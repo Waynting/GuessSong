@@ -133,7 +133,7 @@ export default function SetupPage() {
 
         .hero-title {
           font-family: 'Bebas Neue', sans-serif;
-          font-size: clamp(4rem, 12vw, 9rem);
+          font-size: clamp(2.8rem, 8vw, 6rem);
           letter-spacing: 0.02em;
           line-height: 0.9;
           background: linear-gradient(135deg, #ffffff 0%, #aaffc8 40%, #1DB954 100%);
