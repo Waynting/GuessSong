@@ -309,13 +309,16 @@ export default function GamePage() {
         @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap');
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #111; color: #f0f0f0; font-family: 'Outfit', sans-serif; overflow: auto; }
+        html, body { overflow: hidden; max-width: 100vw; }
+        body { background: #111; color: #f0f0f0; font-family: 'Outfit', sans-serif; }
 
         .game-layout {
           display: grid;
           grid-template-rows: 56px 1fr;
           grid-template-columns: 1fr 300px;
-          height: 100vh;
+          height: 100dvh;
+          max-height: 100dvh;
+          overflow: hidden;
           background: #111;
         }
 
@@ -735,7 +738,8 @@ export default function GamePage() {
             grid-template-columns: 1fr;
             grid-template-rows: 56px 1fr auto;
           }
-          .sidebar { border-left: none; border-top: 1px solid #1e1e1e; max-height: 160px; }
+          .sidebar { border-left: none; border-top: 1px solid #1e1e1e; max-height: 140px; }
+          .end-game-btn { font-size: 10px !important; padding: 4px 8px !important; }
         }
       `}</style>
 
@@ -756,6 +760,7 @@ export default function GamePage() {
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
             {phase !== "finished" && (
               <button
+                className="end-game-btn"
                 onClick={endGame}
                 style={{
                   background: "none",
