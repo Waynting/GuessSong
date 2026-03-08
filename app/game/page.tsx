@@ -607,7 +607,25 @@ export default function GamePage() {
             <span>{tracks.length}</span>
           </div>
           <span className="playlist-name">♫ {playlistName}</span>
-          <div style={{ fontSize: "12px", color: "#333" }}>GuessSong</div>
+          <button
+            onClick={() => { stopClip(); router.push("/"); }}
+            style={{
+              background: "none",
+              border: "1px solid #2a2a2a",
+              borderRadius: "8px",
+              color: "#555",
+              fontSize: "12px",
+              fontFamily: "Outfit, sans-serif",
+              fontWeight: 500,
+              padding: "6px 12px",
+              cursor: "pointer",
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={e => { (e.target as HTMLButtonElement).style.color = "#ef4444"; (e.target as HTMLButtonElement).style.borderColor = "#ef4444"; }}
+            onMouseLeave={e => { (e.target as HTMLButtonElement).style.color = "#555"; (e.target as HTMLButtonElement).style.borderColor = "#2a2a2a"; }}
+          >
+            ✕ Quit
+          </button>
         </header>
 
         {/* MAIN AREA */}
