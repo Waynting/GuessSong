@@ -140,7 +140,7 @@ export default function SetupPage() {
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
-          filter: drop-shadow(0 0 40px rgba(29,185,84,0.15));
+          text-shadow: none;
         }
 
         .card {

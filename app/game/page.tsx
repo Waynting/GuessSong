@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { isAnswerCorrect } from "@/lib/game-logic";
 
 interface Track {
   id: string;
@@ -33,18 +32,22 @@ export default function GamePage() {
   const [clipDuration, setClipDuration] = useState(15);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [phase, setPhase] = useState<Phase>("waiting");
-  const [guess, setGuess] = useState("");
-  const [guessResult, setGuessResult] = useState<null | "correct" | "wrong">(null);
   const [roundWinner, setRoundWinner] = useState<string | null>(null);
+  const [albumWinner, setAlbumWinner] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
-  const [shakeGuess, setShakeGuess] = useState(false);
   const [scorePulse, setScorePulse] = useState<string | null>(null);
   const [pointsAwarded, setPointsAwarded] = useState(false);
+  const [albumPointsAwarded, setAlbumPointsAwarded] = useState(false);
+  const [albumHintShown, setAlbumHintShown] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [noAudio, setNoAudio] = useState(false);
+  const [loadingSkipVisible, setLoadingSkipVisible] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const guessInputRef = useRef<HTMLInputElement>(null);
+  const loadingSkipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewCache = useRef<Record<string, string | null>>({});
 
   useEffect(() => {
     const raw = sessionStorage.getItem("guesssong_game");
@@ -66,12 +69,39 @@ export default function GamePage() {
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
   }, []);
 
-  function playClip() {
+  async function playClip() {
     const audio = audioRef.current;
     const track = tracks[currentIndex];
-    if (!audio || !track?.previewUrl) return;
+    if (!audio || !track) return;
 
-    audio.src = track.previewUrl;
+    // Resolve preview URL — use cache, track field, or fetch from Deezer proxy
+    let previewUrl = previewCache.current[track.id] ?? track.previewUrl ?? null;
+
+    if (!previewUrl) {
+      setPreviewLoading(true);
+      setLoadingSkipVisible(false);
+      loadingSkipTimerRef.current = setTimeout(() => setLoadingSkipVisible(true), 1500);
+      try {
+        const res = await fetch(
+          `/api/preview?track=${encodeURIComponent(track.name)}&artist=${encodeURIComponent(track.artists[0] ?? "")}`
+        );
+        const data = await res.json();
+        previewUrl = data.previewUrl ?? null;
+        previewCache.current[track.id] = previewUrl;
+      } catch {
+        previewUrl = null;
+      }
+      if (loadingSkipTimerRef.current) clearTimeout(loadingSkipTimerRef.current);
+      setLoadingSkipVisible(false);
+      setPreviewLoading(false);
+    }
+
+    if (!previewUrl) {
+      setNoAudio(true);
+      return;
+    }
+
+    audio.src = previewUrl;
     audio.currentTime = 0;
     audio.play().catch(() => {});
     setPhase("playing");
@@ -88,29 +118,11 @@ export default function GamePage() {
       if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
       setProgress(100);
       setPhase("guessing");
-      setTimeout(() => guessInputRef.current?.focus(), 100);
     }, clipDuration * 1000);
   }
 
-  function checkAnswer() {
-    const track = tracks[currentIndex];
-    if (!track || !guess.trim()) return;
-
-    const correct = isAnswerCorrect(guess, track.name, track.artists);
-    setGuessResult(correct ? "correct" : "wrong");
-    if (correct) {
-      stopClip();
-      setPhase("revealed");
-    } else {
-      setShakeGuess(true);
-      setTimeout(() => setShakeGuess(false), 500);
-    }
-  }
-
-  function giveUp() {
+  function reveal() {
     stopClip();
-    setGuessResult(null);
-    setRoundWinner(null);
     setPhase("revealed");
   }
 
@@ -125,6 +137,17 @@ export default function GamePage() {
     setTimeout(() => setScorePulse(null), 600);
   }
 
+  function awardAlbumPoint(playerName: string) {
+    if (albumPointsAwarded) return;
+    setAlbumWinner(playerName);
+    setAlbumPointsAwarded(true);
+    setScorePulse(playerName);
+    setPlayers((prev) =>
+      prev.map((p) => (p.name === playerName ? { ...p, score: p.score + 1 } : p))
+    );
+    setTimeout(() => setScorePulse(null), 600);
+  }
+
   function nextTrack() {
     stopClip();
     if (currentIndex + 1 >= tracks.length) {
@@ -132,21 +155,143 @@ export default function GamePage() {
     } else {
       setCurrentIndex((i) => i + 1);
       setPhase("waiting");
-      setGuess("");
-      setGuessResult(null);
       setRoundWinner(null);
+      setAlbumWinner(null);
       setProgress(0);
       setPointsAwarded(false);
+      setAlbumPointsAwarded(false);
+      setAlbumHintShown(false);
+      setPreviewLoading(false);
+      setNoAudio(false);
+      setLoadingSkipVisible(false);
     }
+  }
+
+  function endGame() {
+    stopClip();
+    setPhase("finished");
   }
 
   function playAgain() {
     router.push("/");
   }
 
+  function downloadResultImage() {
+    const canvas = document.createElement("canvas");
+    const dpr = window.devicePixelRatio || 1;
+    const W = 640;
+    const rowH = 64;
+    const headerH = 200;
+    const footerH = 80;
+    const H = headerH + sortedPlayers.length * rowH + footerH;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    const ctx = canvas.getContext("2d")!;
+    ctx.scale(dpr, dpr);
+
+    // Background
+    ctx.fillStyle = "#111111";
+    ctx.fillRect(0, 0, W, H);
+
+    // Top accent bar
+    const accent = ctx.createLinearGradient(0, 0, W, 0);
+    accent.addColorStop(0, "#1DB954");
+    accent.addColorStop(1, "#0a8f3c");
+    ctx.fillStyle = accent;
+    ctx.fillRect(0, 0, W, 4);
+
+    // Title
+    ctx.fillStyle = "#1DB954";
+    ctx.font = "bold 13px sans-serif";
+    ctx.letterSpacing = "2px";
+    ctx.fillText("GUESS SONG", 40, 48);
+
+    // "Final Scores"
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 48px sans-serif";
+    ctx.letterSpacing = "1px";
+    ctx.fillText("Final Scores", 40, 100);
+
+    // Playlist name
+    ctx.fillStyle = "#666666";
+    ctx.font = "15px sans-serif";
+    ctx.letterSpacing = "0px";
+    const pName = playlistName.length > 50 ? playlistName.slice(0, 50) + "…" : playlistName;
+    ctx.fillText(pName, 40, 130);
+
+    // Divider
+    ctx.strokeStyle = "#222222";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(40, 155);
+    ctx.lineTo(W - 40, 155);
+    ctx.stroke();
+
+    // Player rows
+    sortedPlayers.forEach((p, idx) => {
+      const y = headerH + idx * rowH;
+      const isWinner = idx === 0 && p.score === maxScore && maxScore > 0;
+
+      // Row background
+      if (isWinner) {
+        ctx.fillStyle = "rgba(29,185,84,0.08)";
+        ctx.fillRect(24, y + 4, W - 48, rowH - 8);
+      }
+
+      // Rank
+      const rankLabel = String(idx + 1);
+      ctx.font = `bold 22px sans-serif`;
+      ctx.fillStyle = idx === 0 ? "#1DB954" : idx === 1 ? "#aaaaaa" : idx === 2 ? "#cd7f32" : "#333333";
+      ctx.fillText(rankLabel, 44, y + rowH / 2 + 8);
+
+      // Player name
+      ctx.font = `${isWinner ? "700" : "500"} 18px sans-serif`;
+      ctx.fillStyle = isWinner ? "#ffffff" : "#cccccc";
+      const maxNameW = 360;
+      let nameText = p.name;
+      while (ctx.measureText(nameText).width > maxNameW && nameText.length > 1) {
+        nameText = nameText.slice(0, -1);
+      }
+      if (nameText !== p.name) nameText += "…";
+      ctx.fillText(nameText, 90, y + rowH / 2 + 8);
+
+      // Score
+      ctx.font = `bold 28px sans-serif`;
+      ctx.fillStyle = isWinner ? "#1DB954" : "#555555";
+      const scoreStr = String(p.score);
+      const scoreW = ctx.measureText(scoreStr).width;
+      ctx.fillText(scoreStr, W - 44 - scoreW, y + rowH / 2 + 10);
+
+      // pts label
+      ctx.font = "11px sans-serif";
+      ctx.fillStyle = "#444";
+      ctx.fillText("pts", W - 40, y + rowH / 2 + 10);
+    });
+
+    // Footer
+    const footerY = headerH + sortedPlayers.length * rowH + 20;
+    ctx.strokeStyle = "#222";
+    ctx.beginPath();
+    ctx.moveTo(40, footerY);
+    ctx.lineTo(W - 40, footerY);
+    ctx.stroke();
+    ctx.font = "12px sans-serif";
+    ctx.fillStyle = "#444";
+    ctx.fillText("Played with GuessSong", 40, footerY + 30);
+
+    // Download
+    const link = document.createElement("a");
+    link.download = `guesssong-results-${Date.now()}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  }
+
   const currentTrack = tracks[currentIndex];
   const albumArt = currentTrack?.albumImageUrl || ALBUM_PLACEHOLDER;
   const isRevealed = phase === "revealed" || phase === "finished";
+  const showAlbumArt = isRevealed || albumHintShown;
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
   const maxScore = sortedPlayers[0]?.score ?? 0;
 
@@ -164,7 +309,7 @@ export default function GamePage() {
         @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap');
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #111; color: #f0f0f0; font-family: 'Outfit', sans-serif; overflow: hidden; }
+        body { background: #111; color: #f0f0f0; font-family: 'Outfit', sans-serif; overflow: auto; }
 
         .game-layout {
           display: grid;
@@ -215,9 +360,10 @@ export default function GamePage() {
         /* MAIN AREA */
         .main-area {
           position: relative;
-          overflow: hidden;
+          overflow-y: auto;
+          overflow-x: hidden;
           display: flex;
-          align-items: center;
+          align-items: flex-start;
           justify-content: center;
           padding: 32px;
         }
@@ -489,9 +635,9 @@ export default function GamePage() {
 
         /* FINISHED STATE */
         .finished-overlay {
-          position: absolute;
+          position: fixed;
           inset: 0;
-          z-index: 10;
+          z-index: 100;
           background: rgba(10,10,10,0.97);
           display: flex;
           flex-direction: column;
@@ -606,32 +752,55 @@ export default function GamePage() {
             <span style={{ color: "#333" }}>/</span>
             <span>{tracks.length}</span>
           </div>
-          <span className="playlist-name">♫ {playlistName}</span>
-          <button
-            onClick={() => { stopClip(); router.push("/"); }}
-            style={{
-              background: "none",
-              border: "1px solid #2a2a2a",
-              borderRadius: "8px",
-              color: "#555",
-              fontSize: "12px",
-              fontFamily: "Outfit, sans-serif",
-              fontWeight: 500,
-              padding: "6px 12px",
-              cursor: "pointer",
-              transition: "all 0.15s",
-            }}
-            onMouseEnter={e => { (e.target as HTMLButtonElement).style.color = "#ef4444"; (e.target as HTMLButtonElement).style.borderColor = "#ef4444"; }}
-            onMouseLeave={e => { (e.target as HTMLButtonElement).style.color = "#555"; (e.target as HTMLButtonElement).style.borderColor = "#2a2a2a"; }}
-          >
-            ✕ Quit
-          </button>
+          <span className="playlist-name">{playlistName}</span>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {phase !== "finished" && (
+              <button
+                onClick={endGame}
+                style={{
+                  background: "none",
+                  border: "1px solid #2a2a2a",
+                  borderRadius: "8px",
+                  color: "#888",
+                  fontSize: "12px",
+                  fontFamily: "Outfit, sans-serif",
+                  fontWeight: 600,
+                  padding: "6px 12px",
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = "#1DB954"; e.currentTarget.style.borderColor = "#1DB954"; }}
+                onMouseLeave={e => { e.currentTarget.style.color = "#888"; e.currentTarget.style.borderColor = "#2a2a2a"; }}
+              >
+                End Game
+              </button>
+            )}
+            <button
+              onClick={() => { stopClip(); router.push("/"); }}
+              style={{
+                background: "none",
+                border: "1px solid #2a2a2a",
+                borderRadius: "8px",
+                color: "#555",
+                fontSize: "12px",
+                fontFamily: "Outfit, sans-serif",
+                fontWeight: 500,
+                padding: "6px 12px",
+                cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.borderColor = "#ef4444"; }}
+              onMouseLeave={e => { e.currentTarget.style.color = "#555"; e.currentTarget.style.borderColor = "#2a2a2a"; }}
+            >
+              Quit
+            </button>
+          </div>
         </header>
 
         {/* MAIN AREA */}
         <main className="main-area">
-          {/* Ambient background */}
-          {currentTrack?.albumImageUrl && (
+          {/* Ambient background — only when hint shown or revealed */}
+          {currentTrack?.albumImageUrl && showAlbumArt && (
             <div
               className={`ambient-bg${isRevealed ? " revealed" : ""}`}
               style={{ backgroundImage: `url(${albumArt})` }}
@@ -644,16 +813,27 @@ export default function GamePage() {
             <div className="album-wrap">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={albumArt}
+                src={showAlbumArt ? albumArt : ALBUM_PLACEHOLDER}
                 alt="Album art"
-                className={`album-img${isRevealed ? " revealed" : " blurred"}`}
+                className={`album-img${isRevealed ? " revealed" : showAlbumArt ? " blurred" : " blurred"}`}
               />
               {/* Play button overlay */}
-              {phase === "waiting" && (
+              {phase === "waiting" && !noAudio && (
                 <div className="album-overlay">
-                  <button className="play-btn" onClick={playClip} aria-label="Play clip">
-                    <div className="play-icon" />
+                  <button className="play-btn" onClick={playClip} aria-label="Play clip" disabled={previewLoading} style={previewLoading ? { opacity: 0.5, cursor: "not-allowed" } : {}}>
+                    {previewLoading ? (
+                      <div style={{ width: "24px", height: "24px", border: "3px solid rgba(0,0,0,0.3)", borderTop: "3px solid #000", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                    ) : (
+                      <div className="play-icon" />
+                    )}
                   </button>
+                </div>
+              )}
+              {/* No audio overlay */}
+              {phase === "waiting" && noAudio && (
+                <div className="album-overlay" style={{ background: "rgba(0,0,0,0.75)", flexDirection: "column", gap: "8px" }}>
+                  <span style={{ fontSize: "48px", lineHeight: 1 }}>🔇</span>
+                  <p style={{ color: "#999", fontSize: "13px", textAlign: "center", padding: "0 16px" }}>No audio for this track</p>
                 </div>
               )}
               {phase === "playing" && (
@@ -688,87 +868,147 @@ export default function GamePage() {
 
             {/* Phase content */}
             {phase === "waiting" && (
-              <p style={{ textAlign: "center", color: "#555", fontSize: "13px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                Press ▶ to play clip
-              </p>
+              <div style={{ textAlign: "center" }}>
+                {previewLoading ? (
+                  <div>
+                    <p style={{ color: "#1DB954", fontSize: "13px", letterSpacing: "0.06em", marginBottom: "12px" }}>
+                      ⏳ Finding audio…
+                    </p>
+                    {loadingSkipVisible && (
+                      <div className="btn-row">
+                        <button className="btn-primary" onClick={reveal}>
+                          Reveal Answer →
+                        </button>
+                        <button className="btn-ghost" onClick={nextTrack}>
+                          Skip Track
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : noAudio ? (
+                  <div>
+                    <div className="btn-row">
+                      <button className="btn-primary" onClick={reveal}>
+                        Reveal Answer →
+                      </button>
+                      <button className="btn-ghost" onClick={nextTrack}>
+                        Skip Track
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ color: "#555", fontSize: "13px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                    Press ▶ to play the clip
+                  </p>
+                )}
+              </div>
             )}
 
             {phase === "playing" && (
-              <p className="listening-label">Listening…</p>
+              <div>
+                <p className="listening-label" style={{ marginBottom: "12px" }}>Listening…</p>
+                <div className="btn-row" style={{ marginBottom: "8px" }}>
+                  <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={() => { stopClip(); setProgress(100); setPhase("guessing"); }}>
+                    ■ Stop
+                  </button>
+                  <button className="btn-primary" onClick={reveal}>
+                    Reveal Answer →
+                  </button>
+                </div>
+                <button
+                  className="btn-ghost"
+                  style={{ width: "100%", ...(albumHintShown ? { color: "#1DB954", borderColor: "#1DB954", opacity: 0.7 } : {}) }}
+                  onClick={() => setAlbumHintShown(true)}
+                  disabled={albumHintShown}
+                >
+                  {albumHintShown ? "✓ Album Art Shown" : "Show Album Art Hint"}
+                </button>
+              </div>
             )}
 
             {phase === "guessing" && (
-              <div>
-                <input
-                  ref={guessInputRef}
-                  type="text"
-                  className={`guess-input${shakeGuess ? " shake" : ""}`}
-                  placeholder="Type song name or artist…"
-                  value={guess}
-                  onChange={(e) => setGuess(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && checkAnswer()}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                {guessResult === "wrong" && (
-                  <p style={{ fontSize: "12px", color: "#ef4444", marginBottom: "8px", marginTop: "-4px" }}>
-                    Not quite — try again!
-                  </p>
-                )}
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <p style={{ textAlign: "center", fontSize: "20px", fontWeight: 600, color: "#f0f0f0", marginBottom: "4px" }}>
+                  🎵 What&apos;s the song?
+                </p>
                 <div className="btn-row">
                   <button
-                    className="btn-primary"
-                    onClick={checkAnswer}
-                    disabled={!guess.trim()}
+                    className="btn-ghost"
+                    style={{ flex: "0 0 auto" }}
+                    onClick={() => {
+                      const audio = audioRef.current;
+                      if (audio && audio.src) {
+                        audio.currentTime = 0;
+                        audio.play().catch(() => {});
+                      }
+                    }}
                   >
-                    Check Answer
+                    ↺ Replay
                   </button>
-                  <button className="btn-ghost" onClick={giveUp}>
-                    Give Up
+                  <button className="btn-primary" onClick={reveal}>
+                    Reveal Answer →
                   </button>
                 </div>
+                {!albumHintShown && currentTrack?.albumImageUrl && (
+                  <button className="btn-ghost" onClick={() => setAlbumHintShown(true)}>
+                    Show Album Art Hint
+                  </button>
+                )}
               </div>
             )}
 
             {phase === "revealed" && (
               <div>
-                {guessResult === "correct" && (
-                  <p className="correct-label">✓ Correct!</p>
-                )}
                 <div className="track-reveal">
                   <p className="track-name">{currentTrack?.name}</p>
                   <p className="track-artist">{currentTrack?.artists.join(", ")}</p>
                   {currentTrack?.albumName && (
-                    <p style={{ fontSize: "12px", color: "#444", marginTop: "4px" }}>{currentTrack.albumName}</p>
+                    <p style={{ fontSize: "13px", color: "#666", marginTop: "6px" }}>
+                      {currentTrack.albumName}
+                    </p>
                   )}
                 </div>
 
-                {guessResult === "correct" && !pointsAwarded && (
-                  <>
-                    <p className="who-scored">Who scored?</p>
-                    <div className="player-picker">
-                      {players.map((p) => (
-                        <button
-                          key={p.name}
-                          className={`player-pick-btn${roundWinner === p.name ? " picked" : ""}`}
-                          onClick={() => awardPoint(p.name)}
-                          disabled={pointsAwarded}
-                        >
-                          {p.name}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-
-                {guessResult === "correct" && pointsAwarded && roundWinner && (
-                  <p style={{ textAlign: "center", color: "#1DB954", fontSize: "14px", marginBottom: "14px" }}>
-                    +3 pts → {roundWinner}
+                {/* Song scoring — 3 pts */}
+                <p className="who-scored">Who guessed the song? (+3 pts)</p>
+                {!pointsAwarded ? (
+                  <div className="player-picker" style={{ marginBottom: "14px" }}>
+                    {players.map((p) => (
+                      <button key={p.name} className="player-pick-btn" onClick={() => awardPoint(p.name)}>
+                        {p.name}
+                      </button>
+                    ))}
+                    <button className="btn-ghost" onClick={() => setPointsAwarded(true)}>
+                      No one
+                    </button>
+                  </div>
+                ) : (
+                  <p style={{ textAlign: "center", color: "#1DB954", fontSize: "13px", marginBottom: "14px" }}>
+                    {roundWinner ? `+3 pts → ${roundWinner}` : "No one scored"}
                   </p>
                 )}
 
-                {guessResult !== "correct" && (
-                  <div className="no-score-label">No one scored this round</div>
+                {/* Album scoring — 1 pt, only if track has album */}
+                {currentTrack?.albumName && (
+                  <>
+                    <p className="who-scored">Who guessed the album? (+1 pt)</p>
+                    {!albumPointsAwarded ? (
+                      <div className="player-picker" style={{ marginBottom: "14px" }}>
+                        {players.map((p) => (
+                          <button key={p.name} className="player-pick-btn" onClick={() => awardAlbumPoint(p.name)}>
+                            {p.name}
+                          </button>
+                        ))}
+                        <button className="btn-ghost" onClick={() => setAlbumPointsAwarded(true)}>
+                          No one
+                        </button>
+                      </div>
+                    ) : (
+                      <p style={{ textAlign: "center", color: "#1DB954", fontSize: "13px", marginBottom: "14px" }}>
+                        {albumWinner ? `+1 pt → ${albumWinner}` : "No one scored"}
+                      </p>
+                    )}
+                  </>
                 )}
 
                 <button className="btn-primary" onClick={nextTrack}>
@@ -793,13 +1033,13 @@ export default function GamePage() {
                 {sortedPlayers.map((p, idx) => {
                   const isWinner = p.score === maxScore && maxScore > 0;
                   const rankClass = idx === 0 ? "first" : idx === 1 ? "second" : idx === 2 ? "third" : "rest";
-                  const rankLabel = idx === 0 ? "★" : `${idx + 1}`;
+                  const rankLabel = `${idx + 1}`;
                   return (
                     <div key={p.name} className={`final-row${isWinner && idx === 0 ? " winner" : ""}`}>
                       <span className={`final-rank ${rankClass}`}>{rankLabel}</span>
                       <span className={`final-name${isWinner && idx === 0 ? " winner" : ""}`}>
                         {p.name}
-                        {isWinner && idx === 0 && <span className="winner-star"> ★</span>}
+                        {isWinner && idx === 0 && <span className="winner-star"> (Winner)</span>}
                       </span>
                       <span className={`final-score${isWinner && idx === 0 ? " winner" : ""}`}>
                         {p.score}
@@ -812,6 +1052,9 @@ export default function GamePage() {
               <div className="finished-btn-row">
                 <button className="btn-lg green" onClick={playAgain}>
                   Play Again →
+                </button>
+                <button className="btn-lg outline" onClick={downloadResultImage}>
+                  Save Results
                 </button>
                 <button className="btn-lg outline" onClick={() => router.push("/")}>
                   Back to Setup
@@ -848,6 +1091,7 @@ export default function GamePage() {
           from { height: 8px; opacity: 0.5; }
           to { height: 32px; opacity: 1; }
         }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
     </>
   );
