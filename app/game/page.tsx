@@ -1060,9 +1060,6 @@ export default function GamePage() {
                 <button className="btn-lg outline" onClick={downloadResultImage}>
                   Save Results
                 </button>
-                <button className="btn-lg outline" onClick={() => router.push("/")}>
-                  Back to Setup
-                </button>
               </div>
             </div>
           )}
