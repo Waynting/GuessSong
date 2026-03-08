@@ -837,7 +837,6 @@ export default function GamePage() {
               {/* No audio overlay */}
               {phase === "waiting" && noAudio && (
                 <div className="album-overlay" style={{ background: "rgba(0,0,0,0.75)", flexDirection: "column", gap: "8px" }}>
-                  <span style={{ fontSize: "48px", lineHeight: 1 }}>🔇</span>
                   <p style={{ color: "#999", fontSize: "13px", textAlign: "center", padding: "0 16px" }}>No audio for this track</p>
                 </div>
               )}
@@ -877,7 +876,7 @@ export default function GamePage() {
                 {previewLoading ? (
                   <div>
                     <p style={{ color: "#1DB954", fontSize: "13px", letterSpacing: "0.06em", marginBottom: "12px" }}>
-                      ⏳ Finding audio…
+                      Finding audio…
                     </p>
                     {loadingSkipVisible && (
                       <div className="btn-row">
@@ -903,7 +902,7 @@ export default function GamePage() {
                   </div>
                 ) : (
                   <p style={{ color: "#555", fontSize: "13px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                    Press ▶ to play the clip
+                    Press Play to start the clip
                   </p>
                 )}
               </div>
@@ -914,7 +913,7 @@ export default function GamePage() {
                 <p className="listening-label" style={{ marginBottom: "12px" }}>Listening…</p>
                 <div className="btn-row" style={{ marginBottom: "8px" }}>
                   <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={() => { stopClip(); setProgress(100); setPhase("guessing"); }}>
-                    ■ Stop
+                    Stop
                   </button>
                   <button className="btn-primary" onClick={reveal}>
                     Reveal Answer →
@@ -926,7 +925,7 @@ export default function GamePage() {
                   onClick={() => setAlbumHintShown(true)}
                   disabled={albumHintShown}
                 >
-                  {albumHintShown ? "✓ Album Art Shown" : "Show Album Art Hint"}
+                  {albumHintShown ? "Album Art Shown" : "Show Album Art Hint"}
                 </button>
               </div>
             )}
@@ -934,7 +933,7 @@ export default function GamePage() {
             {phase === "guessing" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 <p style={{ textAlign: "center", fontSize: "20px", fontWeight: 600, color: "#f0f0f0", marginBottom: "4px" }}>
-                  🎵 What&apos;s the song?
+                  What&apos;s the song?
                 </p>
                 <div className="btn-row">
                   <button
@@ -948,7 +947,7 @@ export default function GamePage() {
                       }
                     }}
                   >
-                    ↺ Replay
+                    Replay
                   </button>
                   <button className="btn-primary" onClick={reveal}>
                     Reveal Answer →
