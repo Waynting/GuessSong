@@ -1015,7 +1015,7 @@ export default function GamePage() {
                   </>
                 )}
 
-                <button className="btn-primary" onClick={nextTrack}>
+                <button className="btn-primary" onClick={nextTrack} style={{ flex: "none", display: "block", margin: "0 auto", minWidth: "180px", width: "fit-content" }}>
                   {currentIndex + 1 >= tracks.length ? "See Final Scores →" : "Next Track →"}
                 </button>
               </div>

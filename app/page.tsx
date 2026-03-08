@@ -184,7 +184,7 @@ export default function SetupPage() {
         .player-input::placeholder { color: var(--muted); }
 
         .pill {
-          padding: 8px 18px;
+          padding: 8px 12px;
           border-radius: 999px;
           font-size: 14px;
           font-weight: 600;
