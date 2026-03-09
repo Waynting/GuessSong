@@ -12,7 +12,7 @@ export const metadata: Metadata = {
     template: "%s | GuessSong",
   },
   description:
-    "Play a clip, guess the song. A free music guessing game for parties — works with any Spotify playlist, no login required, local multiplayer.",
+    "Play a clip, guess the song. 猜歌遊戲 — 免費音樂猜歌 app，支援任何 Spotify 歌單，無需登入，多人同樂。A free music guessing game for parties — works with any Spotify playlist, no login required, local multiplayer.",
   keywords: [
     "music guessing game",
     "spotify party game",
@@ -21,6 +21,16 @@ export const metadata: Metadata = {
     "party game",
     "local multiplayer",
     "spotify playlist game",
+    "猜歌",
+    "猜歌遊戲",
+    "音樂猜歌",
+    "派對遊戲",
+    "Spotify 猜歌",
+    "音樂遊戲",
+    "猜歌活動",
+    "猜歌 app",
+    "音樂問答",
+    "朋友聚會遊戲",
   ],
   authors: [{ name: "GuessSong" }],
   robots: { index: true, follow: true },
@@ -64,7 +74,7 @@ export default function RootLayout({
   };
 
   return (
-    <html lang="en">
+    <html lang="zh-TW">
       <head>
         <script
           type="application/ld+json"
