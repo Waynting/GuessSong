@@ -645,52 +645,112 @@ export default function GamePage() {
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
-          padding: 40px;
+          justify-content: flex-start;
+          padding: 28px 24px 24px;
           animation: fade-in 0.4s ease;
+          overflow: hidden;
         }
         @keyframes fade-in { from{opacity:0} to{opacity:1} }
 
+        .finished-header {
+          flex-shrink: 0;
+          text-align: center;
+          width: 100%;
+          max-width: 480px;
+        }
+
         .finished-title {
           font-family: 'Bebas Neue', sans-serif;
-          font-size: clamp(48px, 8vw, 96px);
+          font-size: clamp(36px, 6vw, 72px);
           letter-spacing: 0.04em;
           background: linear-gradient(135deg, #fff 0%, #aaffc8 50%, #1DB954 100%);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
           line-height: 1;
-          margin-bottom: 8px;
+          margin-bottom: 4px;
           text-align: center;
+        }
+
+        /* Winner hero card — shown above the list */
+        .winner-hero {
+          flex-shrink: 0;
+          width: 100%;
+          max-width: 480px;
+          background: linear-gradient(135deg, rgba(29,185,84,0.15) 0%, rgba(29,185,84,0.05) 100%);
+          border: 1px solid rgba(29,185,84,0.35);
+          border-radius: 14px;
+          padding: 12px 20px;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          margin: 12px 0 8px;
+        }
+        .winner-trophy { font-size: 28px; line-height: 1; flex-shrink: 0; }
+        .winner-hero-name {
+          flex: 1;
+          font-family: 'Bebas Neue', sans-serif;
+          font-size: clamp(22px, 4vw, 32px);
+          letter-spacing: 0.04em;
+          color: #1DB954;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .winner-hero-score {
+          font-family: 'Bebas Neue', sans-serif;
+          font-size: 36px;
+          color: #1DB954;
+          letter-spacing: 0.03em;
+          text-shadow: 0 0 20px rgba(29,185,84,0.5);
+          flex-shrink: 0;
+        }
+        .winner-hero-pts {
+          font-size: 11px;
+          color: #1DB954;
+          opacity: 0.6;
+          font-weight: 600;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          margin-top: 2px;
+          flex-shrink: 0;
         }
 
         .final-scoreboard {
           width: 100%;
-          max-width: 440px;
+          max-width: 480px;
           background: #161616;
           border: 1px solid #222;
-          border-radius: 16px;
-          overflow: hidden;
-          margin: 24px 0;
+          border-radius: 14px;
+          overflow-y: auto;
+          overflow-x: hidden;
+          flex: 1 1 0;
+          min-height: 0;
+          margin-bottom: 16px;
         }
+        /* subtle scrollbar */
+        .final-scoreboard::-webkit-scrollbar { width: 4px; }
+        .final-scoreboard::-webkit-scrollbar-track { background: transparent; }
+        .final-scoreboard::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
 
         .final-row {
           display: flex;
           align-items: center;
-          padding: 14px 24px;
-          gap: 16px;
+          padding: 9px 20px;
+          gap: 12px;
           border-bottom: 1px solid #1e1e1e;
           transition: background 0.2s;
+          min-height: 44px;
         }
         .final-row:last-child { border-bottom: none; }
-        .final-row.winner { background: rgba(29,185,84,0.08); }
 
         .final-rank {
           font-family: 'Bebas Neue', sans-serif;
-          font-size: 24px;
-          width: 32px;
+          font-size: 18px;
+          width: 24px;
           text-align: center;
           flex-shrink: 0;
+          line-height: 1;
         }
         .final-rank.first { color: #1DB954; }
         .final-rank.second { color: #aaa; }
@@ -699,34 +759,41 @@ export default function GamePage() {
 
         .final-name {
           flex: 1;
-          font-size: 18px;
-          font-weight: 600;
-          color: #f0f0f0;
+          font-size: 15px;
+          font-weight: 500;
+          color: #ccc;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-        .final-name.winner { color: #fff; }
-        .winner-star { color: #1DB954; margin-left: 8px; }
 
         .final-score {
           font-family: 'Bebas Neue', sans-serif;
-          font-size: 32px;
-          color: #555;
+          font-size: 22px;
+          color: #444;
           letter-spacing: 0.03em;
+          flex-shrink: 0;
         }
-        .final-score.winner { color: #1DB954; text-shadow: 0 0 20px rgba(29,185,84,0.4); }
+        .final-score.podium { color: #888; }
 
-        .finished-btn-row { display: flex; gap: 12px; }
+        .finished-btn-row {
+          display: flex;
+          gap: 12px;
+          flex-shrink: 0;
+          width: 100%;
+          max-width: 480px;
+        }
         .btn-lg {
-          padding: 14px 32px;
+          flex: 1;
+          padding: 13px 24px;
           font-family: 'Outfit', sans-serif;
-          font-size: 16px;
+          font-size: 15px;
           font-weight: 700;
           border-radius: 12px;
           cursor: pointer;
           transition: all 0.15s;
           border: none;
+          white-space: nowrap;
         }
         .btn-lg.green { background: #1DB954; color: #000; box-shadow: 0 4px 24px rgba(29,185,84,0.3); }
         .btn-lg.green:hover { background: #1ed760; transform: translateY(-1px); box-shadow: 0 4px 32px rgba(29,185,84,0.5); }
@@ -1025,34 +1092,47 @@ export default function GamePage() {
           {/* Finished overlay (full screen inside main) */}
           {phase === "finished" && (
             <div className="finished-overlay">
-              <p style={{ fontSize: "12px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#555", marginBottom: "8px" }}>
-                Game Over
-              </p>
-              <h1 className="finished-title">Final Scores</h1>
-              <p style={{ color: "#555", fontSize: "14px", marginBottom: "0" }}>
-                {playlistName}
-              </p>
-
-              <div className="final-scoreboard">
-                {sortedPlayers.map((p, idx) => {
-                  const isWinner = p.score === maxScore && maxScore > 0;
-                  const rankClass = idx === 0 ? "first" : idx === 1 ? "second" : idx === 2 ? "third" : "rest";
-                  const rankLabel = `${idx + 1}`;
-                  return (
-                    <div key={p.name} className={`final-row${isWinner && idx === 0 ? " winner" : ""}`}>
-                      <span className={`final-rank ${rankClass}`}>{rankLabel}</span>
-                      <span className={`final-name${isWinner && idx === 0 ? " winner" : ""}`}>
-                        {p.name}
-                        {isWinner && idx === 0 && <span className="winner-star"> (Winner)</span>}
-                      </span>
-                      <span className={`final-score${isWinner && idx === 0 ? " winner" : ""}`}>
-                        {p.score}
-                      </span>
-                    </div>
-                  );
-                })}
+              {/* Header */}
+              <div className="finished-header">
+                <p style={{ fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#555", marginBottom: "4px" }}>
+                  Game Over
+                </p>
+                <h1 className="finished-title">Final Scores</h1>
+                <p style={{ color: "#444", fontSize: "13px" }}>{playlistName}</p>
               </div>
 
+              {/* Winner hero — only shown when someone scored */}
+              {maxScore > 0 && sortedPlayers.length > 0 && (
+                <div className="winner-hero">
+                  <span className="winner-trophy">🏆</span>
+                  <span className="winner-hero-name">{sortedPlayers[0].name}</span>
+                  <div style={{ textAlign: "right" }}>
+                    <div className="winner-hero-score">{sortedPlayers[0].score}</div>
+                    <div className="winner-hero-pts">pts</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Rest of players (2nd place onward) in compact scrollable list */}
+              {sortedPlayers.length > 1 && (
+                <div className="final-scoreboard">
+                  {sortedPlayers.slice(1).map((p, i) => {
+                    const idx = i + 1; // actual rank index (0-based = 2nd place onward)
+                    const rankClass = idx === 1 ? "second" : idx === 2 ? "third" : "rest";
+                    const rankLabel = `${idx + 1}`;
+                    const isPodium = idx <= 2;
+                    return (
+                      <div key={p.name} className="final-row">
+                        <span className={`final-rank ${rankClass}`}>{rankLabel}</span>
+                        <span className="final-name">{p.name}</span>
+                        <span className={`final-score${isPodium ? " podium" : ""}`}>{p.score}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Buttons — always visible, pinned at bottom */}
               <div className="finished-btn-row">
                 <button className="btn-lg green" onClick={playAgain}>
                   Play Again →
