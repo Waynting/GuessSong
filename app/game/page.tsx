@@ -44,6 +44,7 @@ export default function GamePage() {
   const previewCache = useRef<Record<string, string | null>>({});
   const gameStartTimeRef = useRef<number>(Date.now());
   const finishedTrackedRef = useRef(false);
+  const roundsPlayedRef = useRef(0);
 
   const isTrial = mode === "trial";
 
@@ -164,8 +165,11 @@ export default function GamePage() {
   function trackGameFinished() {
     if (finishedTrackedRef.current) return;
     finishedTrackedRef.current = true;
+    // A round counts only once it has started; ending during "waiting" means
+    // the current round was never played (keeps parity with round_completed).
+    roundsPlayedRef.current = currentIndex + (phase === "waiting" ? 0 : 1);
     trackEvent("game_finished", {
-      rounds_played: currentIndex + 1,
+      rounds_played: roundsPlayedRef.current,
       total_tracks: tracks.length,
       duration_seconds: Math.round((Date.now() - gameStartTimeRef.current) / 1000),
       playlist_source: playlistSource,
@@ -1180,7 +1184,7 @@ export default function GamePage() {
                   Trial Complete
                 </p>
                 <h1 className="finished-title">
-                  You got {players[0]?.score ?? 0} / {currentIndex + 1}
+                  You got {players[0]?.score ?? 0} / {roundsPlayedRef.current}
                 </h1>
                 <p style={{ color: "#444", fontSize: "13px" }}>{playlistName}</p>
                 <p style={{ color: "#888", fontSize: "14px", marginTop: "16px", lineHeight: 1.5 }}>
