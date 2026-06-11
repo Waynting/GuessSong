@@ -26,6 +26,7 @@ export type AnalyticsEvent =
       params: {
         player_count: number;
         clip_duration: number;
+        song_count?: number;
         playlist_source: PlaylistSource;
       };
     }

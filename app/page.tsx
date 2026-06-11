@@ -7,6 +7,7 @@ import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
 import { BUILTIN_PLAYLISTS, type BuiltinPlaylist } from "@/lib/builtin-playlists";
 
 const CLIP_DURATIONS = [5, 10, 15, 20, 30];
+const SONG_COUNTS: (number | "all")[] = [10, 20, 30, 50, "all"];
 
 function SpotifyIcon() {
   return (
@@ -50,6 +51,7 @@ export default function SetupPage() {
   const [playlistUrl, setPlaylistUrl] = useState("");
   const [players, setPlayers] = useState<string[]>(["", ""]);
   const [clipDuration, setClipDuration] = useState(15);
+  const [songCount, setSongCount] = useState<number | "all">(20);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -97,9 +99,10 @@ export default function SetupPage() {
       if (!res.ok) throw new Error(data.error || "Failed to load playlist");
 
       const shuffled = [...data.tracks].sort(() => Math.random() - 0.5);
+      const limited = songCount === "all" ? shuffled : shuffled.slice(0, songCount);
 
       const payload = buildGamePayload({
-        tracks: shuffled,
+        tracks: limited,
         players: validPlayers.map((name) => ({ name, score: 0 })),
         playlistName: data.name,
         clipDuration,
@@ -111,6 +114,7 @@ export default function SetupPage() {
       trackEvent("game_started", {
         player_count: validPlayers.length,
         clip_duration: clipDuration,
+        song_count: limited.length,
         playlist_source: "own",
       });
       router.push("/game");
@@ -576,6 +580,25 @@ export default function SetupPage() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Number of Songs */}
+            <div>
+              <p className="section-label">Number of Songs</p>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {SONG_COUNTS.map((c) => (
+                  <button
+                    key={c}
+                    className={`pill${songCount === c ? " active" : ""}`}
+                    onClick={() => setSongCount(c)}
+                  >
+                    {c === "all" ? "All" : c}
+                  </button>
+                ))}
+              </div>
+              <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                How many tracks to play from the shuffled playlist.
+              </p>
             </div>
 
             {/* Start Button */}
