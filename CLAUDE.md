@@ -9,9 +9,10 @@ npm run dev        # Start dev server on port 8000 (http://127.0.0.1:8000)
 npm run build      # Production build
 npm run start      # Start production server
 npm run lint       # Run ESLint
+npm test           # Run vitest suite (tests/)
 ```
 
-There is no test suite. Use `127.0.0.1:8000` (not `localhost`) — the Spotify app is configured for this origin.
+Use `127.0.0.1:8000` (not `localhost`) — the Spotify app is configured for this origin.
 
 ## What This Is
 
@@ -57,7 +58,7 @@ NEXT_PUBLIC_GA_MEASUREMENT_ID               # Optional — enables GA4
 
 ## Types
 
-`types/index.ts` contains only the `Track` interface — the shape stored in sessionStorage and returned by `/api/playlist`. The game page defines its own local `Player` and `Phase` types.
+`types/index.ts` contains only the `Track` interface — the shape stored in sessionStorage and returned by `/api/playlist`. Shared game types (`GamePayload`, `GamePlayer`, `GameMode`) live in `lib/game-session.ts`; the game page defines its own local `Phase` type.
 
 ## Skill routing
 
