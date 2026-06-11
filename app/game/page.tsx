@@ -6,6 +6,7 @@ import type { Track } from "@/types";
 import { trackEvent, type PlaylistSource } from "@/lib/analytics";
 import {
   parseGamePayload,
+  countRoundsPlayed,
   GAME_STORAGE_KEY,
   type GameMode,
   type GamePlayer as Player,
@@ -165,9 +166,7 @@ export default function GamePage() {
   function trackGameFinished() {
     if (finishedTrackedRef.current) return;
     finishedTrackedRef.current = true;
-    // A round counts only once it has started; ending during "waiting" means
-    // the current round was never played (keeps parity with round_completed).
-    roundsPlayedRef.current = currentIndex + (phase === "waiting" ? 0 : 1);
+    roundsPlayedRef.current = countRoundsPlayed(currentIndex, phase);
     trackEvent("game_finished", {
       rounds_played: roundsPlayedRef.current,
       total_tracks: tracks.length,

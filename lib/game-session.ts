@@ -59,6 +59,17 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
 }
 
 /**
+ * Number of rounds actually played when a game ends. A round counts only
+ * once its clip has started; ending during "waiting" means the current
+ * round was never played. Keeps game_finished's rounds_played consistent
+ * with the number of round_completed events and the trial "You got X / Y"
+ * denominator.
+ */
+export function countRoundsPlayed(currentIndex: number, phase: string): number {
+  return currentIndex + (phase === "waiting" ? 0 : 1);
+}
+
+/**
  * Parse a raw sessionStorage string into a GamePayload.
  * Returns null when the JSON is invalid or has no usable track list.
  * Old payloads (pre playlistSource/mode) get backward-compatible defaults.

@@ -3,6 +3,7 @@ import {
   buildGamePayload,
   parseGamePayload,
   stripTrackForStorage,
+  countRoundsPlayed,
   GAME_STORAGE_KEY,
 } from "@/lib/game-session";
 import type { Track } from "@/types";
@@ -152,5 +153,32 @@ describe("parseGamePayload", () => {
   it("returns null for non-object JSON", () => {
     expect(parseGamePayload("42")).toBeNull();
     expect(parseGamePayload("null")).toBeNull();
+  });
+});
+
+// Regression: ISSUE-001 — rounds_played overcounted by 1 when the game ended
+// during the "waiting" phase (round not yet started), inflating game_finished
+// data and the trial "You got X / Y" denominator.
+// Found by /qa on 2026-06-11
+// Report: .gstack/qa-reports/qa-report-127-0-0-1-8000-2026-06-11.md
+describe("countRoundsPlayed", () => {
+  it("does not count the current round when ending during waiting", () => {
+    // Played rounds 1-3, ended while round 4 (index 3) was still waiting
+    expect(countRoundsPlayed(3, "waiting")).toBe(3);
+  });
+
+  it("counts the current round once its clip has started", () => {
+    expect(countRoundsPlayed(3, "playing")).toBe(4);
+    expect(countRoundsPlayed(3, "guessing")).toBe(4);
+    expect(countRoundsPlayed(3, "revealed")).toBe(4);
+  });
+
+  it("returns 0 when ending before the first clip ever plays", () => {
+    expect(countRoundsPlayed(0, "waiting")).toBe(0);
+  });
+
+  it("counts the final round when finishing normally via next-track", () => {
+    // Last round (index 15 of 16) finishing from revealed
+    expect(countRoundsPlayed(15, "revealed")).toBe(16);
   });
 });
