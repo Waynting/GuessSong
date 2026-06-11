@@ -154,6 +154,11 @@ describe("parseGamePayload", () => {
     expect(parseGamePayload("42")).toBeNull();
     expect(parseGamePayload("null")).toBeNull();
   });
+
+  it("falls back to empty array when tracks is present but not an array", () => {
+    const parsed = parseGamePayload(JSON.stringify({ tracks: "oops", players: [] }));
+    expect(parsed!.tracks).toEqual([]);
+  });
 });
 
 // Regression: ISSUE-001 — rounds_played overcounted by 1 when the game ended
