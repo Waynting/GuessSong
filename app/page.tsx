@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { trackEvent } from "@/lib/analytics";
+import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
+import { BUILTIN_PLAYLISTS, type BuiltinPlaylist } from "@/lib/builtin-playlists";
 
 const CLIP_DURATIONS = [5, 10, 15, 20, 30];
 
@@ -83,6 +86,7 @@ export default function SetupPage() {
       return;
     }
     setLoading(true);
+    trackEvent("playlist_submitted", { playlist_source: "own" });
     try {
       const res = await fetch("/api/playlist", {
         method: "POST",
@@ -94,23 +98,46 @@ export default function SetupPage() {
 
       const shuffled = [...data.tracks].sort(() => Math.random() - 0.5);
 
-      sessionStorage.setItem(
-        "guesssong_game",
-        JSON.stringify({
-          tracks: shuffled,
-          players: validPlayers.map((name) => ({ name, score: 0 })),
-          playlistName: data.name,
-          clipDuration,
-          totalTracks: data.totalTracks,
-          playableTracks: data.playableTracks,
-        })
-      );
+      const payload = buildGamePayload({
+        tracks: shuffled,
+        players: validPlayers.map((name) => ({ name, score: 0 })),
+        playlistName: data.name,
+        clipDuration,
+        totalTracks: data.totalTracks,
+        playlistSource: "own",
+        mode: "party",
+      });
+      sessionStorage.setItem(GAME_STORAGE_KEY, JSON.stringify(payload));
+      trackEvent("game_started", {
+        player_count: validPlayers.length,
+        clip_duration: clipDuration,
+        playlist_source: "own",
+      });
       router.push("/game");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleQuickStart(playlist: BuiltinPlaylist) {
+    const shuffled = [...playlist.tracks].sort(() => Math.random() - 0.5);
+    const payload = buildGamePayload({
+      tracks: shuffled,
+      players: [{ name: "You", score: 0 }],
+      playlistName: playlist.name,
+      clipDuration,
+      playlistSource: "builtin",
+      mode: "trial",
+    });
+    sessionStorage.setItem(GAME_STORAGE_KEY, JSON.stringify(payload));
+    trackEvent("game_started", {
+      player_count: 1,
+      clip_duration: clipDuration,
+      playlist_source: "builtin",
+    });
+    router.push("/game");
   }
 
   return (
@@ -274,6 +301,83 @@ export default function SetupPage() {
           color: var(--muted);
           margin-bottom: 10px;
         }
+
+        .trial-divider {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin: 24px 0 14px;
+        }
+        .trial-divider::before, .trial-divider::after {
+          content: '';
+          flex: 1;
+          height: 1px;
+          background: var(--border);
+        }
+        .trial-divider span {
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: var(--muted);
+          white-space: nowrap;
+        }
+
+        .trial-card {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          padding: 14px 16px;
+          cursor: pointer;
+          text-align: left;
+          font-family: 'Outfit', sans-serif;
+          color: var(--text);
+          transition: border-color 0.15s, background 0.15s, transform 0.1s;
+        }
+        .trial-card:hover {
+          border-color: var(--green);
+          background: rgba(29,185,84,0.05);
+          transform: translateY(-1px);
+        }
+        .trial-card:active { transform: translateY(0); }
+        .trial-card-emoji {
+          width: 44px;
+          height: 44px;
+          border-radius: 10px;
+          background: var(--surface2);
+          border: 1px solid var(--border);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 22px;
+          flex-shrink: 0;
+        }
+        .trial-card-name {
+          font-size: 15px;
+          font-weight: 600;
+          color: var(--text);
+          line-height: 1.2;
+        }
+        .trial-card-desc {
+          font-size: 12px;
+          color: var(--muted);
+          margin-top: 3px;
+          line-height: 1.4;
+        }
+        .trial-card-arrow {
+          margin-left: auto;
+          flex-shrink: 0;
+          color: var(--green);
+          font-size: 18px;
+          font-weight: 700;
+          opacity: 0.7;
+          transition: opacity 0.15s, transform 0.15s;
+        }
+        .trial-card:hover .trial-card-arrow { opacity: 1; transform: translateX(2px); }
 
         .waveform-bar {
           animation: waveform 2.4s ease-in-out infinite alternate;
@@ -504,6 +608,37 @@ export default function SetupPage() {
                   {error}
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Built-in playlists — zero-friction trial */}
+          <div className={mounted ? "fade-in fade-in-3" : ""}>
+            <div className="trial-divider">
+              <span>Try it now — no playlist needed</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {BUILTIN_PLAYLISTS.map((playlist) => (
+                <button
+                  key={playlist.id}
+                  className="trial-card"
+                  onClick={() => handleQuickStart(playlist)}
+                >
+                  <span className="trial-card-emoji" aria-hidden>
+                    {playlist.coverEmoji}
+                  </span>
+                  <span>
+                    <span className="trial-card-name" style={{ display: "block" }}>
+                      {playlist.name}
+                    </span>
+                    <span className="trial-card-desc" style={{ display: "block" }}>
+                      {playlist.description} · {playlist.tracks.length} tracks
+                    </span>
+                  </span>
+                  <span className="trial-card-arrow" aria-hidden>
+                    →
+                  </span>
+                </button>
+              ))}
             </div>
           </div>
 
