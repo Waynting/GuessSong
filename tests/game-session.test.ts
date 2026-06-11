@@ -1,0 +1,189 @@
+import { describe, it, expect } from "vitest";
+import {
+  buildGamePayload,
+  parseGamePayload,
+  stripTrackForStorage,
+  countRoundsPlayed,
+  GAME_STORAGE_KEY,
+} from "@/lib/game-session";
+import type { Track } from "@/types";
+
+function makeTrack(overrides: Partial<Track> = {}): Track {
+  return {
+    id: "t1",
+    name: "Song",
+    artists: ["Artist"],
+    durationMs: 200000,
+    albumName: "Album",
+    albumImageUrl: "https://img.example/a.jpg",
+    previewUrl: null,
+    rawJson: { huge: "blob", nested: { stuff: [1, 2, 3] } },
+    createdAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("GAME_STORAGE_KEY", () => {
+  it("stays backward compatible with the existing key", () => {
+    expect(GAME_STORAGE_KEY).toBe("guesssong_game");
+  });
+});
+
+describe("stripTrackForStorage", () => {
+  it("removes rawJson and keeps everything else", () => {
+    const stripped = stripTrackForStorage(makeTrack());
+    expect(stripped).not.toHaveProperty("rawJson");
+    expect(stripped.id).toBe("t1");
+    expect(stripped.name).toBe("Song");
+    expect(stripped.artists).toEqual(["Artist"]);
+    expect(stripped.albumImageUrl).toBe("https://img.example/a.jpg");
+  });
+});
+
+describe("buildGamePayload", () => {
+  it("builds an own/party payload with rawJson stripped from every track", () => {
+    const payload = buildGamePayload({
+      tracks: [makeTrack({ id: "a" }), makeTrack({ id: "b" })],
+      players: [
+        { name: "Alice", score: 0 },
+        { name: "Bob", score: 0 },
+      ],
+      playlistName: "My Mix",
+      clipDuration: 10,
+      totalTracks: 2,
+      playlistSource: "own",
+      mode: "party",
+    });
+
+    expect(payload.playlistSource).toBe("own");
+    expect(payload.mode).toBe("party");
+    expect(payload.playlistName).toBe("My Mix");
+    expect(payload.clipDuration).toBe(10);
+    expect(payload.totalTracks).toBe(2);
+    expect(payload.players).toHaveLength(2);
+    expect(payload.tracks).toHaveLength(2);
+    for (const t of payload.tracks) {
+      expect(t).not.toHaveProperty("rawJson");
+    }
+    // never persists a playableTracks field (removed legacy field)
+    expect(payload).not.toHaveProperty("playableTracks");
+  });
+
+  it("builds a builtin/trial payload and defaults totalTracks to tracks.length", () => {
+    const payload = buildGamePayload({
+      tracks: [makeTrack({ id: "a" }), makeTrack({ id: "b" }), makeTrack({ id: "c" })],
+      players: [{ name: "You", score: 0 }],
+      playlistName: "Western Classics",
+      clipDuration: 15,
+      playlistSource: "builtin",
+      mode: "trial",
+    });
+
+    expect(payload.playlistSource).toBe("builtin");
+    expect(payload.mode).toBe("trial");
+    expect(payload.totalTracks).toBe(3);
+    expect(payload.players).toEqual([{ name: "You", score: 0 }]);
+  });
+
+  it("round-trips through JSON + parseGamePayload unchanged", () => {
+    const payload = buildGamePayload({
+      tracks: [makeTrack()],
+      players: [{ name: "You", score: 0 }],
+      playlistName: "Mix",
+      clipDuration: 5,
+      playlistSource: "builtin",
+      mode: "trial",
+    });
+    const parsed = parseGamePayload(JSON.stringify(payload));
+    expect(parsed).toEqual(payload);
+  });
+});
+
+describe("parseGamePayload", () => {
+  it("applies defaults for old payloads without mode/playlistSource", () => {
+    const legacy = JSON.stringify({
+      tracks: [makeTrack()],
+      players: [{ name: "Alice", score: 3 }],
+      playlistName: "Old Mix",
+      clipDuration: 20,
+      totalTracks: 1,
+      playableTracks: undefined, // legacy field, ignored
+    });
+
+    const parsed = parseGamePayload(legacy);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.playlistSource).toBe("own");
+    expect(parsed!.mode).toBe("party");
+    expect(parsed!.playlistName).toBe("Old Mix");
+    expect(parsed!.clipDuration).toBe(20);
+    expect(parsed!.tracks).toHaveLength(1);
+  });
+
+  it("defaults missing fields on a minimal payload", () => {
+    const parsed = parseGamePayload(JSON.stringify({ tracks: [] }));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.players).toEqual([]);
+    expect(parsed!.playlistName).toBe("");
+    expect(parsed!.clipDuration).toBe(15);
+    expect(parsed!.totalTracks).toBe(0);
+    expect(parsed!.playlistSource).toBe("own");
+    expect(parsed!.mode).toBe("party");
+  });
+
+  it("parses explicit builtin/trial fields", () => {
+    const parsed = parseGamePayload(
+      JSON.stringify({ tracks: [], playlistSource: "builtin", mode: "trial" })
+    );
+    expect(parsed!.playlistSource).toBe("builtin");
+    expect(parsed!.mode).toBe("trial");
+  });
+
+  it("falls back to defaults for unknown enum values", () => {
+    const parsed = parseGamePayload(
+      JSON.stringify({ tracks: [], playlistSource: "weird", mode: "nope" })
+    );
+    expect(parsed!.playlistSource).toBe("own");
+    expect(parsed!.mode).toBe("party");
+  });
+
+  it("returns null for invalid JSON", () => {
+    expect(parseGamePayload("not json {")).toBeNull();
+  });
+
+  it("returns null for non-object JSON", () => {
+    expect(parseGamePayload("42")).toBeNull();
+    expect(parseGamePayload("null")).toBeNull();
+  });
+
+  it("falls back to empty array when tracks is present but not an array", () => {
+    const parsed = parseGamePayload(JSON.stringify({ tracks: "oops", players: [] }));
+    expect(parsed!.tracks).toEqual([]);
+  });
+});
+
+// Regression: ISSUE-001 — rounds_played overcounted by 1 when the game ended
+// during the "waiting" phase (round not yet started), inflating game_finished
+// data and the trial "You got X / Y" denominator.
+// Found by /qa on 2026-06-11
+// Report: .gstack/qa-reports/qa-report-127-0-0-1-8000-2026-06-11.md
+describe("countRoundsPlayed", () => {
+  it("does not count the current round when ending during waiting", () => {
+    // Played rounds 1-3, ended while round 4 (index 3) was still waiting
+    expect(countRoundsPlayed(3, "waiting")).toBe(3);
+  });
+
+  it("counts the current round once its clip has started", () => {
+    expect(countRoundsPlayed(3, "playing")).toBe(4);
+    expect(countRoundsPlayed(3, "guessing")).toBe(4);
+    expect(countRoundsPlayed(3, "revealed")).toBe(4);
+  });
+
+  it("returns 0 when ending before the first clip ever plays", () => {
+    expect(countRoundsPlayed(0, "waiting")).toBe(0);
+  });
+
+  it("counts the final round when finishing normally via next-track", () => {
+    // Last round (index 15 of 16) finishing from revealed
+    expect(countRoundsPlayed(15, "revealed")).toBe(16);
+  });
+});

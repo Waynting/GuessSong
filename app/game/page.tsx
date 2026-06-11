@@ -2,22 +2,15 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-
-interface Track {
-  id: string;
-  name: string;
-  artists: string[];
-  durationMs: number;
-  albumName?: string;
-  albumImageUrl?: string;
-  previewUrl?: string | null;
-  createdAt: string;
-}
-
-interface Player {
-  name: string;
-  score: number;
-}
+import type { Track } from "@/types";
+import { trackEvent, type PlaylistSource } from "@/lib/analytics";
+import {
+  parseGamePayload,
+  countRoundsPlayed,
+  GAME_STORAGE_KEY,
+  type GameMode,
+  type GamePlayer as Player,
+} from "@/lib/game-session";
 
 type Phase = "waiting" | "playing" | "guessing" | "revealed" | "finished";
 
@@ -42,25 +35,32 @@ export default function GamePage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [noAudio, setNoAudio] = useState(false);
   const [loadingSkipVisible, setLoadingSkipVisible] = useState(false);
+  const [playlistSource, setPlaylistSource] = useState<PlaylistSource>("own");
+  const [mode, setMode] = useState<GameMode>("party");
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadingSkipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewCache = useRef<Record<string, string | null>>({});
+  const gameStartTimeRef = useRef<number>(Date.now());
+  const finishedTrackedRef = useRef(false);
+  const roundsPlayedRef = useRef(0);
+
+  const isTrial = mode === "trial";
 
   useEffect(() => {
-    const raw = sessionStorage.getItem("guesssong_game");
+    const raw = sessionStorage.getItem(GAME_STORAGE_KEY);
     if (!raw) { router.push("/"); return; }
-    try {
-      const data = JSON.parse(raw);
-      setTracks(data.tracks || []);
-      setPlayers(data.players || []);
-      setPlaylistName(data.playlistName || "");
-      setClipDuration(data.clipDuration || 15);
-    } catch {
-      router.push("/");
-    }
+    const data = parseGamePayload(raw);
+    if (!data || data.tracks.length === 0) { router.push("/"); return; }
+    setTracks(data.tracks);
+    setPlayers(data.players);
+    setPlaylistName(data.playlistName);
+    setClipDuration(data.clipDuration);
+    setPlaylistSource(data.playlistSource);
+    setMode(data.mode);
+    gameStartTimeRef.current = Date.now();
   }, [router]);
 
   const stopClip = useCallback(() => {
@@ -97,6 +97,11 @@ export default function GamePage() {
     }
 
     if (!previewUrl) {
+      trackEvent("preview_miss", {
+        playlist_source: playlistSource,
+        track_name: track.name,
+        artist: track.artists[0] ?? "",
+      });
       setNoAudio(true);
       return;
     }
@@ -148,9 +153,38 @@ export default function GamePage() {
     setTimeout(() => setScorePulse(null), 600);
   }
 
+  /** Mark the current trial round as guessed correctly (+1, once per round). */
+  function markTrialCorrect() {
+    if (pointsAwarded) return;
+    setPointsAwarded(true);
+    setPlayers((prev) =>
+      prev.map((p, i) => (i === 0 ? { ...p, score: p.score + 1 } : p))
+    );
+  }
+
+  /** Fire game_finished exactly once (guards endGame + nextTrack double entry). */
+  function trackGameFinished() {
+    if (finishedTrackedRef.current) return;
+    finishedTrackedRef.current = true;
+    roundsPlayedRef.current = countRoundsPlayed(currentIndex, phase);
+    trackEvent("game_finished", {
+      rounds_played: roundsPlayedRef.current,
+      total_tracks: tracks.length,
+      duration_seconds: Math.round((Date.now() - gameStartTimeRef.current) / 1000),
+      playlist_source: playlistSource,
+      ...(isTrial ? { correct_count: players[0]?.score ?? 0 } : {}),
+    });
+  }
+
   function nextTrack() {
     stopClip();
+    trackEvent("round_completed", {
+      round_index: currentIndex + 1,
+      skipped: phase !== "revealed",
+      playlist_source: playlistSource,
+    });
     if (currentIndex + 1 >= tracks.length) {
+      trackGameFinished();
       setPhase("finished");
     } else {
       setCurrentIndex((i) => i + 1);
@@ -169,6 +203,7 @@ export default function GamePage() {
 
   function endGame() {
     stopClip();
+    trackGameFinished();
     setPhase("finished");
   }
 
@@ -321,6 +356,8 @@ export default function GamePage() {
           overflow: hidden;
           background: #111;
         }
+        /* Trial mode: no sidebar, main area takes the full width */
+        .game-layout.trial { grid-template-columns: 1fr; }
 
         .top-bar {
           grid-column: 1 / -1;
@@ -812,7 +849,7 @@ export default function GamePage() {
 
       <audio ref={audioRef} />
 
-      <div className="game-layout">
+      <div className={`game-layout${isTrial ? " trial" : ""}`}>
         {/* TOP BAR */}
         <header className="top-bar">
           <div className="round-badge">
@@ -825,6 +862,19 @@ export default function GamePage() {
           </div>
           <span className="playlist-name">{playlistName}</span>
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {isTrial && (
+              <span
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: "#1DB954",
+                  letterSpacing: "0.06em",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Correct: {players[0]?.score ?? 0}
+              </span>
+            )}
             {phase !== "finished" && (
               <button
                 className="end-game-btn"
@@ -985,6 +1035,11 @@ export default function GamePage() {
                   <button className="btn-primary" onClick={reveal}>
                     Reveal Answer →
                   </button>
+                  {isTrial && (
+                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={nextTrack}>
+                      Skip →
+                    </button>
+                  )}
                 </div>
                 <button
                   className="btn-ghost"
@@ -1019,6 +1074,11 @@ export default function GamePage() {
                   <button className="btn-primary" onClick={reveal}>
                     Reveal Answer →
                   </button>
+                  {isTrial && (
+                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={nextTrack}>
+                      Skip →
+                    </button>
+                  )}
                 </div>
                 {!albumHintShown && currentTrack?.albumImageUrl && (
                   <button className="btn-ghost" onClick={() => setAlbumHintShown(true)}>
@@ -1040,6 +1100,30 @@ export default function GamePage() {
                   )}
                 </div>
 
+                {isTrial ? (
+                  <>
+                    {/* Trial mode: self-scored, no player picker */}
+                    {pointsAwarded ? (
+                      <p style={{ textAlign: "center", color: "#1DB954", fontSize: "13px", marginBottom: "14px" }}>
+                        +1 — nice ear!
+                      </p>
+                    ) : (
+                      <div className="player-picker" style={{ marginBottom: "14px" }}>
+                        <button className="player-pick-btn" onClick={markTrialCorrect}>
+                          I got it ✓
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      className="btn-primary"
+                      onClick={nextTrack}
+                      style={{ flex: "none", display: "block", margin: "0 auto", minWidth: "180px", width: "fit-content" }}
+                    >
+                      {currentIndex + 1 >= tracks.length ? "See Results →" : "Next →"}
+                    </button>
+                  </>
+                ) : (
+                  <>
                 {/* Song scoring — 3 pts */}
                 <p className="who-scored">Who guessed the song? (+3 pts)</p>
                 {!pointsAwarded ? (
@@ -1085,12 +1169,40 @@ export default function GamePage() {
                 <button className="btn-primary" onClick={nextTrack} style={{ flex: "none", display: "block", margin: "0 auto", minWidth: "180px", width: "fit-content" }}>
                   {currentIndex + 1 >= tracks.length ? "See Final Scores →" : "Next Track →"}
                 </button>
+                  </>
+                )}
               </div>
             )}
           </div>
 
+          {/* Finished overlay — trial mode: simple result + party CTA */}
+          {phase === "finished" && isTrial && (
+            <div className="finished-overlay" style={{ justifyContent: "center" }}>
+              <div className="finished-header">
+                <p style={{ fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#555", marginBottom: "4px" }}>
+                  Trial Complete
+                </p>
+                <h1 className="finished-title">
+                  You got {players[0]?.score ?? 0} / {roundsPlayedRef.current}
+                </h1>
+                <p style={{ color: "#444", fontSize: "13px" }}>{playlistName}</p>
+                <p style={{ color: "#888", fontSize: "14px", marginTop: "16px", lineHeight: 1.5 }}>
+                  Next time, bring your friends — GuessSong is built for parties.
+                </p>
+              </div>
+              <div className="finished-btn-row" style={{ marginTop: "28px" }}>
+                <button className="btn-lg green" onClick={() => router.push("/")}>
+                  Start a Party Game →
+                </button>
+                <button className="btn-lg outline" onClick={playAgain}>
+                  Play Again
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Finished overlay (full screen inside main) */}
-          {phase === "finished" && (
+          {phase === "finished" && !isTrial && (
             <div className="finished-overlay">
               {/* Header */}
               <div className="finished-header">
@@ -1145,7 +1257,8 @@ export default function GamePage() {
           )}
         </main>
 
-        {/* SIDEBAR SCOREBOARD */}
+        {/* SIDEBAR SCOREBOARD — hidden in trial mode */}
+        {!isTrial && (
         <aside className="sidebar">
           <div className="sidebar-header">Scoreboard</div>
           <div className="score-list">
@@ -1165,6 +1278,7 @@ export default function GamePage() {
             })}
           </div>
         </aside>
+        )}
       </div>
 
       <style>{`
