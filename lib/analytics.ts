@@ -8,6 +8,7 @@
  */
 
 export type PlaylistSource = "own" | "builtin";
+export type ShareType = "track" | "album" | "artist" | "unknown";
 
 declare global {
   interface Window {
@@ -15,7 +16,7 @@ declare global {
   }
 }
 
-/** The five funnel events. Union type locks event names + param shapes. */
+/** The funnel + PWA events. Union type locks event names + param shapes. */
 export type AnalyticsEvent =
   | {
       name: "playlist_submitted";
@@ -55,6 +56,14 @@ export type AnalyticsEvent =
         track_name?: string;
         artist?: string;
       };
+    }
+  | {
+      name: "pwa_install_prompt";
+      params: { outcome: "accepted" | "dismissed" };
+    }
+  | {
+      name: "share_unsupported";
+      params: { share_type: ShareType };
     };
 
 export type AnalyticsEventName = AnalyticsEvent["name"];

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import { PwaSetup } from "@/components/pwa-setup";
 import "./globals.css";
 
 const GA_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
@@ -32,6 +33,7 @@ export const metadata: Metadata = {
     "spotify trivia",
   ],
   authors: [{ name: "GuessSong" }],
+  manifest: "/manifest.json",
   robots: { index: true, follow: true },
   openGraph: {
     type: "website",
@@ -81,6 +83,12 @@ export default function RootLayout({
         />
       </head>
       <body>
+        {/* Catch beforeinstallprompt before React hydrates — Chrome can fire
+            it earlier than any useEffect. lib/pwa.ts picks it up from
+            window.__bipEvent on init. */}
+        <Script id="bip-capture" strategy="beforeInteractive">
+          {`window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__bipEvent=e;});`}
+        </Script>
         {GA_ID && (
           <>
             <Script
@@ -97,6 +105,7 @@ export default function RootLayout({
             </Script>
           </>
         )}
+        <PwaSetup />
         {children}
       </body>
     </html>

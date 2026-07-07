@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { trackEvent } from "@/lib/analytics";
 import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
 import { BUILTIN_PLAYLISTS, type BuiltinPlaylist } from "@/lib/builtin-playlists";
+import { InstallBanner } from "@/components/install-banner";
 
 const CLIP_DURATIONS = [5, 10, 15, 20, 30];
 const SONG_COUNTS: (number | "all")[] = [10, 20, 30, 50, "all"];
@@ -59,6 +60,9 @@ export default function SetupPage() {
 
   useEffect(() => {
     setMounted(true);
+    // Prefill from the share target redirect (/share → /?playlist=...).
+    const shared = new URLSearchParams(window.location.search).get("playlist");
+    if (shared) setPlaylistUrl(shared);
   }, []);
 
   const isValidSpotifyUrl = playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
@@ -483,7 +487,8 @@ export default function SetupPage() {
             </p>
             <p style={{ color: "#555", fontSize: "12px", marginTop: "8px" }}>
               Paste any public Spotify playlist URL — no login required
-              {" · "}
+            </p>
+            <p style={{ fontSize: "13px", marginTop: "6px" }}>
               <a
                 href="/about"
                 style={{ color: "#1DB954", textDecoration: "none" }}
@@ -501,6 +506,11 @@ export default function SetupPage() {
                 </svg>
               </a>
             </p>
+          </div>
+
+          {/* Install pitch — shown before the setup form */}
+          <div className={mounted ? "fade-in fade-in-2" : ""}>
+            <InstallBanner />
           </div>
 
           {/* Card */}
