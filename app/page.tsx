@@ -481,6 +481,18 @@ export default function SetupPage() {
             <p style={{ color: "#666", fontSize: "15px", marginTop: "12px", fontWeight: 300 }}>
               Play a clip. Guess the song. Compete.
             </p>
+            <p style={{ color: "#555", fontSize: "12px", marginTop: "8px" }}>
+              Paste any public Spotify playlist URL — no login required
+              {" · "}
+              <a
+                href="/about"
+                style={{ color: "#1DB954", textDecoration: "none" }}
+                onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+              >
+                How to play →
+              </a>
+            </p>
             <p style={{ color: "#555", fontSize: "13px", marginTop: "8px", fontWeight: 300, display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
               If you like, give me a star
               <a href="https://github.com/Waynting/spotify-song-guess_web" target="_blank" rel="noopener noreferrer" style={{ color: "#555", display: "inline-flex", transition: "color 0.15s" }} onMouseEnter={e => (e.currentTarget.style.color = "#f0f0f0")} onMouseLeave={e => (e.currentTarget.style.color = "#555")}>
@@ -668,22 +680,6 @@ export default function SetupPage() {
             </div>
           </div>
 
-          {/* Footer note */}
-          <p
-            className={`text-center ${mounted ? "fade-in fade-in-4" : ""}`}
-            style={{ color: "#555", fontSize: "12px", marginTop: "20px" }}
-          >
-            Paste any public Spotify playlist URL — no login required
-            {" · "}
-            <a
-              href="/about"
-              style={{ color: "#1DB954", textDecoration: "none" }}
-              onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
-              onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
-            >
-              How to play →
-            </a>
-          </p>
         </div>
       </main>
     </>
