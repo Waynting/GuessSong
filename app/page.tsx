@@ -486,7 +486,8 @@ export default function SetupPage() {
             </p>
             <p style={{ color: "#555", fontSize: "12px", marginTop: "8px" }}>
               Paste any public Spotify playlist URL — no login required
-              {" · "}
+            </p>
+            <p style={{ fontSize: "13px", marginTop: "6px" }}>
               <a
                 href="/about"
                 style={{ color: "#1DB954", textDecoration: "none" }}

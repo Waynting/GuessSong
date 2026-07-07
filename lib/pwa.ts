@@ -19,6 +19,27 @@ interface BeforeInstallPromptEvent extends Event {
 
 let deferredPrompt: BeforeInstallPromptEvent | null = null;
 let initialized = false;
+const listeners = new Set<(available: boolean) => void>();
+
+function notify(): void {
+  const available = canInstall();
+  listeners.forEach((cb) => cb(available));
+}
+
+/**
+ * Subscribe to install availability. Fires immediately with the current
+ * state, then again whenever it changes (beforeinstallprompt can arrive
+ * well after a page mounts). Returns an unsubscribe function.
+ */
+export function subscribeInstall(
+  cb: (available: boolean) => void
+): () => void {
+  listeners.add(cb);
+  cb(canInstall());
+  return () => {
+    listeners.delete(cb);
+  };
+}
 
 export function initPwa(): void {
   if (initialized || typeof window === "undefined") return;
@@ -27,10 +48,12 @@ export function initPwa(): void {
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     deferredPrompt = e as BeforeInstallPromptEvent;
+    notify();
   });
 
   window.addEventListener("appinstalled", () => {
     deferredPrompt = null;
+    notify();
   });
 
   if ("serviceWorker" in navigator) {
@@ -56,6 +79,7 @@ export async function promptInstall(): Promise<"accepted" | "dismissed" | null> 
   if (!deferredPrompt) return null;
   const prompt = deferredPrompt;
   deferredPrompt = null; // prompt() can only be called once per event
+  notify();
   await prompt.prompt();
   const { outcome } = await prompt.userChoice;
   trackEvent("pwa_install_prompt", { outcome });

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { InstallBanner } from "@/components/install-banner";
 
 export const metadata: Metadata = {
   title: "How to Play",
@@ -400,6 +401,9 @@ export default function AboutPage() {
               </a>
             </div>
           </header>
+
+          {/* PWA install pitch — only renders when the browser allows install */}
+          <InstallBanner />
 
           {/* How it works */}
           <section className="fade-in fade-in-2">

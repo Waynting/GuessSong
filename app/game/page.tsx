@@ -79,8 +79,10 @@ export default function GamePage() {
   }, [phase]);
 
   async function handleInstall() {
-    const outcome = await promptInstall();
-    if (outcome === "accepted") setInstallCta(false);
+    // Hide regardless of outcome: the deferred prompt is consumed either way,
+    // so a second click could never do anything.
+    await promptInstall();
+    setInstallCta(false);
   }
 
   useEffect(() => {
@@ -350,11 +352,37 @@ export default function GamePage() {
     ctx.fillStyle = "#444";
     ctx.fillText("Played with GuessSong", 40, footerY + 30);
 
-    // Download
-    const link = document.createElement("a");
-    link.download = `guesssong-results-${Date.now()}.png`;
-    link.href = canvas.toDataURL("image/png");
-    link.click();
+    // Save: prefer the share sheet with an image file — on Android/iOS that
+    // offers "Save to Photos", and data-URL anchor downloads are unreliable
+    // inside installed PWAs (WebAPK). Fallback: blob URL download.
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], `guesssong-results-${Date.now()}.png`, {
+        type: "image/png",
+      });
+
+      if (
+        typeof navigator.canShare === "function" &&
+        navigator.canShare({ files: [file] })
+      ) {
+        try {
+          await navigator.share({ files: [file], title: "GuessSong results" });
+          return;
+        } catch (e) {
+          // User closed the share sheet — not an error, don't force a download.
+          if (e instanceof DOMException && e.name === "AbortError") return;
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.download = file.name;
+      link.href = url;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    }, "image/png");
   }
 
   const currentTrack = tracks[currentIndex];
