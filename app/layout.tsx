@@ -83,6 +83,12 @@ export default function RootLayout({
         />
       </head>
       <body>
+        {/* Catch beforeinstallprompt before React hydrates — Chrome can fire
+            it earlier than any useEffect. lib/pwa.ts picks it up from
+            window.__bipEvent on init. */}
+        <Script id="bip-capture" strategy="beforeInteractive">
+          {`window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__bipEvent=e;});`}
+        </Script>
         {GA_ID && (
           <>
             <Script

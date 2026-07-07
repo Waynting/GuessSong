@@ -45,6 +45,14 @@ export function initPwa(): void {
   if (initialized || typeof window === "undefined") return;
   initialized = true;
 
+  // Event fired before hydration? The inline bip-capture script in
+  // app/layout.tsx stashed it for us.
+  const early = (window as { __bipEvent?: BeforeInstallPromptEvent }).__bipEvent;
+  if (early) {
+    deferredPrompt = early;
+    notify();
+  }
+
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     deferredPrompt = e as BeforeInstallPromptEvent;

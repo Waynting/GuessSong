@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { trackEvent } from "@/lib/analytics";
 import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
 import { BUILTIN_PLAYLISTS, type BuiltinPlaylist } from "@/lib/builtin-playlists";
+import { InstallBanner } from "@/components/install-banner";
 
 const CLIP_DURATIONS = [5, 10, 15, 20, 30];
 const SONG_COUNTS: (number | "all")[] = [10, 20, 30, 50, "all"];
@@ -505,6 +506,11 @@ export default function SetupPage() {
                 </svg>
               </a>
             </p>
+          </div>
+
+          {/* Install pitch — shown before the setup form */}
+          <div className={mounted ? "fade-in fade-in-2" : ""}>
+            <InstallBanner />
           </div>
 
           {/* Card */}
