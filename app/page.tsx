@@ -674,6 +674,15 @@ export default function SetupPage() {
             style={{ color: "#555", fontSize: "12px", marginTop: "20px" }}
           >
             Paste any public Spotify playlist URL — no login required
+            {" · "}
+            <a
+              href="/about"
+              style={{ color: "#1DB954", textDecoration: "none" }}
+              onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+              onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+            >
+              How to play →
+            </a>
           </p>
         </div>
       </main>
