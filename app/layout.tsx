@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import { PwaSetup } from "@/components/pwa-setup";
 import "./globals.css";
 
 const GA_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
@@ -32,6 +33,7 @@ export const metadata: Metadata = {
     "spotify trivia",
   ],
   authors: [{ name: "GuessSong" }],
+  manifest: "/manifest.json",
   robots: { index: true, follow: true },
   openGraph: {
     type: "website",
@@ -97,6 +99,7 @@ export default function RootLayout({
             </Script>
           </>
         )}
+        <PwaSetup />
         {children}
       </body>
     </html>

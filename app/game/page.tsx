@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { Track } from "@/types";
 import { trackEvent, type PlaylistSource } from "@/lib/analytics";
+import { canInstall, promptInstall } from "@/lib/pwa";
 import {
   parseGamePayload,
   countRoundsPlayed,
@@ -16,6 +17,28 @@ type Phase = "waiting" | "playing" | "guessing" | "revealed" | "finished";
 
 const ALBUM_PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='%231a1a1a'/%3E%3Ccircle cx='200' cy='200' r='80' fill='%23222'/%3E%3Ccircle cx='200' cy='200' r='20' fill='%23111'/%3E%3C/svg%3E";
+
+function InstallCta({ onInstall }: { onInstall: () => void }) {
+  return (
+    <div className="install-cta">
+      <span className="install-cta-emoji" aria-hidden>
+        📲
+      </span>
+      <span>
+        <span className="install-cta-title" style={{ display: "block" }}>
+          Install GuessSong
+        </span>
+        <span className="install-cta-desc" style={{ display: "block" }}>
+          Next time, share any playlist from Spotify straight to GuessSong and
+          start playing.
+        </span>
+      </span>
+      <button className="install-cta-btn" onClick={onInstall}>
+        Install
+      </button>
+    </div>
+  );
+}
 
 export default function GamePage() {
   const router = useRouter();
@@ -37,6 +60,7 @@ export default function GamePage() {
   const [loadingSkipVisible, setLoadingSkipVisible] = useState(false);
   const [playlistSource, setPlaylistSource] = useState<PlaylistSource>("own");
   const [mode, setMode] = useState<GameMode>("party");
+  const [installCta, setInstallCta] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -48,6 +72,16 @@ export default function GamePage() {
   const roundsPlayedRef = useRef(0);
 
   const isTrial = mode === "trial";
+
+  // Show the PWA install pitch at the high-intent moment: game over.
+  useEffect(() => {
+    if (phase === "finished") setInstallCta(canInstall());
+  }, [phase]);
+
+  async function handleInstall() {
+    const outcome = await promptInstall();
+    if (outcome === "accepted") setInstallCta(false);
+  }
 
   useEffect(() => {
     const raw = sessionStorage.getItem(GAME_STORAGE_KEY);
@@ -837,6 +871,39 @@ export default function GamePage() {
         .btn-lg.outline { background: transparent; color: #666; border: 1.5px solid #2a2a2a; }
         .btn-lg.outline:hover { color: #999; border-color: #444; }
 
+        .install-cta {
+          width: 100%;
+          max-width: 480px;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          background: rgba(29,185,84,0.06);
+          border: 1px solid rgba(29,185,84,0.25);
+          border-radius: 12px;
+          padding: 14px 16px;
+          margin-bottom: 16px;
+          flex-shrink: 0;
+          text-align: left;
+        }
+        .install-cta-emoji { font-size: 24px; flex-shrink: 0; }
+        .install-cta-title { font-size: 14px; font-weight: 600; color: #f0f0f0; line-height: 1.3; }
+        .install-cta-desc { font-size: 12px; color: #888; margin-top: 3px; line-height: 1.4; }
+        .install-cta-btn {
+          margin-left: auto;
+          flex-shrink: 0;
+          padding: 9px 18px;
+          background: #1DB954;
+          color: #000;
+          font-family: 'Outfit', sans-serif;
+          font-size: 13px;
+          font-weight: 700;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: background 0.15s, transform 0.1s;
+        }
+        .install-cta-btn:hover { background: #1ed760; transform: translateY(-1px); }
+
         @media (max-width: 768px) {
           .game-layout {
             grid-template-columns: 1fr;
@@ -1190,7 +1257,12 @@ export default function GamePage() {
                   Next time, bring your friends — GuessSong is built for parties.
                 </p>
               </div>
-              <div className="finished-btn-row" style={{ marginTop: "28px" }}>
+              {installCta && (
+                <div style={{ marginTop: "28px", display: "flex", justifyContent: "center" }}>
+                  <InstallCta onInstall={handleInstall} />
+                </div>
+              )}
+              <div className="finished-btn-row" style={{ marginTop: installCta ? "0" : "28px" }}>
                 <button className="btn-lg green" onClick={() => router.push("/")}>
                   Start a Party Game →
                 </button>
@@ -1243,6 +1315,8 @@ export default function GamePage() {
                   })}
                 </div>
               )}
+
+              {installCta && <InstallCta onInstall={handleInstall} />}
 
               {/* Buttons — always visible, pinned at bottom */}
               <div className="finished-btn-row">

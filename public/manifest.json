@@ -1,0 +1,30 @@
+{
+  "id": "/",
+  "name": "GuessSong — Spotify Party Game",
+  "short_name": "GuessSong",
+  "description": "Play a clip, guess the song. Works with any Spotify playlist, no login required.",
+  "start_url": "/?utm_source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "icons": [
+    { "src": "/icons/192", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/512", "sizes": "512x512", "type": "image/png" },
+    {
+      "src": "/icons/maskable",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "share_target": {
+    "action": "/share",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
+}

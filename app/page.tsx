@@ -59,6 +59,9 @@ export default function SetupPage() {
 
   useEffect(() => {
     setMounted(true);
+    // Prefill from the share target redirect (/share → /?playlist=...).
+    const shared = new URLSearchParams(window.location.search).get("playlist");
+    if (shared) setPlaylistUrl(shared);
   }, []);
 
   const isValidSpotifyUrl = playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
