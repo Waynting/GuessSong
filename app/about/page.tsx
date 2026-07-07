@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   },
 };
 
-const GITHUB_URL = "https://github.com/Waynting/spotify-song-guess_web";
+const GITHUB_URL = "https://github.com/Waynting/GuessSong";
 
 function SpotifyIcon() {
   return (
