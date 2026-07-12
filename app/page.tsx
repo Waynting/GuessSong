@@ -715,6 +715,9 @@ export default function SetupPage() {
             <p style={{ color: "#555", fontSize: "12px", marginTop: "8px" }}>
               Paste any public Spotify playlist URL — no login required
             </p>
+            <p style={{ color: "#555", fontSize: "12px", marginTop: "4px" }}>
+              猜歌遊戲・派對音樂猜謎，適合朋友聚會
+            </p>
             <p style={{ fontSize: "13px", marginTop: "6px" }}>
               <a
                 href="/about"

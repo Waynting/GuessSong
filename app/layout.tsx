@@ -9,15 +9,17 @@ const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "https://www.guessong.app";
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
   title: {
-    default: "GuessSong — Spotify Party Game",
+    default: "GuessSong — Guess Song Party Game",
     template: "%s | GuessSong",
   },
   description:
-    "Play a clip, guess the song. A free music guessing game for parties — works with any Spotify playlist, no login required, local multiplayer fun for friends and family.",
+    "Play a clip, guess the song. GuessSong is a free guess song party game for any Spotify playlist — no login required, local multiplayer fun for friends and family.",
   keywords: [
     "music guessing game",
     "spotify party game",
     "song guessing game",
+    "guess song",
+    "guess song game",
     "music quiz",
     "party game",
     "local multiplayer",
@@ -31,6 +33,11 @@ export const metadata: Metadata = {
     "friends game night",
     "music game for parties",
     "spotify trivia",
+    "猜歌",
+    "猜歌遊戲",
+    "音樂猜謎遊戲",
+    "派對猜歌遊戲",
+    "spotify 猜歌",
   ],
   authors: [{ name: "GuessSong" }],
   manifest: "/manifest.json",
@@ -39,16 +46,16 @@ export const metadata: Metadata = {
     type: "website",
     url: BASE_URL,
     siteName: "GuessSong",
-    title: "GuessSong — Spotify Party Game",
+    title: "GuessSong — Guess Song Party Game",
     description:
-      "Play a clip, guess the song. Works with any Spotify playlist, no login required.",
+      "Play a clip, guess the song. A free guess song game for any Spotify playlist, no login required.",
     images: [{ url: "/opengraph-image", width: 1200, height: 630 }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "GuessSong — Spotify Party Game",
+    title: "GuessSong — Guess Song Party Game",
     description:
-      "Play a clip, guess the song. Works with any Spotify playlist, no login required.",
+      "Play a clip, guess the song. A free guess song game for any Spotify playlist, no login required.",
     images: ["/opengraph-image"],
   },
 };
@@ -66,9 +73,10 @@ export default function RootLayout({
     "@context": "https://schema.org",
     "@type": "WebApplication",
     name: "GuessSong",
+    alternateName: ["Guess Song", "Guess the Song", "猜歌", "猜歌遊戲"],
     url: BASE_URL,
     description:
-      "A free music guessing game for parties. Works with any Spotify playlist, no login required.",
+      "A free guess song game for parties. Works with any Spotify playlist, no login required.",
     applicationCategory: "GameApplication",
     operatingSystem: "Web",
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
