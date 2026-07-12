@@ -1,14 +1,28 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import QRCode from "qrcode";
+import type { Track } from "@/types";
+import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolResponse } from "@/types/room";
 import { trackEvent } from "@/lib/analytics";
 import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
 import { BUILTIN_PLAYLISTS, type BuiltinPlaylist } from "@/lib/builtin-playlists";
 import { InstallBanner } from "@/components/install-banner";
+import {
+  MixedPlaylistCollector,
+  type MixedContribution,
+} from "@/components/mixed-playlist-collector";
+import { poolContributions } from "@/lib/mixed-playlist";
 
 const CLIP_DURATIONS = [5, 10, 15, 20, 30];
 const SONG_COUNTS: (number | "all")[] = [10, 20, 30, 50, "all"];
+const MIXED_SAMPLE_COUNTS = [5, 8, 10, 12];
+const MIXED_MIN_CONTRIBUTORS = 2;
+const ROOM_POLL_INTERVAL_MS = 4000;
+
+type SetupMode = "single" | "mixed";
+type MixedSubMode = "room" | "phone";
 
 function SpotifyIcon() {
   return (
@@ -49,20 +63,161 @@ function WaveformBg() {
 
 export default function SetupPage() {
   const router = useRouter();
+  const [setupMode, setSetupMode] = useState<SetupMode>("single");
   const [playlistUrl, setPlaylistUrl] = useState("");
   const [players, setPlayers] = useState<string[]>(["", ""]);
   const [clipDuration, setClipDuration] = useState(15);
   const [songCount, setSongCount] = useState<number | "all">(20);
+  const [mixedContributions, setMixedContributions] = useState<MixedContribution[]>([]);
+  const [sampledPerPlayer, setSampledPerPlayer] = useState(DEFAULT_SAMPLED_PER_PLAYER);
+  const [mixedSubMode, setMixedSubMode] = useState<MixedSubMode>("room");
+  const [roomCode, setRoomCode] = useState<string | null>(null);
+  const [hostToken, setHostToken] = useState<string | null>(null);
+  const [joinUrl, setJoinUrl] = useState<string | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [roomSubmissions, setRoomSubmissions] = useState<RoomSubmissionSummary[]>([]);
+  const [roomCreating, setRoomCreating] = useState(false);
+  const [roomStarting, setRoomStarting] = useState(false);
+  const [roomError, setRoomError] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
+  const roomPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const roomSubmissionTotalRef = useRef(0);
+
+  function addMixedContribution(c: MixedContribution) {
+    setMixedContributions((prev) => [...prev, c]);
+  }
+
+  function removeMixedContribution(idx: number) {
+    setMixedContributions((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function stopRoomPolling() {
+    if (roomPollIntervalRef.current) {
+      clearInterval(roomPollIntervalRef.current);
+      roomPollIntervalRef.current = null;
+    }
+  }
+
+  async function pollRoomStatus(code: string) {
+    try {
+      const res = await fetch(`/api/room/${code}/status`);
+      const data = await res.json();
+      if (!res.ok) return;
+      setRoomSubmissions(data.submissions);
+      if (data.total > roomSubmissionTotalRef.current) {
+        roomSubmissionTotalRef.current = data.total;
+        trackEvent("room_submission_received", { total: data.total });
+      }
+    } catch {
+      // Transient network hiccup while polling — the next tick retries.
+    }
+  }
+
+  async function handleCreateRoom() {
+    setRoomError(null);
+    setRoomCreating(true);
+    try {
+      const res = await fetch("/api/room", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create room");
+
+      setRoomCode(data.roomCode);
+      setHostToken(data.hostToken);
+      roomSubmissionTotalRef.current = 0;
+      setRoomSubmissions([]);
+      trackEvent("room_created", {});
+
+      const url = `${window.location.origin}/j/${data.roomCode}`;
+      setJoinUrl(url);
+      const dataUrl = await QRCode.toDataURL(url, { margin: 1, width: 240 });
+      setQrDataUrl(dataUrl);
+
+      stopRoomPolling();
+      roomPollIntervalRef.current = setInterval(
+        () => pollRoomStatus(data.roomCode),
+        ROOM_POLL_INTERVAL_MS
+      );
+    } catch (e: unknown) {
+      setRoomError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setRoomCreating(false);
+    }
+  }
+
+  async function handleShareJoinLink() {
+    if (!joinUrl) return;
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ url: joinUrl, title: `Join room ${roomCode} on GuessSong` });
+        return;
+      } catch (e) {
+        // User closed the share sheet — not an error, fall through to copy.
+        if (e instanceof DOMException && e.name === "AbortError") return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(joinUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable — the QR code and visible code remain usable.
+    }
+  }
+
+  async function handleRoomStart() {
+    if (!roomCode || !hostToken) return;
+    setRoomError(null);
+    setRoomStarting(true);
+    try {
+      const res = await fetch(`/api/room/${roomCode}/pool?sampledPerPlayer=${sampledPerPlayer}`, {
+        headers: { "x-host-token": hostToken },
+      });
+      const data: RoomPoolResponse & { error?: string } = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to start game");
+      stopRoomPolling();
+
+      const payload = buildGamePayload({
+        tracks: data.tracks,
+        players: data.players.map((name) => ({ name, score: 0 })),
+        playlistName: `${data.players.length}-Player Mix`,
+        clipDuration,
+        totalTracks: data.tracks.length,
+        playlistSource: "mixed",
+        mode: "party",
+        mixedPlaylistMeta: {
+          contributorNames: data.players,
+          sampledPerPlayer: data.sampledPerPlayer,
+        },
+      });
+      sessionStorage.setItem(GAME_STORAGE_KEY, JSON.stringify(payload));
+      trackEvent("game_started", {
+        player_count: data.players.length,
+        clip_duration: clipDuration,
+        song_count: data.tracks.length,
+        playlist_source: "mixed",
+      });
+      trackEvent("room_started", {
+        contributor_count: data.players.length,
+        unique_tracks: data.tracks.length,
+      });
+      router.push("/game");
+    } catch (e: unknown) {
+      setRoomError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setRoomStarting(false);
+    }
+  }
 
   useEffect(() => {
     setMounted(true);
     // Prefill from the share target redirect (/share → /?playlist=...).
     const shared = new URLSearchParams(window.location.search).get("playlist");
     if (shared) setPlaylistUrl(shared);
+    return () => stopRoomPolling();
   }, []);
 
   const isValidSpotifyUrl = playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
@@ -120,6 +275,78 @@ export default function SetupPage() {
         clip_duration: clipDuration,
         song_count: limited.length,
         playlist_source: "own",
+      });
+      router.push("/game");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleMixedStart() {
+    setError(null);
+    if (mixedContributions.length < MIXED_MIN_CONTRIBUTORS) {
+      setError(`Add at least ${MIXED_MIN_CONTRIBUTORS} players' playlists to start`);
+      return;
+    }
+    setLoading(true);
+    trackEvent("playlist_submitted", { playlist_source: "mixed" });
+    try {
+      const results = await Promise.allSettled(
+        mixedContributions.map(async (c) => {
+          const res = await fetch("/api/playlist", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: c.playlistUrl }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Failed to load playlist");
+          return { playerName: c.name, tracks: data.tracks as Track[] };
+        })
+      );
+
+      const failedNames = results
+        .map((r, i) => (r.status === "rejected" ? mixedContributions[i].name : null))
+        .filter((n): n is string => n !== null);
+      if (failedNames.length > 0) {
+        throw new Error(
+          `Couldn't load a playlist for: ${failedNames.join(", ")}. Remove or fix them and try again.`
+        );
+      }
+
+      const contributions = (
+        results as PromiseFulfilledResult<{ playerName: string; tracks: Track[] }>[]
+      ).map((r) => r.value);
+      const totalRawTracks = contributions.reduce((sum, c) => sum + c.tracks.length, 0);
+      const pooled = poolContributions(contributions, sampledPerPlayer);
+      const overlapCount = pooled.filter((t) => t.contributors.length > 1).length;
+
+      const payload = buildGamePayload({
+        tracks: pooled,
+        players: mixedContributions.map((c) => ({ name: c.name, score: 0 })),
+        playlistName: `${mixedContributions.length}-Player Mix`,
+        clipDuration,
+        totalTracks: pooled.length,
+        playlistSource: "mixed",
+        mode: "party",
+        mixedPlaylistMeta: {
+          contributorNames: mixedContributions.map((c) => c.name),
+          sampledPerPlayer,
+        },
+      });
+      sessionStorage.setItem(GAME_STORAGE_KEY, JSON.stringify(payload));
+      trackEvent("game_started", {
+        player_count: mixedContributions.length,
+        clip_duration: clipDuration,
+        song_count: pooled.length,
+        playlist_source: "mixed",
+      });
+      trackEvent("mixed_pool_built", {
+        contributor_count: mixedContributions.length,
+        unique_tracks: pooled.length,
+        total_raw_tracks: totalRawTracks,
+        overlap_count: overlapCount,
       });
       router.push("/game");
     } catch (e: unknown) {
@@ -488,6 +715,9 @@ export default function SetupPage() {
             <p style={{ color: "#555", fontSize: "12px", marginTop: "8px" }}>
               Paste any public Spotify playlist URL — no login required
             </p>
+            <p style={{ color: "#555", fontSize: "12px", marginTop: "4px" }}>
+              猜歌遊戲・派對音樂猜謎，適合朋友聚會
+            </p>
             <p style={{ fontSize: "13px", marginTop: "6px" }}>
               <a
                 href="/about"
@@ -516,80 +746,257 @@ export default function SetupPage() {
           {/* Card */}
           <div className={`card ${mounted ? "fade-in fade-in-2" : ""}`} style={{ padding: "28px", display: "flex", flexDirection: "column", gap: "24px" }}>
 
-            {/* Playlist URL */}
+            {/* Game Mode */}
             <div>
-              <p className="section-label">Spotify Playlist</p>
-              <div style={{ position: "relative" }}>
-                <input
-                  ref={firstInputRef}
-                  type="url"
-                  className={`url-input${isValidSpotifyUrl ? " valid" : ""}`}
-                  placeholder="https://open.spotify.com/playlist/..."
-                  value={playlistUrl}
-                  onChange={(e) => setPlaylistUrl(e.target.value)}
-                  spellCheck={false}
-                />
-                {isValidSpotifyUrl && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      right: "14px",
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      color: "#1DB954",
-                    }}
-                  >
-                    <CheckIcon />
-                  </span>
-                )}
-              </div>
-              {isEditorial && (
-                <p
-                  style={{
-                    marginTop: "8px",
-                    fontSize: "12px",
-                    color: "#f59e0b",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
+              <p className="section-label">Game Mode</p>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button
+                  className={`pill${setupMode === "single" ? " active" : ""}`}
+                  onClick={() => setSetupMode("single")}
                 >
-                  <span>⚠</span> Editorial playlists (Discover Weekly, etc.) may not work
+                  Single Playlist
+                </button>
+                <button
+                  className={`pill${setupMode === "mixed" ? " active" : ""}`}
+                  onClick={() => setSetupMode("mixed")}
+                >
+                  Mixed Playlist 🔀
+                </button>
+              </div>
+              {setupMode === "mixed" && (
+                <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                  Pass this phone around — everyone adds their own playlist, then we mix them together.
                 </p>
               )}
             </div>
 
-            {/* Players */}
-            <div>
-              <p className="section-label">Players</p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                {players.map((name, idx) => (
-                  <div key={idx} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {setupMode === "single" ? (
+              <>
+                {/* Playlist URL */}
+                <div>
+                  <p className="section-label">Spotify Playlist</p>
+                  <div style={{ position: "relative" }}>
                     <input
-                      type="text"
-                      className="player-input"
-                      placeholder={`Player ${idx + 1}`}
-                      value={name}
-                      onChange={(e) => updatePlayer(idx, e.target.value)}
-                      maxLength={24}
+                      ref={firstInputRef}
+                      type="url"
+                      className={`url-input${isValidSpotifyUrl ? " valid" : ""}`}
+                      placeholder="https://open.spotify.com/playlist/..."
+                      value={playlistUrl}
+                      onChange={(e) => setPlaylistUrl(e.target.value)}
+                      spellCheck={false}
                     />
-                    {players.length > 1 && (
-                      <button
-                        className="remove-btn"
-                        onClick={() => removePlayer(idx)}
-                        aria-label={`Remove player ${idx + 1}`}
+                    {isValidSpotifyUrl && (
+                      <span
+                        style={{
+                          position: "absolute",
+                          right: "14px",
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          color: "#1DB954",
+                        }}
                       >
-                        ×
-                      </button>
+                        <CheckIcon />
+                      </span>
                     )}
                   </div>
-                ))}
-                <button className="add-player-btn" onClick={addPlayer}>
-                  <span style={{ fontSize: "18px", lineHeight: 1, fontWeight: 300 }}>+</span>
-                  Add Player
-                </button>
-              </div>
-            </div>
+                  {isEditorial && (
+                    <p
+                      style={{
+                        marginTop: "8px",
+                        fontSize: "12px",
+                        color: "#f59e0b",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      <span>⚠</span> Editorial playlists (Discover Weekly, etc.) may not work
+                    </p>
+                  )}
+                </div>
+
+                {/* Players */}
+                <div>
+                  <p className="section-label">Players</p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {players.map((name, idx) => (
+                      <div key={idx} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                        <input
+                          type="text"
+                          className="player-input"
+                          placeholder={`Player ${idx + 1}`}
+                          value={name}
+                          onChange={(e) => updatePlayer(idx, e.target.value)}
+                          maxLength={24}
+                        />
+                        {players.length > 1 && (
+                          <button
+                            className="remove-btn"
+                            onClick={() => removePlayer(idx)}
+                            aria-label={`Remove player ${idx + 1}`}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button className="add-player-btn" onClick={addPlayer}>
+                      <span style={{ fontSize: "18px", lineHeight: 1, fontWeight: 300 }}>+</span>
+                      Add Player
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Collection sub-mode */}
+                <div>
+                  <p className="section-label">How to Collect</p>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <button
+                      className={`pill${mixedSubMode === "room" ? " active" : ""}`}
+                      onClick={() => setMixedSubMode("room")}
+                    >
+                      QR Code
+                    </button>
+                    <button
+                      className={`pill${mixedSubMode === "phone" ? " active" : ""}`}
+                      onClick={() => setMixedSubMode("phone")}
+                    >
+                      Pass This Phone
+                    </button>
+                  </div>
+                </div>
+
+                {mixedSubMode === "phone" ? (
+                  <div>
+                    <p className="section-label">Collect Playlists</p>
+                    <MixedPlaylistCollector
+                      contributions={mixedContributions}
+                      onAdd={addMixedContribution}
+                      onRemove={removeMixedContribution}
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <p className="section-label">Room</p>
+                    {!roomCode ? (
+                      <div className="card" style={{ padding: "24px", textAlign: "center" }}>
+                        <p style={{ fontSize: "13px", color: "#777", marginBottom: "16px" }}>
+                          Generate a QR code — players scan it to add their own playlist from
+                          their own phone.
+                        </p>
+                        <button
+                          className="start-btn"
+                          onClick={handleCreateRoom}
+                          disabled={roomCreating}
+                        >
+                          {roomCreating ? "Creating Room..." : "Create Room"}
+                        </button>
+                        {roomError && (
+                          <p style={{ marginTop: "10px", fontSize: "12px", color: "#fca5a5" }}>
+                            {roomError}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="card" style={{ padding: "24px", textAlign: "center" }}>
+                        <p
+                          style={{
+                            fontFamily: "'Bebas Neue', sans-serif",
+                            fontSize: "36px",
+                            letterSpacing: "0.12em",
+                            color: "#1DB954",
+                            marginBottom: "12px",
+                          }}
+                        >
+                          {roomCode}
+                        </p>
+                        {qrDataUrl && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={qrDataUrl}
+                            alt={`QR code to join room ${roomCode}`}
+                            style={{
+                              width: "180px",
+                              height: "180px",
+                              margin: "0 auto 12px",
+                              borderRadius: "8px",
+                            }}
+                          />
+                        )}
+                        <button
+                          className="add-player-btn"
+                          onClick={handleShareJoinLink}
+                          style={{ marginBottom: "14px" }}
+                        >
+                          {linkCopied ? "✓ Link copied" : "Share Join Link"}
+                        </button>
+                        <p style={{ fontSize: "12px", color: "#666", marginBottom: "14px" }}>
+                          Can&apos;t scan? Send that link instead — it&apos;s the same thing.
+                        </p>
+                        <p style={{ fontSize: "12px", color: "#666", marginBottom: "14px" }}>
+                          {roomSubmissions.length} player
+                          {roomSubmissions.length === 1 ? "" : "s"} joined
+                        </p>
+                        {roomSubmissions.length > 0 && (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "8px",
+                              textAlign: "left",
+                            }}
+                          >
+                            {roomSubmissions.map((s) => (
+                              <div
+                                key={s.playerName}
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  background: "#1a1a1a",
+                                  border: "1px solid #2a2a2a",
+                                  borderRadius: "8px",
+                                  padding: "10px 14px",
+                                  fontSize: "14px",
+                                }}
+                              >
+                                <span>{s.playerName}</span>
+                                <span style={{ color: "#666" }}>{s.trackCount} tracks</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {roomError && (
+                          <p style={{ marginTop: "12px", fontSize: "12px", color: "#fca5a5" }}>
+                            {roomError}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Songs per Player */}
+                <div>
+                  <p className="section-label">Songs Per Player</p>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    {MIXED_SAMPLE_COUNTS.map((c) => (
+                      <button
+                        key={c}
+                        className={`pill${sampledPerPlayer === c ? " active" : ""}`}
+                        onClick={() => setSampledPerPlayer(c)}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                  <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                    Caps how many tracks each player&apos;s playlist contributes, after duplicates are merged.
+                  </p>
+                </div>
+              </>
+            )}
 
             {/* Clip Duration */}
             <div>
@@ -607,38 +1014,68 @@ export default function SetupPage() {
               </div>
             </div>
 
-            {/* Number of Songs */}
-            <div>
-              <p className="section-label">Number of Songs</p>
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                {SONG_COUNTS.map((c) => (
-                  <button
-                    key={c}
-                    className={`pill${songCount === c ? " active" : ""}`}
-                    onClick={() => setSongCount(c)}
-                  >
-                    {c === "all" ? "All" : c}
-                  </button>
-                ))}
+            {/* Number of Songs — single-playlist mode only; mixed mode uses per-player sampling instead */}
+            {setupMode === "single" && (
+              <div>
+                <p className="section-label">Number of Songs</p>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  {SONG_COUNTS.map((c) => (
+                    <button
+                      key={c}
+                      className={`pill${songCount === c ? " active" : ""}`}
+                      onClick={() => setSongCount(c)}
+                    >
+                      {c === "all" ? "All" : c}
+                    </button>
+                  ))}
+                </div>
+                <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                  How many tracks to play from the shuffled playlist.
+                </p>
               </div>
-              <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                How many tracks to play from the shuffled playlist.
-              </p>
-            </div>
+            )}
 
             {/* Start Button */}
             <div>
-              <button className="start-btn" onClick={handleStart} disabled={loading}>
-                {loading ? (
-                  <>
-                    <span className="spinner" />
-                    Loading playlist
-                    <span className="dot-pulse" />
-                  </>
-                ) : (
-                  "Start Game →"
-                )}
-              </button>
+              {(() => {
+                const isMixedPhone = setupMode === "mixed" && mixedSubMode === "phone";
+                const isMixedRoom = setupMode === "mixed" && mixedSubMode === "room";
+                const phoneShort = MIXED_MIN_CONTRIBUTORS - mixedContributions.length;
+                const roomShort = MIXED_MIN_CONTRIBUTORS - roomSubmissions.length;
+                const busy = loading || roomStarting;
+                const disabled =
+                  busy ||
+                  (isMixedPhone && mixedContributions.length < MIXED_MIN_CONTRIBUTORS) ||
+                  (isMixedRoom && (!roomCode || roomSubmissions.length < MIXED_MIN_CONTRIBUTORS));
+                const onClick = setupMode === "single"
+                  ? handleStart
+                  : isMixedPhone
+                  ? handleMixedStart
+                  : handleRoomStart;
+
+                let label: ReactNode = "Start Game →";
+                if (busy) {
+                  label = (
+                    <>
+                      <span className="spinner" />
+                      Loading playlist
+                      <span className="dot-pulse" />
+                    </>
+                  );
+                } else if (isMixedPhone && phoneShort > 0) {
+                  label = `Add ${phoneShort} more player${phoneShort === 1 ? "" : "s"} to start`;
+                } else if (isMixedRoom && !roomCode) {
+                  label = "Create a room first";
+                } else if (isMixedRoom && roomShort > 0) {
+                  label = `Waiting for ${roomShort} more player${roomShort === 1 ? "" : "s"}`;
+                }
+
+                return (
+                  <button className="start-btn" onClick={onClick} disabled={disabled}>
+                    {label}
+                  </button>
+                );
+              })()}
 
               {error && (
                 <div

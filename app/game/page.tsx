@@ -12,6 +12,15 @@ import {
   type GameMode,
   type GamePlayer as Player,
 } from "@/lib/game-session";
+import type { RoundHistoryEntry } from "@/lib/round-history";
+import { buildTasteCard } from "@/lib/taste-card";
+import {
+  createResultCanvas,
+  drawCardBackground,
+  drawCardHeader,
+  drawCardFooter,
+  shareOrDownloadCanvas,
+} from "@/lib/result-image";
 
 type Phase = "waiting" | "playing" | "guessing" | "revealed" | "finished";
 
@@ -50,10 +59,13 @@ export default function GamePage() {
   const [phase, setPhase] = useState<Phase>("waiting");
   const [roundWinner, setRoundWinner] = useState<string | null>(null);
   const [albumWinner, setAlbumWinner] = useState<string | null>(null);
+  const [sourceWinner, setSourceWinner] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [scorePulse, setScorePulse] = useState<string | null>(null);
   const [pointsAwarded, setPointsAwarded] = useState(false);
   const [albumPointsAwarded, setAlbumPointsAwarded] = useState(false);
+  const [sourcePointsAwarded, setSourcePointsAwarded] = useState(false);
+  const [roundHistory, setRoundHistory] = useState<RoundHistoryEntry[]>([]);
   const [albumHintShown, setAlbumHintShown] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [noAudio, setNoAudio] = useState(false);
@@ -189,6 +201,18 @@ export default function GamePage() {
     setTimeout(() => setScorePulse(null), 600);
   }
 
+  /** Mixed Playlist Mode: +2 for guessing whose playlist the track came from. */
+  function awardSourcePoint(playerName: string) {
+    if (sourcePointsAwarded) return;
+    setSourceWinner(playerName);
+    setSourcePointsAwarded(true);
+    setScorePulse(playerName);
+    setPlayers((prev) =>
+      prev.map((p) => (p.name === playerName ? { ...p, score: p.score + 2 } : p))
+    );
+    setTimeout(() => setScorePulse(null), 600);
+  }
+
   /** Mark the current trial round as guessed correctly (+1, once per round). */
   function markTrialCorrect() {
     if (pointsAwarded) return;
@@ -219,6 +243,21 @@ export default function GamePage() {
       skipped: phase !== "revealed",
       playlist_source: playlistSource,
     });
+
+    const finishedTrack = tracks[currentIndex];
+    if (finishedTrack?.contributors && finishedTrack.contributors.length > 0) {
+      setRoundHistory((prev) => [
+        ...prev,
+        {
+          trackId: finishedTrack.id,
+          contributors: finishedTrack.contributors!,
+          songWinner: roundWinner,
+          albumWinner: albumWinner,
+          sourceWinner: sourceWinner,
+        },
+      ]);
+    }
+
     if (currentIndex + 1 >= tracks.length) {
       trackGameFinished();
       setPhase("finished");
@@ -227,9 +266,11 @@ export default function GamePage() {
       setPhase("waiting");
       setRoundWinner(null);
       setAlbumWinner(null);
+      setSourceWinner(null);
       setProgress(0);
       setPointsAwarded(false);
       setAlbumPointsAwarded(false);
+      setSourcePointsAwarded(false);
       setAlbumHintShown(false);
       setPreviewLoading(false);
       setNoAudio(false);
@@ -248,57 +289,20 @@ export default function GamePage() {
   }
 
   function downloadResultImage() {
-    const canvas = document.createElement("canvas");
-    const dpr = window.devicePixelRatio || 1;
     const W = 640;
     const rowH = 64;
     const headerH = 200;
     const footerH = 80;
     const H = headerH + sortedPlayers.length * rowH + footerH;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    canvas.style.width = W + "px";
-    canvas.style.height = H + "px";
-    const ctx = canvas.getContext("2d")!;
-    ctx.scale(dpr, dpr);
+    const { canvas, ctx } = createResultCanvas(W, H);
 
-    // Background
-    ctx.fillStyle = "#111111";
-    ctx.fillRect(0, 0, W, H);
-
-    // Top accent bar
-    const accent = ctx.createLinearGradient(0, 0, W, 0);
-    accent.addColorStop(0, "#1DB954");
-    accent.addColorStop(1, "#0a8f3c");
-    ctx.fillStyle = accent;
-    ctx.fillRect(0, 0, W, 4);
-
-    // Title
-    ctx.fillStyle = "#1DB954";
-    ctx.font = "bold 13px sans-serif";
-    ctx.letterSpacing = "2px";
-    ctx.fillText("GUESS SONG", 40, 48);
-
-    // "Final Scores"
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 48px sans-serif";
-    ctx.letterSpacing = "1px";
-    ctx.fillText("Final Scores", 40, 100);
-
-    // Playlist name
-    ctx.fillStyle = "#666666";
-    ctx.font = "15px sans-serif";
-    ctx.letterSpacing = "0px";
-    const pName = playlistName.length > 50 ? playlistName.slice(0, 50) + "…" : playlistName;
-    ctx.fillText(pName, 40, 130);
-
-    // Divider
-    ctx.strokeStyle = "#222222";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(40, 155);
-    ctx.lineTo(W - 40, 155);
-    ctx.stroke();
+    drawCardBackground(ctx, W, H);
+    drawCardHeader(ctx, {
+      width: W,
+      kicker: "GUESS SONG",
+      title: "Final Scores",
+      subtitle: playlistName,
+    });
 
     // Player rows
     sortedPlayers.forEach((p, idx) => {
@@ -341,48 +345,101 @@ export default function GamePage() {
       ctx.fillText("pts", W - 40, y + rowH / 2 + 10);
     });
 
-    // Footer
     const footerY = headerH + sortedPlayers.length * rowH + 20;
-    ctx.strokeStyle = "#222";
-    ctx.beginPath();
-    ctx.moveTo(40, footerY);
-    ctx.lineTo(W - 40, footerY);
-    ctx.stroke();
-    ctx.font = "12px sans-serif";
-    ctx.fillStyle = "#444";
-    ctx.fillText("Played with GuessSong", 40, footerY + 30);
+    drawCardFooter(ctx, W, footerY);
+    shareOrDownloadCanvas(canvas, `guesssong-results-${Date.now()}.png`, "GuessSong results");
+  }
 
-    // Save: prefer the share sheet with an image file — on Android/iOS that
-    // offers "Save to Photos", and data-URL anchor downloads are unreliable
-    // inside installed PWAs (WebAPK). Fallback: blob URL download.
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
-      const file = new File([blob], `guesssong-results-${Date.now()}.png`, {
-        type: "image/png",
-      });
+  /** Mixed Playlist Mode (v2): the group taste card — shared bangers + awards. */
+  function downloadTasteCard() {
+    const tasteCard = buildTasteCard(tracks, roundHistory);
+    const W = 640;
+    const sharedTracks = tasteCard.sharedTracks.slice(0, 5);
+    const sharedRowH = 44;
+    const headerH = 200;
+    const sharedSectionH =
+      sharedTracks.length > 0 ? 40 + sharedTracks.length * sharedRowH + 20 : 0;
+    const awardCount = (tasteCard.mostObscure ? 1 : 0) + (tasteCard.mostMainstream ? 1 : 0);
+    const awardsSectionH = 40 + awardCount * 70 + 20;
+    const footerH = 80;
+    const H = headerH + sharedSectionH + awardsSectionH + footerH;
+    const { canvas, ctx } = createResultCanvas(W, H);
 
-      if (
-        typeof navigator.canShare === "function" &&
-        navigator.canShare({ files: [file] })
-      ) {
-        try {
-          await navigator.share({ files: [file], title: "GuessSong results" });
-          return;
-        } catch (e) {
-          // User closed the share sheet — not an error, don't force a download.
-          if (e instanceof DOMException && e.name === "AbortError") return;
+    drawCardBackground(ctx, W, H);
+    drawCardHeader(ctx, {
+      width: W,
+      kicker: "GUESS SONG",
+      title: "Taste Card",
+      subtitle: playlistName,
+    });
+
+    let y = headerH;
+
+    if (sharedTracks.length > 0) {
+      ctx.fillStyle = "#1DB954";
+      ctx.font = "bold 13px sans-serif";
+      ctx.letterSpacing = "1px";
+      ctx.fillText("SHARED BANGERS", 40, y + 24);
+      y += 40;
+
+      sharedTracks.forEach((t) => {
+        ctx.font = "600 16px sans-serif";
+        ctx.fillStyle = "#ffffff";
+        ctx.letterSpacing = "0px";
+        let nameText = t.name;
+        const maxNameW = W - 80;
+        while (ctx.measureText(nameText).width > maxNameW && nameText.length > 1) {
+          nameText = nameText.slice(0, -1);
         }
-      }
+        if (nameText !== t.name) nameText += "…";
+        ctx.fillText(nameText, 40, y + 20);
 
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.download = file.name;
-      link.href = url;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    }, "image/png");
+        ctx.font = "13px sans-serif";
+        ctx.fillStyle = "#666666";
+        ctx.fillText(t.contributors.join(" & "), 40, y + 38);
+
+        y += sharedRowH;
+      });
+      y += 20;
+    }
+
+    ctx.fillStyle = "#1DB954";
+    ctx.font = "bold 13px sans-serif";
+    ctx.letterSpacing = "1px";
+    ctx.fillText("AWARDS", 40, y + 24);
+    y += 40;
+
+    if (tasteCard.mostObscure) {
+      ctx.font = "13px sans-serif";
+      ctx.fillStyle = "#666666";
+      ctx.letterSpacing = "0px";
+      ctx.fillText("MOST OBSCURE TASTE", 40, y + 16);
+      ctx.font = "700 24px sans-serif";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(
+        `${tasteCard.mostObscure.playerName} — ${Math.round(tasteCard.mostObscure.rate * 100)}% guessed`,
+        40,
+        y + 46
+      );
+      y += 70;
+    }
+
+    if (tasteCard.mostMainstream) {
+      ctx.font = "13px sans-serif";
+      ctx.fillStyle = "#666666";
+      ctx.fillText("MOST MAINSTREAM", 40, y + 16);
+      ctx.font = "700 24px sans-serif";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(
+        `${tasteCard.mostMainstream.playerName} — ${Math.round(tasteCard.mostMainstream.averagePopularity)} popularity`,
+        40,
+        y + 46
+      );
+      y += 70;
+    }
+
+    drawCardFooter(ctx, W, y + 20);
+    shareOrDownloadCanvas(canvas, `guesssong-taste-card-${Date.now()}.png`, "GuessSong taste card");
   }
 
   const currentTrack = tracks[currentIndex];
@@ -1193,6 +1250,13 @@ export default function GamePage() {
                       {currentTrack.albumName}
                     </p>
                   )}
+                  {currentTrack?.contributors && currentTrack.contributors.length > 0 && (
+                    <p style={{ fontSize: "13px", color: "#1DB954", marginTop: "8px", fontWeight: 500 }}>
+                      {currentTrack.contributors.length > 1
+                        ? `From ${currentTrack.contributors.join(" & ")}'s playlists!`
+                        : `From ${currentTrack.contributors[0]}'s playlist`}
+                    </p>
+                  )}
                 </div>
 
                 {isTrial ? (
@@ -1256,6 +1320,36 @@ export default function GamePage() {
                     ) : (
                       <p style={{ textAlign: "center", color: "#1DB954", fontSize: "13px", marginBottom: "14px" }}>
                         {albumWinner ? `+1 pt → ${albumWinner}` : "No one scored"}
+                      </p>
+                    )}
+                  </>
+                )}
+
+                {/* Source scoring — 2 pts, Mixed Playlist Mode only. Every player is */}
+                {/* eligible, including this track's contributor(s) — sampling means a */}
+                {/* contributor doesn't know which of their tracks made the pool, so they */}
+                {/* may not recognize their own track any faster than anyone else. */}
+                {currentTrack?.contributors && currentTrack.contributors.length > 0 && (
+                  <>
+                    <p className="who-scored">Who guessed whose playlist this is? (+2 pts)</p>
+                    {!sourcePointsAwarded ? (
+                      <div className="player-picker" style={{ marginBottom: "14px" }}>
+                        {players.map((p) => (
+                          <button
+                            key={p.name}
+                            className="player-pick-btn"
+                            onClick={() => awardSourcePoint(p.name)}
+                          >
+                            {p.name}
+                          </button>
+                        ))}
+                        <button className="btn-ghost" onClick={() => setSourcePointsAwarded(true)}>
+                          No one
+                        </button>
+                      </div>
+                    ) : (
+                      <p style={{ textAlign: "center", color: "#1DB954", fontSize: "13px", marginBottom: "14px" }}>
+                        {sourceWinner ? `+2 pts → ${sourceWinner}` : "No one scored"}
                       </p>
                     )}
                   </>
@@ -1354,6 +1448,11 @@ export default function GamePage() {
                 <button className="btn-lg outline" onClick={downloadResultImage}>
                   Save Results
                 </button>
+                {playlistSource === "mixed" && (
+                  <button className="btn-lg outline" onClick={downloadTasteCard}>
+                    Save Taste Card
+                  </button>
+                )}
               </div>
             </div>
           )}

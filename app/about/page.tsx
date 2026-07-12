@@ -4,12 +4,12 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "How to Play",
   description:
-    "Learn how GuessSong works: paste any public Spotify playlist, add players, play short clips, and guess the song. Free, open source, no login required.",
+    "Learn how GuessSong works: paste any public Spotify playlist, add players, play short clips, and guess the song — or merge everyone's playlists together with Mixed Playlist Mode. Free, open source, no login required.",
   alternates: { canonical: "/about" },
   openGraph: {
     title: "How to Play | GuessSong",
     description:
-      "Paste a Spotify playlist, play short clips, guess the song. Free, open source, no login required.",
+      "Paste a Spotify playlist, play short clips, guess the song. Now with Mixed Playlist Mode. Free, open source, no login required.",
   },
 };
 
@@ -94,6 +94,11 @@ const FEATURES = [
     desc: "Your road-trip mix, K-pop hits, 80s classics — if it's a public Spotify playlist, it works.",
   },
   {
+    emoji: "🔀",
+    title: "Mixed Playlist Mode",
+    desc: "Merge everyone's playlists into one pool and see who can guess whose taste is playing.",
+  },
+  {
     emoji: "⚡",
     title: "Zero setup",
     desc: "Nothing to install, nothing stored on a server. All game state lives in your browser.",
@@ -104,6 +109,11 @@ const FEATURES = [
     desc: "5-second clips for the pros, 30 seconds for a chill night. Pick how many songs each round runs.",
   },
   {
+    emoji: "📷",
+    title: "QR code rooms",
+    desc: "No app to install — players scan a code and submit their own playlist from their own phone.",
+  },
+  {
     emoji: "🔎",
     title: "Smart audio fallback",
     desc: "When Spotify has no preview for a track, GuessSong automatically finds one on iTunes or Deezer.",
@@ -112,6 +122,19 @@ const FEATURES = [
     emoji: "🆓",
     title: "Free & open source",
     desc: "The whole thing is open code on GitHub. Fork it, remix it, host your own.",
+  },
+];
+
+const MIXED_COLLECT = [
+  {
+    emoji: "📱",
+    title: "Pass This Phone",
+    desc: 'No backend, no waiting. Each player takes the host\'s device, types their name and their Spotify playlist link, then passes it on — a masked "✓ added" confirms it without revealing their tracks to the room.',
+  },
+  {
+    emoji: "📷",
+    title: "QR Code Room",
+    desc: "The host taps Create Room and gets a 4-character code plus a QR code. Players scan it (or open the shared link) on their own phone, submit their playlist, and watch it appear on the host's screen live.",
   },
 ];
 
@@ -333,6 +356,15 @@ export default function AboutPage() {
         .fade-in-3 { animation-delay: 0.25s; }
         .fade-in-4 { animation-delay: 0.35s; }
         .fade-in-5 { animation-delay: 0.45s; }
+        .fade-in-6 { animation-delay: 0.55s; }
+
+        .taste-card-highlight {
+          display: flex;
+          gap: 16px;
+          align-items: flex-start;
+          padding: 22px 24px;
+        }
+        .taste-card-emoji { font-size: 24px; flex-shrink: 0; }
         @keyframes fadeUp {
           to { opacity: 1; transform: translateY(0); }
         }
@@ -418,8 +450,40 @@ export default function AboutPage() {
             </div>
           </section>
 
-          {/* Scoring */}
+          {/* Mixed Playlist Mode */}
           <section className="fade-in fade-in-3">
+            <p className="eyebrow" style={{ marginBottom: "8px" }}>New · Multiplayer</p>
+            <h2 className="section-title" style={{ marginBottom: "12px" }}>Mixed Playlist Mode 🔀</h2>
+            <p style={{ color: "#999", fontSize: "14px", fontWeight: 300, lineHeight: 1.6, marginBottom: "24px", maxWidth: "560px" }}>
+              Don&apos;t stop at one playlist — everyone brings their own. GuessSong merges
+              everyone&apos;s tracks into a single mixed pool, dedupes the overlaps, and turns
+              the round into a battle of taste: can you tell whose playlist a song came from?
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px", marginBottom: "12px" }}>
+              {MIXED_COLLECT.map((m) => (
+                <div key={m.title} className="card feature-card">
+                  <div className="feature-emoji" aria-hidden>{m.emoji}</div>
+                  <p className="feature-title">{m.title}</p>
+                  <p className="feature-desc">{m.desc}</p>
+                </div>
+              ))}
+            </div>
+            <div className="card taste-card-highlight">
+              <div className="taste-card-emoji" aria-hidden>🎴</div>
+              <div>
+                <p className="step-title" style={{ marginBottom: "4px" }}>Save a Taste Card</p>
+                <p className="step-desc">
+                  When the game ends, download a shareable Taste Card: the &ldquo;Shared Bangers&rdquo;
+                  every playlist had in common, plus two awards — Most Obscure Taste (whose
+                  picks were hardest for the room to guess) and Most Mainstream (highest average
+                  Spotify popularity).
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* Scoring */}
+          <section className="fade-in fade-in-4">
             <p className="eyebrow" style={{ marginBottom: "8px" }}>Scoring</p>
             <h2 className="section-title" style={{ marginBottom: "12px" }}>The host is the judge</h2>
             <p style={{ color: "#999", fontSize: "14px", fontWeight: 300, lineHeight: 1.6, marginBottom: "20px", maxWidth: "560px" }}>
@@ -439,11 +503,18 @@ export default function AboutPage() {
                   <strong>Album name.</strong> A bonus for the true fans who know where the track lives.
                 </span>
               </div>
+              <div className="card score-row">
+                <span className="score-pts">+2</span>
+                <span className="score-label">
+                  <strong>Whose playlist?</strong> Mixed Playlist mode only — guess which player
+                  contributed the track for a bonus.
+                </span>
+              </div>
             </div>
           </section>
 
           {/* Features */}
-          <section className="fade-in fade-in-4">
+          <section className="fade-in fade-in-5">
             <p className="eyebrow" style={{ marginBottom: "8px" }}>Why GuessSong</p>
             <h2 className="section-title" style={{ marginBottom: "24px" }}>Built for game night, not for sign-ups</h2>
             <div className="feature-grid">
@@ -458,7 +529,7 @@ export default function AboutPage() {
           </section>
 
           {/* Star CTA */}
-          <section className="fade-in fade-in-5">
+          <section className="fade-in fade-in-6">
             <div className="star-banner">
               <div style={{ display: "inline-flex", color: "#ffd75e", marginBottom: "14px" }}>
                 <svg viewBox="0 0 24 24" fill="currentColor" width="32" height="32" aria-hidden>

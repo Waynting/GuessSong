@@ -7,7 +7,7 @@
  * window.gtag is unavailable (GA not configured, ad blocker, etc.).
  */
 
-export type PlaylistSource = "own" | "builtin";
+export type PlaylistSource = "own" | "builtin" | "mixed";
 export type ShareType = "track" | "album" | "artist" | "unknown";
 
 declare global {
@@ -56,6 +56,27 @@ export type AnalyticsEvent =
         track_name?: string;
         artist?: string;
       };
+    }
+  | {
+      name: "mixed_pool_built";
+      params: {
+        contributor_count: number;
+        unique_tracks: number;
+        total_raw_tracks: number;
+        overlap_count: number;
+      };
+    }
+  | {
+      name: "room_created";
+      params: Record<string, never>;
+    }
+  | {
+      name: "room_submission_received";
+      params: { total: number };
+    }
+  | {
+      name: "room_started";
+      params: { contributor_count: number; unique_tracks: number };
     }
   | {
       name: "pwa_install_prompt";
