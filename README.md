@@ -46,9 +46,15 @@ Create a `.env.local` file:
 ```env
 SPOTIFY_CLIENT_ID=your_spotify_client_id
 SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
+
+# Optional — only needed for production deploys, see note below
+UPSTASH_REDIS_REST_URL=your_upstash_redis_rest_url
+UPSTASH_REDIS_REST_TOKEN=your_upstash_redis_rest_token
 ```
 
-Get credentials at [developer.spotify.com](https://developer.spotify.com/dashboard) — create an app and copy the Client ID and Secret. No redirect URI needed (Client Credentials flow only).
+Get Spotify credentials at [developer.spotify.com](https://developer.spotify.com/dashboard) — create an app and copy the Client ID and Secret. No redirect URI needed (Client Credentials flow only).
+
+`UPSTASH_REDIS_REST_URL`/`TOKEN` back the QR-code room store used by Mixed Playlist Mode (`lib/kv.ts`). Leave them unset for local dev — the app falls back to an in-memory store that works fine on a single `next dev` process. **On a serverless/multi-instance deploy (e.g. Vercel) you must set these**, otherwise a room created on one instance can be invisible to a request that lands on another. Get a free database at [upstash.com](https://upstash.com).
 
 ### 3. Run the dev server
 
