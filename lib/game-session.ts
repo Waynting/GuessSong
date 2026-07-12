@@ -6,6 +6,7 @@
 
 import type { Track } from "@/types";
 import type { PlaylistSource } from "@/lib/analytics";
+import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
 
 export const GAME_STORAGE_KEY = "guesssong_game";
 
@@ -16,6 +17,12 @@ export interface GamePlayer {
   score: number;
 }
 
+/** Mixed Playlist Mode metadata — how the pool was assembled. */
+export interface MixedPlaylistMeta {
+  contributorNames: string[];
+  sampledPerPlayer: number;
+}
+
 export interface GamePayload {
   tracks: Track[];
   players: GamePlayer[];
@@ -24,6 +31,13 @@ export interface GamePayload {
   totalTracks: number;
   playlistSource: PlaylistSource;
   mode: GameMode;
+  mixedPlaylistMeta?: MixedPlaylistMeta;
+}
+
+const PLAYLIST_SOURCES: PlaylistSource[] = ["own", "builtin", "mixed"];
+
+function isPlaylistSource(value: unknown): value is PlaylistSource {
+  return typeof value === "string" && (PLAYLIST_SOURCES as string[]).includes(value);
 }
 
 /**
@@ -44,6 +58,7 @@ export interface BuildGamePayloadInput {
   totalTracks?: number;
   playlistSource: PlaylistSource;
   mode: GameMode;
+  mixedPlaylistMeta?: MixedPlaylistMeta;
 }
 
 export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
@@ -55,6 +70,7 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
     totalTracks: input.totalTracks ?? input.tracks.length,
     playlistSource: input.playlistSource,
     mode: input.mode,
+    ...(input.mixedPlaylistMeta ? { mixedPlaylistMeta: input.mixedPlaylistMeta } : {}),
   };
 }
 
@@ -87,13 +103,26 @@ export function parseGamePayload(raw: string): GamePayload | null {
   const tracks = Array.isArray(d.tracks) ? (d.tracks as Track[]) : [];
   const players = Array.isArray(d.players) ? (d.players as GamePlayer[]) : [];
 
+  const rawMeta = d.mixedPlaylistMeta as Record<string, unknown> | undefined;
+  const mixedPlaylistMeta: MixedPlaylistMeta | undefined =
+    rawMeta && typeof rawMeta === "object" && Array.isArray(rawMeta.contributorNames)
+      ? {
+          contributorNames: rawMeta.contributorNames as string[],
+          sampledPerPlayer:
+            typeof rawMeta.sampledPerPlayer === "number"
+              ? rawMeta.sampledPerPlayer
+              : DEFAULT_SAMPLED_PER_PLAYER,
+        }
+      : undefined;
+
   return {
     tracks,
     players,
     playlistName: typeof d.playlistName === "string" ? d.playlistName : "",
     clipDuration: typeof d.clipDuration === "number" ? d.clipDuration : 15,
     totalTracks: typeof d.totalTracks === "number" ? d.totalTracks : tracks.length,
-    playlistSource: d.playlistSource === "builtin" ? "builtin" : "own",
+    playlistSource: isPlaylistSource(d.playlistSource) ? d.playlistSource : "own",
     mode: d.mode === "trial" ? "trial" : "party",
+    ...(mixedPlaylistMeta ? { mixedPlaylistMeta } : {}),
   };
 }

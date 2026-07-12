@@ -97,6 +97,42 @@ describe("buildGamePayload", () => {
     const parsed = parseGamePayload(JSON.stringify(payload));
     expect(parsed).toEqual(payload);
   });
+
+  it("builds a mixed/party payload carrying mixedPlaylistMeta", () => {
+    const payload = buildGamePayload({
+      tracks: [makeTrack({ id: "a", contributors: ["Alice", "Bob"] })],
+      players: [
+        { name: "Alice", score: 0 },
+        { name: "Bob", score: 0 },
+      ],
+      playlistName: "2-Player Mix",
+      clipDuration: 10,
+      playlistSource: "mixed",
+      mode: "party",
+      mixedPlaylistMeta: { contributorNames: ["Alice", "Bob"], sampledPerPlayer: 8 },
+    });
+
+    expect(payload.playlistSource).toBe("mixed");
+    expect(payload.mixedPlaylistMeta).toEqual({
+      contributorNames: ["Alice", "Bob"],
+      sampledPerPlayer: 8,
+    });
+    expect(payload.tracks[0].contributors).toEqual(["Alice", "Bob"]);
+  });
+
+  it("round-trips mixedPlaylistMeta through JSON + parseGamePayload", () => {
+    const payload = buildGamePayload({
+      tracks: [makeTrack({ contributors: ["Alice"] })],
+      players: [{ name: "Alice", score: 0 }],
+      playlistName: "1-Player Mix",
+      clipDuration: 10,
+      playlistSource: "mixed",
+      mode: "party",
+      mixedPlaylistMeta: { contributorNames: ["Alice"], sampledPerPlayer: 8 },
+    });
+    const parsed = parseGamePayload(JSON.stringify(payload));
+    expect(parsed).toEqual(payload);
+  });
 });
 
 describe("parseGamePayload", () => {
@@ -136,6 +172,11 @@ describe("parseGamePayload", () => {
     );
     expect(parsed!.playlistSource).toBe("builtin");
     expect(parsed!.mode).toBe("trial");
+  });
+
+  it("parses explicit mixed playlistSource", () => {
+    const parsed = parseGamePayload(JSON.stringify({ tracks: [], playlistSource: "mixed" }));
+    expect(parsed!.playlistSource).toBe("mixed");
   });
 
   it("falls back to defaults for unknown enum values", () => {
