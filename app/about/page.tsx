@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
 
 export const metadata: Metadata = {
   title: "How to Play",
@@ -312,12 +313,26 @@ export default function AboutPage() {
             var(--surface);
         }
 
-        .footer-link {
-          color: var(--muted);
+        .link-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 16px;
+          border-radius: 999px;
+          border: 1.5px solid rgba(29,185,84,0.35);
+          background: rgba(29,185,84,0.06);
+          color: var(--green);
+          font-family: 'Outfit', sans-serif;
+          font-size: 13px;
+          font-weight: 600;
           text-decoration: none;
-          transition: color 0.15s;
+          transition: border-color 0.15s, background 0.15s, transform 0.1s;
         }
-        .footer-link:hover { color: var(--text); }
+        .link-btn:hover {
+          border-color: var(--green);
+          background: rgba(29,185,84,0.12);
+          transform: translateY(-1px);
+        }
 
         .waveform-wrap {
           position: fixed;
@@ -556,16 +571,9 @@ export default function AboutPage() {
 
           {/* Footer */}
           <footer style={{ textAlign: "center", paddingTop: "8px", borderTop: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", gap: "20px", justifyContent: "center", padding: "20px 0 4px", fontSize: "13px" }}>
-              <Link href="/" className="footer-link">Play</Link>
-              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="footer-link" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                <GitHubIcon size={14} />
-                GitHub
-              </a>
+            <div style={{ padding: "20px 0 4px" }}>
+              <a href={REPORT_PROBLEM_MAILTO} className="link-btn">Report a problem</a>
             </div>
-            <p style={{ color: "#555", fontSize: "12px", fontWeight: 300 }}>
-              Not affiliated with Spotify. Audio previews courtesy of iTunes & Deezer.
-            </p>
           </footer>
         </div>
       </main>

@@ -6,6 +6,7 @@ import QRCode from "qrcode";
 import type { Track } from "@/types";
 import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolResponse } from "@/types/room";
 import { trackEvent } from "@/lib/analytics";
+import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
 import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
 import { BUILTIN_PLAYLISTS, type BuiltinPlaylist } from "@/lib/builtin-playlists";
 import { InstallBanner } from "@/components/install-banner";
@@ -465,6 +466,27 @@ export default function SetupPage() {
           box-shadow: 0 0 16px rgba(29,185,84,0.4);
         }
 
+        .link-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 16px;
+          border-radius: 999px;
+          border: 1.5px solid rgba(29,185,84,0.35);
+          background: rgba(29,185,84,0.06);
+          color: var(--green);
+          font-family: 'Outfit', sans-serif;
+          font-size: 13px;
+          font-weight: 600;
+          text-decoration: none;
+          transition: border-color 0.15s, background 0.15s, transform 0.1s;
+        }
+        .link-btn:hover {
+          border-color: var(--green);
+          background: rgba(29,185,84,0.12);
+          transform: translateY(-1px);
+        }
+
         .start-btn {
           width: 100%;
           padding: 16px;
@@ -718,15 +740,8 @@ export default function SetupPage() {
             <p style={{ color: "#555", fontSize: "12px", marginTop: "4px" }}>
               猜歌遊戲・派對音樂猜謎，適合朋友聚會
             </p>
-            <p style={{ fontSize: "13px", marginTop: "6px" }}>
-              <a
-                href="/about"
-                style={{ color: "#1DB954", textDecoration: "none" }}
-                onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
-                onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
-              >
-                How to play →
-              </a>
+            <p style={{ marginTop: "10px" }}>
+              <a href="/about" className="link-btn">How to play →</a>
             </p>
             <p style={{ color: "#555", fontSize: "13px", marginTop: "8px", fontWeight: 300, display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
               If you like, give me a star
@@ -1126,6 +1141,11 @@ export default function SetupPage() {
               ))}
             </div>
           </div>
+
+          {/* Footer */}
+          <footer style={{ textAlign: "center", marginTop: "32px", paddingTop: "20px", borderTop: "1px solid var(--border)" }}>
+            <a href={REPORT_PROBLEM_MAILTO} className="link-btn">Report a problem</a>
+          </footer>
 
         </div>
       </main>
