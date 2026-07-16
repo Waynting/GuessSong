@@ -313,13 +313,6 @@ export default function AboutPage() {
             var(--surface);
         }
 
-        .footer-link {
-          color: var(--muted);
-          text-decoration: none;
-          transition: color 0.15s;
-        }
-        .footer-link:hover { color: var(--text); }
-
         .link-btn {
           display: inline-flex;
           align-items: center;
@@ -578,17 +571,9 @@ export default function AboutPage() {
 
           {/* Footer */}
           <footer style={{ textAlign: "center", paddingTop: "8px", borderTop: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", gap: "20px", justifyContent: "center", padding: "20px 0 4px", fontSize: "13px" }}>
-              <Link href="/" className="footer-link">Play</Link>
-              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="footer-link" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                <GitHubIcon size={14} />
-                GitHub
-              </a>
+            <div style={{ padding: "20px 0 4px" }}>
               <a href={REPORT_PROBLEM_MAILTO} className="link-btn">Report a problem</a>
             </div>
-            <p style={{ color: "#555", fontSize: "12px", fontWeight: 300 }}>
-              Not affiliated with Spotify. Audio previews courtesy of iTunes & Deezer.
-            </p>
           </footer>
         </div>
       </main>
