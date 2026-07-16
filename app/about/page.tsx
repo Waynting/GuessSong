@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
 
 export const metadata: Metadata = {
   title: "How to Play",
@@ -319,6 +320,27 @@ export default function AboutPage() {
         }
         .footer-link:hover { color: var(--text); }
 
+        .link-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 16px;
+          border-radius: 999px;
+          border: 1.5px solid rgba(29,185,84,0.35);
+          background: rgba(29,185,84,0.06);
+          color: var(--green);
+          font-family: 'Outfit', sans-serif;
+          font-size: 13px;
+          font-weight: 600;
+          text-decoration: none;
+          transition: border-color 0.15s, background 0.15s, transform 0.1s;
+        }
+        .link-btn:hover {
+          border-color: var(--green);
+          background: rgba(29,185,84,0.12);
+          transform: translateY(-1px);
+        }
+
         .waveform-wrap {
           position: fixed;
           inset: 0;
@@ -562,6 +584,7 @@ export default function AboutPage() {
                 <GitHubIcon size={14} />
                 GitHub
               </a>
+              <a href={REPORT_PROBLEM_MAILTO} className="link-btn">Report a problem</a>
             </div>
             <p style={{ color: "#555", fontSize: "12px", fontWeight: 300 }}>
               Not affiliated with Spotify. Audio previews courtesy of iTunes & Deezer.
