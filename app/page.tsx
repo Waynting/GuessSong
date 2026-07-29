@@ -1083,12 +1083,16 @@ export default function SetupPage() {
             {isBuzzerConfigured() && (
               <div>
                 <p className="section-label">Buzzer Mode</p>
+                {/* Label says what the tap does, colour says what the state is.
+                    A grey button reading "Off" was reporting status where a
+                    control belongs — you couldn't tell whether it meant "it is
+                    off" or "tap to turn it off". */}
                 <button
                   className={`pill${buzzerEnabled ? " active" : ""}`}
                   onClick={() => setBuzzerEnabled((v) => !v)}
                   aria-pressed={buzzerEnabled}
                 >
-                  {buzzerEnabled ? "✓ Phones buzz in" : "Off"}
+                  {buzzerEnabled ? "✓ On" : "Turn on"}
                 </button>
                 <p style={{ marginTop: "8px", marginBottom: "12px", fontSize: "12px", color: "#666" }}>
                   {buzzerEnabled
