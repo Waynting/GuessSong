@@ -20,10 +20,22 @@ afterEach(() => {
   }
 });
 
-async function createRoom(): Promise<{ code: string; hostToken: string }> {
+/**
+ * A fresh client IP per call, because the Worker's rate limiter buckets by
+ * CF-Connecting-IP and a real run of this file opens far more rooms than one
+ * host ever would. Sharing an IP across the suite means test #6 fails on the
+ * create budget rather than on anything it was written to check.
+ */
+let nextIp = 0;
+function clientIp(): string {
+  nextIp += 1;
+  return `203.0.113.${nextIp % 256}`;
+}
+
+async function createRoom(ip = clientIp()): Promise<{ code: string; hostToken: string }> {
   const res = await SELF.fetch("https://buzzer.test/rooms", {
     method: "POST",
-    headers: { Origin: ORIGIN },
+    headers: { Origin: ORIGIN, "CF-Connecting-IP": ip },
   });
   expect(res.status).toBe(200);
   return res.json();
@@ -32,7 +44,7 @@ async function createRoom(): Promise<{ code: string; hostToken: string }> {
 /** Opens a real WebSocket to the room and buffers every server frame. */
 async function connect(code: string) {
   const res = await SELF.fetch(`https://buzzer.test/rooms/${code}/ws`, {
-    headers: { Upgrade: "websocket", Origin: ORIGIN },
+    headers: { Upgrade: "websocket", Origin: ORIGIN, "CF-Connecting-IP": clientIp() },
   });
   expect(res.status).toBe(101);
   const ws = res.webSocket;
@@ -312,5 +324,70 @@ describe("reconnect", () => {
 
     back.send({ type: "host:open", hostToken });
     await back.waitFor((m) => m.type === "round:open");
+  });
+});
+
+/**
+ * The Origin check is trivially satisfied by a script running on a page this
+ * Worker already allows, so before these limits the WebSocket upgrade was an
+ * unmetered oracle for "does this room code exist" — and a 4-character code
+ * from a 31-character alphabet is only ~923k combinations.
+ */
+describe("per-IP rate limits", () => {
+  const FLOODER = "198.51.100.7";
+
+  it("cuts off a room-creation flood from one IP", async () => {
+    const statuses: number[] = [];
+    // The configured budget is 15/min. Thirty attempts from one IP must not all
+    // land, or nothing is limiting anything.
+    for (let i = 0; i < 30; i++) {
+      const res = await SELF.fetch("https://buzzer.test/rooms", {
+        method: "POST",
+        headers: { Origin: ORIGIN, "CF-Connecting-IP": FLOODER },
+      });
+      statuses.push(res.status);
+    }
+    expect(statuses).toContain(429);
+    // Still lets a real host through before it bites.
+    expect(statuses[0]).toBe(200);
+  });
+
+  it("buckets by IP, so one flooder can't lock everyone else out", async () => {
+    for (let i = 0; i < 30; i++) {
+      await SELF.fetch("https://buzzer.test/rooms", {
+        method: "POST",
+        headers: { Origin: ORIGIN, "CF-Connecting-IP": "198.51.100.8" },
+      });
+    }
+    const res = await SELF.fetch("https://buzzer.test/rooms", {
+      method: "POST",
+      headers: { Origin: ORIGIN, "CF-Connecting-IP": "198.51.100.9" },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses a code-guessing sweep on the upgrade before it reaches a room", async () => {
+    const sweeper = "198.51.100.10";
+    const statuses: number[] = [];
+    // Well past the 60/min join budget. Codes are deliberately bogus: the point
+    // is that guessing gets throttled, not that any of them exist.
+    for (let i = 0; i < 70; i++) {
+      const res = await SELF.fetch(`https://buzzer.test/rooms/Z${i % 10}Q${i % 7}/ws`, {
+        headers: { Upgrade: "websocket", Origin: ORIGIN, "CF-Connecting-IP": sweeper },
+      });
+      statuses.push(res.status);
+    }
+    expect(statuses).toContain(429);
+    // A 429 must arrive *instead of* the 404 that would confirm the code is
+    // free — that distinction is the whole oracle.
+    expect(statuses.lastIndexOf(429)).toBeGreaterThan(statuses.indexOf(404));
+  });
+
+  it("still refuses a disallowed origin before spending any rate-limit budget", async () => {
+    const res = await SELF.fetch("https://buzzer.test/rooms", {
+      method: "POST",
+      headers: { Origin: "https://evil.example", "CF-Connecting-IP": "198.51.100.11" },
+    });
+    expect(res.status).toBe(403);
   });
 });

@@ -47,13 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Replay` didn't clear the running timers before restarting, so a replayed clip could be cut short by the deadline from the run before it.
 - The clip transport lost buttons as the phase flipped: `Replay` existed only in `guessing`, so resuming took it away, and the clip running out took `Resume`/`Stop` away. Both phases now render one identical row.
 - The Worker refused Vercel preview origins. `ALLOWED_ORIGINS` supports `*` globs, anchored at both ends, where `*` cannot span a `/` — so `https://guesssong-*.vercel.app` can't be widened into `https://guesssong-x.vercel.app.evil.com` by a crafted `Origin` header.
+- Neither Worker endpoint was rate limited; the `Origin` check was the only thing in front of them, and that is trivially satisfied by a script running on a page the Worker already allows. The WebSocket upgrade was therefore an unmetered oracle for "does this room code exist", and a 4-character code from a 31-character alphabet is only ~923k combinations. Both endpoints now throttle per `CF-Connecting-IP` (Cloudflare's own header, which a client can't forge, unlike `X-Forwarded-For`) via Workers' `ratelimits` bindings: 60 joins/min, enough for a whole party arriving at once behind one Wi-Fi NAT plus reconnect backoff, and 15 room creations/min. The upgrade is checked *before* `getByName()`, so a code-guessing sweep can't instantiate a Durable Object per guess on its way to being refused.
 
 ### Known gaps
 
 - **Buzzer Mode has never been tested on a real phone.** The entire value is on phones; `onPointerDown` timing, `navigator.vibrate`, and iOS long-press suppression have only ever been exercised with synthetic pointer events. No game has been played through to the finish screen with buzzers either.
 - Host and player on the *same device* share one `playerId` and collide. Harmless in the real setup (host on a laptop, players on their own phones), but a host who opens the player page to test will break their own session.
 - The host's space-bar buzzer is ignored while a button has focus, because space is that button's own activation. A host who clicks `Resume` with the mouse and then reaches for space will press `Stop` instead of buzzing.
-- Room codes are 4 characters from a 31-character alphabet (~923k combinations). Collisions are detected and retried on both backends, but the Worker's WebSocket upgrade has no rate limit of its own, so enumeration is bounded only by the Origin check.
+- Room codes stay 4 characters from a 31-character alphabet (~923k combinations), chosen so a code is still shoutable across a room. Collisions are detected and retried on both backends, and enumeration is now metered per IP rather than lengthened — but a determined attacker with many IPs still has a smaller space to walk here than a 6-character code would give.
 - The host's room state still lives only in React state — a page reload before starting the game orphans the room, now including the buzzer half.
 
 ## [0.2.0] - 2026-07-12

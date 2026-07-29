@@ -40,11 +40,20 @@ export async function createBuzzerRoom(): Promise<Omit<BuzzerRoomHandle, "hostNa
 
   const res = await fetch(`${origin}/rooms`, { method: "POST" });
   if (!res.ok) {
-    throw new BuzzerUnavailableError(
-      res.status === 403
-        ? "This origin is not allowed by the buzzer Worker — check ALLOWED_ORIGINS in worker/wrangler.jsonc"
-        : "Couldn't open a buzzer room, please try again"
-    );
+    if (res.status === 403) {
+      throw new BuzzerUnavailableError(
+        "This origin is not allowed by the buzzer Worker — check ALLOWED_ORIGINS in worker/wrangler.jsonc"
+      );
+    }
+    if (res.status === 429) {
+      // Reachable by an ordinary host: changing Game Mode discards the open
+      // room, so a few rounds of indecision burn through the per-IP budget.
+      // Say what to do about it rather than "please try again".
+      throw new BuzzerUnavailableError(
+        "Too many rooms opened from this network — wait a minute and try again"
+      );
+    }
+    throw new BuzzerUnavailableError("Couldn't open a buzzer room, please try again");
   }
 
   const data = (await res.json()) as { code?: unknown; hostToken?: unknown };

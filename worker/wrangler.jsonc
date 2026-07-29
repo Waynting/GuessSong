@@ -15,6 +15,25 @@
     "bindings": [{ "name": "BUZZER_ROOM", "class_name": "BuzzerRoom" }]
   },
 
+  // Per-IP throttle on the two public entry points (see rateLimited() in
+  // src/index.ts). Without it the WebSocket upgrade is an unmetered oracle for
+  // "does this room code exist", and the 4-character code space is small enough
+  // to walk. Namespace ids are local to this Worker and only have to be
+  // distinct; they are not account-wide resources to provision.
+  //
+  // Two limiters because the two endpoints deserve very different budgets.
+  // Joining: 60/min, enough for a whole party arriving at once on one shared
+  // Wi-Fi NAT, plus the client's reconnect backoff on a bad network.
+  // Creating: 15/min. Each create claims a Durable Object, so it wants to be
+  // the tighter of the two — but not as tight as "one room per party" suggests,
+  // because changing Game Mode on the setup page discards the open room and the
+  // next "Open Room" claims a fresh one. A host who changes their mind five
+  // times while setting up is not a flood.
+  "ratelimits": [
+    { "name": "BUZZER_JOIN_LIMIT", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } },
+    { "name": "BUZZER_CREATE_LIMIT", "namespace_id": "1002", "simple": { "limit": 15, "period": 60 } }
+  ],
+
   // SQLite-backed classes are the only kind available on the Workers Free plan,
   // and they're what the KV-style `ctx.storage.put/get` API runs on top of here.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BuzzerRoom"] }],

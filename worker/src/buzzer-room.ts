@@ -15,6 +15,13 @@ import {
 export interface Env {
   BUZZER_ROOM: DurableObjectNamespace<BuzzerRoom>;
   ALLOWED_ORIGINS: string;
+  /**
+   * Per-IP throttles on the two public entry points. Optional so a
+   * `wrangler dev` or vitest run without the bindings still works — see
+   * rateLimited() in index.ts for what an absent binding means.
+   */
+  BUZZER_JOIN_LIMIT?: RateLimit;
+  BUZZER_CREATE_LIMIT?: RateLimit;
 }
 
 interface PlayerRecord {
