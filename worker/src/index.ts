@@ -25,20 +25,39 @@ function allowedOrigins(env: Env): string[] {
 }
 
 /**
+ * Exact match, or a `*` glob for deploy targets whose hostname isn't knowable
+ * ahead of time. Vercel mints a fresh preview domain per branch
+ * (`<project>-git-<branch>-<team>.vercel.app`), so pinning exact origins would
+ * mean redeploying this Worker for every branch anyone ever pushes.
+ *
+ * The glob is anchored at both ends and `*` never matches a `/`, so a pattern
+ * like `https://guesssong-*.vercel.app` cannot be widened into
+ * `https://guesssong-x.vercel.app.evil.com` by a crafted Origin header.
+ */
+function originMatches(origin: string, pattern: string): boolean {
+  if (!pattern.includes("*")) return origin === pattern;
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*");
+  return new RegExp(`^${escaped}$`).test(origin);
+}
+
+function isAllowedOrigin(origin: string | null, env: Env): boolean {
+  if (!origin) return false;
+  return allowedOrigins(env).some((p) => originMatches(origin, p));
+}
+
+/**
  * Browsers attach Origin to both `fetch` and the WebSocket upgrade, so this one
  * check keeps other sites off the room API. It is not a defence against a
  * non-browser client — nothing here is secret enough to need one — it just stops
  * a random page from opening rooms on a visitor's behalf.
  */
 function originAllowed(request: Request, env: Env): boolean {
-  const origin = request.headers.get("Origin");
-  if (!origin) return false;
-  return allowedOrigins(env).includes(origin);
+  return isAllowedOrigin(request.headers.get("Origin"), env);
 }
 
 function corsHeaders(request: Request, env: Env): Record<string, string> {
   const origin = request.headers.get("Origin") ?? "";
-  if (!allowedOrigins(env).includes(origin)) return {};
+  if (!isAllowedOrigin(origin, env)) return {};
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",

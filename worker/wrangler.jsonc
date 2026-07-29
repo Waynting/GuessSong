@@ -22,7 +22,16 @@
   "vars": {
     // Browsers send Origin on the WebSocket upgrade; anything not on this list
     // is refused at the Worker before it can reach (and therefore instantiate)
-    // a Durable Object. Override per-environment with `wrangler deploy --var`.
-    "ALLOWED_ORIGINS": "https://www.guessong.app,https://guessong.app,http://127.0.0.1:8000"
+    // a Durable Object.
+    //
+    // Entries may contain `*`, which matches any run of non-`/` characters.
+    // The Vercel entries are globs because preview deployments get a fresh
+    // hostname per branch — pinning them exactly would mean redeploying this
+    // Worker for every branch anyone pushes. Both are anchored to this
+    // project's name, so they don't open the door to vercel.app at large.
+    //
+    // For LAN testing on real phones, put your machine's IP in worker/.dev.vars
+    // instead of here — see .dev.vars.example.
+    "ALLOWED_ORIGINS": "https://www.guessong.app,https://guessong.app,http://127.0.0.1:8000,http://localhost:8000,https://spotify-song-guess-web-*.vercel.app,https://guesssong-*.vercel.app"
   }
 }

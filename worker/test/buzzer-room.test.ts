@@ -112,6 +112,22 @@ describe("room lifecycle", () => {
     expect(res.status).toBe(403);
   });
 
+  it("accepts a glob-matched preview origin but not a lookalike", async () => {
+    const preview = await SELF.fetch("https://buzzer.test/rooms", {
+      method: "POST",
+      headers: { Origin: "https://spotify-song-guess-web-git-any-branch-x.vercel.app" },
+    });
+    expect(preview.status).toBe(200);
+
+    // The glob is anchored and `*` never spans a `/`, so a crafted Origin can't
+    // extend a legitimate prefix into someone else's domain.
+    const lookalike = await SELF.fetch("https://buzzer.test/rooms", {
+      method: "POST",
+      headers: { Origin: "https://spotify-song-guess-web-x.vercel.app.evil.com" },
+    });
+    expect(lookalike.status).toBe(403);
+  });
+
   it("routes a lowercase code to the same room", async () => {
     const { code, hostToken } = await createRoom();
     await joinedHost(code, hostToken);
