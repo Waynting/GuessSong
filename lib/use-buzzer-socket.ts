@@ -10,7 +10,7 @@
  * 1. **The socket is not the identity.** A phone that locks, drops Wi-Fi, or
  *    backgrounds gets a brand new socket. `playerId` lives in localStorage and
  *    survives all of that, so the room can hand the same player their name,
- *    their place in the queue, and any outstanding penalty when they come back.
+ *    their place in the queue when they come back.
  *
  * 2. **The server's snapshot always wins.** On every open we send `join` and the
  *    room replays full state. We overwrite local state with it rather than
@@ -29,6 +29,13 @@ import type {
 const PLAYER_ID_STORAGE_KEY = "guesssong_player_id";
 const INITIAL_RECONNECT_MS = 1000;
 const MAX_RECONNECT_MS = 30_000;
+/**
+ * Consecutive never-opened attempts before we call the room dead. Three, not
+ * one: a phone waking up on a flaky network legitimately fails the first
+ * attempt or two, and telling that player their room is gone would be worse
+ * than making them wait a few seconds.
+ */
+const MAX_FAILED_OPENS = 3;
 
 /**
  * Stable per-device id. Generated once and reused for every room this browser
@@ -54,8 +61,6 @@ export interface BuzzerSocketState {
   snapshot: RoomSnapshot | null;
   isHost: boolean;
   connected: boolean;
-  /** Epoch ms (server clock) until which this player's button is locked out. */
-  penaltyUntil: number | null;
   error: { code: BuzzerErrorCode; message: string } | null;
 }
 
@@ -87,7 +92,6 @@ export function useBuzzerSocket({
     snapshot: null,
     isHost: false,
     connected: false,
-    penaltyUntil: null,
     error: null,
   });
 
@@ -96,6 +100,16 @@ export function useBuzzerSocket({
   const delayRef = useRef(INITIAL_RECONNECT_MS);
   /** Set on unmount so a close event doesn't schedule a doomed reconnect. */
   const closedRef = useRef(false);
+  /**
+   * Consecutive connection attempts that closed without ever opening.
+   *
+   * A room that doesn't exist is refused at the upgrade with a 404, so the
+   * socket never opens and the server's `room_expired` message can never
+   * arrive — there is no socket to deliver it on. Without this counter a
+   * mistyped code leaves the player staring at "connecting…" forever while
+   * the client retries a room that will never exist.
+   */
+  const failedOpensRef = useRef(0);
 
   const playerId = useMemo(() => getPersistentPlayerId(), []);
 
@@ -134,9 +148,15 @@ export function useBuzzerSocket({
       if (closedRef.current) return;
       const ws = new WebSocket(url);
       socketRef.current = ws;
+      // Per-attempt, not a ref: distinguishes "the room refused us" from "we
+      // were connected and the connection dropped", which need opposite
+      // responses (give up vs keep retrying).
+      let openedThisAttempt = false;
 
       ws.addEventListener("open", () => {
+        openedThisAttempt = true;
         delayRef.current = INITIAL_RECONNECT_MS;
+        failedOpensRef.current = 0;
         setState((s) => ({ ...s, connected: true, error: null }));
         ws.send(
           JSON.stringify({
@@ -162,6 +182,24 @@ export function useBuzzerSocket({
       ws.addEventListener("close", () => {
         setState((s) => ({ ...s, connected: false }));
         if (closedRef.current) return;
+
+        if (ws.readyState === WebSocket.CLOSED && !openedThisAttempt) {
+          failedOpensRef.current += 1;
+          if (failedOpensRef.current >= MAX_FAILED_OPENS) {
+            // Give up and say so. Retrying past this point cannot succeed —
+            // the room was refused at the upgrade, which is what a wrong or
+            // expired code looks like from here.
+            setState((s) => ({
+              ...s,
+              error: {
+                code: "room_expired",
+                message: "找不到這個房間,可能碼輸錯了或房間已經結束",
+              },
+            }));
+            return;
+          }
+        }
+
         // Exponential backoff so a room that is genuinely gone doesn't turn six
         // phones into a reconnect storm against the Worker.
         reconnectRef.current = setTimeout(connect, delayRef.current);
@@ -269,8 +307,6 @@ export function reduce(state: BuzzerSocketState, msg: ServerMessage): BuzzerSock
       return state.snapshot
         ? { ...state, snapshot: { ...state.snapshot, players: msg.players } }
         : state;
-    case "penalty":
-      return { ...state, penaltyUntil: msg.untilMs };
     case "error":
       return { ...state, error: { code: msg.code, message: msg.message } };
     case "pong":
