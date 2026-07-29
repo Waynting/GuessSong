@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-29
+
+### Added
+
+- **Traditional Chinese landing page at `/zh`.** The site only ranked for the brand string "guessong" — a query nobody types unless they already know us. English head terms ("guess the song", "guess song") are a red ocean of Heardle clones, but the Chinese equivalents are not, and the audience is already here: the homepage hero has carried a Chinese line since launch. `/zh` is written natively rather than translated, and its `<h1>` is the keyword itself (`猜歌遊戲`) rather than the brand, because unlike `/` it has no brand identity to protect. Carries its own `HowTo` and `FAQPage` JSON-LD in `zh-TW`, and the homepage's Chinese hero line is now the crawl path into it, so the anchor text is the keyword instead of sitting next to it.
+- **`hreflang` annotations** across `/` and `/zh` (`en`, `zh-TW`, `x-default`), emitted both as `<link rel="alternate">` tags and in `sitemap.xml`. Both URLs carry the full annotation set — a one-sided declaration is a weaker signal than none — and the visible language switcher on `/zh` points at `/` to match what the annotation claims.
+- **`FAQPage` structured data on the homepage** and **`HowTo` on `/about`**, the latter generated from the existing `STEPS` array so the schema cannot drift from what the page actually renders.
+
+### Changed
+
+- **The homepage now has content for a search engine to read.** It was a setup form and roughly 50 words of prose, which left Google nothing to match "guess the song game" against except the brand string. Added a "What is GuessSong?" section and six FAQs — 588 words, all of it useful to a first-time visitor too, not keyword filler. The hero tagline ("Play a clip. Guess the song. Compete.") became an `<h2>` so the phrase people actually search for is a heading; the `<h1>` stays `GuessSong` and the hero is visually unchanged.
+- Titles and descriptions across `/` and `/about` lead with the generic phrase instead of the brand. `/about` is now "How to Play the Guess the Song Game".
+- Trimmed `keywords` from 22 entries to 11. Google has ignored the tag since 2009; the list is kept only because Bing still weighs it slightly, and a focused list is worth more there than a long one.
+- Added an explicit canonical for the homepage. It's a client component and can't export its own metadata, so it lives in the root layout.
+
+### Fixed
+
+- `/buzz` and `/j` are now disallowed in `robots.txt`. They're ephemeral room codes that 404 once the room's TTL expires, so crawling them spent budget on pages guaranteed to rot.
+
+### Known gaps
+
+- The root layout owns `<html lang="en">` and Next.js only lets the root layout render `<html>`, so `/zh` scopes its language with `lang="zh-Hant-TW"` on its `<main>` instead. `hreflang` is what Google keys off, so ranking is unaffected, but a screen reader that only checks the root element will read the page with an English voice. Fixing it properly means moving every route into a `(lang)` route group with per-locale root layouts.
+- Only `/` and `/zh` form an `hreflang` cluster. `/about` has no Chinese counterpart of its own — `/zh` covers that content — so it is deliberately left out rather than pointed at a page that isn't its translation.
+- `/zh` duplicates about 200 lines of CSS from `app/about/page.tsx`. That matches the project's per-page `<style>` block convention, but a third page in this style is the point where the shared rules should be extracted.
+
 ## [0.3.0] - 2026-07-29
 
 ### Added
