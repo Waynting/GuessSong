@@ -30,7 +30,7 @@ function httpOrigin(): string | null {
   return ws.replace(/^ws/, "http").replace(/\/$/, "");
 }
 
-export async function createBuzzerRoom(): Promise<BuzzerRoomHandle> {
+export async function createBuzzerRoom(): Promise<Omit<BuzzerRoomHandle, "hostName">> {
   const origin = httpOrigin();
   if (!origin) {
     throw new BuzzerUnavailableError(

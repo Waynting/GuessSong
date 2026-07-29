@@ -13,7 +13,7 @@ import {
   type GamePlayer as Player,
   type BuzzerRoomHandle,
 } from "@/lib/game-session";
-import { BuzzerHostPanel } from "@/components/buzzer-host-panel";
+import { BuzzerHostPanel, type BuzzerControls } from "@/components/buzzer-host-panel";
 import type { RoundHistoryEntry } from "@/lib/round-history";
 import { buildTasteCard } from "@/lib/taste-card";
 import {
@@ -78,7 +78,15 @@ export default function GamePage() {
   // Buzzer Mode only. Null in every other mode, which is also how the panel
   // stays entirely out of the party/trial render path.
   const [buzzerRoom, setBuzzerRoom] = useState<BuzzerRoomHandle | null>(null);
+  // Handed up by the panel so this page's existing Reveal / Next / scoring
+  // buttons drive the room, instead of the panel growing its own copies.
+  const [buzzerControls, setBuzzerControls] = useState<BuzzerControls | null>(null);
   const peakPhonesRef = useRef(0);
+  // reveal()/nextTrack() are plain functions recreated each render; reading the
+  // controls through a ref keeps them from going stale without threading state
+  // through every call site.
+  const buzzerControlsRef = useRef<BuzzerControls | null>(null);
+  buzzerControlsRef.current = buzzerControls;
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -186,8 +194,29 @@ export default function GamePage() {
 
   function reveal() {
     stopClip();
+    // One Reveal, not two. Whoever was mid-press stops being able to score on a
+    // question the host just answered for them.
+    buzzerControlsRef.current?.reveal();
     setPhase("revealed");
   }
+
+  /**
+   * The scoreboard follows whoever actually joined the room.
+   *
+   * Two name spaces used to drift apart: names typed at setup (or pulled from
+   * Mixed Playlist contributors) fed the scoreboard, while names typed on each
+   * phone fed the room. awardPoint matches by name, so anyone whose phone name
+   * didn't exactly match their setup name scored nothing, silently.
+   *
+   * Additive only — a player who drops out keeps the points they earned.
+   */
+  const mergeRoomPlayers = useCallback((names: string[]) => {
+    setPlayers((prev) => {
+      const known = new Set(prev.map((p) => p.name));
+      const missing = names.filter((n) => !known.has(n));
+      return missing.length ? [...prev, ...missing.map((name) => ({ name, score: 0 }))] : prev;
+    });
+  }, []);
 
   function awardPoint(playerName: string) {
     if (pointsAwarded) return;
@@ -253,6 +282,7 @@ export default function GamePage() {
 
   function nextTrack() {
     stopClip();
+    buzzerControlsRef.current?.next();
     trackEvent("round_completed", {
       round_index: currentIndex + 1,
       skipped: phase !== "revealed",
@@ -1180,9 +1210,11 @@ export default function GamePage() {
               <BuzzerHostPanel
                 roomCode={buzzerRoom.code}
                 hostToken={buzzerRoom.hostToken}
+                hostName={buzzerRoom.hostName}
                 roundIndex={currentIndex}
                 gamePhase={phase}
-                onCorrect={awardPoint}
+                onControls={setBuzzerControls}
+                onPlayersChange={mergeRoomPlayers}
                 onPeakPlayers={(n) => {
                   peakPhonesRef.current = n;
                 }}
@@ -1333,19 +1365,56 @@ export default function GamePage() {
                   </>
                 ) : (
                   <>
-                {/* Song scoring — 3 pts */}
-                <p className="who-scored">Who guessed the song? (+3 pts)</p>
-                {!pointsAwarded ? (
-                  <div className="player-picker" style={{ marginBottom: "14px" }}>
-                    {players.map((p) => (
-                      <button key={p.name} className="player-pick-btn" onClick={() => awardPoint(p.name)}>
-                        {p.name}
+                {/* Song scoring — 3 pts. In Buzzer Mode the room already knows
+                    who got there first, so listing every player again would be
+                    asking the host to re-answer a question the server settled.
+                    Falls back to the full picker when nobody buzzed. */}
+                {buzzerControls && buzzerControls.buzzes.length > 0 && !pointsAwarded ? (
+                  <>
+                    <p className="who-scored">
+                      {buzzerControls.buzzes[0].name} buzzed first —{" "}
+                      {(buzzerControls.buzzes[0].msSinceOpen / 1000).toFixed(2)}s
+                    </p>
+                    <div className="btn-row" style={{ marginBottom: "14px" }}>
+                      <button
+                        className="btn-primary"
+                        onClick={() => {
+                          awardPoint(buzzerControls.buzzes[0].name);
+                          buzzerControls.correct();
+                        }}
+                      >
+                        Correct +3
                       </button>
-                    ))}
-                    <button className="btn-ghost" onClick={() => setPointsAwarded(true)}>
-                      No one
-                    </button>
-                  </div>
+                      <button
+                        className="btn-ghost"
+                        onClick={() => buzzerControls.wrong()}
+                        style={{ flex: "0 0 auto" }}
+                      >
+                        {buzzerControls.buzzes.length > 1
+                          ? `Wrong → ${buzzerControls.buzzes[1].name}`
+                          : "Wrong"}
+                      </button>
+                    </div>
+                    {buzzerControls.buzzes.length > 1 && (
+                      <p style={{ textAlign: "center", fontSize: "12px", color: "#666", marginBottom: "14px" }}>
+                        Queue: {buzzerControls.buzzes.slice(1).map((b) => b.name).join(" → ")}
+                      </p>
+                    )}
+                  </>
+                ) : !pointsAwarded ? (
+                  <>
+                    <p className="who-scored">Who guessed the song? (+3 pts)</p>
+                    <div className="player-picker" style={{ marginBottom: "14px" }}>
+                      {players.map((p) => (
+                        <button key={p.name} className="player-pick-btn" onClick={() => awardPoint(p.name)}>
+                          {p.name}
+                        </button>
+                      ))}
+                      <button className="btn-ghost" onClick={() => setPointsAwarded(true)}>
+                        No one
+                      </button>
+                    </div>
+                  </>
                 ) : (
                   <p style={{ textAlign: "center", color: "#1DB954", fontSize: "13px", marginBottom: "14px" }}>
                     {roundWinner ? `+3 pts → ${roundWinner}` : "No one scored"}

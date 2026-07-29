@@ -42,7 +42,7 @@ describe("GameMode round-trip (regression: silent downgrade to party)", () => {
       clipDuration: 15,
       playlistSource: "own",
       mode: "buzzer",
-      buzzerRoom: { code: "AB7K", hostToken: "secret-token" },
+      buzzerRoom: { code: "AB7K", hostToken: "secret-token", hostName: "Wayn" },
     });
 
     const parsed = parseGamePayload(JSON.stringify(payload));
@@ -51,7 +51,7 @@ describe("GameMode round-trip (regression: silent downgrade to party)", () => {
     // that wasn't "trial" to "party" — a buzzer game silently became a party
     // game on reload, with no error anywhere.
     expect(parsed?.mode).toBe("buzzer");
-    expect(parsed?.buzzerRoom).toEqual({ code: "AB7K", hostToken: "secret-token" });
+    expect(parsed?.buzzerRoom).toEqual({ code: "AB7K", hostToken: "secret-token", hostName: "Wayn" });
   });
 
   it("still round-trips the pre-existing modes", () => {
@@ -77,6 +77,20 @@ describe("GameMode round-trip (regression: silent downgrade to party)", () => {
       JSON.stringify({ tracks: [], players: [], mode: "kahoot", playlistSource: "own" })
     );
     expect(parsed?.mode).toBe("party");
+  });
+
+  it("defaults a legacy room's host name instead of dropping a live game", () => {
+    // Rooms created before hostName existed are still in someone's
+    // sessionStorage; losing the whole handle would kick them out mid-party.
+    const parsed = parseGamePayload(
+      JSON.stringify({
+        tracks: [],
+        players: [],
+        mode: "buzzer",
+        buzzerRoom: { code: "AB7K", hostToken: "t" },
+      })
+    );
+    expect(parsed?.buzzerRoom?.hostName).toBe("Host");
   });
 
   it("drops a buzzerRoom missing its host token rather than half-loading it", () => {

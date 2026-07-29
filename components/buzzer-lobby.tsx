@@ -30,20 +30,31 @@ export interface BuzzerLobbyProps {
 }
 
 export function BuzzerLobby({ room, onRoomCreated, onPlayerCountChange }: BuzzerLobbyProps) {
+  // The host buzzes like everyone else, so they need a name the scoreboard can
+  // award points to. Persisted per browser so a host isn't retyping it every
+  // party.
+  const [hostName, setHostName] = useState("Host");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  useEffect(() => {
+    const saved = window.localStorage.getItem("guesssong_host_name");
+    if (saved) setHostName(saved);
+  }, []);
+
   const { snapshot, connected } = useBuzzerSocket({
     code: room?.code ?? null,
-    name: "Host",
+    name: room?.hostName ?? hostName,
     hostToken: room?.hostToken,
   });
 
-  // The host is in the room's player list but isn't holding a buzzer, so it
-  // would be wrong to count them as a phone that joined.
-  const players = (snapshot?.players ?? []).filter((p) => p.name !== "Host");
+  // Phones that scanned in. The host is in the room's player list too, but they
+  // are the big screen rather than a phone, so they don't belong in this count.
+  const players = (snapshot?.players ?? []).filter(
+    (p) => p.name !== (room?.hostName ?? hostName)
+  );
 
   useEffect(() => {
     onPlayerCountChange?.(players.length);
@@ -60,9 +71,11 @@ export function BuzzerLobby({ room, onRoomCreated, onPlayerCountChange }: Buzzer
     setCreating(true);
     setError(null);
     try {
+      const trimmed = hostName.trim() || "Host";
+      window.localStorage.setItem("guesssong_host_name", trimmed);
       const created = await createBuzzerRoom();
       trackEvent("buzz_room_created", {});
-      onRoomCreated(created);
+      onRoomCreated({ ...created, hostName: trimmed });
     } catch (e: unknown) {
       setError(
         e instanceof BuzzerUnavailableError ? e.message : "Couldn't open a buzzer room"
@@ -96,6 +109,20 @@ export function BuzzerLobby({ room, onRoomCreated, onPlayerCountChange }: Buzzer
           Open the room first so everyone can scan in before the music starts.
           Each player gets a buzzer on their own phone.
         </p>
+        <label
+          style={{ display: "block", fontSize: "12px", color: "#777", marginBottom: "6px" }}
+          htmlFor="host-name"
+        >
+          Your name — you can buzz from this screen too
+        </label>
+        <input
+          id="host-name"
+          className="player-input"
+          value={hostName}
+          onChange={(e) => setHostName(e.target.value)}
+          maxLength={24}
+          style={{ marginBottom: "16px", textAlign: "center" }}
+        />
         <button className="start-btn" onClick={handleCreate} disabled={creating}>
           {creating ? "Opening Room..." : "Open Buzzer Room"}
         </button>

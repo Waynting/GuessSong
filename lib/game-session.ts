@@ -10,6 +10,13 @@ import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
 
 export const GAME_STORAGE_KEY = "guesssong_game";
 
+/**
+ * What the host's socket is called when they haven't named themselves. It is a
+ * real player name, not a sentinel — nothing keys off it, so a guest who types
+ * "Host" on their phone is just another player with an unimaginative name.
+ */
+export const DEFAULT_HOST_NAME = "Host";
+
 export type GameMode = "party" | "trial" | "buzzer";
 
 export interface GamePlayer {
@@ -32,6 +39,12 @@ export interface MixedPlaylistMeta {
 export interface BuzzerRoomHandle {
   code: string;
   hostToken: string;
+  /**
+   * What the host is called inside the room. They buzz like everyone else, so
+   * they need a name the scoreboard can award points to — "Host" is only the
+   * default, not a special case.
+   */
+  hostName: string;
 }
 
 export interface GamePayload {
@@ -102,6 +115,41 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
 }
 
 /**
+ * Fold the buzzer room's live roster into the scoreboard.
+ *
+ * Buzzer Mode has no typed-in player list — the room is the roster, so this is
+ * what makes a phone that scanned in scoreable at all. Points are awarded by
+ * name (`awardPoint`), so a buzzer winner who isn't in `players` silently earns
+ * nothing; every name the room reports has to reach this list before the host
+ * can tap "Correct".
+ *
+ * Two rules, both about not punishing a flaky phone:
+ *
+ * - **Additive only.** A player who locks their screen drops out of the room's
+ *   roster, and removing them here would wipe a score they earned fairly. They
+ *   keep their seat for the rest of the game.
+ * - **Case-insensitive on name.** The room already refuses a second "amy" while
+ *   "Amy" is connected, so two spellings are the same human reconnecting, not
+ *   two players.
+ *
+ * Returns the original array reference when nothing is new, so calling this in
+ * a `setPlayers` updater on every snapshot can't loop.
+ */
+export function mergeRoomRoster(players: GamePlayer[], roster: string[]): GamePlayer[] {
+  const seen = new Set(players.map((p) => p.name.toLowerCase()));
+  const additions: GamePlayer[] = [];
+  for (const raw of roster) {
+    const name = raw.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    additions.push({ name, score: 0 });
+  }
+  return additions.length ? [...players, ...additions] : players;
+}
+
+/**
  * Number of rounds actually played when a game ends. A round counts only
  * once its clip has started; ending during "waiting" means the current
  * round was never played. Keeps game_finished's rounds_played consistent
@@ -148,7 +196,18 @@ export function parseGamePayload(raw: string): GamePayload | null {
     typeof rawRoom === "object" &&
     typeof rawRoom.code === "string" &&
     typeof rawRoom.hostToken === "string"
-      ? { code: rawRoom.code, hostToken: rawRoom.hostToken }
+      ? {
+          code: rawRoom.code,
+          hostToken: rawRoom.hostToken,
+          // Rooms created before hostName existed round-trip as "Host" rather
+          // than dropping the whole handle and stranding a live game. Blank
+          // names take the same path: the room rejects an empty join outright,
+          // so an unnamed host would otherwise never connect at all.
+          hostName:
+            typeof rawRoom.hostName === "string" && rawRoom.hostName.trim()
+              ? rawRoom.hostName.trim()
+              : DEFAULT_HOST_NAME,
+        }
       : undefined;
 
   return {
