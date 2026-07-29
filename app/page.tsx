@@ -8,7 +8,7 @@ import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolRe
 import { trackEvent } from "@/lib/analytics";
 import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
 import { buildGamePayload, GAME_STORAGE_KEY, type BuzzerRoomHandle } from "@/lib/game-session";
-import { isBuzzerConfigured } from "@/lib/buzzer-client";
+import { createBuzzerRoom, isBuzzerConfigured } from "@/lib/buzzer-client";
 import { BuzzerLobby } from "@/components/buzzer-lobby";
 import { BUILTIN_PLAYLISTS, type BuiltinPlaylist } from "@/lib/builtin-playlists";
 import { InstallBanner } from "@/components/install-banner";
@@ -159,6 +159,20 @@ export default function SetupPage() {
     }
   }
 
+  /**
+   * Opens a buzzer room for the flows that have no lobby (mixed mode). The host
+   * name comes from the same localStorage key the lobby writes, so a host keeps
+   * one identity across both flows instead of being "Host" in one and themselves
+   * in the other.
+   */
+  async function openBuzzerRoom(): Promise<BuzzerRoomHandle> {
+    const created = await createBuzzerRoom();
+    trackEvent("buzz_room_created", {});
+    const hostName =
+      window.localStorage.getItem("guesssong_host_name")?.trim() || "Host";
+    return { ...created, hostName };
+  }
+
   async function handleShareJoinLink() {
     if (!joinUrl) return;
     if (typeof navigator.share === "function") {
@@ -191,10 +205,12 @@ export default function SetupPage() {
       if (!res.ok) throw new Error(data.error || "Failed to start game");
       stopRoomPolling();
 
-      // A separate code from the playlist room on purpose: every player already
-      // saw that one, and whoever POSTs it to the Worker first is handed the
-      // host token, so reusing it would let any guest take over the buzzers.
-      const room = buzzerEnabled ? buzzerRoom ?? undefined : undefined;
+      // Opened here rather than from a lobby: mixed mode's screen already has a
+      // room card, and a second one under it read as a mistake. A separate code
+      // from the playlist room on purpose — every player already saw that one,
+      // and whoever POSTs it to the Worker first is handed the host token, so
+      // reusing it would let any guest take over the buzzers.
+      const room = buzzerEnabled ? await openBuzzerRoom() : undefined;
 
       const payload = buildGamePayload({
         tracks: data.tracks,
@@ -288,7 +304,12 @@ export default function SetupPage() {
 
       const payload = buildGamePayload({
         tracks: limited,
-        players: validPlayers.map((name) => ({ name, score: 0 })),
+        // Empty in Buzzer Mode, even if the inputs still hold something. A host
+        // who typed two names and then turned the toggle on would otherwise ship
+        // rows nobody can claim: the section is hidden, so those names are
+        // invisible, but they'd sit on the scoreboard all game next to the real
+        // players the room reports.
+        players: room ? [] : validPlayers.map((name) => ({ name, score: 0 })),
         playlistName: data.name,
         clipDuration,
         totalTracks: data.totalTracks,
@@ -298,7 +319,10 @@ export default function SetupPage() {
       });
       sessionStorage.setItem(GAME_STORAGE_KEY, JSON.stringify(payload));
       trackEvent("game_started", {
-        player_count: validPlayers.length,
+        // Phones that scanned in, plus the host, who buzzes from the game
+        // screen. The typed count is 0 for every buzzer game, so reporting it
+        // would quietly zero out the metric for the mode we care most about.
+        player_count: room ? buzzerPlayerCount + 1 : validPlayers.length,
         clip_duration: clipDuration,
         song_count: limited.length,
         playlist_source: "own",
@@ -350,7 +374,7 @@ export default function SetupPage() {
       const pooled = poolContributions(contributions, sampledPerPlayer);
       const overlapCount = pooled.filter((t) => t.contributors.length > 1).length;
 
-      const room = buzzerEnabled ? buzzerRoom ?? undefined : undefined;
+      const room = buzzerEnabled ? await openBuzzerRoom() : undefined;
 
       const payload = buildGamePayload({
         tracks: pooled,
@@ -1035,20 +1059,26 @@ export default function SetupPage() {
                     ? "Everyone scans in and gets a buzzer on their phone. The server decides who was first, so you can stop refereeing and actually play."
                     : "Turn this on to give every player a buzzer on their phone."}
                 </p>
-                {buzzerEnabled && (
-                  <>
-                    {setupMode === "mixed" && (
-                      <p style={{ marginBottom: "12px", fontSize: "12px", color: "#8a6d3b" }}>
-                        This room is separate from the playlist room above — it stays live for
-                        the whole game, so it needs its own code.
-                      </p>
-                    )}
-                    <BuzzerLobby
-                      room={buzzerRoom}
-                      onRoomCreated={setBuzzerRoom}
-                      onPlayerCountChange={setBuzzerPlayerCount}
-                    />
-                  </>
+                {/* Single-playlist mode gets the full lobby, because nothing else
+                    on this screen collects people. Mixed mode already has a room
+                    card above with its own code and QR, and stacking a second one
+                    underneath reads as a mistake — so there it stays a plain
+                    toggle and the buzzer room opens with the game. Players pick
+                    up its QR from the host panel on the next screen, phones still
+                    in hand from submitting playlists. */}
+                {buzzerEnabled && setupMode === "single" && (
+                  <BuzzerLobby
+                    room={buzzerRoom}
+                    onRoomCreated={setBuzzerRoom}
+                    onPlayerCountChange={setBuzzerPlayerCount}
+                  />
+                )}
+                {buzzerEnabled && setupMode === "mixed" && (
+                  <p style={{ fontSize: "12px", color: "#666" }}>
+                    The buzzer room opens when the game starts, with its own code —
+                    it has to outlive the playlist room above. Its QR is on the game
+                    screen.
+                  </p>
                 )}
               </div>
             )}
@@ -1141,7 +1171,10 @@ export default function SetupPage() {
                 // minimum player count though: latecomers can scan in mid-game,
                 // and blocking on an arbitrary number would strand a host whose
                 // friends are still finding the QR.
-                const buzzerNotReady = buzzerEnabled && !buzzerRoom;
+                // Only single-playlist mode has a lobby to open the room from.
+                // Mixed mode opens it as part of starting, so there is nothing
+                // to wait for.
+                const buzzerNotReady = buzzerEnabled && setupMode === "single" && !buzzerRoom;
                 const disabled =
                   busy ||
                   buzzerNotReady ||
