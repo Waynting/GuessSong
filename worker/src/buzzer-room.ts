@@ -2,7 +2,6 @@ import { DurableObject } from "cloudflare:workers";
 import {
   BUZZER_IDLE_TIMEOUT_MS,
   BUZZER_MAX_PLAYERS,
-  EARLY_BUZZ_PENALTY_MS,
   parseClientMessage,
   type BuzzEntry,
   type BuzzerErrorCode,
@@ -20,8 +19,6 @@ export interface Env {
 
 interface PlayerRecord {
   name: string;
-  /** Epoch ms this player may buzz again. Absent/past = no penalty. */
-  penaltyUntil?: number;
 }
 
 interface RoomState {
@@ -191,8 +188,8 @@ export class BuzzerRoom extends DurableObject<Env> {
 
   override async webSocketClose(ws: WebSocket): Promise<void> {
     // The player record survives — identity is the localStorage playerId, not
-    // the socket, so a phone that drops and reconnects keeps its name and any
-    // outstanding penalty.
+    // the socket, so a phone that drops and reconnects keeps its name and its
+    // place in the queue.
     const att = this.attachment(ws);
     if (att) this.broadcastPlayers();
   }
@@ -263,20 +260,6 @@ export class BuzzerRoom extends DurableObject<Env> {
     const now = Date.now();
     const player = this.room.players[att.playerId];
     if (!player) return this.sendError(ws, "not_joined", "Send a join message first");
-
-    if (player.penaltyUntil && now < player.penaltyUntil) {
-      return this.send(ws, { type: "penalty", untilMs: player.penaltyUntil });
-    }
-
-    // Buzzing before the round opens costs you a couple of seconds. Without a
-    // penalty the optimal strategy is to hold the button down, which stops
-    // being a game.
-    if (this.room.phase === "idle") {
-      player.penaltyUntil = now + EARLY_BUZZ_PENALTY_MS;
-      this.send(ws, { type: "penalty", untilMs: player.penaltyUntil });
-      await this.persist();
-      return;
-    }
 
     // ---- atomic region: not a single `await` between here and the push ----
     // This is the whole ballgame. JS runs one task to completion, and a Durable

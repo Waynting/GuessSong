@@ -73,8 +73,6 @@ const isState = (m: ServerMessage): m is Extract<ServerMessage, { type: "state" 
   m.type === "state";
 const isBuzz = (m: ServerMessage): m is Extract<ServerMessage, { type: "buzz" }> =>
   m.type === "buzz";
-const isPenalty = (m: ServerMessage): m is Extract<ServerMessage, { type: "penalty" }> =>
-  m.type === "penalty";
 const isError = (m: ServerMessage): m is Extract<ServerMessage, { type: "error" }> =>
   m.type === "error";
 
@@ -195,17 +193,6 @@ describe("buzz arbitration", () => {
     expect(host.received.filter(isBuzz)).toHaveLength(0);
   });
 
-  it("penalises buzzing while the round is idle, and does not queue it", async () => {
-    const { code, hostToken } = await createRoom();
-    const host = await joinedHost(code, hostToken);
-    const ann = await joinedPlayer(code, "p-1", "Ann");
-
-    ann.send({ type: "buzz", roundIndex: 0 });
-    const penalty = await ann.waitFor(isPenalty);
-
-    expect(penalty.untilMs).toBeGreaterThan(Date.now());
-    expect(host.received.filter(isBuzz)).toHaveLength(0);
-  });
 
   it("advances the queue on a wrong answer and reopens when it empties", async () => {
     const { code, hostToken } = await createRoom();

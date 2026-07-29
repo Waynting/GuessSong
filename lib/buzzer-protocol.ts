@@ -44,13 +44,6 @@ export const BUZZER_MAX_PLAYERS = 12;
  */
 export const BUZZER_IDLE_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 
-/**
- * Penalty for buzzing before the round opens. Without it the dominant strategy
- * is to mash the button continuously, which makes the game unplayable rather
- * than merely unfair.
- */
-export const EARLY_BUZZ_PENALTY_MS = 2000;
-
 export type BuzzerPhase =
   /** Between rounds. Buttons disabled. */
   | "idle"
@@ -134,8 +127,6 @@ export type ServerMessage =
   | { type: "buzz"; entry: BuzzEntry; phase: BuzzerPhase }
   | { type: "round:resolved"; roundIndex: number; verdict: RoundVerdict }
   | { type: "players"; players: PlayerSummary[] }
-  /** Sent only to the offender. `untilMs` is DO clock, not client clock. */
-  | { type: "penalty"; untilMs: number }
   | { type: "error"; code: BuzzerErrorCode; message: string }
   | { type: "pong" };
 

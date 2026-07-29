@@ -39,7 +39,7 @@ export default function BuzzPlayerPage() {
   }, []);
 
   const joinedRef = useRef(false);
-  const { snapshot, connected, penaltyUntil, error, playerId, buzz } = useBuzzerSocket({
+  const { snapshot, connected, error, playerId, buzz } = useBuzzerSocket({
     code: ready ? code : null,
     name,
   });
@@ -126,7 +126,6 @@ export default function BuzzPlayerPage() {
         phase={snapshot?.phase ?? "idle"}
         buzzes={snapshot?.buzzes ?? []}
         playerId={playerId}
-        penaltyUntil={penaltyUntil}
         connected={connected}
         onBuzz={buzz}
       />

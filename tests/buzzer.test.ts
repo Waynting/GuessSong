@@ -12,7 +12,6 @@ const emptyState: BuzzerSocketState = {
   snapshot: null,
   isHost: false,
   connected: false,
-  penaltyUntil: null,
   error: null,
 };
 
@@ -154,14 +153,6 @@ describe("client reducer", () => {
     expect(s.snapshot?.buzzes).toHaveLength(1);
   });
 
-  it("records a penalty without touching the round", () => {
-    const s = reduce({ ...emptyState, snapshot: snapshot({ phase: "open" }) }, {
-      type: "penalty",
-      untilMs: 9999,
-    });
-    expect(s.penaltyUntil).toBe(9999);
-    expect(s.snapshot?.phase).toBe("open");
-  });
 
   it("returns to idle when the round resolves", () => {
     const s = reduce(

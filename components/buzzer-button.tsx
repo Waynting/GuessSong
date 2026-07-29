@@ -23,8 +23,6 @@ export interface BuzzerButtonProps {
   phase: BuzzerPhase;
   buzzes: BuzzEntry[];
   playerId: string;
-  /** Server clock, so it is compared against a server-derived remaining time. */
-  penaltyUntil: number | null;
   connected: boolean;
   onBuzz: () => void;
 }
@@ -41,7 +39,6 @@ export function BuzzerButton({
   phase,
   buzzes,
   playerId,
-  penaltyUntil,
   connected,
   onBuzz,
 }: BuzzerButtonProps) {
@@ -49,7 +46,6 @@ export function BuzzerButton({
   // this is what stops a mobile long-press from firing a burst of frames in the
   // first place.
   const [pressed, setPressed] = useState(false);
-  const [penaltyLeft, setPenaltyLeft] = useState(0);
 
   const myBuzz = buzzes.find((b) => b.playerId === playerId);
   const winner = buzzes[0];
@@ -61,16 +57,8 @@ export function BuzzerButton({
     if (phase === "open" && buzzes.length === 0) setPressed(false);
   }, [phase, buzzes.length]);
 
-  useEffect(() => {
-    if (!penaltyUntil) return setPenaltyLeft(0);
-    const tick = () => setPenaltyLeft(Math.max(0, penaltyUntil - Date.now()));
-    tick();
-    const id = setInterval(tick, 100);
-    return () => clearInterval(id);
-  }, [penaltyUntil]);
 
-  const penalised = penaltyLeft > 0;
-  const canBuzz = connected && !penalised && !myBuzz && !pressed && phase !== "idle";
+  const canBuzz = connected && !myBuzz && !pressed && phase !== "idle";
 
   function handlePointerDown() {
     if (!canBuzz) return;
@@ -81,7 +69,7 @@ export function BuzzerButton({
     onBuzz();
   }
 
-  const visual = describe({ connected, penalised, penaltyLeft, phase, myBuzz, iWon, winner, pressed });
+  const visual = describe({ connected, phase, myBuzz, iWon, winner, pressed });
 
   return (
     <div className="flex flex-1 flex-col">
@@ -111,8 +99,6 @@ export function BuzzerButton({
 
 function describe(s: {
   connected: boolean;
-  penalised: boolean;
-  penaltyLeft: number;
   phase: BuzzerPhase;
   myBuzz: BuzzEntry | undefined;
   iWon: boolean;
@@ -121,15 +107,6 @@ function describe(s: {
 }): Visual {
   if (!s.connected) {
     return { label: "連線中…", sub: "回到這個畫面就會自動接回", bg: "#1a1a1a", fg: "#888", disabled: true };
-  }
-  if (s.penalised) {
-    return {
-      label: "搶快了",
-      sub: `${(s.penaltyLeft / 1000).toFixed(1)} 秒後可以再搶`,
-      bg: "#3a1a1a",
-      fg: "#ff6b6b",
-      disabled: true,
-    };
   }
   if (s.iWon) {
     return { label: "你搶到了", sub: "大聲講答案", bg: "#1DB954", fg: "#04120a", disabled: true };
