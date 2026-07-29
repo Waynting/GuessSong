@@ -3,12 +3,12 @@ import Link from "next/link";
 import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
 
 export const metadata: Metadata = {
-  title: "How to Play",
+  title: "How to Play the Guess the Song Game",
   description:
-    "Learn how GuessSong works: paste any public Spotify playlist, add players, play short clips, and guess the song — or merge everyone's playlists together with Mixed Playlist Mode. Free, open source, no login required.",
+    "How to play the guess the song game with friends: paste any public Spotify playlist, add players, play short clips and name the track. Includes Mixed Playlist Mode. Free, open source, no login required.",
   alternates: { canonical: "/about" },
   openGraph: {
-    title: "How to Play | GuessSong",
+    title: "How to Play the Guess the Song Game | GuessSong",
     description:
       "Paste a Spotify playlist, play short clips, guess the song. Now with Mixed Playlist Mode. Free, open source, no login required.",
   },
@@ -140,8 +140,30 @@ const MIXED_COLLECT = [
 ];
 
 export default function AboutPage() {
+  // Built from STEPS so the schema can never drift from what's on the page.
+  const howToLd = {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: "How to play the guess the song game",
+    description:
+      "Turn any public Spotify playlist into a guess the song party game in four steps.",
+    totalTime: "PT30S",
+    supply: [{ "@type": "HowToSupply", name: "A public Spotify playlist link" }],
+    tool: [{ "@type": "HowToTool", name: "Any device with a browser and speakers" }],
+    step: STEPS.map((s, i) => ({
+      "@type": "HowToStep",
+      position: i + 1,
+      name: s.title,
+      text: s.desc,
+    })),
+  };
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(howToLd) }}
+      />
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap');
 
@@ -433,10 +455,12 @@ export default function AboutPage() {
               </span>
             </div>
             <h1 className="hero-title">GuessSong</h1>
-            <p style={{ color: "#999", fontSize: "17px", marginTop: "16px", fontWeight: 300, maxWidth: "520px", marginLeft: "auto", marginRight: "auto", lineHeight: 1.6 }}>
-              Turn any Spotify playlist into a party game. Play a short clip,
-              let everyone guess the song, and crown the music champion of the room.
-            </p>
+            {/* Same trick as the homepage: the H1 is brand-only, so the
+                searchable phrase lives in an <h2> right under it. */}
+            <h2 style={{ color: "#999", fontSize: "17px", marginTop: "16px", fontWeight: 300, maxWidth: "520px", marginLeft: "auto", marginRight: "auto", lineHeight: 1.6 }}>
+              Turn any Spotify playlist into a guess the song party game. Play a short
+              clip, let everyone name the track, and crown the music champion of the room.
+            </h2>
             <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap", marginTop: "28px" }}>
               <Link href="/" className="cta-primary">
                 Play Now →

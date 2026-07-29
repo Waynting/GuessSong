@@ -23,6 +23,35 @@ const SONG_COUNTS: (number | "all")[] = [10, 20, 30, 50, "all"];
 const MIXED_SAMPLE_COUNTS = [5, 8, 10, 12];
 const MIXED_MIN_CONTRIBUTORS = 2;
 
+// Rendered on the page *and* emitted as FAQPage JSON-LD below — keep the two
+// in sync, Google penalises schema that doesn't match visible content.
+const FAQS: { q: string; a: string }[] = [
+  {
+    q: "How do you play the guess the song game?",
+    a: "One person hosts on a single screen. Paste a public Spotify playlist, add everyone's names, and the game plays a short clip (5 to 30 seconds) from a random track. Everyone shouts their guess out loud and the host taps whoever got it first: 3 points for the song title, 1 more for the album.",
+  },
+  {
+    q: "Do I need a Spotify account or a login?",
+    a: "No. GuessSong never asks anyone to sign in, and there are no accounts to create. It reads the track list from any public playlist link and plays a short preview clip of each song.",
+  },
+  {
+    q: "Is it free?",
+    a: "Yes, completely free and open source. There is nothing to install and nothing to pay for — it runs in the browser.",
+  },
+  {
+    q: "How many people can play?",
+    a: "As many as fit around one screen. GuessSong is a local party game: the host controls the music and the scoreboard, and everyone else just listens and guesses. You can also turn on Buzzer Mode so players buzz in from their own phones.",
+  },
+  {
+    q: "Can everyone use their own playlist?",
+    a: "Yes — that's Mixed Playlist Mode. Everyone submits their own playlist, GuessSong merges them into one pool and removes duplicates, and you get a bonus point for guessing whose playlist a track came from.",
+  },
+  {
+    q: "Why do some songs have no audio?",
+    a: "Spotify stopped providing preview clips for many tracks in late 2024, so GuessSong looks the song up on iTunes and Deezer instead. A small number of tracks have no preview anywhere and get skipped — playlists with mainstream music tend to work best.",
+  },
+];
+
 type SetupMode = "single" | "mixed";
 type MixedSubMode = "room" | "phone";
 
@@ -355,6 +384,20 @@ export default function SetupPage() {
 
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            mainEntity: FAQS.map((faq) => ({
+              "@type": "Question",
+              name: faq.q,
+              acceptedAnswer: { "@type": "Answer", text: faq.a },
+            })),
+          }),
+        }}
+      />
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap');
 
@@ -536,6 +579,39 @@ export default function SetupPage() {
           margin-bottom: 10px;
         }
 
+        /* Crawlable prose. The setup form above is almost entirely UI chrome,
+           so without this the homepage has nothing for Google to match a
+           query like "guess the song game" against. */
+        .seo-section { margin-top: 44px; }
+        .seo-h2 {
+          font-size: 15px;
+          font-weight: 600;
+          color: #999;
+          margin-bottom: 10px;
+        }
+        .seo-p {
+          font-size: 13px;
+          font-weight: 300;
+          line-height: 1.7;
+          color: #666;
+        }
+        .seo-p + .seo-p { margin-top: 10px; }
+        .faq-list { margin-top: 12px; display: flex; flex-direction: column; gap: 14px; }
+        .faq-q {
+          font-size: 13px;
+          font-weight: 500;
+          color: #999;
+          margin-bottom: 4px;
+        }
+        .faq-a {
+          font-size: 13px;
+          font-weight: 300;
+          line-height: 1.7;
+          color: #666;
+        }
+        .faq-a a { color: #1DB954; }
+        .faq-a a:hover { text-decoration: underline; }
+
         .trial-divider {
           display: flex;
           align-items: center;
@@ -708,14 +784,24 @@ export default function SetupPage() {
               </span>
             </div>
             <h1 className="hero-title">GuessSong</h1>
-            <p style={{ color: "#666", fontSize: "15px", marginTop: "12px", fontWeight: 300 }}>
+            {/* This is an <h2>, not a <p>, so crawlers see the generic phrase
+                people actually search for — the H1 is brand-only. */}
+            <h2 style={{ color: "#666", fontSize: "15px", marginTop: "12px", fontWeight: 300 }}>
               Play a clip. Guess the song. Compete.
-            </p>
+            </h2>
             <p style={{ color: "#555", fontSize: "12px", marginTop: "8px" }}>
-              Paste any public Spotify playlist URL — no login required
+              The free music guessing game for any Spotify playlist — no login required
             </p>
+            {/* Crawl path to /zh with Chinese anchor text — that anchor is the
+                signal, so keep the keyword in the link, not around it. */}
             <p style={{ color: "#555", fontSize: "12px", marginTop: "4px" }}>
-              猜歌遊戲・派對音樂猜謎，適合朋友聚會
+              <a
+                href="/zh"
+                hrefLang="zh-TW"
+                style={{ color: "#666", textDecoration: "underline", textUnderlineOffset: "3px" }}
+              >
+                猜歌遊戲・派對音樂猜謎，適合朋友聚會
+              </a>
             </p>
             <p style={{ marginTop: "10px" }}>
               <a href="/about" className="link-btn">How to play →</a>
@@ -1113,6 +1199,37 @@ export default function SetupPage() {
               ))}
             </div>
           </div>
+
+          {/* Prose for search engines and first-time visitors alike. */}
+          <section className="seo-section">
+            <h2 className="seo-h2">What is GuessSong?</h2>
+            <p className="seo-p">
+              GuessSong is a free guess the song game for parties. The host pastes any
+              public Spotify playlist, the game plays a short clip from a random track,
+              and everyone races to name it out loud. No login, no app to install, no
+              accounts — one screen and a room full of people is all you need.
+            </p>
+            <p className="seo-p">
+              It works as a music quiz for game nights, road trips, classrooms and office
+              parties. Want everyone&apos;s taste in the mix? Mixed Playlist Mode merges
+              every player&apos;s playlist into one round.
+            </p>
+            <p style={{ marginTop: "14px" }}>
+              <a href="/about" className="link-btn">See how to play →</a>
+            </p>
+          </section>
+
+          <section className="seo-section">
+            <h2 className="seo-h2">Frequently asked questions</h2>
+            <div className="faq-list">
+              {FAQS.map((faq) => (
+                <div key={faq.q}>
+                  <h3 className="faq-q">{faq.q}</h3>
+                  <p className="faq-a">{faq.a}</p>
+                </div>
+              ))}
+            </div>
+          </section>
 
           {/* Footer */}
           <footer style={{ textAlign: "center", marginTop: "32px", paddingTop: "20px", borderTop: "1px solid var(--border)" }}>
