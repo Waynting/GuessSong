@@ -10,7 +10,14 @@ import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
 
 export const GAME_STORAGE_KEY = "guesssong_game";
 
-export type GameMode = "party" | "trial";
+/**
+ * What the host's socket is called when they haven't named themselves. It is a
+ * real player name, not a sentinel — nothing keys off it, so a guest who types
+ * "Host" on their phone is just another player with an unimaginative name.
+ */
+export const DEFAULT_HOST_NAME = "Host";
+
+export type GameMode = "party" | "trial" | "buzzer";
 
 export interface GamePlayer {
   name: string;
@@ -23,6 +30,23 @@ export interface MixedPlaylistMeta {
   sampledPerPlayer: number;
 }
 
+/**
+ * Buzzer Mode's handle on its Cloudflare room. Present only when mode is
+ * "buzzer". The host token is a bearer secret for host-only actions (opening a
+ * round, awarding points), so it lives in the host's own sessionStorage and is
+ * never rendered, shared, or put in the join URL players scan.
+ */
+export interface BuzzerRoomHandle {
+  code: string;
+  hostToken: string;
+  /**
+   * What the host is called inside the room. They buzz like everyone else, so
+   * they need a name the scoreboard can award points to — "Host" is only the
+   * default, not a special case.
+   */
+  hostName: string;
+}
+
 export interface GamePayload {
   tracks: Track[];
   players: GamePlayer[];
@@ -32,12 +56,26 @@ export interface GamePayload {
   playlistSource: PlaylistSource;
   mode: GameMode;
   mixedPlaylistMeta?: MixedPlaylistMeta;
+  buzzerRoom?: BuzzerRoomHandle;
 }
 
 const PLAYLIST_SOURCES: PlaylistSource[] = ["own", "builtin", "mixed"];
 
 function isPlaylistSource(value: unknown): value is PlaylistSource {
   return typeof value === "string" && (PLAYLIST_SOURCES as string[]).includes(value);
+}
+
+const GAME_MODES: GameMode[] = ["party", "trial", "buzzer"];
+
+/**
+ * Allow-list, not a ternary. The previous `d.mode === "trial" ? "trial" : "party"`
+ * silently rewrote every unrecognised mode to "party", so adding a member to
+ * GameMode changed behaviour without failing anywhere — a sessionStorage
+ * round-trip would quietly downgrade a buzzer game into a party game. Extend
+ * GAME_MODES whenever GameMode grows and this stays honest.
+ */
+function isGameMode(value: unknown): value is GameMode {
+  return typeof value === "string" && (GAME_MODES as string[]).includes(value);
 }
 
 /**
@@ -59,6 +97,7 @@ export interface BuildGamePayloadInput {
   playlistSource: PlaylistSource;
   mode: GameMode;
   mixedPlaylistMeta?: MixedPlaylistMeta;
+  buzzerRoom?: BuzzerRoomHandle;
 }
 
 export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
@@ -71,7 +110,43 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
     playlistSource: input.playlistSource,
     mode: input.mode,
     ...(input.mixedPlaylistMeta ? { mixedPlaylistMeta: input.mixedPlaylistMeta } : {}),
+    ...(input.buzzerRoom ? { buzzerRoom: input.buzzerRoom } : {}),
   };
+}
+
+/**
+ * Fold the buzzer room's live roster into the scoreboard.
+ *
+ * Buzzer Mode has no typed-in player list — the room is the roster, so this is
+ * what makes a phone that scanned in scoreable at all. Points are awarded by
+ * name (`awardPoint`), so a buzzer winner who isn't in `players` silently earns
+ * nothing; every name the room reports has to reach this list before the host
+ * can tap "Correct".
+ *
+ * Two rules, both about not punishing a flaky phone:
+ *
+ * - **Additive only.** A player who locks their screen drops out of the room's
+ *   roster, and removing them here would wipe a score they earned fairly. They
+ *   keep their seat for the rest of the game.
+ * - **Case-insensitive on name.** The room already refuses a second "amy" while
+ *   "Amy" is connected, so two spellings are the same human reconnecting, not
+ *   two players.
+ *
+ * Returns the original array reference when nothing is new, so calling this in
+ * a `setPlayers` updater on every snapshot can't loop.
+ */
+export function mergeRoomRoster(players: GamePlayer[], roster: string[]): GamePlayer[] {
+  const seen = new Set(players.map((p) => p.name.toLowerCase()));
+  const additions: GamePlayer[] = [];
+  for (const raw of roster) {
+    const name = raw.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    additions.push({ name, score: 0 });
+  }
+  return additions.length ? [...players, ...additions] : players;
 }
 
 /**
@@ -115,6 +190,26 @@ export function parseGamePayload(raw: string): GamePayload | null {
         }
       : undefined;
 
+  const rawRoom = d.buzzerRoom as Record<string, unknown> | undefined;
+  const buzzerRoom: BuzzerRoomHandle | undefined =
+    rawRoom &&
+    typeof rawRoom === "object" &&
+    typeof rawRoom.code === "string" &&
+    typeof rawRoom.hostToken === "string"
+      ? {
+          code: rawRoom.code,
+          hostToken: rawRoom.hostToken,
+          // Rooms created before hostName existed round-trip as "Host" rather
+          // than dropping the whole handle and stranding a live game. Blank
+          // names take the same path: the room rejects an empty join outright,
+          // so an unnamed host would otherwise never connect at all.
+          hostName:
+            typeof rawRoom.hostName === "string" && rawRoom.hostName.trim()
+              ? rawRoom.hostName.trim()
+              : DEFAULT_HOST_NAME,
+        }
+      : undefined;
+
   return {
     tracks,
     players,
@@ -122,7 +217,8 @@ export function parseGamePayload(raw: string): GamePayload | null {
     clipDuration: typeof d.clipDuration === "number" ? d.clipDuration : 15,
     totalTracks: typeof d.totalTracks === "number" ? d.totalTracks : tracks.length,
     playlistSource: isPlaylistSource(d.playlistSource) ? d.playlistSource : "own",
-    mode: d.mode === "trial" ? "trial" : "party",
+    mode: isGameMode(d.mode) ? d.mode : "party",
     ...(mixedPlaylistMeta ? { mixedPlaylistMeta } : {}),
+    ...(buzzerRoom ? { buzzerRoom } : {}),
   };
 }

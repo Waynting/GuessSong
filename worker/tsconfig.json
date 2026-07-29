@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true
+  },
+  // ../lib/buzzer-protocol.ts is deliberately outside this directory: it is the
+  // single source of truth for the wire format and is imported unchanged by the
+  // Next.js app too. Keep it dependency-free or this include will start pulling
+  // Next-specific types into the Workers build.
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "../lib/buzzer-protocol.ts",
+    "worker-configuration.d.ts"
+  ]
+}

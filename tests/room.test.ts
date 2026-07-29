@@ -43,6 +43,34 @@ describe("room lifecycle", () => {
     expect(a.hostToken).not.toBe(b.hostToken);
   });
 
+  // One code, two backends: Buzzer Mode claims its Durable Object first and
+  // hands the claimed code here, so a party scans a single QR. See
+  // lib/room-client.ts for why claiming first is what makes that safe.
+  it("opens a room under a requested code", async () => {
+    const { roomCode, hostToken } = await createRoom("AB7K");
+    expect(roomCode).toBe("AB7K");
+    expect(hostToken).toBeTruthy();
+    await expect(getRoomStatus("AB7K")).resolves.toMatchObject({ total: 0 });
+  });
+
+  it("uppercases a requested code so a lowercase link hits the same room", async () => {
+    const { roomCode } = await createRoom("cd8m");
+    expect(roomCode).toBe("CD8M");
+  });
+
+  it("refuses a requested code that is already a live room", async () => {
+    await createRoom("EF9N");
+    // 409 and not a silent join: the caller must claim a different code rather
+    // than hand its players someone else's mailbox.
+    await expect(createRoom("EF9N")).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("rejects a malformed requested code", async () => {
+    await expect(createRoom("TOOLONG")).rejects.toMatchObject({ status: 422 });
+    await expect(createRoom("AB1K")).rejects.toMatchObject({ status: 422 }); // 1 is not in the alphabet
+    await expect(createRoom("")).rejects.toMatchObject({ status: 422 });
+  });
+
   it("submits a playlist and returns its track count", async () => {
     vi.mocked(spotify.getPlaylistWithTracks).mockResolvedValue({
       playlist: FAKE_PLAYLIST,

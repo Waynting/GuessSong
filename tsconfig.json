@@ -23,6 +23,11 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  // worker/ is a separate Cloudflare Workers build with its own tsconfig. Its
+  // generated worker-configuration.d.ts declares Workers globals that shadow the
+  // DOM lib — pull it into this compilation and every `await res.json()` in the
+  // app starts returning `unknown` instead of `any`. lib/buzzer-protocol.ts is
+  // shared by both and stays here, because it imports nothing from either runtime.
+  "exclude": ["node_modules", "worker"]
 }
 

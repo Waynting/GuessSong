@@ -64,34 +64,73 @@ function generateRoomCode(): string {
   return code;
 }
 
+/** Shape check only — says nothing about whether the code is in use. */
+function isWellFormedCode(code: string): boolean {
+  return (
+    code.length === ROOM_CODE_LENGTH &&
+    [...code].every((c) => ROOM_CODE_ALPHABET.includes(c))
+  );
+}
+
 function remainingTtlSeconds(record: RoomRecord): number {
   return Math.max(1, Math.round((record.expiresAt - Date.now()) / 1000));
 }
 
-export async function createRoom(): Promise<{
+async function writeNewRoom(
+  store: Awaited<ReturnType<typeof getKvStore>>,
+  code: string
+): Promise<{ roomCode: string; expiresAt: number; hostToken: string }> {
+  const now = Date.now();
+  const hostToken = randomUUID();
+  const record: RoomRecord = {
+    code,
+    hostToken,
+    createdAt: now,
+    expiresAt: now + ROOM_TTL_SECONDS * 1000,
+    consumed: false,
+    submissions: [],
+  };
+  await store.set(roomKey(code), record, ROOM_TTL_SECONDS);
+  return { roomCode: code, expiresAt: record.expiresAt, hostToken };
+}
+
+/**
+ * Open a playlist mailbox, optionally under a code the caller already owns.
+ *
+ * `requestedCode` is what lets one code drive both room systems. Buzzer Mode
+ * claims its Durable Object first and passes the claimed code here, so a party
+ * scans one QR instead of two. Passing a code is only safe *because* of that
+ * ordering: the DO is held before the code is ever shown, so there is nothing
+ * for a guest to race for. A 409 means the code is already a live playlist
+ * room — the caller should claim a fresh one rather than join someone else's.
+ *
+ * Called with no argument (the Mixed-only flow) it keeps generating its own.
+ */
+export async function createRoom(requestedCode?: string): Promise<{
   roomCode: string;
   expiresAt: number;
   hostToken: string;
 }> {
   const store = await getKvStore();
+
+  if (requestedCode !== undefined) {
+    const code = requestedCode.trim().toUpperCase();
+    if (!isWellFormedCode(code)) {
+      throw new RoomError("Invalid room code", 422);
+    }
+    const existing = await store.get<RoomRecord>(roomKey(code));
+    if (existing) {
+      throw new RoomError("That room code is already in use", 409);
+    }
+    return writeNewRoom(store, code);
+  }
+
   // Small retry loop for the unlikely event of a code collision.
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = generateRoomCode();
     const existing = await store.get<RoomRecord>(roomKey(code));
     if (existing) continue;
-
-    const now = Date.now();
-    const hostToken = randomUUID();
-    const record: RoomRecord = {
-      code,
-      hostToken,
-      createdAt: now,
-      expiresAt: now + ROOM_TTL_SECONDS * 1000,
-      consumed: false,
-      submissions: [],
-    };
-    await store.set(roomKey(code), record, ROOM_TTL_SECONDS);
-    return { roomCode: code, expiresAt: record.expiresAt, hostToken };
+    return writeNewRoom(store, code);
   }
   throw new RoomError("Could not allocate a room code, please try again", 500);
 }

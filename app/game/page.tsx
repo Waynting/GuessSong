@@ -8,10 +8,13 @@ import { canInstall, promptInstall } from "@/lib/pwa";
 import {
   parseGamePayload,
   countRoundsPlayed,
+  mergeRoomRoster,
   GAME_STORAGE_KEY,
   type GameMode,
   type GamePlayer as Player,
+  type BuzzerRoomHandle,
 } from "@/lib/game-session";
+import { BuzzerHostPanel, type BuzzerControls } from "@/components/buzzer-host-panel";
 import type { RoundHistoryEntry } from "@/lib/round-history";
 import { buildTasteCard } from "@/lib/taste-card";
 import {
@@ -61,6 +64,15 @@ export default function GamePage() {
   const [albumWinner, setAlbumWinner] = useState<string | null>(null);
   const [sourceWinner, setSourceWinner] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  // The clip is stopped mid-round but resumable. Set when someone buzzes in:
+  // the music gets out of the way so the room can hear the answer, and the host
+  // decides whether to let it run on.
+  const [clipPaused, setClipPaused] = useState(false);
+  // Mirrors the <audio> element itself, so the Stop/Resume toggle can't claim
+  // the music is running when it isn't. `clipPaused` says "held mid-round";
+  // this says "is sound coming out right now", and the clip ending on its own
+  // changes the second without the first.
+  const [audioPlaying, setAudioPlaying] = useState(false);
   const [scorePulse, setScorePulse] = useState<string | null>(null);
   const [pointsAwarded, setPointsAwarded] = useState(false);
   const [albumPointsAwarded, setAlbumPointsAwarded] = useState(false);
@@ -73,10 +85,31 @@ export default function GamePage() {
   const [playlistSource, setPlaylistSource] = useState<PlaylistSource>("own");
   const [mode, setMode] = useState<GameMode>("party");
   const [installCta, setInstallCta] = useState(false);
+  // Buzzer Mode only. Null in every other mode, which is also how the panel
+  // stays entirely out of the party/trial render path.
+  const [buzzerRoom, setBuzzerRoom] = useState<BuzzerRoomHandle | null>(null);
+  // Handed up by the panel so this page's existing Reveal / Next / scoring
+  // buttons drive the room, instead of the panel growing its own copies.
+  const [buzzerControls, setBuzzerControls] = useState<BuzzerControls | null>(null);
+  const peakPhonesRef = useRef(0);
+  // reveal()/nextTrack() are plain functions recreated each render; reading the
+  // controls through a ref keeps them from going stale without threading state
+  // through every call site.
+  const buzzerControlsRef = useRef<BuzzerControls | null>(null);
+  buzzerControlsRef.current = buzzerControls;
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Clip time is accounted in segments rather than from one start timestamp,
+  // because a pause splits the clip into several. Without this a 15s clip
+  // paused for 20s would end the moment it resumed — the deadline was wall
+  // clock, not playback.
+  const clipElapsedRef = useRef(0);
+  const clipSegmentStartRef = useRef(0);
+  // Read by the buzz handler, which must not re-subscribe on every phase change.
+  const phaseRef = useRef<Phase>("waiting");
+  phaseRef.current = phase;
   const loadingSkipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewCache = useRef<Record<string, string | null>>({});
   const gameStartTimeRef = useRef<number>(Date.now());
@@ -84,6 +117,43 @@ export default function GamePage() {
   const roundsPlayedRef = useRef(0);
 
   const isTrial = mode === "trial";
+
+  /**
+   * The clip transport, identical in "playing" and "guessing".
+   *
+   * It has to be the same set in both, because the phase flips underneath the
+   * host constantly — a buzz holds the clip, Resume puts it back to "playing",
+   * Stop drops it to "guessing", the clip running out does the same. When the
+   * two phases rendered different rows, buttons appeared and vanished as a
+   * side effect of that churn, and the host lost whichever control they were
+   * reaching for. One row, always the same three, until Reveal ends the round.
+   */
+  function clipControls() {
+    return (
+      <>
+        {audioPlaying ? (
+          <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={holdClip}>
+            Stop
+          </button>
+        ) : (
+          <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={resumeClip}>
+            Resume
+          </button>
+        )}
+        <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={replayClip}>
+          Replay
+        </button>
+        <button className="btn-primary" onClick={reveal}>
+          Reveal Answer →
+        </button>
+        {isTrial && (
+          <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={nextTrack}>
+            Skip →
+          </button>
+        )}
+      </>
+    );
+  }
 
   // Show the PWA install pitch at the high-intent moment: game over.
   useEffect(() => {
@@ -108,6 +178,7 @@ export default function GamePage() {
     setClipDuration(data.clipDuration);
     setPlaylistSource(data.playlistSource);
     setMode(data.mode);
+    setBuzzerRoom(data.buzzerRoom ?? null);
     gameStartTimeRef.current = Date.now();
   }, [router]);
 
@@ -115,7 +186,89 @@ export default function GamePage() {
     audioRef.current?.pause();
     if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    setClipPaused(false);
   }, []);
+
+  /**
+   * Start (or restart) the progress bar and the end-of-clip deadline for
+   * however much of the clip is left. Called once when a clip starts, and again
+   * on every resume.
+   */
+  const startClipTimers = useCallback(() => {
+    const totalMs = clipDuration * 1000;
+    clipSegmentStartRef.current = Date.now();
+    progressIntervalRef.current = setInterval(() => {
+      const elapsed = clipElapsedRef.current + (Date.now() - clipSegmentStartRef.current);
+      setProgress(Math.min((elapsed / totalMs) * 100, 100));
+    }, 80);
+    clipTimeoutRef.current = setTimeout(() => {
+      audioRef.current?.pause();
+      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+      // Bank the whole clip, so a later Resume knows the window is spent and
+      // plays on instead of re-arming a countdown that already finished.
+      clipElapsedRef.current = totalMs;
+      setProgress(100);
+      setPhase("guessing");
+    }, Math.max(0, totalMs - clipElapsedRef.current));
+  }, [clipDuration]);
+
+  /**
+   * Hold the music where it is, without ending the round. Someone buzzing in is
+   * the usual trigger: the music gets out of the way so the room can hear the
+   * answer, and a wrong answer can hand the rest of the clip back.
+   *
+   * Available for as long as the host is still running the round — through
+   * "playing" and on into "guessing", where the clip's own window has elapsed
+   * but the host may well still be playing the song while people think. Only
+   * revealing the answer ends it.
+   */
+  const pauseClip = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || audio.paused) return;
+    if (phaseRef.current !== "playing" && phaseRef.current !== "guessing") return;
+    audio.pause();
+    clipElapsedRef.current += Date.now() - clipSegmentStartRef.current;
+    if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
+    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    setClipPaused(true);
+  }, []);
+
+  const resumeClip = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio?.src) return;
+    audio.play().catch(() => {});
+    setClipPaused(false);
+    // Only re-arm the end-of-clip deadline if any of the clip is left. Past
+    // that the host is deliberately playing on, so there is nothing left to
+    // count down to and we stay put rather than snapping the phase around.
+    if (clipElapsedRef.current < clipDuration * 1000) {
+      startClipTimers();
+      setPhase("playing");
+    } else {
+      clipSegmentStartRef.current = Date.now();
+    }
+  }, [clipDuration, startClipTimers]);
+
+  /** Stop the music and ask the room. The clip stays resumable. */
+  const holdClip = useCallback(() => {
+    pauseClip();
+    setPhase("guessing");
+  }, [pauseClip]);
+
+  /** Start the clip over from the top. */
+  const replayClip = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio?.src) return;
+    if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
+    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    audio.currentTime = 0;
+    clipElapsedRef.current = 0;
+    audio.play().catch(() => {});
+    setClipPaused(false);
+    setProgress(0);
+    startClipTimers();
+    setPhase("playing");
+  }, [startClipTimers]);
 
   async function playClip() {
     const audio = audioRef.current;
@@ -162,25 +315,42 @@ export default function GamePage() {
     audio.play().catch(() => {});
     setPhase("playing");
     setProgress(0);
-
-    const startTime = Date.now();
-    progressIntervalRef.current = setInterval(() => {
-      const elapsed = (Date.now() - startTime) / 1000;
-      setProgress(Math.min((elapsed / clipDuration) * 100, 100));
-    }, 80);
-
-    clipTimeoutRef.current = setTimeout(() => {
-      audio.pause();
-      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-      setProgress(100);
-      setPhase("guessing");
-    }, clipDuration * 1000);
+    clipElapsedRef.current = 0;
+    setClipPaused(false);
+    startClipTimers();
   }
 
   function reveal() {
     stopClip();
+    // Deliberately does NOT resolve the room's round.
+    //
+    // Revealing is when the host *starts* scoring, not when they finish: the
+    // answer goes up, then they say who got it. The room only accepts a verdict
+    // while the round is "locked", so resolving here made the Correct and Wrong
+    // buttons on the next screen silent no-ops — the queue never advanced and
+    // the phones never heard the outcome. The round closes when the host
+    // actually calls it: correct(), reveal() on "No one", or next().
     setPhase("revealed");
   }
+
+  /**
+   * The scoreboard follows whoever actually joined the room.
+   *
+   * Two name spaces used to drift apart: names typed at setup (or pulled from
+   * Mixed Playlist contributors) fed the scoreboard, while names typed on each
+   * phone fed the room. awardPoint matches by name, so anyone whose phone name
+   * didn't exactly match their setup name scored nothing, silently.
+   *
+   * Additive only — a player who drops out keeps the points they earned.
+   *
+   * The merge itself lives in game-session so it can be unit-tested without a
+   * room; it also matches names case-insensitively, which this callback used to
+   * get wrong. The room refuses a second "amy" while "Amy" is connected, so the
+   * two spellings are one player reconnecting, not two rows on the scoreboard.
+   */
+  const mergeRoomPlayers = useCallback((names: string[]) => {
+    setPlayers((prev) => mergeRoomRoster(prev, names));
+  }, []);
 
   function awardPoint(playerName: string) {
     if (pointsAwarded) return;
@@ -235,12 +405,18 @@ export default function GamePage() {
       total_tracks: tracks.length,
       duration_seconds: Math.round((Date.now() - gameStartTimeRef.current) / 1000),
       playlist_source: playlistSource,
+      game_mode: mode,
       ...(isTrial ? { correct_count: players[0]?.score ?? 0 } : {}),
+      // The reach denominator: how many phones this game actually touched.
+      // Only meaningful in buzzer mode, so it's omitted elsewhere rather than
+      // reported as 0 and dragging the average down.
+      ...(buzzerRoom ? { peak_phone_count: peakPhonesRef.current } : {}),
     });
   }
 
   function nextTrack() {
     stopClip();
+    buzzerControlsRef.current?.next();
     trackEvent("round_completed", {
       round_index: currentIndex + 1,
       skipped: phase !== "revealed",
@@ -487,6 +663,15 @@ export default function GamePage() {
         html, body { overflow: hidden; max-width: 100vw; }
         body { background: #111; color: #f0f0f0; font-family: 'Outfit', sans-serif; }
 
+        /* One corner radius for every button, control and surface on this
+           screen. It used to be five values picked per element (8, 10, 12, 14,
+           20) plus 999px pills for the player picker, which read as sloppy the
+           moment two of them sat side by side — the picker sits directly under
+           the Correct/Wrong row, so the mismatch was unmissable.
+           Only the circular avatar (50%) and the 2px progress hairline are
+           exempt: those are shapes, not corner-radius choices. */
+        :root { --radius: 12px; }
+
         .game-layout {
           display: grid;
           grid-template-rows: 56px 1fr;
@@ -569,7 +754,7 @@ export default function GamePage() {
           max-width: 540px;
           background: rgba(20,20,20,0.92);
           border: 1px solid #2a2a2a;
-          border-radius: 20px;
+          border-radius: var(--radius);
           padding: 28px;
           backdrop-filter: blur(20px);
           box-shadow: 0 24px 80px rgba(0,0,0,0.6);
@@ -579,7 +764,7 @@ export default function GamePage() {
         .album-wrap {
           width: 100%;
           aspect-ratio: 1;
-          border-radius: 12px;
+          border-radius: var(--radius);
           overflow: hidden;
           position: relative;
           background: #1a1a1a;
@@ -653,7 +838,7 @@ export default function GamePage() {
           width: 100%;
           background: #1e1e1e;
           border: 1.5px solid #2a2a2a;
-          border-radius: 10px;
+          border-radius: var(--radius);
           padding: 14px 16px;
           font-size: 16px;
           font-family: 'Outfit', sans-serif;
@@ -680,7 +865,7 @@ export default function GamePage() {
           font-size: 15px;
           font-weight: 700;
           border: none;
-          border-radius: 10px;
+          border-radius: var(--radius);
           cursor: pointer;
           transition: background 0.15s, transform 0.1s;
         }
@@ -696,7 +881,7 @@ export default function GamePage() {
           font-size: 14px;
           font-weight: 500;
           border: 1.5px solid #2a2a2a;
-          border-radius: 10px;
+          border-radius: var(--radius);
           cursor: pointer;
           transition: all 0.15s;
           white-space: nowrap;
@@ -744,7 +929,7 @@ export default function GamePage() {
         .player-picker { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 14px; }
         .player-pick-btn {
           padding: 9px 18px;
-          border-radius: 999px;
+          border-radius: var(--radius);
           font-family: 'Outfit', sans-serif;
           font-size: 14px;
           font-weight: 600;
@@ -856,7 +1041,7 @@ export default function GamePage() {
           max-width: 480px;
           background: linear-gradient(135deg, rgba(29,185,84,0.15) 0%, rgba(29,185,84,0.05) 100%);
           border: 1px solid rgba(29,185,84,0.35);
-          border-radius: 14px;
+          border-radius: var(--radius);
           padding: 12px 20px;
           display: flex;
           align-items: center;
@@ -898,7 +1083,7 @@ export default function GamePage() {
           max-width: 480px;
           background: #161616;
           border: 1px solid #222;
-          border-radius: 14px;
+          border-radius: var(--radius);
           overflow-y: auto;
           overflow-x: hidden;
           flex: 1 1 0;
@@ -966,7 +1151,7 @@ export default function GamePage() {
           font-family: 'Outfit', sans-serif;
           font-size: 15px;
           font-weight: 700;
-          border-radius: 12px;
+          border-radius: var(--radius);
           cursor: pointer;
           transition: all 0.15s;
           border: none;
@@ -985,7 +1170,7 @@ export default function GamePage() {
           gap: 14px;
           background: rgba(29,185,84,0.06);
           border: 1px solid rgba(29,185,84,0.25);
-          border-radius: 12px;
+          border-radius: var(--radius);
           padding: 14px 16px;
           margin-bottom: 16px;
           flex-shrink: 0;
@@ -1004,7 +1189,7 @@ export default function GamePage() {
           font-size: 13px;
           font-weight: 700;
           border: none;
-          border-radius: 8px;
+          border-radius: var(--radius);
           cursor: pointer;
           transition: background 0.15s, transform 0.1s;
         }
@@ -1020,7 +1205,12 @@ export default function GamePage() {
         }
       `}</style>
 
-      <audio ref={audioRef} />
+      <audio
+        ref={audioRef}
+        onPlay={() => setAudioPlaying(true)}
+        onPause={() => setAudioPlaying(false)}
+        onEnded={() => setAudioPlaying(false)}
+      />
 
       <div className={`game-layout${isTrial ? " trial" : ""}`}>
         {/* TOP BAR */}
@@ -1055,7 +1245,7 @@ export default function GamePage() {
                 style={{
                   background: "none",
                   border: "1px solid #2a2a2a",
-                  borderRadius: "8px",
+                  borderRadius: "var(--radius)",
                   color: "#888",
                   fontSize: "12px",
                   fontFamily: "Outfit, sans-serif",
@@ -1075,7 +1265,7 @@ export default function GamePage() {
               style={{
                 background: "none",
                 border: "1px solid #2a2a2a",
-                borderRadius: "8px",
+                borderRadius: "var(--radius)",
                 color: "#555",
                 fontSize: "12px",
                 fontFamily: "Outfit, sans-serif",
@@ -1160,6 +1350,26 @@ export default function GamePage() {
               </div>
             )}
 
+            {/* Buzzer Mode: the room code, the queue, and the host's verdict
+                buttons. Rendered above the phase content so the host's eyes and
+                thumb stay in one place all game. Absent unless a room was
+                created at setup, so party/trial games are untouched. */}
+            {buzzerRoom && phase !== "finished" && (
+              <BuzzerHostPanel
+                roomCode={buzzerRoom.code}
+                hostToken={buzzerRoom.hostToken}
+                hostName={buzzerRoom.hostName}
+                roundIndex={currentIndex}
+                gamePhase={phase}
+                onControls={setBuzzerControls}
+                onBuzz={pauseClip}
+                onPlayersChange={mergeRoomPlayers}
+                onPeakPlayers={(n) => {
+                  peakPhonesRef.current = n;
+                }}
+              />
+            )}
+
             {/* Phase content */}
             {phase === "waiting" && (
               <div style={{ textAlign: "center" }}>
@@ -1200,19 +1410,11 @@ export default function GamePage() {
 
             {phase === "playing" && (
               <div>
-                <p className="listening-label" style={{ marginBottom: "12px" }}>Listening…</p>
+                <p className="listening-label" style={{ marginBottom: "12px" }}>
+                  {clipPaused ? "Paused — someone buzzed in" : "Listening…"}
+                </p>
                 <div className="btn-row" style={{ marginBottom: "8px" }}>
-                  <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={() => { stopClip(); setProgress(100); setPhase("guessing"); }}>
-                    Stop
-                  </button>
-                  <button className="btn-primary" onClick={reveal}>
-                    Reveal Answer →
-                  </button>
-                  {isTrial && (
-                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={nextTrack}>
-                      Skip →
-                    </button>
-                  )}
+                  {clipControls()}
                 </div>
                 <button
                   className="btn-ghost"
@@ -1230,29 +1432,7 @@ export default function GamePage() {
                 <p style={{ textAlign: "center", fontSize: "20px", fontWeight: 600, color: "#f0f0f0", marginBottom: "4px" }}>
                   What&apos;s the song?
                 </p>
-                <div className="btn-row">
-                  <button
-                    className="btn-ghost"
-                    style={{ flex: "0 0 auto" }}
-                    onClick={() => {
-                      const audio = audioRef.current;
-                      if (audio && audio.src) {
-                        audio.currentTime = 0;
-                        audio.play().catch(() => {});
-                      }
-                    }}
-                  >
-                    Replay
-                  </button>
-                  <button className="btn-primary" onClick={reveal}>
-                    Reveal Answer →
-                  </button>
-                  {isTrial && (
-                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={nextTrack}>
-                      Skip →
-                    </button>
-                  )}
-                </div>
+                <div className="btn-row">{clipControls()}</div>
                 {!albumHintShown && currentTrack?.albumImageUrl && (
                   <button className="btn-ghost" onClick={() => setAlbumHintShown(true)}>
                     Show Album Art Hint
@@ -1304,19 +1484,73 @@ export default function GamePage() {
                   </>
                 ) : (
                   <>
-                {/* Song scoring — 3 pts */}
-                <p className="who-scored">Who guessed the song? (+3 pts)</p>
-                {!pointsAwarded ? (
-                  <div className="player-picker" style={{ marginBottom: "14px" }}>
-                    {players.map((p) => (
-                      <button key={p.name} className="player-pick-btn" onClick={() => awardPoint(p.name)}>
-                        {p.name}
+                {/* Song scoring — 3 pts. In Buzzer Mode the room already knows
+                    who got there first, so listing every player again would be
+                    asking the host to re-answer a question the server settled.
+                    Falls back to the full picker when nobody buzzed. */}
+                {buzzerControls && buzzerControls.buzzes.length > 0 && !pointsAwarded ? (
+                  <>
+                    <p className="who-scored">
+                      {buzzerControls.buzzes[0].name} buzzed first —{" "}
+                      {(buzzerControls.buzzes[0].msSinceOpen / 1000).toFixed(2)}s
+                    </p>
+                    {/* Centred and content-sized, both of them. .btn-primary is
+                        flex:1 by default, so next to a content-sized "Wrong" the
+                        Correct button ballooned across the card and read as a
+                        different class of control than the verdict beside it. */}
+                    <div
+                      className="btn-row"
+                      style={{ marginBottom: "14px", justifyContent: "center" }}
+                    >
+                      <button
+                        className="btn-primary"
+                        style={{ flex: "0 0 auto", padding: "12px 16px" }}
+                        onClick={() => {
+                          awardPoint(buzzerControls.buzzes[0].name);
+                          buzzerControls.correct();
+                        }}
+                      >
+                        Correct +3
                       </button>
-                    ))}
-                    <button className="btn-ghost" onClick={() => setPointsAwarded(true)}>
-                      No one
-                    </button>
-                  </div>
+                      <button
+                        className="btn-ghost"
+                        onClick={() => buzzerControls.wrong()}
+                        style={{ flex: "0 0 auto" }}
+                      >
+                        {buzzerControls.buzzes.length > 1
+                          ? `Wrong → ${buzzerControls.buzzes[1].name}`
+                          : "Wrong"}
+                      </button>
+                    </div>
+                    {buzzerControls.buzzes.length > 1 && (
+                      <p style={{ textAlign: "center", fontSize: "12px", color: "#666", marginBottom: "14px" }}>
+                        Queue: {buzzerControls.buzzes.slice(1).map((b) => b.name).join(" → ")}
+                      </p>
+                    )}
+                  </>
+                ) : !pointsAwarded ? (
+                  <>
+                    <p className="who-scored">Who guessed the song? (+3 pts)</p>
+                    <div className="player-picker" style={{ marginBottom: "14px" }}>
+                      {players.map((p) => (
+                        <button key={p.name} className="player-pick-btn" onClick={() => awardPoint(p.name)}>
+                          {p.name}
+                        </button>
+                      ))}
+                      <button
+                        className="btn-ghost"
+                        onClick={() => {
+                          // Nobody scored, so the round is over — tell the room
+                          // now rather than leaving the phones showing a live
+                          // queue until the host gets to Next Track.
+                          buzzerControlsRef.current?.reveal();
+                          setPointsAwarded(true);
+                        }}
+                      >
+                        No one
+                      </button>
+                    </div>
+                  </>
                 ) : (
                   <p style={{ textAlign: "center", color: "#1DB954", fontSize: "13px", marginBottom: "14px" }}>
                     {roundWinner ? `+3 pts → ${roundWinner}` : "No one scored"}
