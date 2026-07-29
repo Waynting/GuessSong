@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import QRCode from "qrcode";
 import type { Track } from "@/types";
 import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolResponse } from "@/types/room";
 import { trackEvent } from "@/lib/analytics";
 import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
-import { buildGamePayload, GAME_STORAGE_KEY, type BuzzerRoomHandle } from "@/lib/game-session";
-import { createBuzzerRoom, isBuzzerConfigured } from "@/lib/buzzer-client";
-import { BuzzerLobby } from "@/components/buzzer-lobby";
+import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
+import { isBuzzerConfigured } from "@/lib/buzzer-client";
+import type { OpenRoom } from "@/lib/room-client";
+import { RoomPanel } from "@/components/room-panel";
 import { BUILTIN_PLAYLISTS, type BuiltinPlaylist } from "@/lib/builtin-playlists";
 import { InstallBanner } from "@/components/install-banner";
 import {
@@ -22,7 +22,6 @@ const CLIP_DURATIONS = [5, 10, 15, 20, 30];
 const SONG_COUNTS: (number | "all")[] = [10, 20, 30, 50, "all"];
 const MIXED_SAMPLE_COUNTS = [5, 8, 10, 12];
 const MIXED_MIN_CONTRIBUTORS = 2;
-const ROOM_POLL_INTERVAL_MS = 4000;
 
 type SetupMode = "single" | "mixed";
 type MixedSubMode = "room" | "phone";
@@ -74,29 +73,26 @@ export default function SetupPage() {
   // Buzzer Mode is opt-in per game, and only offered when the deployment has a
   // Worker to talk to — no point showing a toggle that can only fail.
   const [buzzerEnabled, setBuzzerEnabled] = useState(false);
-  // The room is opened from the lobby BEFORE the game starts, so players have
-  // time to scan in. Creating it on "Start Game" meant the QR first appeared
-  // once the music was already playing.
-  const [buzzerRoom, setBuzzerRoom] = useState<BuzzerRoomHandle | null>(null);
+  // One room, opened BEFORE the game starts so players have time to scan in,
+  // and carrying whichever backends the chosen modes need. Null until the host
+  // opens it, and never opened at all for the flows that need no phones.
+  const [openedRoom, setOpenedRoom] = useState<OpenRoom | null>(null);
   const [buzzerPlayerCount, setBuzzerPlayerCount] = useState(0);
   const [mixedContributions, setMixedContributions] = useState<MixedContribution[]>([]);
   const [sampledPerPlayer, setSampledPerPlayer] = useState(DEFAULT_SAMPLED_PER_PLAYER);
   const [mixedSubMode, setMixedSubMode] = useState<MixedSubMode>("room");
-  const [roomCode, setRoomCode] = useState<string | null>(null);
-  const [hostToken, setHostToken] = useState<string | null>(null);
-  const [joinUrl, setJoinUrl] = useState<string | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [roomSubmissions, setRoomSubmissions] = useState<RoomSubmissionSummary[]>([]);
-  const [roomCreating, setRoomCreating] = useState(false);
   const [roomStarting, setRoomStarting] = useState(false);
   const [roomError, setRoomError] = useState<string | null>(null);
-  const [linkCopied, setLinkCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
-  const roomPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const roomSubmissionTotalRef = useRef(0);
+
+  // What the one room has to do, given the modes picked above. Pass-the-phone
+  // with the buzzer off needs no room at all, and never opens one.
+  const collectsPlaylists = setupMode === "mixed" && mixedSubMode === "room";
+  const needsRoom = collectsPlaylists || buzzerEnabled;
 
   function addMixedContribution(c: MixedContribution) {
     setMixedContributions((prev) => [...prev, c]);
@@ -106,111 +102,36 @@ export default function SetupPage() {
     setMixedContributions((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  function stopRoomPolling() {
-    if (roomPollIntervalRef.current) {
-      clearInterval(roomPollIntervalRef.current);
-      roomPollIntervalRef.current = null;
-    }
-  }
-
-  async function pollRoomStatus(code: string) {
-    try {
-      const res = await fetch(`/api/room/${code}/status`);
-      const data = await res.json();
-      if (!res.ok) return;
-      setRoomSubmissions(data.submissions);
-      if (data.total > roomSubmissionTotalRef.current) {
-        roomSubmissionTotalRef.current = data.total;
-        trackEvent("room_submission_received", { total: data.total });
-      }
-    } catch {
-      // Transient network hiccup while polling — the next tick retries.
-    }
-  }
-
-  async function handleCreateRoom() {
-    setRoomError(null);
-    setRoomCreating(true);
-    try {
-      const res = await fetch("/api/room", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create room");
-
-      setRoomCode(data.roomCode);
-      setHostToken(data.hostToken);
-      roomSubmissionTotalRef.current = 0;
-      setRoomSubmissions([]);
-      trackEvent("room_created", {});
-
-      const url = `${window.location.origin}/j/${data.roomCode}`;
-      setJoinUrl(url);
-      const dataUrl = await QRCode.toDataURL(url, { margin: 1, width: 240 });
-      setQrDataUrl(dataUrl);
-
-      stopRoomPolling();
-      roomPollIntervalRef.current = setInterval(
-        () => pollRoomStatus(data.roomCode),
-        ROOM_POLL_INTERVAL_MS
-      );
-    } catch (e: unknown) {
-      setRoomError(e instanceof Error ? e.message : "Something went wrong");
-    } finally {
-      setRoomCreating(false);
-    }
-  }
-
   /**
-   * Opens a buzzer room for the flows that have no lobby (mixed mode). The host
-   * name comes from the same localStorage key the lobby writes, so a host keeps
-   * one identity across both flows instead of being "Host" in one and themselves
-   * in the other.
+   * Discard a room whose jobs no longer match the chosen modes. Switching from
+   * Mixed·QR to Single after opening a room would otherwise leave a mailbox
+   * handle around that the new mode never reads, and — worse in the other
+   * direction — a buzzer-only room in a mixed game whose code has no mailbox
+   * behind it, so every scan lands on a form that cannot submit.
    */
-  async function openBuzzerRoom(): Promise<BuzzerRoomHandle> {
-    const created = await createBuzzerRoom();
-    trackEvent("buzz_room_created", {});
-    const hostName =
-      window.localStorage.getItem("guesssong_host_name")?.trim() || "Host";
-    return { ...created, hostName };
-  }
-
-  async function handleShareJoinLink() {
-    if (!joinUrl) return;
-    if (typeof navigator.share === "function") {
-      try {
-        await navigator.share({ url: joinUrl, title: `Join room ${roomCode} on GuessSong` });
-        return;
-      } catch (e) {
-        // User closed the share sheet — not an error, fall through to copy.
-        if (e instanceof DOMException && e.name === "AbortError") return;
-      }
-    }
-    try {
-      await navigator.clipboard.writeText(joinUrl);
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
-    } catch {
-      // Clipboard unavailable — the QR code and visible code remain usable.
-    }
+  function resetRoom() {
+    setOpenedRoom(null);
+    setRoomSubmissions([]);
+    setBuzzerPlayerCount(0);
+    setRoomError(null);
   }
 
   async function handleRoomStart() {
-    if (!roomCode || !hostToken) return;
+    if (!openedRoom?.playlistHostToken) return;
     setRoomError(null);
     setRoomStarting(true);
     try {
-      const res = await fetch(`/api/room/${roomCode}/pool?sampledPerPlayer=${sampledPerPlayer}`, {
-        headers: { "x-host-token": hostToken },
-      });
+      const res = await fetch(
+        `/api/room/${openedRoom.code}/pool?sampledPerPlayer=${sampledPerPlayer}`,
+        { headers: { "x-host-token": openedRoom.playlistHostToken } }
+      );
       const data: RoomPoolResponse & { error?: string } = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to start game");
-      stopRoomPolling();
 
-      // Opened here rather than from a lobby: mixed mode's screen already has a
-      // room card, and a second one under it read as a mistake. A separate code
-      // from the playlist room on purpose — every player already saw that one,
-      // and whoever POSTs it to the Worker first is handed the host token, so
-      // reusing it would let any guest take over the buzzers.
-      const room = buzzerEnabled ? await openBuzzerRoom() : undefined;
+      // Already open, and sharing this room's single code — the host claimed the
+      // Durable Object before the code was ever shown, so there was nothing for
+      // a guest to race for. See lib/room-client.ts.
+      const room = openedRoom.buzzer;
 
       const payload = buildGamePayload({
         tracks: data.tracks,
@@ -251,7 +172,6 @@ export default function SetupPage() {
     // Prefill from the share target redirect (/share → /?playlist=...).
     const shared = new URLSearchParams(window.location.search).get("playlist");
     if (shared) setPlaylistUrl(shared);
-    return () => stopRoomPolling();
   }, []);
 
   const isValidSpotifyUrl = playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
@@ -298,9 +218,9 @@ export default function SetupPage() {
       const shuffled = [...data.tracks].sort(() => Math.random() - 0.5);
       const limited = songCount === "all" ? shuffled : shuffled.slice(0, songCount);
 
-      // Opened from the lobby before we got here, so players have already had
-      // time to scan in. `undefined` when Buzzer Mode is off.
-      const room = buzzerEnabled ? buzzerRoom ?? undefined : undefined;
+      // Opened from the room step before we got here, so players have already
+      // had time to scan in. `undefined` when Buzzer Mode is off.
+      const room = buzzerEnabled ? openedRoom?.buzzer : undefined;
 
       const payload = buildGamePayload({
         tracks: limited,
@@ -374,7 +294,9 @@ export default function SetupPage() {
       const pooled = poolContributions(contributions, sampledPerPlayer);
       const overlapCount = pooled.filter((t) => t.contributors.length > 1).length;
 
-      const room = buzzerEnabled ? await openBuzzerRoom() : undefined;
+      // Pass-the-phone collects its players here on this screen, so the only
+      // reason it opens a room at all is the buzzer.
+      const room = buzzerEnabled ? openedRoom?.buzzer : undefined;
 
       const payload = buildGamePayload({
         tracks: pooled,
@@ -822,13 +744,19 @@ export default function SetupPage() {
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 <button
                   className={`pill${setupMode === "single" ? " active" : ""}`}
-                  onClick={() => setSetupMode("single")}
+                  onClick={() => {
+                    setSetupMode("single");
+                    resetRoom();
+                  }}
                 >
                   Single Playlist
                 </button>
                 <button
                   className={`pill${setupMode === "mixed" ? " active" : ""}`}
-                  onClick={() => setSetupMode("mixed")}
+                  onClick={() => {
+                    setSetupMode("mixed");
+                    resetRoom();
+                  }}
                 >
                   Mixed Playlist 🔀
                 </button>
@@ -894,20 +822,29 @@ export default function SetupPage() {
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                     <button
                       className={`pill${mixedSubMode === "room" ? " active" : ""}`}
-                      onClick={() => setMixedSubMode("room")}
+                      onClick={() => {
+                        setMixedSubMode("room");
+                        resetRoom();
+                      }}
                     >
                       QR Code
                     </button>
                     <button
                       className={`pill${mixedSubMode === "phone" ? " active" : ""}`}
-                      onClick={() => setMixedSubMode("phone")}
+                      onClick={() => {
+                        setMixedSubMode("phone");
+                        resetRoom();
+                      }}
                     >
                       Pass This Phone
                     </button>
                   </div>
                 </div>
 
-                {mixedSubMode === "phone" ? (
+                {/* Pass-the-phone collects playlists right here. The QR flow
+                    collects them in the room step at the bottom instead, so
+                    there is nothing to show for it this far up. */}
+                {mixedSubMode === "phone" && (
                   <div>
                     <p className="section-label">Collect Playlists</p>
                     <MixedPlaylistCollector
@@ -915,104 +852,6 @@ export default function SetupPage() {
                       onAdd={addMixedContribution}
                       onRemove={removeMixedContribution}
                     />
-                  </div>
-                ) : (
-                  <div>
-                    <p className="section-label">Room</p>
-                    {!roomCode ? (
-                      <div className="card" style={{ padding: "24px", textAlign: "center" }}>
-                        <p style={{ fontSize: "13px", color: "#777", marginBottom: "16px" }}>
-                          Generate a QR code — players scan it to add their own playlist from
-                          their own phone.
-                        </p>
-                        <button
-                          className="start-btn"
-                          onClick={handleCreateRoom}
-                          disabled={roomCreating}
-                        >
-                          {roomCreating ? "Creating Room..." : "Create Room"}
-                        </button>
-                        {roomError && (
-                          <p style={{ marginTop: "10px", fontSize: "12px", color: "#fca5a5" }}>
-                            {roomError}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="card" style={{ padding: "24px", textAlign: "center" }}>
-                        <p
-                          style={{
-                            fontFamily: "'Bebas Neue', sans-serif",
-                            fontSize: "36px",
-                            letterSpacing: "0.12em",
-                            color: "#1DB954",
-                            marginBottom: "12px",
-                          }}
-                        >
-                          {roomCode}
-                        </p>
-                        {qrDataUrl && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={qrDataUrl}
-                            alt={`QR code to join room ${roomCode}`}
-                            style={{
-                              width: "180px",
-                              height: "180px",
-                              margin: "0 auto 12px",
-                              borderRadius: "8px",
-                            }}
-                          />
-                        )}
-                        <button
-                          className="add-player-btn"
-                          onClick={handleShareJoinLink}
-                          style={{ marginBottom: "14px" }}
-                        >
-                          {linkCopied ? "✓ Link copied" : "Share Join Link"}
-                        </button>
-                        <p style={{ fontSize: "12px", color: "#666", marginBottom: "14px" }}>
-                          Can&apos;t scan? Send that link instead — it&apos;s the same thing.
-                        </p>
-                        <p style={{ fontSize: "12px", color: "#666", marginBottom: "14px" }}>
-                          {roomSubmissions.length} player
-                          {roomSubmissions.length === 1 ? "" : "s"} joined
-                        </p>
-                        {roomSubmissions.length > 0 && (
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "8px",
-                              textAlign: "left",
-                            }}
-                          >
-                            {roomSubmissions.map((s) => (
-                              <div
-                                key={s.playerName}
-                                style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  background: "#1a1a1a",
-                                  border: "1px solid #2a2a2a",
-                                  borderRadius: "8px",
-                                  padding: "10px 14px",
-                                  fontSize: "14px",
-                                }}
-                              >
-                                <span>{s.playerName}</span>
-                                <span style={{ color: "#666" }}>{s.trackCount} tracks</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {roomError && (
-                          <p style={{ marginTop: "12px", fontSize: "12px", color: "#fca5a5" }}>
-                            {roomError}
-                          </p>
-                        )}
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -1049,37 +888,19 @@ export default function SetupPage() {
                     off" or "tap to turn it off". */}
                 <button
                   className={`pill${buzzerEnabled ? " active" : ""}`}
-                  onClick={() => setBuzzerEnabled((v) => !v)}
+                  onClick={() => {
+                    setBuzzerEnabled((v) => !v);
+                    resetRoom();
+                  }}
                   aria-pressed={buzzerEnabled}
                 >
                   {buzzerEnabled ? "✓ On" : "Turn on"}
                 </button>
-                <p style={{ marginTop: "8px", marginBottom: "12px", fontSize: "12px", color: "#666" }}>
+                <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
                   {buzzerEnabled
                     ? "Everyone scans in and gets a buzzer on their phone. The server decides who was first, so you can stop refereeing and actually play."
                     : "Turn this on to give every player a buzzer on their phone."}
                 </p>
-                {/* Single-playlist mode gets the full lobby, because nothing else
-                    on this screen collects people. Mixed mode already has a room
-                    card above with its own code and QR, and stacking a second one
-                    underneath reads as a mistake — so there it stays a plain
-                    toggle and the buzzer room opens with the game. Players pick
-                    up its QR from the host panel on the next screen, phones still
-                    in hand from submitting playlists. */}
-                {buzzerEnabled && setupMode === "single" && (
-                  <BuzzerLobby
-                    room={buzzerRoom}
-                    onRoomCreated={setBuzzerRoom}
-                    onPlayerCountChange={setBuzzerPlayerCount}
-                  />
-                )}
-                {buzzerEnabled && setupMode === "mixed" && (
-                  <p style={{ fontSize: "12px", color: "#666" }}>
-                    The buzzer room opens when the game starts, with its own code —
-                    it has to outlive the playlist room above. Its QR is on the game
-                    screen.
-                  </p>
-                )}
               </div>
             )}
 
@@ -1159,27 +980,51 @@ export default function SetupPage() {
                   </div>
             )}
 
+            {/* The room — one code, one QR, doing whichever jobs the settings
+                above ask for. Deliberately last: the code is what turns a
+                configured game into a gathering, and printing it before the
+                clip length was even picked meant people scanned into a room
+                whose settings were still moving. Pass-the-phone with the
+                buzzer off needs no room and shows nothing here. */}
+            {needsRoom && (
+              <div>
+                <p className="section-label">Room</p>
+                <RoomPanel
+                  collectsPlaylists={collectsPlaylists}
+                  buzzer={buzzerEnabled}
+                  room={openedRoom}
+                  onOpened={setOpenedRoom}
+                  onPhoneCountChange={setBuzzerPlayerCount}
+                  onSubmissionsChange={setRoomSubmissions}
+                />
+                {roomError && (
+                  <p style={{ marginTop: "10px", fontSize: "12px", color: "#fca5a5" }}>
+                    {roomError}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Start Button */}
             <div>
               {(() => {
                 const isMixedPhone = setupMode === "mixed" && mixedSubMode === "phone";
-                const isMixedRoom = setupMode === "mixed" && mixedSubMode === "room";
+                const isMixedRoom = collectsPlaylists;
                 const phoneShort = MIXED_MIN_CONTRIBUTORS - mixedContributions.length;
                 const roomShort = MIXED_MIN_CONTRIBUTORS - roomSubmissions.length;
                 const busy = loading || roomStarting;
-                // Buzzer Mode needs its room open before the game starts. Not a
-                // minimum player count though: latecomers can scan in mid-game,
-                // and blocking on an arbitrary number would strand a host whose
-                // friends are still finding the QR.
-                // Only single-playlist mode has a lobby to open the room from.
-                // Mixed mode opens it as part of starting, so there is nothing
-                // to wait for.
-                const buzzerNotReady = buzzerEnabled && setupMode === "single" && !buzzerRoom;
+                // Every flow that needs phones needs its one room open first.
+                // Not a minimum player count for the buzzer though: latecomers
+                // can scan in mid-game, and blocking on an arbitrary number
+                // would strand a host whose friends are still finding the QR.
+                // Mixed·QR is the exception — its pool is built from what the
+                // mailbox has when Start is tapped, so it does need people.
+                const roomNotReady = needsRoom && !openedRoom;
                 const disabled =
                   busy ||
-                  buzzerNotReady ||
+                  roomNotReady ||
                   (isMixedPhone && mixedContributions.length < MIXED_MIN_CONTRIBUTORS) ||
-                  (isMixedRoom && (!roomCode || roomSubmissions.length < MIXED_MIN_CONTRIBUTORS));
+                  (isMixedRoom && roomSubmissions.length < MIXED_MIN_CONTRIBUTORS);
                 const onClick = setupMode === "single"
                   ? handleStart
                   : isMixedPhone
@@ -1197,12 +1042,10 @@ export default function SetupPage() {
                   );
                 } else if (isMixedPhone && phoneShort > 0) {
                   label = `Add ${phoneShort} more player${phoneShort === 1 ? "" : "s"} to start`;
-                } else if (isMixedRoom && !roomCode) {
-                  label = "Create a room first";
+                } else if (roomNotReady) {
+                  label = "Open the room first";
                 } else if (isMixedRoom && roomShort > 0) {
                   label = `Waiting for ${roomShort} more player${roomShort === 1 ? "" : "s"}`;
-                } else if (buzzerNotReady) {
-                  label = "Open the buzzer room first";
                 } else if (buzzerEnabled) {
                   label =
                     buzzerPlayerCount > 0
