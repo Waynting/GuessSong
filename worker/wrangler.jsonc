@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "guesssong-buzzer",
+  "main": "src/index.ts",
+
+  // 2026-04-07 is the floor for `web_socket_auto_reply_to_close`, which makes
+  // the runtime answer close frames for hibernated objects without waking them.
+  // Waking a DO just to say goodbye is the single easiest way to turn a free
+  // room into a billed one.
+  "compatibility_date": "2026-07-01",
+
+  "observability": { "enabled": true },
+
+  "durable_objects": {
+    "bindings": [{ "name": "BUZZER_ROOM", "class_name": "BuzzerRoom" }]
+  },
+
+  // SQLite-backed classes are the only kind available on the Workers Free plan,
+  // and they're what the KV-style `ctx.storage.put/get` API runs on top of here.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BuzzerRoom"] }],
+
+  "vars": {
+    // Browsers send Origin on the WebSocket upgrade; anything not on this list
+    // is refused at the Worker before it can reach (and therefore instantiate)
+    // a Durable Object. Override per-environment with `wrangler deploy --var`.
+    "ALLOWED_ORIGINS": "https://www.guessong.app,https://guessong.app,http://127.0.0.1:8000"
+  }
+}

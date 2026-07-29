@@ -8,6 +8,9 @@
  */
 
 import type { ShareOutcome } from "@/lib/result-image";
+// Type-only, so the analytics <-> game-session cycle is erased at compile time
+// and never becomes a runtime import cycle.
+import type { GameMode } from "@/lib/game-session";
 
 export type PlaylistSource = "own" | "builtin" | "mixed";
 export type ShareType = "track" | "album" | "artist" | "unknown";
@@ -33,6 +36,13 @@ export type AnalyticsEvent =
         clip_duration: number;
         song_count?: number;
         playlist_source: PlaylistSource;
+        /**
+         * Optional so every existing caller keeps compiling. Without it the
+         * buzzer funnel can't be separated from the party funnel, and the
+         * round-by-round drop-off curves of the two modes get averaged into
+         * one meaningless line.
+         */
+        game_mode?: GameMode;
       };
     }
   | {
@@ -51,6 +61,9 @@ export type AnalyticsEvent =
         duration_seconds: number;
         playlist_source: PlaylistSource;
         correct_count?: number; // trial mode only
+        game_mode?: GameMode;
+        /** Buzzer mode only: most phones connected at once. The reach denominator. */
+        peak_phone_count?: number;
       };
     }
   | {
@@ -81,6 +94,50 @@ export type AnalyticsEvent =
   | {
       name: "room_started";
       params: { contributor_count: number; unique_tracks: number };
+    }
+  /*
+   * Buzzer Mode events. These exist to answer five questions that no amount of
+   * watching one's own parties can answer, because they need n=4000 rather than
+   * n=1:
+   *
+   *   1. How many phones actually join a game?        buzz_player_joined
+   *   2. Which round do people stop pressing?         buzz_received.round_index
+   *   3. Is the clip the right length?                buzz_received.ms_since_round_open
+   *      (first-buzz latency: if everyone buzzes at 2s, 15s clips are too long)
+   *   4. Are the songs too hard?                      buzz_round_resolved.verdict
+   *   5. How often does nobody know it?               buzz_round_resolved.buzz_count === 0
+   *
+   * Drop any of these and Buzzer Mode ships as a feature rather than as an
+   * instrument, which was the whole reason for choosing this scope.
+   */
+  | {
+      name: "buzz_room_created";
+      params: Record<string, never>;
+    }
+  | {
+      name: "buzz_player_joined";
+      /** Running count of distinct phones in the room, not a per-join id. */
+      params: { player_count: number };
+    }
+  | {
+      name: "buzz_received";
+      params: {
+        round_index: number; // 1-based, matches round_completed
+        /** 1 = won the round. Higher values are the queue behind the winner. */
+        buzz_order: number;
+        /** Reaction time as the room measured it, not as the phone claims. */
+        ms_since_round_open: number;
+      };
+    }
+  | {
+      name: "buzz_round_resolved";
+      params: {
+        round_index: number;
+        /** "revealed" means the host gave up on it — nobody got there. */
+        verdict: "correct" | "wrong" | "revealed";
+        /** 0 means the round opened and nobody pressed at all. */
+        buzz_count: number;
+      };
     }
   | {
       /**

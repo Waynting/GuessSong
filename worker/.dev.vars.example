@@ -1,0 +1,13 @@
+# Copy to worker/.dev.vars (gitignored) for local development.
+# wrangler loads .dev.vars automatically and it overrides `vars` in wrangler.jsonc,
+# so your LAN IP never has to be committed.
+#
+# Testing on real phones means serving Next.js from your machine's LAN IP, and
+# the browser sends THAT as the Origin on the WebSocket upgrade — 127.0.0.1 in
+# the committed allow-list won't match it. Find your IP with:
+#
+#   ipconfig getifaddr en0        # macOS Wi-Fi
+#
+# then list every origin the phones will actually use (scheme + host + port):
+
+ALLOWED_ORIGINS=http://127.0.0.1:8000,http://localhost:8000,http://10.107.0.98:8000

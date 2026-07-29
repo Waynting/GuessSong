@@ -8,6 +8,7 @@ import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolRe
 import { trackEvent } from "@/lib/analytics";
 import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
 import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
+import { createBuzzerRoom, isBuzzerConfigured } from "@/lib/buzzer-client";
 import { BUILTIN_PLAYLISTS, type BuiltinPlaylist } from "@/lib/builtin-playlists";
 import { InstallBanner } from "@/components/install-banner";
 import {
@@ -69,6 +70,9 @@ export default function SetupPage() {
   const [players, setPlayers] = useState<string[]>(["", ""]);
   const [clipDuration, setClipDuration] = useState(15);
   const [songCount, setSongCount] = useState<number | "all">(20);
+  // Buzzer Mode is opt-in per game, and only offered when the deployment has a
+  // Worker to talk to — no point showing a toggle that can only fail.
+  const [buzzerEnabled, setBuzzerEnabled] = useState(false);
   const [mixedContributions, setMixedContributions] = useState<MixedContribution[]>([]);
   const [sampledPerPlayer, setSampledPerPlayer] = useState(DEFAULT_SAMPLED_PER_PLAYER);
   const [mixedSubMode, setMixedSubMode] = useState<MixedSubMode>("room");
@@ -181,6 +185,12 @@ export default function SetupPage() {
       if (!res.ok) throw new Error(data.error || "Failed to start game");
       stopRoomPolling();
 
+      // A fresh code, deliberately not the playlist room's. Every player already
+      // saw that one, and whoever POSTs it to the Worker first is handed the
+      // host token — so reusing it would let any guest take over the buzzers.
+      const room = buzzerEnabled ? await createBuzzerRoom() : undefined;
+      if (room) trackEvent("buzz_room_created", {});
+
       const payload = buildGamePayload({
         tracks: data.tracks,
         players: data.players.map((name) => ({ name, score: 0 })),
@@ -188,11 +198,12 @@ export default function SetupPage() {
         clipDuration,
         totalTracks: data.tracks.length,
         playlistSource: "mixed",
-        mode: "party",
+        mode: room ? "buzzer" : "party",
         mixedPlaylistMeta: {
           contributorNames: data.players,
           sampledPerPlayer: data.sampledPerPlayer,
         },
+        ...(room ? { buzzerRoom: room } : {}),
       });
       sessionStorage.setItem(GAME_STORAGE_KEY, JSON.stringify(payload));
       trackEvent("game_started", {
@@ -200,6 +211,7 @@ export default function SetupPage() {
         clip_duration: clipDuration,
         song_count: data.tracks.length,
         playlist_source: "mixed",
+        game_mode: room ? "buzzer" : "party",
       });
       trackEvent("room_started", {
         contributor_count: data.players.length,
@@ -261,6 +273,13 @@ export default function SetupPage() {
       const shuffled = [...data.tracks].sort(() => Math.random() - 0.5);
       const limited = songCount === "all" ? shuffled : shuffled.slice(0, songCount);
 
+      // Open the Cloudflare room before navigating. If the host asked for
+      // buzzers and we can't get one, stop here — dropping silently into a
+      // normal party game would strand everyone waiting for a code that never
+      // appears on screen.
+      const room = buzzerEnabled ? await createBuzzerRoom() : undefined;
+      if (room) trackEvent("buzz_room_created", {});
+
       const payload = buildGamePayload({
         tracks: limited,
         players: validPlayers.map((name) => ({ name, score: 0 })),
@@ -268,7 +287,8 @@ export default function SetupPage() {
         clipDuration,
         totalTracks: data.totalTracks,
         playlistSource: "own",
-        mode: "party",
+        mode: room ? "buzzer" : "party",
+        ...(room ? { buzzerRoom: room } : {}),
       });
       sessionStorage.setItem(GAME_STORAGE_KEY, JSON.stringify(payload));
       trackEvent("game_started", {
@@ -276,6 +296,7 @@ export default function SetupPage() {
         clip_duration: clipDuration,
         song_count: limited.length,
         playlist_source: "own",
+        game_mode: room ? "buzzer" : "party",
       });
       router.push("/game");
     } catch (e: unknown) {
@@ -323,6 +344,9 @@ export default function SetupPage() {
       const pooled = poolContributions(contributions, sampledPerPlayer);
       const overlapCount = pooled.filter((t) => t.contributors.length > 1).length;
 
+      const room = buzzerEnabled ? await createBuzzerRoom() : undefined;
+      if (room) trackEvent("buzz_room_created", {});
+
       const payload = buildGamePayload({
         tracks: pooled,
         players: mixedContributions.map((c) => ({ name: c.name, score: 0 })),
@@ -330,11 +354,12 @@ export default function SetupPage() {
         clipDuration,
         totalTracks: pooled.length,
         playlistSource: "mixed",
-        mode: "party",
+        mode: room ? "buzzer" : "party",
         mixedPlaylistMeta: {
           contributorNames: mixedContributions.map((c) => c.name),
           sampledPerPlayer,
         },
+        ...(room ? { buzzerRoom: room } : {}),
       });
       sessionStorage.setItem(GAME_STORAGE_KEY, JSON.stringify(payload));
       trackEvent("game_started", {
@@ -342,6 +367,7 @@ export default function SetupPage() {
         clip_duration: clipDuration,
         song_count: pooled.length,
         playlist_source: "mixed",
+        game_mode: room ? "buzzer" : "party",
       });
       trackEvent("mixed_pool_built", {
         contributor_count: mixedContributions.length,
@@ -1047,6 +1073,33 @@ export default function SetupPage() {
                 <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
                   How many tracks to play from the shuffled playlist.
                 </p>
+              </div>
+            )}
+
+            {/* Buzzer Mode — the reason the host gets to play too. Hidden
+                entirely when NEXT_PUBLIC_BUZZER_WS_URL is unset, because
+                without a Worker there is no room to open. */}
+            {isBuzzerConfigured() && (
+              <div>
+                <p className="section-label">Buzzer Mode</p>
+                <button
+                  className={`pill${buzzerEnabled ? " active" : ""}`}
+                  onClick={() => setBuzzerEnabled((v) => !v)}
+                  aria-pressed={buzzerEnabled}
+                >
+                  {buzzerEnabled ? "✓ Phones buzz in" : "Off"}
+                </button>
+                <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                  {buzzerEnabled
+                    ? "Everyone scans a code and gets a buzzer on their phone. The server decides who was first, so you can stop refereeing and actually play."
+                    : "Turn this on to give every player a buzzer on their phone."}
+                </p>
+                {buzzerEnabled && setupMode === "mixed" && (
+                  <p style={{ marginTop: "6px", fontSize: "12px", color: "#8a6d3b" }}>
+                    Heads up: the buzzer room gets its own code, separate from the playlist
+                    room. Players scan once more when the game starts.
+                  </p>
+                )}
               </div>
             )}
 

@@ -11,7 +11,9 @@ import {
   GAME_STORAGE_KEY,
   type GameMode,
   type GamePlayer as Player,
+  type BuzzerRoomHandle,
 } from "@/lib/game-session";
+import { BuzzerHostPanel } from "@/components/buzzer-host-panel";
 import type { RoundHistoryEntry } from "@/lib/round-history";
 import { buildTasteCard } from "@/lib/taste-card";
 import {
@@ -73,6 +75,10 @@ export default function GamePage() {
   const [playlistSource, setPlaylistSource] = useState<PlaylistSource>("own");
   const [mode, setMode] = useState<GameMode>("party");
   const [installCta, setInstallCta] = useState(false);
+  // Buzzer Mode only. Null in every other mode, which is also how the panel
+  // stays entirely out of the party/trial render path.
+  const [buzzerRoom, setBuzzerRoom] = useState<BuzzerRoomHandle | null>(null);
+  const peakPhonesRef = useRef(0);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -108,6 +114,7 @@ export default function GamePage() {
     setClipDuration(data.clipDuration);
     setPlaylistSource(data.playlistSource);
     setMode(data.mode);
+    setBuzzerRoom(data.buzzerRoom ?? null);
     gameStartTimeRef.current = Date.now();
   }, [router]);
 
@@ -235,7 +242,12 @@ export default function GamePage() {
       total_tracks: tracks.length,
       duration_seconds: Math.round((Date.now() - gameStartTimeRef.current) / 1000),
       playlist_source: playlistSource,
+      game_mode: mode,
       ...(isTrial ? { correct_count: players[0]?.score ?? 0 } : {}),
+      // The reach denominator: how many phones this game actually touched.
+      // Only meaningful in buzzer mode, so it's omitted elsewhere rather than
+      // reported as 0 and dragging the average down.
+      ...(buzzerRoom ? { peak_phone_count: peakPhonesRef.current } : {}),
     });
   }
 
@@ -1158,6 +1170,23 @@ export default function GamePage() {
               <div className="progress-wrap">
                 <div className="progress-fill" style={{ width: `${progress}%` }} />
               </div>
+            )}
+
+            {/* Buzzer Mode: the room code, the queue, and the host's verdict
+                buttons. Rendered above the phase content so the host's eyes and
+                thumb stay in one place all game. Absent unless a room was
+                created at setup, so party/trial games are untouched. */}
+            {buzzerRoom && phase !== "finished" && (
+              <BuzzerHostPanel
+                roomCode={buzzerRoom.code}
+                hostToken={buzzerRoom.hostToken}
+                roundIndex={currentIndex}
+                gamePhase={phase}
+                onCorrect={awardPoint}
+                onPeakPlayers={(n) => {
+                  peakPhonesRef.current = n;
+                }}
+              />
             )}
 
             {/* Phase content */}

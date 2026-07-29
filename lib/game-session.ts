@@ -10,7 +10,7 @@ import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
 
 export const GAME_STORAGE_KEY = "guesssong_game";
 
-export type GameMode = "party" | "trial";
+export type GameMode = "party" | "trial" | "buzzer";
 
 export interface GamePlayer {
   name: string;
@@ -23,6 +23,17 @@ export interface MixedPlaylistMeta {
   sampledPerPlayer: number;
 }
 
+/**
+ * Buzzer Mode's handle on its Cloudflare room. Present only when mode is
+ * "buzzer". The host token is a bearer secret for host-only actions (opening a
+ * round, awarding points), so it lives in the host's own sessionStorage and is
+ * never rendered, shared, or put in the join URL players scan.
+ */
+export interface BuzzerRoomHandle {
+  code: string;
+  hostToken: string;
+}
+
 export interface GamePayload {
   tracks: Track[];
   players: GamePlayer[];
@@ -32,12 +43,26 @@ export interface GamePayload {
   playlistSource: PlaylistSource;
   mode: GameMode;
   mixedPlaylistMeta?: MixedPlaylistMeta;
+  buzzerRoom?: BuzzerRoomHandle;
 }
 
 const PLAYLIST_SOURCES: PlaylistSource[] = ["own", "builtin", "mixed"];
 
 function isPlaylistSource(value: unknown): value is PlaylistSource {
   return typeof value === "string" && (PLAYLIST_SOURCES as string[]).includes(value);
+}
+
+const GAME_MODES: GameMode[] = ["party", "trial", "buzzer"];
+
+/**
+ * Allow-list, not a ternary. The previous `d.mode === "trial" ? "trial" : "party"`
+ * silently rewrote every unrecognised mode to "party", so adding a member to
+ * GameMode changed behaviour without failing anywhere — a sessionStorage
+ * round-trip would quietly downgrade a buzzer game into a party game. Extend
+ * GAME_MODES whenever GameMode grows and this stays honest.
+ */
+function isGameMode(value: unknown): value is GameMode {
+  return typeof value === "string" && (GAME_MODES as string[]).includes(value);
 }
 
 /**
@@ -59,6 +84,7 @@ export interface BuildGamePayloadInput {
   playlistSource: PlaylistSource;
   mode: GameMode;
   mixedPlaylistMeta?: MixedPlaylistMeta;
+  buzzerRoom?: BuzzerRoomHandle;
 }
 
 export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
@@ -71,6 +97,7 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
     playlistSource: input.playlistSource,
     mode: input.mode,
     ...(input.mixedPlaylistMeta ? { mixedPlaylistMeta: input.mixedPlaylistMeta } : {}),
+    ...(input.buzzerRoom ? { buzzerRoom: input.buzzerRoom } : {}),
   };
 }
 
@@ -115,6 +142,15 @@ export function parseGamePayload(raw: string): GamePayload | null {
         }
       : undefined;
 
+  const rawRoom = d.buzzerRoom as Record<string, unknown> | undefined;
+  const buzzerRoom: BuzzerRoomHandle | undefined =
+    rawRoom &&
+    typeof rawRoom === "object" &&
+    typeof rawRoom.code === "string" &&
+    typeof rawRoom.hostToken === "string"
+      ? { code: rawRoom.code, hostToken: rawRoom.hostToken }
+      : undefined;
+
   return {
     tracks,
     players,
@@ -122,7 +158,8 @@ export function parseGamePayload(raw: string): GamePayload | null {
     clipDuration: typeof d.clipDuration === "number" ? d.clipDuration : 15,
     totalTracks: typeof d.totalTracks === "number" ? d.totalTracks : tracks.length,
     playlistSource: isPlaylistSource(d.playlistSource) ? d.playlistSource : "own",
-    mode: d.mode === "trial" ? "trial" : "party",
+    mode: isGameMode(d.mode) ? d.mode : "party",
     ...(mixedPlaylistMeta ? { mixedPlaylistMeta } : {}),
+    ...(buzzerRoom ? { buzzerRoom } : {}),
   };
 }
