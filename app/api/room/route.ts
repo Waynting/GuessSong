@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createRoom, RoomError } from "@/lib/room";
-import { rateLimit, getClientIp } from "@/lib/rate-limit";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 const CREATE_ROOM_LIMIT = 10;
 const CREATE_ROOM_WINDOW_SECONDS = 10 * 60;
 
 export async function POST(req: NextRequest) {
-  const ip = getClientIp(req);
-  const { allowed } = await rateLimit(`room:create:${ip}`, CREATE_ROOM_LIMIT, CREATE_ROOM_WINDOW_SECONDS);
-  if (!allowed) {
-    return NextResponse.json({ error: "Too many rooms created, please slow down" }, { status: 429 });
-  }
+  const limited = await enforceRateLimit(
+    req,
+    "room:create",
+    CREATE_ROOM_LIMIT,
+    CREATE_ROOM_WINDOW_SECONDS,
+    "Too many rooms created, please slow down"
+  );
+  if (limited) return limited;
 
   try {
     const { roomCode, expiresAt, hostToken } = await createRoom();

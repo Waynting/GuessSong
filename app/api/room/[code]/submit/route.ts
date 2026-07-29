@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { submitToRoom, RoomError } from "@/lib/room";
-import { rateLimit, getClientIp } from "@/lib/rate-limit";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 const SubmitSchema = z.object({
   playerName: z.string().trim().min(1).max(24),
@@ -17,13 +17,16 @@ export async function POST(
 ) {
   const { code } = await params;
 
-  const ip = getClientIp(req);
   // Keyed by IP only (not IP+code) so a scanner sweeping many codes from one
   // IP still gets throttled, not just repeated guesses against one room.
-  const { allowed } = await rateLimit(`room:submit:${ip}`, SUBMIT_LIMIT, SUBMIT_WINDOW_SECONDS);
-  if (!allowed) {
-    return NextResponse.json({ error: "Too many attempts, please slow down" }, { status: 429 });
-  }
+  const limited = await enforceRateLimit(
+    req,
+    "room:submit",
+    SUBMIT_LIMIT,
+    SUBMIT_WINDOW_SECONDS,
+    "Too many attempts, please slow down"
+  );
+  if (limited) return limited;
 
   try {
     const body = SubmitSchema.parse(await req.json());

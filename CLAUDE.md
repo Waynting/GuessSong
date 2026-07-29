@@ -16,7 +16,9 @@ Use `127.0.0.1:8000` (not `localhost`) — the Spotify app is configured for thi
 
 ## What This Is
 
-**GuessSong** — a local party music guessing game built on **Next.js 15 App Router**. The host pastes a public Spotify playlist URL, adds player names, and plays short audio clips; everyone guesses out loud and the host awards points. No login, no database — all game state lives in React state, handed off between pages via `sessionStorage`.
+**GuessSong** — a local party music guessing game built on **Next.js 15 App Router**. The host pastes a public Spotify playlist URL, adds player names, and plays short audio clips; everyone guesses out loud and the host awards points. **No login and no user accounts** — a single game's state lives in React state, handed off between pages via `sessionStorage`.
+
+There *is* server-side storage, but it is deliberately narrow: a KV layer (`lib/kv.ts`) backed by Upstash Redis, used only for short-lived, TTL'd data — Mixed Playlist Mode's rooms (`lib/room.ts`) and IP rate limiting (`lib/rate-limit.ts`). Nothing is persisted per-user, and there are no tables or migrations. Local dev and tests fall back to an in-process `Map`, so neither needs a real Redis.
 
 ## Architecture
 
@@ -32,11 +34,21 @@ Use `127.0.0.1:8000` (not `localhost`) — the Spotify app is configured for thi
 | Route | Purpose |
 |---|---|
 | `POST /api/playlist` | `{url}` → playlist name + tracks, via Spotify **Client Credentials** flow (`lib/spotify.ts`). Rejects Spotify editorial playlists (IDs starting `37i9` return 404 for new apps). |
-| `GET /api/preview` | Track/artist → 30s preview URL (iTunes, then Deezer). No auth required. |
+| `GET /api/preview` | Track/artist/id → 30s preview URL (iTunes, then Deezer). No auth required. KV-cached by track id, including negative results. |
+| `POST /api/room` | Creates a Mixed Playlist Mode room; returns room code, host token, expiry. |
+| `POST /api/room/[code]/submit` | A player submits their playlist URL to the room. |
+| `GET /api/room/[code]/status` | Poll for who has submitted so far. |
+| `POST /api/room/[code]/pool` | Host consumes the room and gets the sampled, deduped track pool. |
+
+**Every route is IP rate limited** via `lib/rate-limit.ts` (fixed window on top of `lib/kv.ts`'s atomic `incr`). When adding a route, follow the existing pattern: module-level `X_LIMIT` / `X_WINDOW_SECONDS` constants, then `rateLimit()` → 429 before any expensive work.
+
+Two caches keep upstream request volume flat as traffic grows, both of which matter because serverless egress IPs are shared and upstream APIs throttle per IP:
+- **Preview cache** (`app/api/preview/route.ts`) — KV, keyed by Spotify track id. Hits live 30 days, misses 7. Caching misses is the point: tracks with no preview anywhere are the most repeatedly queried, and each uncached miss costs 5 upstream calls.
+- **Spotify token cache** (`lib/spotify.ts`) — module scope, so per-lambda-instance rather than global. Deliberately *not* in KV, so `/api/playlist` keeps zero KV dependency and can't be taken down by an Upstash outage. A 401 clears the cache and retries once.
 
 ### Scoring
 
-The host is the judge — there is no automated answer checking. Correct song guess = host taps the player → **+3 pts**; album name = **+1 pt**. One award of each type per round, guarded by `pointsAwarded` / `albumPointsAwarded` flags. Note: `lib/game-logic.ts` (`isAnswerCorrect`, answer normalization) is currently **unused** — it's a leftover from the old text-input flow.
+The host is the judge — there is no automated answer checking. Correct song guess = host taps the player → **+3 pts**; album name = **+1 pt**. One award of each type per round, guarded by `pointsAwarded` / `albumPointsAwarded` flags.
 
 ### SEO / Metadata
 
@@ -46,9 +58,12 @@ Production domain is `https://www.guessong.app` (fallback in `app/layout.tsx`, `
 
 ```
 SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET   # Required — Client Credentials only, no redirect URI
+UPSTASH_REDIS_REST_URL / _TOKEN             # Required in production — see below
 NEXT_PUBLIC_BASE_URL                        # Optional — defaults to https://www.guessong.app
 NEXT_PUBLIC_GA_MEASUREMENT_ID               # Optional — enables GA4
 ```
+
+Without the Upstash pair, `lib/kv.ts` falls back to an in-process `Map`. That is fine for `next dev` and tests, but **not** for multi-instance serverless deploys: rooms created by one lambda would be invisible to another, rate limit counters would reset per instance, and the preview cache would lose most of its hit rate.
 
 ## Styling Conventions
 
@@ -58,7 +73,9 @@ NEXT_PUBLIC_GA_MEASUREMENT_ID               # Optional — enables GA4
 
 ## Types
 
-`types/index.ts` contains only the `Track` interface — the shape stored in sessionStorage and returned by `/api/playlist`. Shared game types (`GamePayload`, `GamePlayer`, `GameMode`) live in `lib/game-session.ts`; the game page defines its own local `Phase` type.
+`types/index.ts` contains only the `Track` interface — the shape stored in sessionStorage and returned by `/api/playlist`. Shared game types (`GamePayload`, `GamePlayer`, `GameMode`) live in `lib/game-session.ts`; room types and constants (`ROOM_TTL_SECONDS`, `ROOM_MAX_SUBMISSIONS`) live in `types/room.ts`; the game page defines its own local `Phase` type.
+
+When adding a value to a union that `parseGamePayload` reads, add a type guard alongside it. The existing `mode` line falls back to `"party"` for anything unrecognised, so a new mode would be silently downgraded rather than rejected — follow the `isPlaylistSource` pattern one line above instead.
 
 ## Skill routing
 

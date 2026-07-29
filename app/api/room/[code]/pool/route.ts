@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { consumeRoomPool, RoomError } from "@/lib/room";
-import { rateLimit, getClientIp } from "@/lib/rate-limit";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
 
 // hostToken already gates the actual pool consumption, but this route is
@@ -15,11 +15,14 @@ export async function GET(
 ) {
   const { code } = await params;
 
-  const ip = getClientIp(req);
-  const { allowed } = await rateLimit(`room:pool:${ip}`, POOL_LIMIT, POOL_WINDOW_SECONDS);
-  if (!allowed) {
-    return NextResponse.json({ error: "Too many attempts, please slow down" }, { status: 429 });
-  }
+  const limited = await enforceRateLimit(
+    req,
+    "room:pool",
+    POOL_LIMIT,
+    POOL_WINDOW_SECONDS,
+    "Too many attempts, please slow down"
+  );
+  if (limited) return limited;
 
   const rawSampledPerPlayer = req.nextUrl.searchParams.get("sampledPerPlayer");
   const sampledPerPlayer = rawSampledPerPlayer

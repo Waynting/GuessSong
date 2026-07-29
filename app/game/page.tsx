@@ -131,7 +131,10 @@ export default function GamePage() {
       loadingSkipTimerRef.current = setTimeout(() => setLoadingSkipVisible(true), 1500);
       try {
         const res = await fetch(
-          `/api/preview?track=${encodeURIComponent(track.name)}&artist=${encodeURIComponent(track.artists[0] ?? "")}`
+          // id keys the server-side cache: the same recording shows up under
+          // different name/artist strings across playlists, which would
+          // otherwise fragment the cache and re-hit iTunes for a known track.
+          `/api/preview?track=${encodeURIComponent(track.name)}&artist=${encodeURIComponent(track.artists[0] ?? "")}&id=${encodeURIComponent(track.id)}`
         );
         const data = await res.json();
         previewUrl = data.previewUrl ?? null;
@@ -288,7 +291,7 @@ export default function GamePage() {
     router.push("/");
   }
 
-  function downloadResultImage() {
+  async function downloadResultImage() {
     const W = 640;
     const rowH = 64;
     const headerH = 200;
@@ -347,11 +350,20 @@ export default function GamePage() {
 
     const footerY = headerH + sortedPlayers.length * rowH + 20;
     drawCardFooter(ctx, W, footerY);
-    shareOrDownloadCanvas(canvas, `guesssong-results-${Date.now()}.png`, "GuessSong results");
+    const outcome = await shareOrDownloadCanvas(
+      canvas,
+      `guesssong-results-${Date.now()}.png`,
+      "GuessSong results"
+    );
+    trackEvent("result_shared", {
+      card_type: "scores",
+      outcome,
+      playlist_source: playlistSource,
+    });
   }
 
   /** Mixed Playlist Mode (v2): the group taste card — shared bangers + awards. */
-  function downloadTasteCard() {
+  async function downloadTasteCard() {
     const tasteCard = buildTasteCard(tracks, roundHistory);
     const W = 640;
     const sharedTracks = tasteCard.sharedTracks.slice(0, 5);
@@ -439,7 +451,16 @@ export default function GamePage() {
     }
 
     drawCardFooter(ctx, W, y + 20);
-    shareOrDownloadCanvas(canvas, `guesssong-taste-card-${Date.now()}.png`, "GuessSong taste card");
+    const outcome = await shareOrDownloadCanvas(
+      canvas,
+      `guesssong-taste-card-${Date.now()}.png`,
+      "GuessSong taste card"
+    );
+    trackEvent("result_shared", {
+      card_type: "taste",
+      outcome,
+      playlist_source: playlistSource,
+    });
   }
 
   const currentTrack = tracks[currentIndex];
