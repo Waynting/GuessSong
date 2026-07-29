@@ -1045,7 +1045,11 @@ export default function SetupPage() {
                 } else if (roomNotReady) {
                   label = "Open the room first";
                 } else if (isMixedRoom && roomShort > 0) {
-                  label = `Waiting for ${roomShort} more player${roomShort === 1 ? "" : "s"}`;
+                  // Playlists, not players. The host is a player too but scans
+                  // nothing, so counting people here read as "wait for another
+                  // guest" when what was actually missing was the host's own
+                  // playlist — which they add from the room card.
+                  label = `Waiting for ${roomShort} more playlist${roomShort === 1 ? "" : "s"}`;
                 } else if (buzzerEnabled) {
                   label =
                     buzzerPlayerCount > 0

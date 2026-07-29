@@ -65,6 +65,12 @@ export function RoomPanel({
   const [copied, setCopied] = useState(false);
   const [submissions, setSubmissions] = useState<RoomSubmissionSummary[]>([]);
   const submissionTotalRef = useRef(0);
+  // The host's own contribution. They are holding the screen everyone else is
+  // scanning, so they are the one player with no phone to scan it from.
+  const [hostPlaylistUrl, setHostPlaylistUrl] = useState("");
+  const [hostSubmitting, setHostSubmitting] = useState(false);
+  const [hostTrackCount, setHostTrackCount] = useState<number | null>(null);
+  const [hostSubmitError, setHostSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(HOST_NAME_STORAGE_KEY);
@@ -133,6 +139,10 @@ export function RoomPanel({
       if (buzzer) window.localStorage.setItem(HOST_NAME_STORAGE_KEY, trimmed);
       submissionTotalRef.current = 0;
       setSubmissions([]);
+      // A fresh room has a fresh mailbox — the host has submitted nothing to it
+      // yet, whatever they did in a room they abandoned by switching modes.
+      setHostTrackCount(null);
+      setHostSubmitError(null);
       const opened = await openRoom({ collectsPlaylists, buzzer, hostName: trimmed });
       if (opened.collectsPlaylists) trackEvent("room_created", {});
       if (opened.buzzer) trackEvent("buzz_room_created", {});
@@ -145,6 +155,40 @@ export function RoomPanel({
       );
     } finally {
       setOpening(false);
+    }
+  }
+
+  /**
+   * Submit the host's own playlist into the room's mailbox.
+   *
+   * Everyone else contributes by scanning the QR on this screen, which the host
+   * cannot do — they *are* the screen. Without this they either sat out of
+   * their own party's pool, or had to open the join link on a second device.
+   * It posts to the same `/api/room/[code]/submit` a scanned phone does, so the
+   * host lands in the roster, the pool, and the ≥2-contributor gate on exactly
+   * the same terms as a guest.
+   */
+  async function handleHostSubmit() {
+    const trimmed = hostLabel.trim() || DEFAULT_HOST_NAME;
+    if (!room || !hostPlaylistUrl.trim()) return;
+    setHostSubmitting(true);
+    setHostSubmitError(null);
+    try {
+      const res = await fetch(`/api/room/${room.code}/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playerName: trimmed, playlistUrl: hostPlaylistUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't add your playlist");
+      window.localStorage.setItem(HOST_NAME_STORAGE_KEY, trimmed);
+      setHostTrackCount(data.trackCount);
+      // Don't wait for the next poll tick to prove it worked.
+      pollStatus(room.code);
+    } catch (e: unknown) {
+      setHostSubmitError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setHostSubmitting(false);
     }
   }
 
@@ -233,9 +277,11 @@ export function RoomPanel({
       </p>
 
       <p style={{ fontSize: "12px", color: "#666", marginBottom: roster.length ? "10px" : "0" }}>
+        {/* "in the room", not "joined": once the host adds their own playlist
+            they show up in this list too, and they didn't scan anything. */}
         {room.buzzer && !connected
           ? "Connecting to room…"
-          : `${roster.length} player${roster.length === 1 ? "" : "s"} joined`}
+          : `${roster.length} in the room`}
       </p>
 
       {roster.length > 0 && (
@@ -271,6 +317,72 @@ export function RoomPanel({
             ? "Nobody has scanned yet. You can still start — latecomers can join mid-game."
             : "Nobody has scanned yet."}
         </p>
+      )}
+
+      {/* The host's own playlist. Everyone else contributes by scanning the QR
+          above; the host is the one person who can't, because they're holding
+          the screen it's on. */}
+      {room.collectsPlaylists && (
+        <div
+          style={{
+            marginTop: "16px",
+            paddingTop: "16px",
+            borderTop: "1px solid #2a2a2a",
+            textAlign: "left",
+          }}
+        >
+          {hostTrackCount !== null ? (
+            <p style={{ fontSize: "13px", color: "#8fd6a5" }}>
+              ✓ Your playlist is in — {hostTrackCount} track
+              {hostTrackCount === 1 ? "" : "s"} from {hostLabel}
+            </p>
+          ) : (
+            <>
+              <p style={{ fontSize: "12px", color: "#777", marginBottom: "8px" }}>
+                Add your own playlist — you can&apos;t scan your own QR code.
+              </p>
+              {!buzzer && (
+                <input
+                  className="player-input"
+                  value={hostName}
+                  onChange={(e) => setHostName(e.target.value)}
+                  placeholder="Your name"
+                  maxLength={24}
+                  style={{ width: "100%", marginBottom: "8px" }}
+                />
+              )}
+              <input
+                type="url"
+                className="player-input"
+                value={hostPlaylistUrl}
+                onChange={(e) => setHostPlaylistUrl(e.target.value)}
+                placeholder="https://open.spotify.com/playlist/..."
+                spellCheck={false}
+                style={{ width: "100%", marginBottom: "8px" }}
+              />
+              <button
+                className="add-player-btn"
+                onClick={handleHostSubmit}
+                // Same shape check the join page makes, so an obvious typo
+                // fails here instead of after a round trip to Spotify.
+                disabled={
+                  hostSubmitting ||
+                  !(
+                    hostPlaylistUrl.includes("spotify.com/playlist") ||
+                    hostPlaylistUrl.includes("spotify:playlist:")
+                  )
+                }
+              >
+                {hostSubmitting ? "Adding..." : "Add My Playlist"}
+              </button>
+              {hostSubmitError && (
+                <p style={{ marginTop: "8px", fontSize: "12px", color: "#fca5a5" }}>
+                  {hostSubmitError}
+                </p>
+              )}
+            </>
+          )}
+        </div>
       )}
 
       {/* The mailbox closes at kickoff while the buzzer room runs all game, so
