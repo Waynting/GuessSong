@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildGamePayload, parseGamePayload } from "@/lib/game-session";
 import { reduce, type BuzzerSocketState } from "@/lib/use-buzzer-socket";
+import { buzzerJoinUrl } from "@/lib/buzzer-client";
 import {
   parseClientMessage,
   type BuzzEntry,
@@ -84,6 +85,24 @@ describe("GameMode round-trip (regression: silent downgrade to party)", () => {
     );
     expect(parsed?.mode).toBe("buzzer");
     expect(parsed?.buzzerRoom).toBeUndefined();
+  });
+});
+
+describe("buzzerJoinUrl", () => {
+  it("points at the deployment the host is actually on, not the production domain", () => {
+    // jsdom's origin, standing in for a Vercel preview host. Building this from
+    // NEXT_PUBLIC_BASE_URL sent every scanned QR to www.guessong.app — a build
+    // where the room, and on a feature branch the whole route, doesn't exist.
+    process.env.NEXT_PUBLIC_BASE_URL = "https://www.guessong.app";
+    expect(buzzerJoinUrl("ab7k")).toBe(`${window.location.origin}/buzz/AB7K`);
+  });
+
+  it("upper-cases the code so a lowercase scan still reaches the room", () => {
+    expect(buzzerJoinUrl("ab7k")).toContain("/buzz/AB7K");
+  });
+
+  it("carries no host token", () => {
+    expect(buzzerJoinUrl("AB7K")).not.toMatch(/token/i);
   });
 });
 

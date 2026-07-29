@@ -54,10 +54,23 @@ export async function createBuzzerRoom(): Promise<BuzzerRoomHandle> {
   return { code: data.code, hostToken: data.hostToken };
 }
 
-/** The URL players scan. Deliberately carries no host token. */
+/**
+ * The URL players scan. Deliberately carries no host token.
+ *
+ * Built from `window.location.origin`, NOT `NEXT_PUBLIC_BASE_URL`: the player
+ * has to land on the same deployment the host is running. That env var points
+ * at production, so on a Vercel preview the QR code would send everyone to
+ * www.guessong.app — a build where this room, and possibly the whole feature,
+ * doesn't exist. Same reason Mixed Playlist Mode builds its `/j/` link from
+ * `window.location.origin`.
+ *
+ * The env var stays as the non-browser fallback, which is only reachable if a
+ * caller ever renders this during SSR.
+ */
 export function buzzerJoinUrl(code: string): string {
   const base =
-    process.env.NEXT_PUBLIC_BASE_URL ??
-    (typeof window !== "undefined" ? window.location.origin : "https://www.guessong.app");
+    typeof window !== "undefined"
+      ? window.location.origin
+      : process.env.NEXT_PUBLIC_BASE_URL ?? "https://www.guessong.app";
   return `${base.replace(/\/$/, "")}/buzz/${code.toUpperCase()}`;
 }
