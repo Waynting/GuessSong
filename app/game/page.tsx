@@ -118,6 +118,43 @@ export default function GamePage() {
 
   const isTrial = mode === "trial";
 
+  /**
+   * The clip transport, identical in "playing" and "guessing".
+   *
+   * It has to be the same set in both, because the phase flips underneath the
+   * host constantly — a buzz holds the clip, Resume puts it back to "playing",
+   * Stop drops it to "guessing", the clip running out does the same. When the
+   * two phases rendered different rows, buttons appeared and vanished as a
+   * side effect of that churn, and the host lost whichever control they were
+   * reaching for. One row, always the same three, until Reveal ends the round.
+   */
+  function clipControls() {
+    return (
+      <>
+        {audioPlaying ? (
+          <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={holdClip}>
+            Stop
+          </button>
+        ) : (
+          <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={resumeClip}>
+            Resume
+          </button>
+        )}
+        <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={replayClip}>
+          Replay
+        </button>
+        <button className="btn-primary" onClick={reveal}>
+          Reveal Answer →
+        </button>
+        {isTrial && (
+          <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={nextTrack}>
+            Skip →
+          </button>
+        )}
+      </>
+    );
+  }
+
   // Show the PWA install pitch at the high-intent moment: game over.
   useEffect(() => {
     if (phase === "finished") setInstallCta(canInstall());
@@ -217,6 +254,21 @@ export default function GamePage() {
     pauseClip();
     setPhase("guessing");
   }, [pauseClip]);
+
+  /** Start the clip over from the top. */
+  const replayClip = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio?.src) return;
+    if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
+    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    audio.currentTime = 0;
+    clipElapsedRef.current = 0;
+    audio.play().catch(() => {});
+    setClipPaused(false);
+    setProgress(0);
+    startClipTimers();
+    setPhase("playing");
+  }, [startClipTimers]);
 
   async function playClip() {
     const audio = audioRef.current;
@@ -1362,26 +1414,7 @@ export default function GamePage() {
                   {clipPaused ? "Paused — someone buzzed in" : "Listening…"}
                 </p>
                 <div className="btn-row" style={{ marginBottom: "8px" }}>
-                  {/* Resume and Stop stay usable for the whole round, not just
-                      the first buzz — see the guessing phase for the other half
-                      of the pair. */}
-                  {audioPlaying ? (
-                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={holdClip}>
-                      Stop
-                    </button>
-                  ) : (
-                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={resumeClip}>
-                      Resume
-                    </button>
-                  )}
-                  <button className="btn-primary" onClick={reveal}>
-                    Reveal Answer →
-                  </button>
-                  {isTrial && (
-                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={nextTrack}>
-                      Skip →
-                    </button>
-                  )}
+                  {clipControls()}
                 </div>
                 <button
                   className="btn-ghost"
@@ -1399,47 +1432,7 @@ export default function GamePage() {
                 <p style={{ textAlign: "center", fontSize: "20px", fontWeight: 600, color: "#f0f0f0", marginBottom: "4px" }}>
                   What&apos;s the song?
                 </p>
-                <div className="btn-row">
-                  {/* The same Resume/Stop pair as the playing phase. The clip's
-                      own window has run out here, but the host may still be
-                      playing the song while people think — and after a buzz
-                      they need to stop it again. Only Reveal ends this. */}
-                  {audioPlaying ? (
-                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={pauseClip}>
-                      Stop
-                    </button>
-                  ) : (
-                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={resumeClip}>
-                      Resume
-                    </button>
-                  )}
-                  <button
-                    className="btn-ghost"
-                    style={{ flex: "0 0 auto" }}
-                    onClick={() => {
-                      const audio = audioRef.current;
-                      if (audio && audio.src) {
-                        audio.currentTime = 0;
-                        clipElapsedRef.current = 0;
-                        audio.play().catch(() => {});
-                        setClipPaused(false);
-                        setProgress(0);
-                        startClipTimers();
-                        setPhase("playing");
-                      }
-                    }}
-                  >
-                    Replay
-                  </button>
-                  <button className="btn-primary" onClick={reveal}>
-                    Reveal Answer →
-                  </button>
-                  {isTrial && (
-                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={nextTrack}>
-                      Skip →
-                    </button>
-                  )}
-                </div>
+                <div className="btn-row">{clipControls()}</div>
                 {!albumHintShown && currentTrack?.albumImageUrl && (
                   <button className="btn-ghost" onClick={() => setAlbumHintShown(true)}>
                     Show Album Art Hint
