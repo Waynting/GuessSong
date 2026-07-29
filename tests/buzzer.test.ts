@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildGamePayload, parseGamePayload } from "@/lib/game-session";
+import { buildGamePayload, parseGamePayload, mergeRoomRoster } from "@/lib/game-session";
 import { reduce, type BuzzerSocketState } from "@/lib/use-buzzer-socket";
 import { buzzerJoinUrl } from "@/lib/buzzer-client";
 import {
@@ -208,5 +208,93 @@ describe("client reducer", () => {
       expect(() => reduce(emptyState, msg)).not.toThrow();
       expect(reduce(emptyState, msg).snapshot).toBeNull();
     }
+  });
+});
+
+describe("mergeRoomRoster (regression: buzzer winners scored nothing)", () => {
+  // The bug this exists to stop: the scoreboard came from names typed at setup
+  // while the buzzers came from names typed on each phone. awardPoint matches by
+  // name, so tapping "Correct" for a player who only existed in the room mapped
+  // over nothing and silently awarded zero. Reproduced in a browser: PhonePlayer
+  // buzzed, host tapped Correct, scoreboard stayed at 0.
+  it("adds room players the scoreboard has never seen", () => {
+    const merged = mergeRoomRoster([], ["Amy", "Ken"]);
+    expect(merged).toEqual([
+      { name: "Amy", score: 0 },
+      { name: "Ken", score: 0 },
+    ]);
+  });
+
+  it("keeps existing scores when the roster is re-sent", () => {
+    const players = [{ name: "Amy", score: 6 }];
+    expect(mergeRoomRoster(players, ["Amy", "Ken"])).toEqual([
+      { name: "Amy", score: 6 },
+      { name: "Ken", score: 0 },
+    ]);
+  });
+
+  it("returns the same array when nothing is new, so a snapshot loop can't thrash", () => {
+    // setPlayers(prev => merge(prev, names)) runs on every room broadcast. A
+    // fresh array each time would re-render the whole game page per heartbeat.
+    const players = [{ name: "Amy", score: 3 }];
+    expect(mergeRoomRoster(players, ["Amy"])).toBe(players);
+  });
+
+  it("treats a differently-cased name as the same player", () => {
+    // The room refuses a second "amy" while "Amy" is connected, so two spellings
+    // are one human reconnecting. Two rows would split their score.
+    const players = [{ name: "Amy", score: 3 }];
+    expect(mergeRoomRoster(players, ["amy"])).toBe(players);
+  });
+
+  it("never drops a player who left, so a locked phone doesn't wipe a score", () => {
+    const players = [{ name: "Amy", score: 9 }];
+    expect(mergeRoomRoster(players, ["Ken"])).toEqual([
+      { name: "Amy", score: 9 },
+      { name: "Ken", score: 0 },
+    ]);
+  });
+
+  it("ignores blank names and dedupes within one roster", () => {
+    expect(mergeRoomRoster([], ["  ", "Amy", "amy", ""])).toEqual([{ name: "Amy", score: 0 }]);
+  });
+});
+
+describe("queue advance on a wrong answer", () => {
+  // The room shifts its queue and broadcasts the NEW head as a `buzz` frame.
+  // That frame carries a player the client already has, which the reducer used
+  // to discard as a reconnect replay — so the host tapped "Wrong", the room
+  // moved on, and their screen kept the eliminated player at the head.
+  it("drops the eliminated player when the room advances to someone queued", () => {
+    let s: BuzzerSocketState = { ...emptyState, snapshot: snapshot({ phase: "open" }) };
+    s = reduce(s, { type: "buzz", entry: entry("Ann", 1), phase: "locked" });
+    s = reduce(s, { type: "buzz", entry: entry("Bob", 2), phase: "locked" });
+    s = reduce(s, { type: "buzz", entry: entry("Cat", 3), phase: "locked" });
+
+    // Host says Ann was wrong; the room promotes Bob.
+    s = reduce(s, { type: "buzz", entry: entry("Bob", 2), phase: "locked" });
+
+    expect(s.snapshot?.buzzes.map((b) => b.name)).toEqual(["Bob", "Cat"]);
+  });
+
+  it("still ignores a replay of the player already at the head", () => {
+    let s: BuzzerSocketState = { ...emptyState, snapshot: snapshot({ phase: "open" }) };
+    s = reduce(s, { type: "buzz", entry: entry("Ann", 1), phase: "locked" });
+    s = reduce(s, { type: "buzz", entry: entry("Bob", 2), phase: "locked" });
+    s = reduce(s, { type: "buzz", entry: entry("Ann", 1), phase: "locked" });
+    expect(s.snapshot?.buzzes.map((b) => b.name)).toEqual(["Ann", "Bob"]);
+  });
+
+  it("keeps the queue when the round resolves, because scoring happens after reveal", () => {
+    // The host reveals the answer and only then awards the point, so the queue
+    // has to survive `round:resolved` — it is what the scoring UI reads to offer
+    // "Ann buzzed first, +3" instead of the full player list. The server agrees:
+    // handleResolve leaves room.buzzes alone and host:next is what clears it.
+    const s = reduce(
+      { ...emptyState, snapshot: snapshot({ phase: "locked", buzzes: [entry("Ann", 1)] }) },
+      { type: "round:resolved", roundIndex: 0, verdict: "correct" }
+    );
+    expect(s.snapshot?.phase).toBe("idle");
+    expect(s.snapshot?.buzzes.map((b) => b.name)).toEqual(["Ann"]);
   });
 });

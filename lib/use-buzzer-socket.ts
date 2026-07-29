@@ -297,21 +297,37 @@ export function reduce(state: BuzzerSocketState, msg: ServerMessage): BuzzerSock
             },
           }
         : state;
-    case "buzz":
+    case "buzz": {
       if (!state.snapshot) return state;
-      // The room is authoritative on order, so append only if this entry is new
-      // — a reconnect mid-round can replay a buzz we already have.
-      return {
-        ...state,
-        snapshot: {
-          ...state.snapshot,
-          phase: msg.phase,
-          buzzes: state.snapshot.buzzes.some((b) => b.playerId === msg.entry.playerId)
-            ? state.snapshot.buzzes
-            : [...state.snapshot.buzzes, msg.entry],
-        },
-      };
+      // One frame, two meanings, told apart by whether we already know this
+      // player:
+      //
+      // - **New to us** — someone just buzzed. Append them to the queue.
+      // - **Already queued** — the host called the previous answer wrong and the
+      //   room shifted the queue onto this entry. Everyone ahead of them is out
+      //   of this round, so drop them.
+      //
+      // Treating the second case as a duplicate to ignore was a real bug: the
+      // host tapped "Wrong", the room advanced, and their screen kept the
+      // eliminated player at the head of the queue for the rest of the round.
+      // A reconnecting client replaying the current head lands on index 0 and
+      // changes nothing, which is still what we want.
+      const known = state.snapshot.buzzes.findIndex((b) => b.playerId === msg.entry.playerId);
+      const buzzes =
+        known === -1
+          ? [...state.snapshot.buzzes, msg.entry]
+          : known === 0
+          ? state.snapshot.buzzes
+          : state.snapshot.buzzes.slice(known);
+      return { ...state, snapshot: { ...state.snapshot, phase: msg.phase, buzzes } };
+    }
     case "round:resolved":
+      // The queue deliberately outlives the round. The host reveals the answer
+      // first and scores second, so "who buzzed" is exactly what the scoring UI
+      // needs at the moment this arrives — clearing it here sent the host back
+      // to picking a name out of the full player list. `host:next` is what wipes
+      // it, on the server and here, and that matches handleResolve leaving
+      // room.buzzes untouched.
       return state.snapshot
         ? { ...state, snapshot: { ...state.snapshot, phase: "idle", roundOpenedAt: null } }
         : state;

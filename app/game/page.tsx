@@ -8,6 +8,7 @@ import { canInstall, promptInstall } from "@/lib/pwa";
 import {
   parseGamePayload,
   countRoundsPlayed,
+  mergeRoomRoster,
   GAME_STORAGE_KEY,
   type GameMode,
   type GamePlayer as Player,
@@ -194,9 +195,14 @@ export default function GamePage() {
 
   function reveal() {
     stopClip();
-    // One Reveal, not two. Whoever was mid-press stops being able to score on a
-    // question the host just answered for them.
-    buzzerControlsRef.current?.reveal();
+    // Deliberately does NOT resolve the room's round.
+    //
+    // Revealing is when the host *starts* scoring, not when they finish: the
+    // answer goes up, then they say who got it. The room only accepts a verdict
+    // while the round is "locked", so resolving here made the Correct and Wrong
+    // buttons on the next screen silent no-ops — the queue never advanced and
+    // the phones never heard the outcome. The round closes when the host
+    // actually calls it: correct(), reveal() on "No one", or next().
     setPhase("revealed");
   }
 
@@ -209,13 +215,14 @@ export default function GamePage() {
    * didn't exactly match their setup name scored nothing, silently.
    *
    * Additive only — a player who drops out keeps the points they earned.
+   *
+   * The merge itself lives in game-session so it can be unit-tested without a
+   * room; it also matches names case-insensitively, which this callback used to
+   * get wrong. The room refuses a second "amy" while "Amy" is connected, so the
+   * two spellings are one player reconnecting, not two rows on the scoreboard.
    */
   const mergeRoomPlayers = useCallback((names: string[]) => {
-    setPlayers((prev) => {
-      const known = new Set(prev.map((p) => p.name));
-      const missing = names.filter((n) => !known.has(n));
-      return missing.length ? [...prev, ...missing.map((name) => ({ name, score: 0 }))] : prev;
-    });
+    setPlayers((prev) => mergeRoomRoster(prev, names));
   }, []);
 
   function awardPoint(playerName: string) {
@@ -1410,7 +1417,16 @@ export default function GamePage() {
                           {p.name}
                         </button>
                       ))}
-                      <button className="btn-ghost" onClick={() => setPointsAwarded(true)}>
+                      <button
+                        className="btn-ghost"
+                        onClick={() => {
+                          // Nobody scored, so the round is over — tell the room
+                          // now rather than leaving the phones showing a live
+                          // queue until the host gets to Next Track.
+                          buzzerControlsRef.current?.reveal();
+                          setPointsAwarded(true);
+                        }}
+                      >
                         No one
                       </button>
                     </div>
