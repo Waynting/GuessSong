@@ -260,7 +260,11 @@ export default function SetupPage() {
       setError("Please enter a Spotify playlist URL");
       return;
     }
-    if (validPlayers.length < 1) {
+    // Buzzer Mode has no manual roster to check — players name themselves as
+    // they scan in, and the scoreboard fills from the room. Blocking on an
+    // empty list here would make "Start Game" unreachable in the exact mode
+    // that hides the list.
+    if (!buzzerEnabled && validPlayers.length < 1) {
       setError("Add at least one player");
       return;
     }
@@ -857,37 +861,6 @@ export default function SetupPage() {
                   )}
                 </div>
 
-                {/* Players */}
-                <div>
-                  <p className="section-label">Players</p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {players.map((name, idx) => (
-                      <div key={idx} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                        <input
-                          type="text"
-                          className="player-input"
-                          placeholder={`Player ${idx + 1}`}
-                          value={name}
-                          onChange={(e) => updatePlayer(idx, e.target.value)}
-                          maxLength={24}
-                        />
-                        {players.length > 1 && (
-                          <button
-                            className="remove-btn"
-                            onClick={() => removePlayer(idx)}
-                            aria-label={`Remove player ${idx + 1}`}
-                          >
-                            ×
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    <button className="add-player-btn" onClick={addPlayer}>
-                      <span style={{ fontSize: "18px", lineHeight: 1, fontWeight: 300 }}>+</span>
-                      Add Player
-                    </button>
-                  </div>
-                </div>
               </>
             ) : (
               <>
@@ -1040,43 +1013,6 @@ export default function SetupPage() {
               </>
             )}
 
-            {/* Clip Duration */}
-            <div>
-              <p className="section-label">Clip Duration</p>
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                {CLIP_DURATIONS.map((d) => (
-                  <button
-                    key={d}
-                    className={`pill${clipDuration === d ? " active" : ""}`}
-                    onClick={() => setClipDuration(d)}
-                  >
-                    {d}s
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Number of Songs — single-playlist mode only; mixed mode uses per-player sampling instead */}
-            {setupMode === "single" && (
-              <div>
-                <p className="section-label">Number of Songs</p>
-                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                  {SONG_COUNTS.map((c) => (
-                    <button
-                      key={c}
-                      className={`pill${songCount === c ? " active" : ""}`}
-                      onClick={() => setSongCount(c)}
-                    >
-                      {c === "all" ? "All" : c}
-                    </button>
-                  ))}
-                </div>
-                <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                  How many tracks to play from the shuffled playlist.
-                </p>
-              </div>
-            )}
-
             {/* Buzzer Mode — the reason the host gets to play too. Hidden
                 entirely when NEXT_PUBLIC_BUZZER_WS_URL is unset, because
                 without a Worker there is no room to open. */}
@@ -1115,6 +1051,82 @@ export default function SetupPage() {
                   </>
                 )}
               </div>
+            )}
+
+            {/* Clip Duration */}
+            <div>
+              <p className="section-label">Clip Duration</p>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {CLIP_DURATIONS.map((d) => (
+                  <button
+                    key={d}
+                    className={`pill${clipDuration === d ? " active" : ""}`}
+                    onClick={() => setClipDuration(d)}
+                  >
+                    {d}s
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Number of Songs — single-playlist mode only; mixed mode uses per-player sampling instead */}
+            {setupMode === "single" && (
+              <div>
+                <p className="section-label">Number of Songs</p>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  {SONG_COUNTS.map((c) => (
+                    <button
+                      key={c}
+                      className={`pill${songCount === c ? " active" : ""}`}
+                      onClick={() => setSongCount(c)}
+                    >
+                      {c === "all" ? "All" : c}
+                    </button>
+                  ))}
+                </div>
+                <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                  How many tracks to play from the shuffled playlist.
+                </p>
+              </div>
+            )}
+
+            {/* Players — the manual roster, and only when phones are not
+                supplying one. Buzzer Mode makes this redundant: everyone types
+                their own name as they scan in, and asking the host to type the
+                same names again is how the two lists drifted apart and points
+                went to players who did not exist. Mixed mode takes its roster
+                from the contributors instead. */}
+            {setupMode === "single" && !buzzerEnabled && (
+                  <div>
+                    <p className="section-label">Players</p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                      {players.map((name, idx) => (
+                        <div key={idx} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                          <input
+                            type="text"
+                            className="player-input"
+                            placeholder={`Player ${idx + 1}`}
+                            value={name}
+                            onChange={(e) => updatePlayer(idx, e.target.value)}
+                            maxLength={24}
+                          />
+                          {players.length > 1 && (
+                            <button
+                              className="remove-btn"
+                              onClick={() => removePlayer(idx)}
+                              aria-label={`Remove player ${idx + 1}`}
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button className="add-player-btn" onClick={addPlayer}>
+                        <span style={{ fontSize: "18px", lineHeight: 1, fontWeight: 300 }}>+</span>
+                        Add Player
+                      </button>
+                    </div>
+                  </div>
             )}
 
             {/* Start Button */}
