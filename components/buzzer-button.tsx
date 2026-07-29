@@ -106,30 +106,30 @@ function describe(s: {
   pressed: boolean;
 }): Visual {
   if (!s.connected) {
-    return { label: "連線中…", sub: "回到這個畫面就會自動接回", bg: "#1a1a1a", fg: "#888", disabled: true };
+    return { label: "Connecting…", sub: "Come back to this screen and it reconnects", bg: "#1a1a1a", fg: "#888", disabled: true };
   }
   if (s.iWon) {
-    return { label: "你搶到了", sub: "大聲講答案", bg: "#1DB954", fg: "#04120a", disabled: true };
+    return { label: "You buzzed first", sub: "Shout the answer", bg: "#1DB954", fg: "#04120a", disabled: true };
   }
   if (s.myBuzz) {
     // Queued behind the winner. Worth showing the position, because a wrong
     // answer passes the question down the line and they may still be up.
     return {
-      label: `第 ${s.myBuzz.order} 個`,
-      sub: s.winner ? `${s.winner.name} 先搶到,答錯就換你` : undefined,
+      label: `#${s.myBuzz.order} in line`,
+      sub: s.winner ? `${s.winner.name} was first — you are up if they miss` : undefined,
       bg: "#1a2a1a",
       fg: "#8fd6a5",
       disabled: true,
     };
   }
   if (s.winner) {
-    return { label: `${s.winner.name}`, sub: "先搶到了 — 還能排隊", bg: "#1a1a1a", fg: "#bbb", disabled: false };
+    return { label: `${s.winner.name}`, sub: "buzzed first — you can still queue", bg: "#1a1a1a", fg: "#bbb", disabled: false };
   }
   if (s.pressed) {
-    return { label: "已送出…", bg: "#1a2a1a", fg: "#8fd6a5", disabled: true };
+    return { label: "Sent…", bg: "#1a2a1a", fg: "#8fd6a5", disabled: true };
   }
   if (s.phase === "idle") {
-    return { label: "等主持人放歌", bg: "#141414", fg: "#666", disabled: true };
+    return { label: "Wait for the clip", bg: "#141414", fg: "#666", disabled: true };
   }
-  return { label: "搶答", bg: "#1DB954", fg: "#04120a", disabled: false };
+  return { label: "BUZZ", bg: "#1DB954", fg: "#04120a", disabled: false };
 }

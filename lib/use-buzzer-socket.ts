@@ -205,7 +205,7 @@ export function useBuzzerSocket({
               ...s,
               error: {
                 code: "room_expired",
-                message: "找不到這個房間,可能碼輸錯了或房間已經結束",
+                message: "Room not found — check the code, or it may have ended",
               },
             }));
             return;

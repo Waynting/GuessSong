@@ -63,25 +63,25 @@ export default function BuzzPlayerPage() {
       <main className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
         <div className="flex w-full max-w-sm flex-col gap-4">
           <div>
-            <h1 className="text-2xl font-bold">加入 {code}</h1>
+            <h1 className="text-2xl font-bold">Join {code}</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              輸入名字,主持人的畫面上會顯示是誰搶到。
+              Enter your name — the host&apos;s screen shows who buzzed first.
             </p>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="name">你的名字</Label>
+            <Label htmlFor="name">Your name</Label>
             <Input
               id="name"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleJoin()}
-              placeholder="小明"
+              placeholder="Player name"
               maxLength={24}
               autoFocus
             />
           </div>
           <Button onClick={handleJoin} disabled={!draft.trim()}>
-            進房間
+            Join Room
           </Button>
         </div>
       </main>
@@ -105,7 +105,7 @@ export default function BuzzPlayerPage() {
               joinedRef.current = false;
             }}
           >
-            換個名字再試
+            Try a different name
           </Button>
         </div>
       </main>
@@ -117,8 +117,8 @@ export default function BuzzPlayerPage() {
       <header className="flex items-center justify-between px-1 text-sm">
         <span className="font-semibold">{name}</span>
         <span className="text-muted-foreground">
-          {connected ? `房間 ${code}` : "連線中…"}
-          {snapshot ? ` · ${snapshot.players.length} 人` : ""}
+          {connected ? `Room ${code}` : "Connecting…"}
+          {snapshot ? ` · ${snapshot.players.length} in room` : ""}
         </span>
       </header>
 
@@ -131,7 +131,7 @@ export default function BuzzPlayerPage() {
       />
 
       <p className="px-1 pb-1 text-center text-xs text-muted-foreground">
-        把手機拿好,歌一放就按。答案用喊的。
+        Hold your phone ready. Buzz the moment the clip starts, then shout the answer.
       </p>
     </main>
   );
