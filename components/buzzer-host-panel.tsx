@@ -39,11 +39,12 @@ export interface BuzzerHostPanelProps {
    */
   onControls?: (controls: BuzzerControls) => void;
   /**
-   * Fired on the buzz that locks the round — the first one, not every entry
-   * that queues behind it. The game page uses it to pause the clip so the room
-   * can actually hear the answer.
+   * Fired on every buzz, not just the one that locks the round. The game page
+   * pauses the clip so the room can hear the answer — and a host who resumed
+   * after a wrong answer needs the next buzz to stop the music again, which a
+   * first-buzz-only signal never did.
    */
-  onRoundLocked?: () => void;
+  onBuzz?: () => void;
 }
 
 export interface BuzzerControls {
@@ -67,7 +68,7 @@ export function BuzzerHostPanel({
   onPlayersChange,
   onPeakPlayers,
   onControls,
-  onRoundLocked,
+  onBuzz,
 }: BuzzerHostPanelProps) {
   const [qr, setQr] = useState<string | null>(null);
   const [showJoin, setShowJoin] = useState(true);
@@ -87,10 +88,11 @@ export function BuzzerHostPanel({
           buzz_order: msg.entry.order,
           ms_since_round_open: msg.entry.msSinceOpen,
         });
-        // order 1 is the buzz that locked the round. Later entries are queued
-        // behind it and must not re-fire this — the clip is already paused, and
-        // on a "Wrong" the room re-broadcasts the new head as a queue advance.
-        if (msg.entry.order === 1) onRoundLocked?.();
+        // Every buzz, including ones queued behind the current head: the host
+        // may have resumed the clip after a wrong answer, and whoever buzzes
+        // next has to stop the music again. Harmless when it's already paused —
+        // pauseClip is a no-op unless a clip is actually running.
+        onBuzz?.();
       }
       if (msg.type === "state" || msg.type === "players") {
         const list = msg.type === "state" ? msg.snapshot.players : msg.players;
@@ -101,7 +103,7 @@ export function BuzzerHostPanel({
         }
       }
     },
-    [roundIndex, onPlayersChange, onPeakPlayers, onRoundLocked]
+    [roundIndex, onPlayersChange, onPeakPlayers, onBuzz]
   );
 
   const { snapshot, connected, buzz, hostOpen, hostVerdict, hostReveal, hostNext } =

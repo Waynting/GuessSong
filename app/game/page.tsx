@@ -68,6 +68,11 @@ export default function GamePage() {
   // the music gets out of the way so the room can hear the answer, and the host
   // decides whether to let it run on.
   const [clipPaused, setClipPaused] = useState(false);
+  // Mirrors the <audio> element itself, so the Stop/Resume toggle can't claim
+  // the music is running when it isn't. `clipPaused` says "held mid-round";
+  // this says "is sound coming out right now", and the clip ending on its own
+  // changes the second without the first.
+  const [audioPlaying, setAudioPlaying] = useState(false);
   const [scorePulse, setScorePulse] = useState<string | null>(null);
   const [pointsAwarded, setPointsAwarded] = useState(false);
   const [albumPointsAwarded, setAlbumPointsAwarded] = useState(false);
@@ -162,19 +167,29 @@ export default function GamePage() {
     clipTimeoutRef.current = setTimeout(() => {
       audioRef.current?.pause();
       if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+      // Bank the whole clip, so a later Resume knows the window is spent and
+      // plays on instead of re-arming a countdown that already finished.
+      clipElapsedRef.current = totalMs;
       setProgress(100);
       setPhase("guessing");
     }, Math.max(0, totalMs - clipElapsedRef.current));
   }, [clipDuration]);
 
   /**
-   * Hold the clip where it is. Someone buzzing in is the usual trigger: the
-   * music stops so the room can hear the answer, and the round is *not* over —
-   * a wrong answer should be able to hand the rest of the clip back.
+   * Hold the music where it is, without ending the round. Someone buzzing in is
+   * the usual trigger: the music gets out of the way so the room can hear the
+   * answer, and a wrong answer can hand the rest of the clip back.
+   *
+   * Available for as long as the host is still running the round — through
+   * "playing" and on into "guessing", where the clip's own window has elapsed
+   * but the host may well still be playing the song while people think. Only
+   * revealing the answer ends it.
    */
   const pauseClip = useCallback(() => {
-    if (phaseRef.current !== "playing") return;
-    audioRef.current?.pause();
+    const audio = audioRef.current;
+    if (!audio || audio.paused) return;
+    if (phaseRef.current !== "playing" && phaseRef.current !== "guessing") return;
+    audio.pause();
     clipElapsedRef.current += Date.now() - clipSegmentStartRef.current;
     if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
@@ -186,8 +201,22 @@ export default function GamePage() {
     if (!audio?.src) return;
     audio.play().catch(() => {});
     setClipPaused(false);
-    startClipTimers();
-  }, [startClipTimers]);
+    // Only re-arm the end-of-clip deadline if any of the clip is left. Past
+    // that the host is deliberately playing on, so there is nothing left to
+    // count down to and we stay put rather than snapping the phase around.
+    if (clipElapsedRef.current < clipDuration * 1000) {
+      startClipTimers();
+      setPhase("playing");
+    } else {
+      clipSegmentStartRef.current = Date.now();
+    }
+  }, [clipDuration, startClipTimers]);
+
+  /** Stop the music and ask the room. The clip stays resumable. */
+  const holdClip = useCallback(() => {
+    pauseClip();
+    setPhase("guessing");
+  }, [pauseClip]);
 
   async function playClip() {
     const audio = audioRef.current;
@@ -582,11 +611,13 @@ export default function GamePage() {
         html, body { overflow: hidden; max-width: 100vw; }
         body { background: #111; color: #f0f0f0; font-family: 'Outfit', sans-serif; }
 
-        /* One corner radius for every rectangular surface and control on this
+        /* One corner radius for every button, control and surface on this
            screen. It used to be five values picked per element (8, 10, 12, 14,
-           20), which read as sloppy once two of them sat side by side. Pills
-           (999px), the circular avatar, and the 2px progress hairline are
-           shapes rather than radius choices, so they stay as they are. */
+           20) plus 999px pills for the player picker, which read as sloppy the
+           moment two of them sat side by side — the picker sits directly under
+           the Correct/Wrong row, so the mismatch was unmissable.
+           Only the circular avatar (50%) and the 2px progress hairline are
+           exempt: those are shapes, not corner-radius choices. */
         :root { --radius: 12px; }
 
         .game-layout {
@@ -846,7 +877,7 @@ export default function GamePage() {
         .player-picker { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 14px; }
         .player-pick-btn {
           padding: 9px 18px;
-          border-radius: 999px;
+          border-radius: var(--radius);
           font-family: 'Outfit', sans-serif;
           font-size: 14px;
           font-weight: 600;
@@ -1122,7 +1153,12 @@ export default function GamePage() {
         }
       `}</style>
 
-      <audio ref={audioRef} />
+      <audio
+        ref={audioRef}
+        onPlay={() => setAudioPlaying(true)}
+        onPause={() => setAudioPlaying(false)}
+        onEnded={() => setAudioPlaying(false)}
+      />
 
       <div className={`game-layout${isTrial ? " trial" : ""}`}>
         {/* TOP BAR */}
@@ -1274,7 +1310,7 @@ export default function GamePage() {
                 roundIndex={currentIndex}
                 gamePhase={phase}
                 onControls={setBuzzerControls}
-                onRoundLocked={pauseClip}
+                onBuzz={pauseClip}
                 onPlayersChange={mergeRoomPlayers}
                 onPeakPlayers={(n) => {
                   peakPhonesRef.current = n;
@@ -1326,14 +1362,18 @@ export default function GamePage() {
                   {clipPaused ? "Paused — someone buzzed in" : "Listening…"}
                 </p>
                 <div className="btn-row" style={{ marginBottom: "8px" }}>
-                  {clipPaused && (
+                  {/* Resume and Stop stay usable for the whole round, not just
+                      the first buzz — see the guessing phase for the other half
+                      of the pair. */}
+                  {audioPlaying ? (
+                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={holdClip}>
+                      Stop
+                    </button>
+                  ) : (
                     <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={resumeClip}>
                       Resume
                     </button>
                   )}
-                  <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={() => { stopClip(); setProgress(100); setPhase("guessing"); }}>
-                    Stop
-                  </button>
                   <button className="btn-primary" onClick={reveal}>
                     Reveal Answer →
                   </button>
@@ -1360,6 +1400,19 @@ export default function GamePage() {
                   What&apos;s the song?
                 </p>
                 <div className="btn-row">
+                  {/* The same Resume/Stop pair as the playing phase. The clip's
+                      own window has run out here, but the host may still be
+                      playing the song while people think — and after a buzz
+                      they need to stop it again. Only Reveal ends this. */}
+                  {audioPlaying ? (
+                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={pauseClip}>
+                      Stop
+                    </button>
+                  ) : (
+                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={resumeClip}>
+                      Resume
+                    </button>
+                  )}
                   <button
                     className="btn-ghost"
                     style={{ flex: "0 0 auto" }}
@@ -1367,7 +1420,12 @@ export default function GamePage() {
                       const audio = audioRef.current;
                       if (audio && audio.src) {
                         audio.currentTime = 0;
+                        clipElapsedRef.current = 0;
                         audio.play().catch(() => {});
+                        setClipPaused(false);
+                        setProgress(0);
+                        startClipTimers();
+                        setPhase("playing");
                       }
                     }}
                   >
