@@ -85,6 +85,15 @@ export function drawCardFooter(ctx: CanvasRenderingContext2D, width: number, y: 
 }
 
 /**
+ * Which path the save actually took. These are not interchangeable for
+ * measurement: "shared" means the image left the device through the share
+ * sheet (the only outcome that can spread), "downloaded" means it landed in
+ * the filesystem and usually stops there, and "dismissed" means the user
+ * opened the sheet and backed out — a tap, but not a share.
+ */
+export type ShareOutcome = "shared" | "dismissed" | "downloaded" | "failed";
+
+/**
  * Save: prefer the share sheet with an image file — on Android/iOS that
  * offers "Save to Photos", and data-URL anchor downloads are unreliable
  * inside installed PWAs (WebAPK). Fallback: blob URL download.
@@ -93,11 +102,11 @@ export function shareOrDownloadCanvas(
   canvas: HTMLCanvasElement,
   filename: string,
   shareTitle: string
-): Promise<void> {
+): Promise<ShareOutcome> {
   return new Promise((resolve) => {
     canvas.toBlob(async (blob) => {
       if (!blob) {
-        resolve();
+        resolve("failed");
         return;
       }
       const file = new File([blob], filename, { type: "image/png" });
@@ -105,12 +114,12 @@ export function shareOrDownloadCanvas(
       if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
         try {
           await navigator.share({ files: [file], title: shareTitle });
-          resolve();
+          resolve("shared");
           return;
         } catch (e) {
           // User closed the share sheet — not an error, don't force a download.
           if (e instanceof DOMException && e.name === "AbortError") {
-            resolve();
+            resolve("dismissed");
             return;
           }
         }
@@ -124,7 +133,7 @@ export function shareOrDownloadCanvas(
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
-      resolve();
+      resolve("downloaded");
     }, "image/png");
   });
 }

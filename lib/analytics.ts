@@ -7,8 +7,12 @@
  * window.gtag is unavailable (GA not configured, ad blocker, etc.).
  */
 
+import type { ShareOutcome } from "@/lib/result-image";
+
 export type PlaylistSource = "own" | "builtin" | "mixed";
 export type ShareType = "track" | "album" | "artist" | "unknown";
+/** Which end-of-game image the player saved. */
+export type ResultCardType = "scores" | "taste";
 
 declare global {
   interface Window {
@@ -77,6 +81,23 @@ export type AnalyticsEvent =
   | {
       name: "room_started";
       params: { contributor_count: number; unique_tracks: number };
+    }
+  | {
+      /**
+       * End-of-game image save. The share buttons shipped long before this
+       * event did, so until now the loop was unmeasurable — we knew the
+       * feature existed but not whether anyone used it.
+       *
+       * `outcome` is the load-bearing param: only "shared" leaves the device
+       * through the share sheet. Counting taps alone would overstate reach,
+       * since a download or a dismissed sheet spreads nothing.
+       */
+      name: "result_shared";
+      params: {
+        card_type: ResultCardType;
+        outcome: ShareOutcome;
+        playlist_source: PlaylistSource;
+      };
     }
   | {
       name: "pwa_install_prompt";

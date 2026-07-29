@@ -33,6 +33,42 @@ describe("trackEvent", () => {
       vi.stubEnv("NODE_ENV", "production");
     });
 
+    it("reports which card was saved and whether it actually left the device", () => {
+      // outcome is the load-bearing param: a download or a dismissed share
+      // sheet spreads nothing, so counting taps alone overstates reach.
+      const gtag = vi.fn();
+      window.gtag = gtag;
+
+      trackEvent("result_shared", {
+        card_type: "taste",
+        outcome: "shared",
+        playlist_source: "mixed",
+      });
+
+      expect(gtag).toHaveBeenCalledWith("event", "result_shared", {
+        card_type: "taste",
+        outcome: "shared",
+        playlist_source: "mixed",
+      });
+    });
+
+    it("distinguishes a dismissed share sheet from a completed one", () => {
+      const gtag = vi.fn();
+      window.gtag = gtag;
+
+      trackEvent("result_shared", {
+        card_type: "scores",
+        outcome: "dismissed",
+        playlist_source: "own",
+      });
+
+      expect(gtag).toHaveBeenCalledWith(
+        "event",
+        "result_shared",
+        expect.objectContaining({ outcome: "dismissed" })
+      );
+    });
+
     it("passes event name and params to window.gtag", () => {
       const gtag = vi.fn();
       window.gtag = gtag;
