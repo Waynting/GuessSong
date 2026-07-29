@@ -96,10 +96,7 @@ export function useBuzzerSocket({
   });
 
   const socketRef = useRef<WebSocket | null>(null);
-  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const delayRef = useRef(INITIAL_RECONNECT_MS);
-  /** Set on unmount so a close event doesn't schedule a doomed reconnect. */
-  const closedRef = useRef(false);
   /**
    * Consecutive connection attempts that closed without ever opening.
    *
@@ -142,10 +139,22 @@ export function useBuzzerSocket({
       return;
     }
 
-    closedRef.current = false;
+    // Scoped to THIS effect run, not a ref shared across runs. A ref was a real
+    // bug: React remounts effects (StrictMode in dev, any dep change in prod),
+    // and the sequence went
+    //
+    //   run 1 connects A -> cleanup closes A and sets the ref -> run 2 clears
+    //   the ref and connects B -> A's close event finally fires, reads the
+    //   *cleared* ref, concludes it dropped unexpectedly, and reconnects as C
+    //
+    // leaving B and C both live. The room deduped them by playerId so the phone
+    // count looked right, while every broadcast arrived twice and doubled every
+    // analytics event. A closure variable can't be clobbered by a later run.
+    let cancelled = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
-      if (closedRef.current) return;
+      if (cancelled) return;
       const ws = new WebSocket(url);
       socketRef.current = ws;
       // Per-attempt, not a ref: distinguishes "the room refused us" from "we
@@ -169,6 +178,9 @@ export function useBuzzerSocket({
       });
 
       ws.addEventListener("message", (event) => {
+        // A socket orphaned by a remount must not keep driving state or firing
+        // analytics on its way out.
+        if (cancelled) return;
         let msg: ServerMessage;
         try {
           msg = JSON.parse(String(event.data)) as ServerMessage;
@@ -180,8 +192,8 @@ export function useBuzzerSocket({
       });
 
       ws.addEventListener("close", () => {
+        if (cancelled) return;
         setState((s) => ({ ...s, connected: false }));
-        if (closedRef.current) return;
 
         if (ws.readyState === WebSocket.CLOSED && !openedThisAttempt) {
           failedOpensRef.current += 1;
@@ -202,7 +214,7 @@ export function useBuzzerSocket({
 
         // Exponential backoff so a room that is genuinely gone doesn't turn six
         // phones into a reconnect storm against the Worker.
-        reconnectRef.current = setTimeout(connect, delayRef.current);
+        reconnectTimer = setTimeout(connect, delayRef.current);
         delayRef.current = Math.min(delayRef.current * 2, MAX_RECONNECT_MS);
       });
 
@@ -214,8 +226,8 @@ export function useBuzzerSocket({
     connect();
 
     return () => {
-      closedRef.current = true;
-      if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       socketRef.current?.close();
       socketRef.current = null;
     };
