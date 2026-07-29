@@ -64,6 +64,10 @@ export default function GamePage() {
   const [albumWinner, setAlbumWinner] = useState<string | null>(null);
   const [sourceWinner, setSourceWinner] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  // The clip is stopped mid-round but resumable. Set when someone buzzes in:
+  // the music gets out of the way so the room can hear the answer, and the host
+  // decides whether to let it run on.
+  const [clipPaused, setClipPaused] = useState(false);
   const [scorePulse, setScorePulse] = useState<string | null>(null);
   const [pointsAwarded, setPointsAwarded] = useState(false);
   const [albumPointsAwarded, setAlbumPointsAwarded] = useState(false);
@@ -92,6 +96,15 @@ export default function GamePage() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const clipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Clip time is accounted in segments rather than from one start timestamp,
+  // because a pause splits the clip into several. Without this a 15s clip
+  // paused for 20s would end the moment it resumed — the deadline was wall
+  // clock, not playback.
+  const clipElapsedRef = useRef(0);
+  const clipSegmentStartRef = useRef(0);
+  // Read by the buzz handler, which must not re-subscribe on every phase change.
+  const phaseRef = useRef<Phase>("waiting");
+  phaseRef.current = phase;
   const loadingSkipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewCache = useRef<Record<string, string | null>>({});
   const gameStartTimeRef = useRef<number>(Date.now());
@@ -131,7 +144,50 @@ export default function GamePage() {
     audioRef.current?.pause();
     if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    setClipPaused(false);
   }, []);
+
+  /**
+   * Start (or restart) the progress bar and the end-of-clip deadline for
+   * however much of the clip is left. Called once when a clip starts, and again
+   * on every resume.
+   */
+  const startClipTimers = useCallback(() => {
+    const totalMs = clipDuration * 1000;
+    clipSegmentStartRef.current = Date.now();
+    progressIntervalRef.current = setInterval(() => {
+      const elapsed = clipElapsedRef.current + (Date.now() - clipSegmentStartRef.current);
+      setProgress(Math.min((elapsed / totalMs) * 100, 100));
+    }, 80);
+    clipTimeoutRef.current = setTimeout(() => {
+      audioRef.current?.pause();
+      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+      setProgress(100);
+      setPhase("guessing");
+    }, Math.max(0, totalMs - clipElapsedRef.current));
+  }, [clipDuration]);
+
+  /**
+   * Hold the clip where it is. Someone buzzing in is the usual trigger: the
+   * music stops so the room can hear the answer, and the round is *not* over —
+   * a wrong answer should be able to hand the rest of the clip back.
+   */
+  const pauseClip = useCallback(() => {
+    if (phaseRef.current !== "playing") return;
+    audioRef.current?.pause();
+    clipElapsedRef.current += Date.now() - clipSegmentStartRef.current;
+    if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
+    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    setClipPaused(true);
+  }, []);
+
+  const resumeClip = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio?.src) return;
+    audio.play().catch(() => {});
+    setClipPaused(false);
+    startClipTimers();
+  }, [startClipTimers]);
 
   async function playClip() {
     const audio = audioRef.current;
@@ -178,19 +234,9 @@ export default function GamePage() {
     audio.play().catch(() => {});
     setPhase("playing");
     setProgress(0);
-
-    const startTime = Date.now();
-    progressIntervalRef.current = setInterval(() => {
-      const elapsed = (Date.now() - startTime) / 1000;
-      setProgress(Math.min((elapsed / clipDuration) * 100, 100));
-    }, 80);
-
-    clipTimeoutRef.current = setTimeout(() => {
-      audio.pause();
-      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-      setProgress(100);
-      setPhase("guessing");
-    }, clipDuration * 1000);
+    clipElapsedRef.current = 0;
+    setClipPaused(false);
+    startClipTimers();
   }
 
   function reveal() {
@@ -536,6 +582,13 @@ export default function GamePage() {
         html, body { overflow: hidden; max-width: 100vw; }
         body { background: #111; color: #f0f0f0; font-family: 'Outfit', sans-serif; }
 
+        /* One corner radius for every rectangular surface and control on this
+           screen. It used to be five values picked per element (8, 10, 12, 14,
+           20), which read as sloppy once two of them sat side by side. Pills
+           (999px), the circular avatar, and the 2px progress hairline are
+           shapes rather than radius choices, so they stay as they are. */
+        :root { --radius: 12px; }
+
         .game-layout {
           display: grid;
           grid-template-rows: 56px 1fr;
@@ -618,7 +671,7 @@ export default function GamePage() {
           max-width: 540px;
           background: rgba(20,20,20,0.92);
           border: 1px solid #2a2a2a;
-          border-radius: 20px;
+          border-radius: var(--radius);
           padding: 28px;
           backdrop-filter: blur(20px);
           box-shadow: 0 24px 80px rgba(0,0,0,0.6);
@@ -628,7 +681,7 @@ export default function GamePage() {
         .album-wrap {
           width: 100%;
           aspect-ratio: 1;
-          border-radius: 12px;
+          border-radius: var(--radius);
           overflow: hidden;
           position: relative;
           background: #1a1a1a;
@@ -702,7 +755,7 @@ export default function GamePage() {
           width: 100%;
           background: #1e1e1e;
           border: 1.5px solid #2a2a2a;
-          border-radius: 10px;
+          border-radius: var(--radius);
           padding: 14px 16px;
           font-size: 16px;
           font-family: 'Outfit', sans-serif;
@@ -729,7 +782,7 @@ export default function GamePage() {
           font-size: 15px;
           font-weight: 700;
           border: none;
-          border-radius: 10px;
+          border-radius: var(--radius);
           cursor: pointer;
           transition: background 0.15s, transform 0.1s;
         }
@@ -745,7 +798,7 @@ export default function GamePage() {
           font-size: 14px;
           font-weight: 500;
           border: 1.5px solid #2a2a2a;
-          border-radius: 10px;
+          border-radius: var(--radius);
           cursor: pointer;
           transition: all 0.15s;
           white-space: nowrap;
@@ -905,7 +958,7 @@ export default function GamePage() {
           max-width: 480px;
           background: linear-gradient(135deg, rgba(29,185,84,0.15) 0%, rgba(29,185,84,0.05) 100%);
           border: 1px solid rgba(29,185,84,0.35);
-          border-radius: 14px;
+          border-radius: var(--radius);
           padding: 12px 20px;
           display: flex;
           align-items: center;
@@ -947,7 +1000,7 @@ export default function GamePage() {
           max-width: 480px;
           background: #161616;
           border: 1px solid #222;
-          border-radius: 14px;
+          border-radius: var(--radius);
           overflow-y: auto;
           overflow-x: hidden;
           flex: 1 1 0;
@@ -1015,7 +1068,7 @@ export default function GamePage() {
           font-family: 'Outfit', sans-serif;
           font-size: 15px;
           font-weight: 700;
-          border-radius: 12px;
+          border-radius: var(--radius);
           cursor: pointer;
           transition: all 0.15s;
           border: none;
@@ -1034,7 +1087,7 @@ export default function GamePage() {
           gap: 14px;
           background: rgba(29,185,84,0.06);
           border: 1px solid rgba(29,185,84,0.25);
-          border-radius: 12px;
+          border-radius: var(--radius);
           padding: 14px 16px;
           margin-bottom: 16px;
           flex-shrink: 0;
@@ -1053,7 +1106,7 @@ export default function GamePage() {
           font-size: 13px;
           font-weight: 700;
           border: none;
-          border-radius: 8px;
+          border-radius: var(--radius);
           cursor: pointer;
           transition: background 0.15s, transform 0.1s;
         }
@@ -1104,7 +1157,7 @@ export default function GamePage() {
                 style={{
                   background: "none",
                   border: "1px solid #2a2a2a",
-                  borderRadius: "8px",
+                  borderRadius: "var(--radius)",
                   color: "#888",
                   fontSize: "12px",
                   fontFamily: "Outfit, sans-serif",
@@ -1124,7 +1177,7 @@ export default function GamePage() {
               style={{
                 background: "none",
                 border: "1px solid #2a2a2a",
-                borderRadius: "8px",
+                borderRadius: "var(--radius)",
                 color: "#555",
                 fontSize: "12px",
                 fontFamily: "Outfit, sans-serif",
@@ -1221,6 +1274,7 @@ export default function GamePage() {
                 roundIndex={currentIndex}
                 gamePhase={phase}
                 onControls={setBuzzerControls}
+                onRoundLocked={pauseClip}
                 onPlayersChange={mergeRoomPlayers}
                 onPeakPlayers={(n) => {
                   peakPhonesRef.current = n;
@@ -1268,8 +1322,15 @@ export default function GamePage() {
 
             {phase === "playing" && (
               <div>
-                <p className="listening-label" style={{ marginBottom: "12px" }}>Listening…</p>
+                <p className="listening-label" style={{ marginBottom: "12px" }}>
+                  {clipPaused ? "Paused — someone buzzed in" : "Listening…"}
+                </p>
                 <div className="btn-row" style={{ marginBottom: "8px" }}>
+                  {clipPaused && (
+                    <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={resumeClip}>
+                      Resume
+                    </button>
+                  )}
                   <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={() => { stopClip(); setProgress(100); setPhase("guessing"); }}>
                     Stop
                   </button>
@@ -1382,9 +1443,17 @@ export default function GamePage() {
                       {buzzerControls.buzzes[0].name} buzzed first —{" "}
                       {(buzzerControls.buzzes[0].msSinceOpen / 1000).toFixed(2)}s
                     </p>
-                    <div className="btn-row" style={{ marginBottom: "14px" }}>
+                    {/* Centred and content-sized, both of them. .btn-primary is
+                        flex:1 by default, so next to a content-sized "Wrong" the
+                        Correct button ballooned across the card and read as a
+                        different class of control than the verdict beside it. */}
+                    <div
+                      className="btn-row"
+                      style={{ marginBottom: "14px", justifyContent: "center" }}
+                    >
                       <button
                         className="btn-primary"
+                        style={{ flex: "0 0 auto", padding: "12px 16px" }}
                         onClick={() => {
                           awardPoint(buzzerControls.buzzes[0].name);
                           buzzerControls.correct();

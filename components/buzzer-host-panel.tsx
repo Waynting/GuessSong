@@ -38,6 +38,12 @@ export interface BuzzerHostPanelProps {
    * scoring buttons can drive the room instead of duplicating it.
    */
   onControls?: (controls: BuzzerControls) => void;
+  /**
+   * Fired on the buzz that locks the round — the first one, not every entry
+   * that queues behind it. The game page uses it to pause the clip so the room
+   * can actually hear the answer.
+   */
+  onRoundLocked?: () => void;
 }
 
 export interface BuzzerControls {
@@ -61,6 +67,7 @@ export function BuzzerHostPanel({
   onPlayersChange,
   onPeakPlayers,
   onControls,
+  onRoundLocked,
 }: BuzzerHostPanelProps) {
   const [qr, setQr] = useState<string | null>(null);
   const [showJoin, setShowJoin] = useState(true);
@@ -80,6 +87,10 @@ export function BuzzerHostPanel({
           buzz_order: msg.entry.order,
           ms_since_round_open: msg.entry.msSinceOpen,
         });
+        // order 1 is the buzz that locked the round. Later entries are queued
+        // behind it and must not re-fire this — the clip is already paused, and
+        // on a "Wrong" the room re-broadcasts the new head as a queue advance.
+        if (msg.entry.order === 1) onRoundLocked?.();
       }
       if (msg.type === "state" || msg.type === "players") {
         const list = msg.type === "state" ? msg.snapshot.players : msg.players;
@@ -90,7 +101,7 @@ export function BuzzerHostPanel({
         }
       }
     },
-    [roundIndex, onPlayersChange, onPeakPlayers]
+    [roundIndex, onPlayersChange, onPeakPlayers, onRoundLocked]
   );
 
   const { snapshot, connected, buzz, hostOpen, hostVerdict, hostReveal, hostNext } =
@@ -174,7 +185,7 @@ export function BuzzerHostPanel({
   }, [canBuzz, buzz]);
 
   return (
-    <div className="rounded-2xl bg-[#1a1a1a] p-4 text-white">
+    <div className="rounded-xl bg-[#1a1a1a] p-4 text-white">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-widest text-[#888]">Room</p>
@@ -188,7 +199,7 @@ export function BuzzerHostPanel({
         <button
           type="button"
           onClick={() => setShowJoin((v) => !v)}
-          className="rounded-lg bg-[#222] px-3 py-1.5 text-xs text-[#bbb]"
+          className="rounded-xl bg-[#222] px-3 py-1.5 text-xs text-[#bbb]"
         >
           {showJoin ? "Hide QR" : "Show QR"}
         </button>
@@ -197,7 +208,7 @@ export function BuzzerHostPanel({
       {showJoin && qr && (
         <div className="mt-3 flex flex-col items-center">
           {/* eslint-disable-next-line @next/next/no-img-element -- client-generated data: URI */}
-          <img src={qr} alt={`QR code to join room ${roomCode}`} className="h-32 w-32 rounded bg-white p-1" />
+          <img src={qr} alt={`QR code to join room ${roomCode}`} className="h-32 w-32 rounded-xl bg-white p-1" />
           <p className="mt-2 break-all text-center text-[10px] text-[#555]">{joinUrl}</p>
         </div>
       )}
@@ -240,7 +251,7 @@ export function BuzzerHostPanel({
       {buzzes.length > 1 && (
         <ol className="mt-2 flex flex-wrap gap-2 text-xs text-[#888]">
           {buzzes.slice(1).map((b) => (
-            <li key={b.playerId} className="rounded bg-[#222] px-2 py-1">
+            <li key={b.playerId} className="rounded-xl bg-[#222] px-2 py-1">
               {b.order}. {b.name}
             </li>
           ))}
