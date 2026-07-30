@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
+import { ChangelogModal } from "@/components/changelog-modal";
 
 export const metadata: Metadata = {
   title: "How to Play the Guess the Song Game",
@@ -348,6 +349,10 @@ export default function AboutPage() {
           font-size: 13px;
           font-weight: 600;
           text-decoration: none;
+          /* The footer's "What's new" is a <button> in the same row as the
+             mailto <a>. Buttons don't inherit either of these. */
+          cursor: pointer;
+          line-height: 1.2;
           transition: border-color 0.15s, background 0.15s, transform 0.1s;
         }
         .link-btn:hover {
@@ -595,8 +600,19 @@ export default function AboutPage() {
 
           {/* Footer */}
           <footer style={{ textAlign: "center", paddingTop: "8px", borderTop: "1px solid var(--border)" }}>
-            <div style={{ padding: "20px 0 4px" }}>
+            <div
+              style={{
+                padding: "20px 0 4px",
+                display: "flex",
+                gap: "10px",
+                justifyContent: "center",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
               <a href={REPORT_PROBLEM_MAILTO} className="link-btn">Report a problem</a>
+              <span aria-hidden style={{ color: "#333" }}>·</span>
+              <ChangelogModal />
             </div>
           </footer>
         </div>
