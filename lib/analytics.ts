@@ -16,6 +16,31 @@ export type PlaylistSource = "own" | "builtin" | "mixed";
 export type ShareType = "track" | "album" | "artist" | "unknown";
 /** Which end-of-game image the player saved. */
 export type ResultCardType = "scores" | "taste";
+/**
+ * What the one room code is doing. Both room-created events carry it because a
+ * combined room fires *both*, and without this param GA4 can only tell the two
+ * apart by joining events within a session — which the standard reports can't do.
+ */
+export type RoomJobs = "playlists" | "buzzer" | "both";
+
+/**
+ * What a room is being asked to do, as the room-event params report it.
+ *
+ * Lives here rather than in the panel that calls it because it decides the
+ * `room_jobs` param on every room-created and room-open-failed event: get it
+ * wrong and the whole room funnel is mislabeled rather than merely missing. A
+ * module-private helper inside a component is also unreachable from a test,
+ * and this repo's suite covers `lib/` only.
+ */
+export function roomJobs(collectsPlaylists: boolean, buzzer: boolean): RoomJobs {
+  if (collectsPlaylists && buzzer) return "both";
+  return collectsPlaylists ? "playlists" : "buzzer";
+}
+/** Who fed the playlist mailbox. The host can't scan their own QR, so they have
+ *  a separate path into it and a separate conversion rate. */
+export type SubmittedBy = "player" | "host";
+/** The join page a scanned phone actually landed on. See roomJoinUrl(). */
+export type JoinPage = "buzz" | "j";
 
 declare global {
   interface Window {
@@ -83,9 +108,61 @@ export type AnalyticsEvent =
         overlap_count: number;
       };
     }
+  /*
+   * The room funnel. One code, two halves (mailbox + buzzer socket), and three
+   * places a party can silently fall out of it:
+   *
+   *   room_created / buzz_room_created   host opened a room
+   *   room_open_failed                   ...or couldn't. Worker down = the whole
+   *                                      buzzer funnel vanishes, and without this
+   *                                      event it looks like nobody tried.
+   *   room_join_opened                   a phone landed on the join page. This is
+   *                                      the DENOMINATOR: room_submission_received
+   *                                      alone can't distinguish one scan that
+   *                                      submitted from eight where seven bounced.
+   *   room_submission_sent / _failed     the phone's own view of submitting, which
+   *                                      the host's poll cannot see — a player who
+   *                                      hit an error never reaches the mailbox, so
+   *                                      host-side counting reads it as "no scan".
+   *   room_submission_received           host's poll saw the mailbox grow
+   *   room_started / room_start_failed   host consumed the pool and kicked off
+   */
   | {
       name: "room_created";
-      params: Record<string, never>;
+      params: { room_jobs: RoomJobs };
+    }
+  | {
+      name: "room_open_failed";
+      params: {
+        room_jobs: RoomJobs;
+        /**
+         * Bucketed, never the raw error message: messages come from upstream and
+         * from user input, so sending them would blow up cardinality and could
+         * carry a pasted URL into GA4.
+         */
+        reason: "buzzer_unavailable" | "other";
+      };
+    }
+  | {
+      name: "room_join_opened";
+      params: { join_page: JoinPage; wants_playlist: boolean };
+    }
+  | {
+      name: "room_submission_sent";
+      params: { submitted_by: SubmittedBy; track_count: number };
+    }
+  | {
+      name: "room_submission_failed";
+      params: {
+        submitted_by: SubmittedBy;
+        /**
+         * "too_late" is a 410 — the host already built the pool, so this phone
+         * scanned after kickoff. Worth separating from a real error: it says the
+         * mailbox closes before people finish arriving, which is a design
+         * question, not a bug.
+         */
+        reason: "too_late" | "other";
+      };
     }
   | {
       name: "room_submission_received";
@@ -94,6 +171,10 @@ export type AnalyticsEvent =
   | {
       name: "room_started";
       params: { contributor_count: number; unique_tracks: number };
+    }
+  | {
+      name: "room_start_failed";
+      params: { contributor_count: number };
     }
   /*
    * Buzzer Mode events. These exist to answer five questions that no amount of
@@ -112,7 +193,7 @@ export type AnalyticsEvent =
    */
   | {
       name: "buzz_room_created";
-      params: Record<string, never>;
+      params: { room_jobs: RoomJobs };
     }
   | {
       name: "buzz_player_joined";
@@ -163,6 +244,12 @@ export type AnalyticsEvent =
   | {
       name: "share_unsupported";
       params: { share_type: ShareType };
+    }
+  | {
+      /** Footer "What's new" overlay. `version` is the newest entry shown, so a
+       *  release can be checked against how many people actually read it. */
+      name: "changelog_opened";
+      params: { version: string };
     };
 
 export type AnalyticsEventName = AnalyticsEvent["name"];

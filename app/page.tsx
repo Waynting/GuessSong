@@ -10,6 +10,7 @@ import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
 import { isBuzzerConfigured } from "@/lib/buzzer-client";
 import type { OpenRoom } from "@/lib/room-client";
 import { RoomPanel } from "@/components/room-panel";
+import { ChangelogModal } from "@/components/changelog-modal";
 import { BUILTIN_PLAYLISTS, type BuiltinPlaylist } from "@/lib/builtin-playlists";
 import { InstallBanner } from "@/components/install-banner";
 import {
@@ -190,6 +191,9 @@ export default function SetupPage() {
       });
       router.push("/game");
     } catch (e: unknown) {
+      // The last step of the room funnel, and the one where a full room can still
+      // end in no game at all — every playlist submitted and the pool refused.
+      trackEvent("room_start_failed", { contributor_count: roomSubmissions.length });
       setRoomError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setRoomStarting(false);
@@ -499,6 +503,10 @@ export default function SetupPage() {
           font-size: 13px;
           font-weight: 600;
           text-decoration: none;
+          /* The footer's "What's new" is a <button> in the same row as the
+             mailto <a>. Buttons don't inherit either of these. */
+          cursor: pointer;
+          line-height: 1.2;
           transition: border-color 0.15s, background 0.15s, transform 0.1s;
         }
         .link-btn:hover {
@@ -1233,7 +1241,19 @@ export default function SetupPage() {
 
           {/* Footer */}
           <footer style={{ textAlign: "center", marginTop: "32px", paddingTop: "20px", borderTop: "1px solid var(--border)" }}>
-            <a href={REPORT_PROBLEM_MAILTO} className="link-btn">Report a problem</a>
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                justifyContent: "center",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <a href={REPORT_PROBLEM_MAILTO} className="link-btn">Report a problem</a>
+              <span aria-hidden style={{ color: "#333" }}>·</span>
+              <ChangelogModal />
+            </div>
           </footer>
 
         </div>

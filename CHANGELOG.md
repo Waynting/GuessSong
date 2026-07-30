@@ -5,6 +5,42 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-07-30
+
+The 1.0 line is drawn here rather than at a feature: the party game, Buzzer Mode,
+Mixed Playlist Mode, the PWA and the bilingual site are all shipped and stable,
+and this release makes the two things a 1.0 needs — release notes a player can
+read, and enough instrumentation to know whether the newest feature actually
+works for people who are not us.
+
+### Added
+
+- **Room funnel telemetry.** The room feature shipped in 0.3.0 with only the host side instrumented, which left the funnel without a denominator: `room_submission_received` counts submissions that *landed*, so a room with one submission was indistinguishable from one scan that worked and eight that bounced. The player side had no events at all — `app/j/[code]/page.tsx` did not import `trackEvent`. Six events close it:
+  - `room_join_opened` (`join_page`, `wants_playlist`) — fires on every landing at `/buzz/[code]` and `/j/[code]`, including the ones that go no further. This is the denominator; `buzz_player_joined` only ever counted phones that made it.
+  - `room_submission_sent` (`submitted_by`, `track_count`) and `room_submission_failed` (`submitted_by`, `reason`) — the phone's own view of submitting, which the host's poll cannot see: a player who hits an error never reaches the mailbox, so host-side counting reads it as "never scanned". `reason: "too_late"` is the 410 specifically, i.e. arrived after the host built the pool — a design question about when the mailbox closes, not a bug, and worth separating from real errors.
+  - `room_open_failed` (`room_jobs`, `reason`) — a room that never opens is the one failure the funnel cannot infer, because the host gives up and every downstream event simply never happens. `reason: "buzzer_unavailable"` is split out because it means the Worker is down for everyone rather than that this host did something wrong.
+  - `room_start_failed` (`contributor_count`) — a full room whose pool was refused: every playlist in, still no game.
+  - `changelog_opened` (`version`) — reads of the panel below, attributed to the release being read.
+- **A "What's new" overlay** in the footer of `/`, `/about` and `/zh`, replacing nothing — there was previously no way for a player to find out what changed. An overlay rather than a `/changelog` route on purpose: release notes are a detour, not a destination, and a navigation would discard the half-configured setup form, whose state lives in React. It would also want indexing, sitemap and `hreflang` entries for content with no search value.
+  - Content lives in `lib/changelog.ts`, hand-written and deliberately *not* generated from this file. This one is a maintainer's record and includes a todo list; that one is for someone who came to play a party game.
+  - Every entry is bilingual, as parallel `text`/`textZh` fields on one object rather than two lists. `/zh` is written natively rather than translated and its footer says 回報問題, so an English-only panel opening off it would undo the one thing that page is for. Parallel fields make a missing translation a type error instead of a silent English fallback.
+  - Renders through a portal into `document.body`. The homepage footer sits inside `.fade-in` containers whose finished animation leaves a non-`none` transform behind, which makes them the containing block for `position: fixed` — an inline overlay was clipped to the footer.
+  - Escape, backdrop click, body scroll lock, Tab trapped inside the dialog, focus restored to the trigger on close.
+
+### Changed
+
+- `room_created` and `buzz_room_created` now carry `room_jobs` (`"playlists" | "buzzer" | "both"`), previously `Record<string, never>`. A combined room fires *both* events, and without the param GA4's standard reports cannot tell that pair from two unrelated rooms opened in one session.
+- Failure reasons on the new events are bucketed enums, never the raw error message. Messages come from upstream APIs and from pasted user input, so forwarding them verbatim would both blow up parameter cardinality and risk carrying a playlist URL into GA4. A test asserts the bucketing.
+- `roomJobs()` moved from a module-private helper in `components/room-panel.tsx` to an export of `lib/analytics.ts`, beside the `RoomJobs` type it returns. It decides `room_jobs` on every room-created and room-open-failed event, so getting it wrong mislabels the whole funnel rather than merely dropping an event — and a private function inside a component is unreachable from a suite that covers `lib/` only. Now has tests for all three branches.
+- `.link-btn` gained `cursor: pointer` and an explicit `line-height` in all three page styles, since it is now applied to a `<button>` as well as an `<a>` and buttons inherit neither.
+
+### Known gaps
+
+- Every new parameter needs registering as a GA4 custom dimension (event-scoped) before it appears in anything but Realtime and DebugView, and registration is not retroactive. `track_count` wants to be a custom *metric*, not a dimension.
+- `trackEvent` no-ops when `NODE_ENV !== "production"`, so none of this can be verified against `next dev` in GA4 itself — only via the `console.debug` line it falls back to. Confirming the real pipeline means deploying and using DebugView.
+- `room_join_opened` fires per page load, not per person. A player whose phone drops Wi-Fi and reloads counts twice, so the scan-to-submit rate is a floor rather than an exact figure.
+- The overlay's release list is hand-maintained alongside this file. Nothing enforces that a release updates both; the tests only check ordering, non-emptiness and that both languages are present for whatever is there.
+
 ## [0.4.0] - 2026-07-29
 
 ### Added

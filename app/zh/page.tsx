@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
+import { ChangelogModal } from "@/components/changelog-modal";
 
 export const metadata: Metadata = {
   // Unlike the English pages, the H1 here IS the keyword — /zh is not the brand
@@ -283,6 +284,10 @@ export default function ZhPage() {
           font-size: 13px;
           font-weight: 600;
           text-decoration: none;
+          /* 頁尾的「更新內容」是 <button>，和旁邊的 mailto <a> 排在同一行。
+             button 不會繼承這兩個屬性。 */
+          cursor: pointer;
+          line-height: 1.2;
           transition: border-color 0.15s, background 0.15s;
         }
         .link-btn:hover { border-color: var(--green); background: rgba(29,185,84,0.12); }
@@ -424,7 +429,22 @@ export default function ZhPage() {
           </section>
 
           <footer style={{ textAlign: "center", paddingTop: "20px", borderTop: "1px solid var(--border)" }}>
-            <a href={REPORT_PROBLEM_MAILTO} className="link-btn">回報問題</a>
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                justifyContent: "center",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <a href={REPORT_PROBLEM_MAILTO} className="link-btn">回報問題</a>
+              <span aria-hidden style={{ color: "#333" }}>·</span>
+              {/* Chinese notes, to match the page they open from — /zh is written
+                  natively rather than translated, and an English panel here would
+                  be the one seam in it. */}
+              <ChangelogModal locale="zh" />
+            </div>
           </footer>
         </div>
       </main>

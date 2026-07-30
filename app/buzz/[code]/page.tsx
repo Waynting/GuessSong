@@ -50,6 +50,10 @@ export default function BuzzPlayerPage() {
   // Read from the URL rather than rendered from it, so the form doesn't flash
   // its short version before the query string is known.
   const [hydrated, setHydrated] = useState(false);
+  // One landing per page load, like joinedRef below. This event is the room
+  // funnel's denominator, so a second fire doesn't just add noise — it deflates
+  // every conversion rate measured against it.
+  const openedRef = useRef(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -70,6 +74,14 @@ export default function BuzzPlayerPage() {
       }
     }
     setHydrated(true);
+
+    // Fires for every landing, including the ones that go no further. Paired with
+    // buzz_player_joined it gives the scan → in-the-room rate; buzz_player_joined
+    // alone only ever counts the phones that made it.
+    if (!openedRef.current) {
+      openedRef.current = true;
+      trackEvent("room_join_opened", { join_page: "buzz", wants_playlist: needsPlaylist });
+    }
   }, [code]);
 
   const joinedRef = useRef(false);
@@ -104,9 +116,23 @@ export default function BuzzPlayerPage() {
         if (!res.ok && res.status !== 410) {
           throw new Error(data.error || "Couldn't submit your playlist");
         }
+        if (res.ok) {
+          trackEvent("room_submission_sent", {
+            submitted_by: "player",
+            track_count: data.trackCount,
+          });
+        } else {
+          // Still a fall-out from the pool, even though the player carries on to
+          // a working buzzer and sees no error.
+          trackEvent("room_submission_failed", {
+            submitted_by: "player",
+            reason: "too_late",
+          });
+        }
         window.localStorage.setItem(submittedKey(code), "1");
         setWantsPlaylist(false);
       } catch (e: unknown) {
+        trackEvent("room_submission_failed", { submitted_by: "player", reason: "other" });
         setJoinError(e instanceof Error ? e.message : "Something went wrong");
         return;
       } finally {
