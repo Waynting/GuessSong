@@ -1,5 +1,29 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { trackEvent } from "@/lib/analytics";
+import { roomJobs, trackEvent } from "@/lib/analytics";
+
+describe("roomJobs", () => {
+  // Decides room_jobs on every room-created and room-open-failed event. Wrong
+  // here mislabels the whole room funnel rather than just losing an event.
+  it("reports a room doing both jobs as \"both\"", () => {
+    expect(roomJobs(true, true)).toBe("both");
+  });
+
+  it("reports a playlist-only room as \"playlists\"", () => {
+    expect(roomJobs(true, false)).toBe("playlists");
+  });
+
+  it("reports a buzzer-only room as \"buzzer\"", () => {
+    expect(roomJobs(false, true)).toBe("buzzer");
+  });
+
+  it("never returns \"playlists\" for a room that collects none", () => {
+    // openRoom() rejects a room with no job at all, so (false, false) cannot
+    // reach here — but if it ever did, claiming it collects playlists would be
+    // the one wrong answer, because the pool would be attributed to a room
+    // that never had a mailbox.
+    expect(roomJobs(false, false)).not.toBe("playlists");
+  });
+});
 
 describe("trackEvent", () => {
   beforeEach(() => {
@@ -125,6 +149,62 @@ describe("trackEvent", () => {
       ]);
       // every call goes through the gtag "event" command
       expect(gtag.mock.calls.every((c) => c[0] === "event")).toBe(true);
+    });
+
+    it("carries room_jobs on both room-created events, so a combined room is separable", () => {
+      // A combined room fires room_created AND buzz_room_created. Without this
+      // param GA4's standard reports can't tell that pair from two unrelated
+      // rooms opened in one session.
+      const gtag = vi.fn();
+      window.gtag = gtag;
+
+      trackEvent("room_created", { room_jobs: "both" });
+      trackEvent("buzz_room_created", { room_jobs: "both" });
+
+      expect(gtag.mock.calls).toEqual([
+        ["event", "room_created", { room_jobs: "both" }],
+        ["event", "buzz_room_created", { room_jobs: "both" }],
+      ]);
+    });
+
+    it("sends the whole room funnel, landings and failures included", () => {
+      const gtag = vi.fn();
+      window.gtag = gtag;
+
+      trackEvent("room_created", { room_jobs: "playlists" });
+      trackEvent("room_open_failed", { room_jobs: "buzzer", reason: "buzzer_unavailable" });
+      trackEvent("room_join_opened", { join_page: "buzz", wants_playlist: true });
+      trackEvent("room_submission_sent", { submitted_by: "player", track_count: 42 });
+      trackEvent("room_submission_failed", { submitted_by: "player", reason: "too_late" });
+      trackEvent("room_submission_received", { total: 3 });
+      trackEvent("room_started", { contributor_count: 3, unique_tracks: 24 });
+      trackEvent("room_start_failed", { contributor_count: 3 });
+
+      expect(gtag.mock.calls.map((c) => c[1])).toEqual([
+        "room_created",
+        "room_open_failed",
+        "room_join_opened",
+        "room_submission_sent",
+        "room_submission_failed",
+        "room_submission_received",
+        "room_started",
+        "room_start_failed",
+      ]);
+      expect(gtag.mock.calls.every((c) => c[0] === "event")).toBe(true);
+    });
+
+    it("keeps room_open_failed's reason bucketed rather than passing the raw message", () => {
+      // Error messages come from upstream and from pasted user input; sending
+      // them verbatim would blow up cardinality and could carry a playlist URL
+      // into GA4.
+      const gtag = vi.fn();
+      window.gtag = gtag;
+
+      trackEvent("room_open_failed", { room_jobs: "both", reason: "other" });
+
+      const params = gtag.mock.calls[0][2] as Record<string, unknown>;
+      expect(params.reason).toBe("other");
+      expect(Object.keys(params).sort()).toEqual(["reason", "room_jobs"]);
     });
 
     it("does not throw and does not log when window.gtag is missing", () => {

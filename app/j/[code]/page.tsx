@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import { trackEvent } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -29,10 +30,24 @@ export default function JoinRoomPage() {
     playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
   const canSubmit = name.trim().length > 0 && isValidUrl && status !== "loading";
 
+  // The denominator for this page's only conversion. The host's poll counts
+  // submissions that landed, so a phone that scanned in and then bounced off the
+  // form is indistinguishable from a phone that never scanned at all.
+  const openedRef = useRef(false);
+  useEffect(() => {
+    if (openedRef.current) return;
+    openedRef.current = true;
+    trackEvent("room_join_opened", { join_page: "j", wants_playlist: true });
+  }, []);
+
   async function handleSubmit() {
     if (!canSubmit) return;
     setStatus("loading");
     setError(null);
+    // 410 from the mailbox means the host already started, i.e. this player
+    // arrived too late rather than did anything wrong. Read in the catch, where
+    // the response is no longer in scope.
+    let tooLate = false;
     try {
       const res = await fetch(`/api/room/${code}/submit`, {
         method: "POST",
@@ -40,10 +55,21 @@ export default function JoinRoomPage() {
         body: JSON.stringify({ playerName: name, playlistUrl }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Couldn't submit your playlist");
+      if (!res.ok) {
+        tooLate = res.status === 410;
+        throw new Error(data.error || "Couldn't submit your playlist");
+      }
       setTrackCount(data.trackCount);
       setStatus("done");
+      trackEvent("room_submission_sent", {
+        submitted_by: "player",
+        track_count: data.trackCount,
+      });
     } catch (e: unknown) {
+      trackEvent("room_submission_failed", {
+        submitted_by: "player",
+        reason: tooLate ? "too_late" : "other",
+      });
       setError(e instanceof Error ? e.message : "Something went wrong");
       setStatus("error");
     }

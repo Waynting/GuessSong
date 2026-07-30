@@ -27,7 +27,7 @@ import QRCode from "qrcode";
 import { BuzzerUnavailableError } from "@/lib/buzzer-client";
 import { buildRoster, openRoom, roomJoinUrl, type OpenRoom } from "@/lib/room-client";
 import { useBuzzerSocket } from "@/lib/use-buzzer-socket";
-import { trackEvent } from "@/lib/analytics";
+import { roomJobs, trackEvent } from "@/lib/analytics";
 import { DEFAULT_HOST_NAME } from "@/lib/game-session";
 import type { RoomSubmissionSummary } from "@/types/room";
 
@@ -144,10 +144,19 @@ export function RoomPanel({
       setHostTrackCount(null);
       setHostSubmitError(null);
       const opened = await openRoom({ collectsPlaylists, buzzer, hostName: trimmed });
-      if (opened.collectsPlaylists) trackEvent("room_created", {});
-      if (opened.buzzer) trackEvent("buzz_room_created", {});
+      const jobs = roomJobs(opened.collectsPlaylists, Boolean(opened.buzzer));
+      if (opened.collectsPlaylists) trackEvent("room_created", { room_jobs: jobs });
+      if (opened.buzzer) trackEvent("buzz_room_created", { room_jobs: jobs });
       onOpened(opened);
     } catch (e: unknown) {
+      // A room that never opens is the one failure the funnel can't infer: the
+      // host sees an error and gives up, and every downstream event simply never
+      // happens. Buzzer-unavailable is split out because it means the Worker is
+      // down for everyone, not that this host did something wrong.
+      trackEvent("room_open_failed", {
+        room_jobs: roomJobs(collectsPlaylists, buzzer),
+        reason: e instanceof BuzzerUnavailableError ? "buzzer_unavailable" : "other",
+      });
       setError(
         e instanceof BuzzerUnavailableError || e instanceof Error
           ? e.message
@@ -173,6 +182,9 @@ export function RoomPanel({
     if (!room || !hostPlaylistUrl.trim()) return;
     setHostSubmitting(true);
     setHostSubmitError(null);
+    // Same 410 bucketing as the player pages, for consistency rather than because
+    // it is reachable — a host whose room is consumed has already left for /game.
+    let tooLate = false;
     try {
       const res = await fetch(`/api/room/${room.code}/submit`, {
         method: "POST",
@@ -180,12 +192,23 @@ export function RoomPanel({
         body: JSON.stringify({ playerName: trimmed, playlistUrl: hostPlaylistUrl }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Couldn't add your playlist");
+      if (!res.ok) {
+        tooLate = res.status === 410;
+        throw new Error(data.error || "Couldn't add your playlist");
+      }
       window.localStorage.setItem(HOST_NAME_STORAGE_KEY, trimmed);
       setHostTrackCount(data.trackCount);
+      trackEvent("room_submission_sent", {
+        submitted_by: "host",
+        track_count: data.trackCount,
+      });
       // Don't wait for the next poll tick to prove it worked.
       pollStatus(room.code);
     } catch (e: unknown) {
+      trackEvent("room_submission_failed", {
+        submitted_by: "host",
+        reason: tooLate ? "too_late" : "other",
+      });
       setHostSubmitError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setHostSubmitting(false);
