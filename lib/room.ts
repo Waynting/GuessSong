@@ -7,7 +7,7 @@
  */
 
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { getPlaylistWithTracks } from "@/lib/spotify";
+import { loadPlaylist } from "@/lib/playlist-cache";
 import { poolContributions } from "@/lib/mixed-playlist";
 import { getKvStore } from "@/lib/kv";
 import { stripTrackForStorage } from "@/lib/game-session";
@@ -144,6 +144,24 @@ async function requireOpenRoom(code: string) {
 }
 
 /**
+ * The two reasons a submission is refused even though the room is open.
+ * Shared so the pre-fetch check and the authoritative in-loop check cannot
+ * drift apart and start disagreeing about who is allowed in.
+ */
+function assertCanJoin(record: RoomRecord, trimmedName: string): void {
+  if (
+    record.submissions.some(
+      (s) => s.playerName.toLowerCase() === trimmedName.toLowerCase()
+    )
+  ) {
+    throw new RoomError("That name is already taken in this room", 409);
+  }
+  if (record.submissions.length >= ROOM_MAX_SUBMISSIONS) {
+    throw new RoomError("This room is full", 409);
+  }
+}
+
+/**
  * submitToRoom and consumeRoomPool both read-modify-write the whole room
  * record — there's no CAS primitive on lib/kv.ts's get/set. Two requests
  * landing close together (the common case for a QR-code room: a group
@@ -161,14 +179,22 @@ export async function submitToRoom(
 ): Promise<{ trackCount: number }> {
   // Validate the room is currently open before doing the slow network work
   // below, so a request against a dead room fails fast.
-  await requireOpenRoom(code);
+  const { record: openRecord } = await requireOpenRoom(code);
 
   const trimmedName = playerName.trim();
   if (!trimmedName) throw new RoomError("Name is required", 422);
 
+  // Every rejection the write loop below can produce, checked against the
+  // record we already hold. Advisory only — the loop re-checks under its race
+  // guard, which is what actually decides — but it moves the common rejections
+  // (a player retrying under a name someone just took, a 13th phone scanning a
+  // full room) to *before* the playlist fetch. Those used to spend a full
+  // pagination against the shared Spotify quota only to answer with a 409.
+  assertCanJoin(openRecord, trimmedName);
+
   let tracks: Track[];
   try {
-    ({ tracks } = await getPlaylistWithTracks(playlistUrl));
+    ({ tracks } = await loadPlaylist(playlistUrl));
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load playlist";
     throw new RoomError(message, 422);
@@ -183,16 +209,7 @@ export async function submitToRoom(
     const fresh = await store.get<RoomRecord>(roomKey(code));
     if (!fresh) throw new RoomError("Room not found or expired", 404);
     if (fresh.consumed) throw new RoomError("This room has already started", 410);
-    if (
-      fresh.submissions.some(
-        (s) => s.playerName.toLowerCase() === trimmedName.toLowerCase()
-      )
-    ) {
-      throw new RoomError("That name is already taken in this room", 409);
-    }
-    if (fresh.submissions.length >= ROOM_MAX_SUBMISSIONS) {
-      throw new RoomError("This room is full", 409);
-    }
+    assertCanJoin(fresh, trimmedName);
 
     const updated: RoomRecord = {
       ...fresh,

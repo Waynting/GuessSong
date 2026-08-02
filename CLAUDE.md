@@ -42,9 +42,23 @@ There *is* server-side storage, but it is deliberately narrow: a KV layer (`lib/
 
 **Every route is IP rate limited** via `lib/rate-limit.ts` (fixed window on top of `lib/kv.ts`'s atomic `incr`). When adding a route, follow the existing pattern: module-level `X_LIMIT` / `X_WINDOW_SECONDS` constants, then `rateLimit()` → 429 before any expensive work.
 
-Two caches keep upstream request volume flat as traffic grows, both of which matter because serverless egress IPs are shared and upstream APIs throttle per IP:
-- **Preview cache** (`app/api/preview/route.ts`) — KV, keyed by Spotify track id. Hits live 30 days, misses 7. Caching misses is the point: tracks with no preview anywhere are the most repeatedly queried, and each uncached miss costs 5 upstream calls.
-- **Spotify token cache** (`lib/spotify.ts`) — module scope, so per-lambda-instance rather than global. Deliberately *not* in KV, so `/api/playlist` keeps zero KV dependency and can't be taken down by an Upstash outage. A 401 clears the cache and retries once.
+Three caches keep upstream request volume flat as traffic grows:
+- **Preview cache** (`app/api/preview/route.ts`) — KV, keyed by Spotify track id. Hits live 30 days, misses 7. Caching misses is the point: tracks with no preview anywhere are the most repeatedly queried, and each uncached miss costs 5 upstream calls. Matters because serverless egress IPs are shared and iTunes/Deezer throttle per IP.
+- **Playlist cache** (`lib/playlist-cache.ts`) — KV, keyed by playlist id. 6h on a full playlist, 1h on a sampled one. **Every caller must go through `loadPlaylist`, never `getPlaylistWithTracks` directly** — a single uncached path is enough to put the shared quota back at risk.
+- **Spotify token cache** (`lib/spotify.ts`) — module scope, so per-lambda-instance rather than global. Deliberately *not* in KV: a token is the one thing with no fallback, so a KV outage on that path would take down playlist loading entirely. A 401 clears the cache and retries once.
+
+### Spotify's quota is per app, not per IP
+
+This is the constraint the whole playlist path is shaped around, and it is the opposite of how `lib/rate-limit.ts` works. Spotify throttles on the **client id**, so every visitor shares one budget, while every route limiter is keyed by IP and hands each new visitor a fresh allowance. Per-IP limits bound one abusive client; they do nothing about aggregate load. `lib/playlist-cache.ts` is what bounds the aggregate, in three layers:
+
+- **Cache** — a repeat playlist costs zero upstream calls.
+- **In-flight coalescing** — concurrent loads of the same playlist collapse into one fetch, per lambda instance. Mixed mode fires one request per contributor from one click, and a QR room gets a burst of simultaneous submits; the cache write lands too late to help those siblings.
+- **Global budget** (`SPOTIFY_MAX_LOADS_PER_MINUTE`) — a KV `incr` counter shared across instances, refusing new playlists *before* Spotify does. Fails open on a KV error: losing the safety net must mean "back to how it was", not "nobody can play".
+- **429 cooldown** — when Spotify does refuse, all uncached loads are parked for `Retry-After` (clamped 30s–15min), in KV so every instance sees it. Without this a throttled window is self-sustaining: every host errors, every host retries, the retries keep the quota pinned. Cached playlists keep serving throughout, so a party mid-game is unaffected by someone else's throttling.
+
+Two rules that follow from this, and are easy to undo by accident:
+- **Never flatten an upstream 429 into a generic 400.** The client has to be able to tell "your playlist is wrong" from "we are throttled" — the original bug told throttled hosts to check their URL was public, which sent them straight back into retrying.
+- **`fetchPlaylistTracks` reads at most `MAX_PLAYLIST_TRACKS` (500), sampling random pages when a playlist is bigger.** Following `next` unbounded made one big playlist cost 40+ requests for a game that plays at most 50 songs. Cache hit rate is logged on every miss (`[playlist-cache] miss … rate=…`) and readable via `getCacheStats()`.
 
 ### Scoring
 
@@ -61,6 +75,7 @@ SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET   # Required — Client Credentials on
 UPSTASH_REDIS_REST_URL / _TOKEN             # Required in production — see below
 NEXT_PUBLIC_BASE_URL                        # Optional — defaults to https://www.guessong.app
 NEXT_PUBLIC_GA_MEASUREMENT_ID               # Optional — enables GA4
+SPOTIFY_MAX_LOADS_PER_MINUTE                # Optional — global upstream ceiling, default 40
 ```
 
 Without the Upstash pair, `lib/kv.ts` falls back to an in-process `Map`. That is fine for `next dev` and tests, but **not** for multi-instance serverless deploys: rooms created by one lambda would be invisible to another, rate limit counters would reset per instance, and the preview cache would lose most of its hit rate.
