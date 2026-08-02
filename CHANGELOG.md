@@ -5,6 +5,40 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`429 QUOTA_EXCEEDED` from Spotify on `/api/playlist`.** Nothing anywhere cached a playlist: `getPlaylistWithTracks` went to the network on every single call, so the same URL re-paginated in full on every host retry, every room submit, and for every player in a room who pasted the same link. Meanwhile Spotify's quota is per *client id* — one budget shared by the whole user base — while every limiter in `lib/rate-limit.ts` is keyed by IP, so N phones each got a fresh allowance against it. Five compounding causes, fixed together:
+  - **`lib/playlist-cache.ts` (new)** — KV cache keyed by playlist id, 6h on a hit. A repeat load now costs zero upstream calls. Reads and writes are wrapped so a KV outage degrades to "slower", never "broken", the same contract `app/api/preview/route.ts` follows. This is not a reversal of the token cache's deliberate no-KV decision (`lib/spotify.ts`): a token has no fallback, a playlist does.
+  - **In-flight coalescing** in the same module. One Mixed-mode Start fires a request per contributor and a QR room gets a burst of simultaneous submits; duplicate URLs in either used to mean duplicate pagination, because the cache write lands too late to help its own siblings.
+  - **A 429 cooldown**, in KV so every lambda instance sees it. Without it a throttled window is self-sustaining — every host sees an error, every host retries, the retries keep the quota pinned. One 429 now parks all *uncached* loads for the duration Spotify asked for (clamped to 30s–15min); cached playlists keep serving, so a party already mid-game is unaffected by someone else's throttling.
+  - **A proactive global budget** (`SPOTIFY_MAX_LOADS_PER_MINUTE`, default 40), a KV `incr` counter shared across instances. The cooldown above is reactive — it only helps once Spotify has already refused something. This is the half that stops us getting there: a spike, a scripted client, or a dozen rooms starting at once is refused here rather than spending the quota to find out. Counted in *loads*, not requests; one cold load is 1 metadata call plus up to 5 track pages, so the default works out to roughly 240 upstream requests a minute. Fails **open** on a KV error — losing the safety net has to mean "back to how it was", not "nobody can play".
+  - **`limit=50` → `limit=100`** in `fetchPlaylistTracks`, Spotify's documented maximum. Every playlist was costing exactly twice the requests it needed to.
+  - **`MAX_PLAYLIST_TRACKS = 500`**, replacing an unbounded `while (data.next)` loop. A 4,000-track playlist was 40 upstream requests for a game that then plays at most 50 of them.
+
+### Added
+
+- **Random sampling for oversized playlists.** A playlist longer than `MAX_PLAYLIST_TRACKS` is no longer read front-to-back: the first page reports the real length, and the rest of the page budget goes on randomly chosen pages spread across the whole playlist. Taking the first 500 of a 4,000-track playlist would mean the same songs every single game, and whatever the owner happened to add first. Sampling is by *page* rather than by track, because a page is what a request buys and sampling finer would cost more requests — the one thing this whole change exists to avoid. Page 0 is always among the candidates, since reading it is how the length is discovered, so the first 100 tracks are slightly over-represented; everything after them is uniform. Playlists that fit are still read whole and in order.
+  - Sampled entries cache for 1h rather than 6h. The TTL is also how long everyone is stuck with the same draw, and six hours of it would undo the point of sampling.
+  - `shuffle()` is Fisher-Yates. `Array#sort` with a random comparator, which the setup page still uses for its own shuffle, is not a uniform permutation.
+- **Cache hit-rate instrumentation.** Hit/miss counters in KV, bucketed by day, held a week, readable via `getCacheStats()`. The running rate is logged on every *miss* rather than every load: once the cache is working, misses are the rare case, so the instrumentation gets quieter exactly as things get healthier and a sudden run of lines is itself the signal. Previously "did this work" could only be answered by the absence of 429s, which is indistinguishable from a quiet evening.
+
+### Changed
+
+- `getPlaylistWithTracks` ties its two concurrent calls to an `AbortController`. `Promise.all` rejects on the first failure and the route returns, but the losing half used to keep paginating afterwards — spending quota on a request nobody was waiting for, and emitting `console.error` with no request context. That is the whole explanation for "Spotify tracks fetch error" appearing under `/api/preview` in the production logs; `/api/preview` never called Spotify at all.
+- `/api/playlist` returns **429 and 404 as themselves** instead of flattening every upstream failure into `400 + message`, and sets `Retry-After` on a 429. The client could not previously tell "your playlist is wrong" from "we are throttled", so the UI told throttled hosts to check their URL was public — sending them straight back into retrying against a spent quota. The 429 message now says the URL is fine and gives a wait.
+- `submitToRoom` runs the duplicate-name and room-full checks against the record it already holds *before* fetching the playlist. Those rejections used to cost a full pagination and then answer 409. The authoritative re-check inside the write loop is unchanged; both now share `assertCanJoin`.
+- Mixed mode's Start button loads contributor playlists two at a time (`MIXED_FETCH_CONCURRENCY`) instead of all 12 at once, and reports a 429 as a wait rather than as "remove or fix" the contributor's playlist.
+- `/api/playlist` responses no longer carry `rawJson`. Every consumer already dropped it via `stripTrackForStorage`; keeping it made cache entries and response bodies roughly an order of magnitude larger than they needed to be.
+
+### Known gaps
+
+- `SPOTIFY_MAX_LOADS_PER_MINUTE`'s default of 40 is a guess. The right value depends on which quota tier the Spotify app is on, which the code cannot find out — hence the env var. Watch the hit-rate log for a week and tune.
+- The global budget is a fixed window, so it can pass up to 2× the limit across a window boundary, same caveat as `lib/rate-limit.ts`. Acceptable: the cooldown catches the overshoot.
+- `MAX_PLAYLIST_TRACKS` makes "All" mean "a random 500". Invisible for any playlist a party would realistically use, but it is a real behaviour change, and `truncated` is returned but not yet surfaced anywhere in the UI — a host with a 4,000-track playlist gets no indication they're playing a sample.
+- Hit rate is logged and readable in-process but has no endpoint, so checking it means grepping Vercel logs. Deliberate: an endpoint would need an auth story for what is currently a two-line grep.
+
 ## [1.0.0] - 2026-07-30
 
 The 1.0 line is drawn here rather than at a feature: the party game, Buzzer Mode,

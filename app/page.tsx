@@ -24,6 +24,48 @@ const SONG_COUNTS: (number | "all")[] = [10, 20, 30, 50, "all"];
 const MIXED_SAMPLE_COUNTS = [5, 8, 10, 12];
 const MIXED_MIN_CONTRIBUTORS = 2;
 
+/**
+ * How many /api/playlist loads Mixed mode has in flight at once.
+ *
+ * One Start click fans out to one request per contributor — up to 12 — and
+ * each of those pages through a playlist against a Spotify quota shared by the
+ * entire site. Firing them all simultaneously is what put three POSTs inside
+ * the same second in the production logs. Two at a time keeps the wall-clock
+ * respectable while giving the server-side cache a chance to be warm for the
+ * later ones, which matters whenever two friends contribute the same playlist.
+ */
+const MIXED_FETCH_CONCURRENCY = 2;
+
+/**
+ * Promise.allSettled with a ceiling on how many run at once. Results stay in
+ * input order, because the caller maps rejections back to contributor names by
+ * index to build its error message.
+ */
+async function settleWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let next = 0;
+
+  async function run(): Promise<void> {
+    while (next < items.length) {
+      const index = next++;
+      try {
+        results[index] = { status: "fulfilled", value: await worker(items[index], index) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => run())
+  );
+  return results;
+}
+
 // Rendered on the page *and* emitted as FAQPage JSON-LD below — keep the two
 // in sync, Google penalises schema that doesn't match visible content.
 const FAQS: { q: string; a: string }[] = [
@@ -298,18 +340,42 @@ export default function SetupPage() {
     setLoading(true);
     trackEvent("playlist_submitted", { playlist_source: "mixed" });
     try {
-      const results = await Promise.allSettled(
-        mixedContributions.map(async (c) => {
+      const results = await settleWithConcurrency(
+        mixedContributions,
+        MIXED_FETCH_CONCURRENCY,
+        async (c) => {
           const res = await fetch("/api/playlist", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url: c.playlistUrl }),
           });
           const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "Failed to load playlist");
+          if (!res.ok) {
+            const err = new Error(data.error || "Failed to load playlist");
+            // Carried so the summary below can tell "this playlist is broken"
+            // apart from "Spotify is throttling the whole site".
+            (err as Error & { status?: number }).status = res.status;
+            throw err;
+          }
           return { playerName: c.name, tracks: data.tracks as Track[] };
-        })
+        }
       );
+
+      // A 429 is not the contributor's fault, and telling someone to "remove
+      // or fix" a perfectly good playlist sends them straight back to retrying,
+      // which is what keeps the shared quota spent. Surface the wait instead.
+      const throttled = results.find(
+        (r): r is PromiseRejectedResult =>
+          r.status === "rejected" &&
+          (r.reason as { status?: number } | undefined)?.status === 429
+      );
+      if (throttled) {
+        throw new Error(
+          throttled.reason instanceof Error
+            ? throttled.reason.message
+            : "Spotify is rate limiting us right now. Please try again in a minute."
+        );
+      }
 
       const failedNames = results
         .map((r, i) => (r.status === "rejected" ? mixedContributions[i].name : null))

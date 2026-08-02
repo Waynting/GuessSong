@@ -1,0 +1,396 @@
+/**
+ * Cache and admission control in front of Spotify playlist loads.
+ *
+ * Spotify's client-credentials quota is per *app*, not per user or per IP.
+ * Every rate limiter in this codebase is keyed by IP (lib/rate-limit.ts), so
+ * N players from N phones each got a fresh allowance against one shared
+ * upstream budget — and nothing anywhere cached a playlist. The same URL
+ * re-paginated in full on every submit, every retry, and every player in a
+ * room who happened to paste the same link. That is what produced
+ * `429 QUOTA_EXCEEDED`.
+ *
+ * Three layers, cheapest first:
+ *
+ *   loadPlaylist ─→ KV cache ─────── hit ──→ return (zero upstream calls)
+ *                       │ miss
+ *                       ├─ in-flight map ── hit ──→ await the existing fetch
+ *                       │ miss
+ *                       ├─ cooldown gate ── open ─→ throw 429 immediately
+ *                       │ closed
+ *                       └─ Spotify ─→ store ─→ return
+ *
+ * The cooldown is the layer that actually lets the quota recover. Without it
+ * a throttled window is self-sustaining: every host sees an error, every host
+ * retries, and the retries keep the quota pinned. One 429 from Spotify parks
+ * *all* uncached loads for the duration it asked for.
+ *
+ * Every KV call is wrapped. A cache outage must degrade to "slower", never to
+ * "broken" — same contract as app/api/preview/route.ts, which this follows.
+ */
+
+import { getKvStore } from "@/lib/kv";
+import {
+  getPlaylistWithTracks,
+  isSpotifyEditorial,
+  parsePlaylistUrl,
+  SpotifyApiError,
+} from "@/lib/spotify";
+import { stripTrackForStorage } from "@/lib/game-session";
+import type { Track } from "@/types";
+
+/**
+ * Bump when the cached shape changes. Entries are TTL'd rather than migrated,
+ * so an old-shape read would otherwise be handed to callers as a valid hit.
+ */
+const CACHE_VERSION = "v1";
+
+/**
+ * Long enough that a party spends zero upstream requests after the first load
+ * — including the host reloading, re-pasting, or every player in a room
+ * submitting the same popular playlist — and short enough that a host who adds
+ * songs mid-afternoon sees them tonight.
+ */
+const HIT_TTL_SECONDS = 6 * 60 * 60;
+
+/**
+ * Shorter, for playlists too big to read whole. Those are cached as a *random
+ * sample* of MAX_PLAYLIST_TRACKS, so the TTL is also how long everyone is
+ * stuck with the same draw. Six hours would mean a 4,000-track playlist plays
+ * the same 500 songs all evening, which is the thing sampling exists to avoid;
+ * an hour still absorbs a party's worth of retries and reloads.
+ */
+const SAMPLED_TTL_SECONDS = 60 * 60;
+
+/**
+ * Negative caching, deliberately much shorter than the preview cache's.
+ * A 404 here usually means "public playlist, wrong link" or "the owner made it
+ * private", both of which a host fixes within minutes; caching that for days
+ * would keep telling them their fixed playlist is broken. Ten minutes is
+ * enough to absorb the burst of retries a bad paste generates.
+ */
+const NOT_FOUND_TTL_SECONDS = 10 * 60;
+
+const COOLDOWN_KEY = "spotify:cooldown";
+
+/**
+ * Proactive ceiling on how many playlist loads the *whole site* sends upstream
+ * per minute, shared across lambda instances via KV's atomic incr.
+ *
+ * The cooldown below is reactive — it only helps once Spotify has already
+ * refused something. This is the half that stops us reaching that point: a
+ * traffic spike, a scripted client, or a dozen rooms starting at once gets
+ * refused here rather than spending the app's quota to find out.
+ *
+ * The number is in *loads*, not requests. One cold load costs 1 metadata call
+ * plus up to MAX_TRACK_PAGES track pages, so the default 40 works out to a
+ * ceiling of roughly 240 upstream requests a minute. Cache hits never reach
+ * here, so this bounds genuinely-new playlists only. Env-overridable because
+ * the right value depends on which quota tier the Spotify app is on, and that
+ * is not something the code can find out.
+ */
+const GLOBAL_LOAD_WINDOW_SECONDS = 60;
+const DEFAULT_GLOBAL_LOAD_LIMIT = 40;
+const BUDGET_KEY = "spotify:budget";
+
+/**
+ * Spotify's Retry-After on QUOTA_EXCEEDED is sometimes enormous (hours) and
+ * sometimes absent. Clamp both ends: never park the whole site for longer than
+ * a party would wait, never hammer straight back into a spent quota either.
+ */
+const MIN_COOLDOWN_SECONDS = 30;
+const MAX_COOLDOWN_SECONDS = 15 * 60;
+const DEFAULT_COOLDOWN_SECONDS = 60;
+
+export interface LoadedPlaylist {
+  name: string;
+  tracks: Track[];
+  totalTracks: number;
+  /** True when the playlist is longer than MAX_PLAYLIST_TRACKS. */
+  truncated: boolean;
+}
+
+type CacheEntry =
+  | { kind: "hit"; name: string; tracks: Track[]; truncated: boolean }
+  | { kind: "missing"; message: string; status: number };
+
+function cacheKey(playlistId: string): string {
+  return `playlist:${CACHE_VERSION}:${playlistId}`;
+}
+
+async function readCache(playlistId: string): Promise<CacheEntry | null> {
+  try {
+    const store = await getKvStore();
+    return await store.get<CacheEntry>(cacheKey(playlistId));
+  } catch {
+    return null;
+  }
+}
+
+async function writeCache(
+  playlistId: string,
+  entry: CacheEntry,
+  ttlSeconds: number
+): Promise<void> {
+  try {
+    const store = await getKvStore();
+    await store.set(cacheKey(playlistId), entry, ttlSeconds);
+  } catch {
+    // Swallowed: the caller already has its answer, and failing the request
+    // over a cache write would turn a degraded cache into a broken game.
+  }
+}
+
+async function readCooldownUntil(): Promise<number | null> {
+  try {
+    const store = await getKvStore();
+    const entry = await store.get<{ until: number }>(COOLDOWN_KEY);
+    return typeof entry?.until === "number" ? entry.until : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Records that Spotify is throttling the app. Stored in KV rather than module
+ * scope on purpose — unlike the token cache, this is only useful if every
+ * lambda instance sees it. A per-instance cooldown would park one instance
+ * while the rest carried on spending the quota it is trying to protect.
+ */
+async function startCooldown(retryAfterSeconds?: number): Promise<number> {
+  const seconds = Math.min(
+    MAX_COOLDOWN_SECONDS,
+    Math.max(MIN_COOLDOWN_SECONDS, retryAfterSeconds ?? DEFAULT_COOLDOWN_SECONDS)
+  );
+  const until = Date.now() + seconds * 1000;
+  try {
+    const store = await getKvStore();
+    await store.set(COOLDOWN_KEY, { until }, seconds);
+  } catch {
+    // Best effort. Losing the cooldown costs us the coordinated backoff, not
+    // correctness — each request still fails on its own 429.
+  }
+  return seconds;
+}
+
+function globalLoadLimit(): number {
+  const configured = Number(process.env.SPOTIFY_MAX_LOADS_PER_MINUTE);
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_GLOBAL_LOAD_LIMIT;
+}
+
+/**
+ * Claims one slot in the current minute's global budget. Returns false when
+ * the window is spent.
+ *
+ * Fails *open* on a KV error: the budget is a safety net, and losing the net
+ * has to mean "back to how it was", not "nobody can load a playlist". The
+ * cooldown still catches the resulting 429 if we overshoot.
+ */
+async function claimGlobalBudget(): Promise<boolean> {
+  try {
+    const store = await getKvStore();
+    const used = await store.incr(BUDGET_KEY, GLOBAL_LOAD_WINDOW_SECONDS);
+    return used <= globalLoadLimit();
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Hit/miss counters, bucketed by day and held for a week.
+ *
+ * Without these, "did the cache work" can only be answered by watching for the
+ * absence of 429s, which is indistinguishable from a quiet evening. The rate
+ * is logged on every miss rather than on every load: misses are the rare case
+ * once the cache is doing its job, so the instrumentation gets quieter exactly
+ * as things get healthier, and a sudden run of lines is itself the signal.
+ */
+function statsKey(kind: "hit" | "miss"): string {
+  const day = new Date().toISOString().slice(0, 10);
+  return `playlist:stats:${day}:${kind}`;
+}
+
+const STATS_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+async function recordHit(): Promise<void> {
+  try {
+    const store = await getKvStore();
+    await store.incr(statsKey("hit"), STATS_TTL_SECONDS);
+  } catch {
+    // Instrumentation must never be able to fail a request.
+  }
+}
+
+async function recordMiss(playlistId: string): Promise<void> {
+  try {
+    const store = await getKvStore();
+    const misses = await store.incr(statsKey("miss"), STATS_TTL_SECONDS);
+    const hits = (await store.get<number>(statsKey("hit"))) ?? 0;
+    const rate = hits + misses > 0 ? hits / (hits + misses) : 0;
+    console.log(
+      `[playlist-cache] miss id=${playlistId} hits=${hits} misses=${misses} rate=${rate.toFixed(3)}`
+    );
+  } catch {
+    // Instrumentation must never be able to fail a request.
+  }
+}
+
+/** Today's counters, for anything that wants to read the rate back. */
+export async function getCacheStats(): Promise<{
+  hits: number;
+  misses: number;
+  hitRate: number;
+}> {
+  const store = await getKvStore();
+  const hits = (await store.get<number>(statsKey("hit"))) ?? 0;
+  const misses = (await store.get<number>(statsKey("miss"))) ?? 0;
+  const total = hits + misses;
+  return { hits, misses, hitRate: total > 0 ? hits / total : 0 };
+}
+
+function cooldownError(secondsRemaining: number): SpotifyApiError {
+  return new SpotifyApiError(
+    `Spotify is rate limiting us right now. Try again in about ${secondsRemaining}s — your playlist URL is fine.`,
+    429,
+    secondsRemaining
+  );
+}
+
+/**
+ * Coalesces concurrent loads of the same playlist within one lambda instance.
+ *
+ * Mixed Playlist Mode fires one request per contributor from a single click,
+ * and a QR room gets a burst of submits as everyone scans at once. Duplicated
+ * URLs in either of those used to mean duplicated pagination, because the KV
+ * write only lands after the first fetch finishes — too late for its own
+ * siblings. Per-instance rather than distributed: a cross-instance lock would
+ * need a primitive lib/kv.ts doesn't have, for a shrinking share of the win
+ * now that results are cached.
+ */
+const inFlight = new Map<string, Promise<LoadedPlaylist>>();
+
+function toLoaded(entry: Extract<CacheEntry, { kind: "hit" }>): LoadedPlaylist {
+  return {
+    name: entry.name,
+    tracks: entry.tracks,
+    totalTracks: entry.tracks.length,
+    truncated: entry.truncated,
+  };
+}
+
+async function fetchAndCache(
+  playlistId: string,
+  playlistUrl: string
+): Promise<LoadedPlaylist> {
+  const cooldownUntil = await readCooldownUntil();
+  if (cooldownUntil && Date.now() < cooldownUntil) {
+    throw cooldownError(Math.ceil((cooldownUntil - Date.now()) / 1000));
+  }
+
+  if (!(await claimGlobalBudget())) {
+    throw new SpotifyApiError(
+      "Too many new playlists are being loaded across the site right now. Please try again in a minute — your playlist URL is fine.",
+      429,
+      GLOBAL_LOAD_WINDOW_SECONDS
+    );
+  }
+
+  await recordMiss(playlistId);
+
+  try {
+    const { playlist, tracks, truncated } = await getPlaylistWithTracks(playlistUrl);
+
+    // rawJson is the entire Spotify track object and nothing reads it — every
+    // consumer runs it through stripTrackForStorage before use. Dropping it
+    // here keeps cache entries (and the /api/playlist response body) roughly
+    // an order of magnitude smaller.
+    const stripped = tracks.map(stripTrackForStorage);
+
+    if (stripped.length > 0) {
+      await writeCache(
+        playlistId,
+        { kind: "hit", name: playlist.name, tracks: stripped, truncated },
+        truncated ? SAMPLED_TTL_SECONDS : HIT_TTL_SECONDS
+      );
+    }
+
+    return {
+      name: playlist.name,
+      tracks: stripped,
+      totalTracks: stripped.length,
+      truncated,
+    };
+  } catch (err) {
+    if (err instanceof SpotifyApiError && err.status === 429) {
+      const seconds = await startCooldown(err.retryAfterSeconds);
+      throw cooldownError(seconds);
+    }
+
+    // Only 404 is cached. A 429 is transient by definition and a 5xx is
+    // Spotify's problem, not this playlist's — caching either would make a
+    // blip look like a broken playlist for as long as the entry lived.
+    if (err instanceof SpotifyApiError && err.status === 404) {
+      await writeCache(
+        playlistId,
+        { kind: "missing", message: err.message, status: 404 },
+        NOT_FOUND_TTL_SECONDS
+      );
+    }
+
+    throw err;
+  }
+}
+
+/**
+ * Load a playlist's tracks, going upstream only when it isn't already known.
+ *
+ * Drop-in replacement for calling getPlaylistWithTracks directly — every
+ * caller should use this instead, since a single uncached path is enough to
+ * put the shared quota back at risk.
+ */
+export async function loadPlaylist(playlistUrl: string): Promise<LoadedPlaylist> {
+  const playlistId = parsePlaylistUrl(playlistUrl);
+  if (!playlistId) {
+    throw new SpotifyApiError("Invalid playlist URL", 400);
+  }
+
+  // Checked here as well as inside getPlaylistWithTracks so it stays true
+  // during a cooldown: an editorial playlist is permanently unsupported, and
+  // telling that host "we're rate limited, try again in 60s" would send them
+  // back to a URL that is never going to work.
+  if (isSpotifyEditorial(playlistId)) {
+    throw new SpotifyApiError(
+      "Spotify editorial/algorithm playlists are not supported. Please use a public playlist you created.",
+      404
+    );
+  }
+
+  const cached = await readCache(playlistId);
+  if (cached?.kind === "hit") {
+    await recordHit();
+    return toLoaded(cached);
+  }
+  if (cached?.kind === "missing") {
+    // A cached 404 is a cache hit too — it is a question answered without
+    // touching Spotify, which is the only thing the rate measures.
+    await recordHit();
+    throw new SpotifyApiError(cached.message, cached.status);
+  }
+
+  const existing = inFlight.get(playlistId);
+  if (existing) return existing;
+
+  const pending = fetchAndCache(playlistId, playlistUrl);
+  inFlight.set(playlistId, pending);
+  try {
+    return await pending;
+  } finally {
+    inFlight.delete(playlistId);
+  }
+}
+
+/** Test seam: the in-flight map is module state that outlives a single test. */
+export function __resetInFlightForTests(): void {
+  inFlight.clear();
+}
