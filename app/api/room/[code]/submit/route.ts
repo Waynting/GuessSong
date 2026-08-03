@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { submitToRoom, RoomError } from "@/lib/room";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { errorResponse } from "@/lib/api-error";
 
 const SubmitSchema = z.object({
   playerName: z.string().trim().min(1).max(24),
@@ -24,7 +25,7 @@ export async function POST(
     "room:submit",
     SUBMIT_LIMIT,
     SUBMIT_WINDOW_SECONDS,
-    "Too many attempts, please slow down"
+    "rate_limited"
   );
   if (limited) return limited;
 
@@ -34,10 +35,14 @@ export async function POST(
     return NextResponse.json({ ok: true, trackCount });
   } catch (err: unknown) {
     if (err instanceof z.ZodError) {
-      return NextResponse.json({ error: "Missing name or playlist URL" }, { status: 400 });
+      return errorResponse("room_missing_fields", 400);
     }
-    const status = err instanceof RoomError ? err.status : 500;
-    const message = err instanceof Error ? err.message : "Failed to submit playlist";
-    return NextResponse.json({ error: message }, { status });
+    if (err instanceof RoomError) {
+      return errorResponse(err.code, err.status, {
+        params: err.params,
+        retryAfter: err.retryAfterSeconds,
+      });
+    }
+    return errorResponse("room_submit_failed", 500);
   }
 }

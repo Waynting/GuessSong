@@ -61,6 +61,11 @@ export interface BuzzerSocketState {
   snapshot: RoomSnapshot | null;
   isHost: boolean;
   connected: boolean;
+  /**
+   * `code` is what gets rendered — through BUZZER_ERROR_CODES, in whatever
+   * language the phone reads. `message` is English and is a fallback for a
+   * Worker newer than this page, so nothing should print it directly.
+   */
   error: { code: BuzzerErrorCode; message: string } | null;
 }
 

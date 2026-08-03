@@ -6,6 +6,13 @@ import type { Track } from "@/types";
 import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolResponse } from "@/types/room";
 import { trackEvent } from "@/lib/analytics";
 import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
+import {
+  AppError,
+  apiError,
+  describeError,
+  errorMessage,
+} from "@/lib/error-messages";
+import { useErrorLocale } from "@/lib/use-error-locale";
 import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
 import { isBuzzerConfigured } from "@/lib/buzzer-client";
 import type { OpenRoom } from "@/lib/room-client";
@@ -159,6 +166,7 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const locale = useErrorLocale();
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   // What the one room has to do, given the modes picked above. Pass-the-phone
@@ -198,7 +206,7 @@ export default function SetupPage() {
         { headers: { "x-host-token": openedRoom.playlistHostToken } }
       );
       const data: RoomPoolResponse & { error?: string } = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to start game");
+      if (!res.ok) throw apiError(data, "room_start_failed");
 
       // Already open, and sharing this room's single code — the host claimed the
       // Durable Object before the code was ever shown, so there was nothing for
@@ -236,7 +244,7 @@ export default function SetupPage() {
       // The last step of the room funnel, and the one where a full room can still
       // end in no game at all — every playlist submitted and the pool refused.
       trackEvent("room_start_failed", { contributor_count: roomSubmissions.length });
-      setRoomError(e instanceof Error ? e.message : "Something went wrong");
+      setRoomError(describeError(e, locale, "room_start_failed"));
     } finally {
       setRoomStarting(false);
     }
@@ -268,7 +276,7 @@ export default function SetupPage() {
     setError(null);
     const validPlayers = players.filter((p) => p.trim());
     if (!playlistUrl.trim()) {
-      setError("Please enter a Spotify playlist URL");
+      setError(errorMessage("playlist_url_required", locale));
       return;
     }
     // Buzzer Mode has no manual roster to check — players name themselves as
@@ -276,7 +284,7 @@ export default function SetupPage() {
     // empty list here would make "Start Game" unreachable in the exact mode
     // that hides the list.
     if (!buzzerEnabled && validPlayers.length < 1) {
-      setError("Add at least one player");
+      setError(errorMessage("players_required", locale));
       return;
     }
     setLoading(true);
@@ -288,7 +296,7 @@ export default function SetupPage() {
         body: JSON.stringify({ url: playlistUrl }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load playlist");
+      if (!res.ok) throw apiError(data, "playlist_load_failed");
 
       const shuffled = [...data.tracks].sort(() => Math.random() - 0.5);
       const limited = songCount === "all" ? shuffled : shuffled.slice(0, songCount);
@@ -325,7 +333,7 @@ export default function SetupPage() {
       });
       router.push("/game");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Something went wrong");
+      setError(describeError(e, locale, "playlist_load_failed"));
     } finally {
       setLoading(false);
     }
@@ -334,7 +342,11 @@ export default function SetupPage() {
   async function handleMixedStart() {
     setError(null);
     if (mixedContributions.length < MIXED_MIN_CONTRIBUTORS) {
-      setError(`Add at least ${MIXED_MIN_CONTRIBUTORS} players' playlists to start`);
+      setError(
+        errorMessage("mixed_min_contributors", locale, {
+          params: { count: MIXED_MIN_CONTRIBUTORS },
+        })
+      );
       return;
     }
     setLoading(true);
@@ -351,10 +363,10 @@ export default function SetupPage() {
           });
           const data = await res.json();
           if (!res.ok) {
-            const err = new Error(data.error || "Failed to load playlist");
+            const err = apiError(data, "playlist_load_failed");
             // Carried so the summary below can tell "this playlist is broken"
             // apart from "Spotify is throttling the whole site".
-            (err as Error & { status?: number }).status = res.status;
+            (err as AppError & { status?: number }).status = res.status;
             throw err;
           }
           return { playerName: c.name, tracks: data.tracks as Track[] };
@@ -370,20 +382,19 @@ export default function SetupPage() {
           (r.reason as { status?: number } | undefined)?.status === 429
       );
       if (throttled) {
-        throw new Error(
-          throttled.reason instanceof Error
-            ? throttled.reason.message
-            : "Spotify is rate limiting us right now. Please try again in a minute."
-        );
+        // Rethrown whole rather than re-wrapped: the original carries the code
+        // and its `{seconds}`, so the host reads the same wait their own
+        // single-playlist start would have shown them, in their own language.
+        throw throttled.reason instanceof AppError
+          ? throttled.reason
+          : new AppError("spotify_rate_limited");
       }
 
       const failedNames = results
         .map((r, i) => (r.status === "rejected" ? mixedContributions[i].name : null))
         .filter((n): n is string => n !== null);
       if (failedNames.length > 0) {
-        throw new Error(
-          `Couldn't load a playlist for: ${failedNames.join(", ")}. Remove or fix them and try again.`
-        );
+        throw new AppError("mixed_playlists_failed", { names: failedNames.join(", ") });
       }
 
       const contributions = (
@@ -427,7 +438,7 @@ export default function SetupPage() {
       });
       router.push("/game");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Something went wrong");
+      setError(describeError(e, locale, "playlist_load_failed"));
     } finally {
       setLoading(false);
     }

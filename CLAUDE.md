@@ -38,7 +38,7 @@ There *is* server-side storage, but it is deliberately narrow: a KV layer (`lib/
 | `POST /api/room` | Creates a Mixed Playlist Mode room; returns room code, host token, expiry. |
 | `POST /api/room/[code]/submit` | A player submits their playlist URL to the room. |
 | `GET /api/room/[code]/status` | Poll for who has submitted so far. |
-| `POST /api/room/[code]/pool` | Host consumes the room and gets the sampled, deduped track pool. |
+| `GET /api/room/[code]/pool` | Host consumes the room and gets the sampled, deduped track pool. |
 
 **Every route is IP rate limited** via `lib/rate-limit.ts` (fixed window on top of `lib/kv.ts`'s atomic `incr`). When adding a route, follow the existing pattern: module-level `X_LIMIT` / `X_WINDOW_SECONDS` constants, then `rateLimit()` → 429 before any expensive work.
 
@@ -58,7 +58,11 @@ This is the constraint the whole playlist path is shaped around, and it is the o
 
 Two rules that follow from this, and are easy to undo by accident:
 - **Never flatten an upstream 429 into a generic 400.** The client has to be able to tell "your playlist is wrong" from "we are throttled" — the original bug told throttled hosts to check their URL was public, which sent them straight back into retrying.
-- **`fetchPlaylistTracks` reads at most `MAX_PLAYLIST_TRACKS` (500), sampling random pages when a playlist is bigger.** Following `next` unbounded made one big playlist cost 40+ requests for a game that plays at most 50 songs. Cache hit rate is logged on every miss (`[playlist-cache] miss … rate=…`) and readable via `getCacheStats()`.
+- **`fetchPlaylistTracks` reads at most `MAX_PLAYLIST_TRACKS` (500), sampling random pages when a playlist is bigger.** Following `next` unbounded made one big playlist cost 40+ requests for a game that plays at most 50 songs. Cache hit rate is logged on every miss (`[playlist-cache] miss id=… source=… hits=… negative=… misses=… rate=…`) and readable via `getCacheStats()`.
+
+Two things about reading that line, both of which have already cost a debugging detour:
+- **Trust `source=`, not the log row's method.** Only `POST /api/playlist` and `POST /api/room/[code]/submit` can produce it, but Vercel attributes a line to whichever request the instance was serving, so it often appears against an unrelated `GET`. New callers of `loadPlaylist` should pass a `PlaylistLoadSource`; the default logs `source=unknown`.
+- **`rate` counts a replayed 404 as a hit** — correctly, since it answered without touching Spotify — so a host retrying a dead link pushes it *up*. `negative=` is that subset, and `hits - negative` is the part that describes real playlists. The bucket is a **UTC** day, so a rate read soon after 00:00 UTC is measuring almost nothing.
 
 ### Scoring
 
@@ -88,6 +92,20 @@ A release updates **both** of these, and they are not the same document:
 - `lib/changelog.ts` — what players read in the footer's "What's new" overlay (`components/changelog-modal.tsx`, on `/`, `/about`, `/zh`). Plain language, and **bilingual**: every entry needs `text` *and* `textZh`, plus `headline` and `headlineZh`. `/zh` is written natively rather than translated, so an English string leaking through there is a visible defect, not a fallback.
 
 `tests/changelog.test.ts` enforces what it can: newest-first ordering, both languages present and different, valid dates, no markdown, and `LATEST_VERSION === package.json`'s version. That last one means **bumping `package.json` without adding an entry to `lib/changelog.ts` fails the suite** — deliberately, because the overlay prints that version to users and `changelog_opened` files reads under it.
+
+## Error messages — codes, not sentences
+
+`lib/error-messages.ts` is the only place a user-visible error string exists: one `AppErrorCode` union and one `Record<AppErrorCode, {en, zh}>` table, so a missing translation is a compile error. Add an error by adding a code, never by writing a sentence at the throw site.
+
+**The server sends `{ error, code }` and the client picks the language.** Routes build that with `errorResponse` (`lib/api-error.ts`); `SpotifyApiError`, `RoomError` and `BuzzerUnavailableError` are constructed from a code, and their `message` is the English rendering — it is for `console.error`, never for the UI. Localising server-side would be wrong three ways: one room is read by several devices, `/api/playlist` is called on behalf of other people's phones in Mixed mode, and `lib/playlist-cache.ts` caches 404s, which would freeze one language into the cache for everyone.
+
+Clients render with `errorMessage` / `describeError` and get the locale from `useErrorLocale()` (device language, resolved in an effect so the server-rendered join pages don't hydrate against a different string). `apiError(body, fallbackCode)` turns a failed response into an `AppError`; the fallback should name what the caller was doing, not `unknown`.
+
+Two things `tests/error-messages.test.ts` will catch, both easy to do by accident:
+- **A placeholder only exists if its callers pass params.** `{seconds}` with no `params` renders literally at the player, so the test pins the exact set of codes allowed to have one.
+- **No throttling message may blame the host's playlist**, in *either* language. That is the `spotify_*` hazard documented above, and a translation is just as capable of reintroducing it.
+
+The buzzer Worker keeps its own wire codes (`BuzzerErrorCode` in `lib/buzzer-protocol.ts`, which is shared verbatim with the Worker and must stay dependency-free). `BUZZER_ERROR_CODES` maps them onto app codes — that mapping is the only thing connecting the two, so a new wire code needs an entry there.
 
 ## Analytics
 

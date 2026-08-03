@@ -36,6 +36,7 @@ import {
   SpotifyApiError,
 } from "@/lib/spotify";
 import { stripTrackForStorage } from "@/lib/game-session";
+import type { AppErrorCode } from "@/lib/error-messages";
 import type { Track } from "@/types";
 
 /**
@@ -109,9 +110,33 @@ export interface LoadedPlaylist {
   truncated: boolean;
 }
 
+/**
+ * Which caller a load came from, named in the miss log.
+ *
+ * The log viewer attributes a line to whichever request the instance happened
+ * to be serving, and under concurrent invocations that can be an unrelated
+ * request — a miss from `POST /api/room/[code]/submit` showing up against a
+ * `GET .../pool` that never touches this file. Reading the method off the log
+ * row then points at a code path that cannot produce the line, which is a long
+ * detour to nowhere. Carry the caller in the message so it stands on its own.
+ *
+ * `unknown` is the default rather than a required argument: a new caller that
+ * forgets should still load, and the literal string `source=unknown` in the
+ * logs is a clearer report of that omission than a compile error nobody sees
+ * in production.
+ */
+export type PlaylistLoadSource = "playlist-api" | "room-submit" | "unknown";
+
 type CacheEntry =
   | { kind: "hit"; name: string; tracks: Track[]; truncated: boolean }
-  | { kind: "missing"; message: string; status: number };
+  /**
+   * `code` is what a replayed 404 is rendered from, so a cached miss is
+   * readable in either language — caching a *sentence* would have frozen
+   * whichever language wrote the entry into every later reader's screen for
+   * the whole TTL. Optional because entries written before this field existed
+   * are still live in KV; `readCache` falls back for them.
+   */
+  | { kind: "missing"; code?: AppErrorCode; message: string; status: number };
 
 function cacheKey(playlistId: string): string {
   return `playlist:${CACHE_VERSION}:${playlistId}`;
@@ -206,55 +231,75 @@ async function claimGlobalBudget(): Promise<boolean> {
  * once the cache is doing its job, so the instrumentation gets quieter exactly
  * as things get healthier, and a sudden run of lines is itself the signal.
  */
-function statsKey(kind: "hit" | "miss"): string {
+function statsKey(kind: "hit" | "miss" | "negative"): string {
   const day = new Date().toISOString().slice(0, 10);
   return `playlist:stats:${day}:${kind}`;
 }
 
 const STATS_TTL_SECONDS = 7 * 24 * 60 * 60;
 
-async function recordHit(): Promise<void> {
+/**
+ * `negative` counts the subset of hits that replayed a cached 404. Those are
+ * real hits — the question was answered without touching Spotify, which is all
+ * `rate` claims to measure — but they are the one kind a *broken* input
+ * produces on repeat. A host retrying a playlist they made private pushes the
+ * rate up, so counting them silently makes the healthiest-looking number and
+ * one of the unhealthiest situations read identically. Kept inside `hits` so
+ * the rate keeps its meaning, and reported alongside so it can be subtracted.
+ */
+async function recordHit(negative = false): Promise<void> {
   try {
     const store = await getKvStore();
     await store.incr(statsKey("hit"), STATS_TTL_SECONDS);
+    if (negative) await store.incr(statsKey("negative"), STATS_TTL_SECONDS);
   } catch {
     // Instrumentation must never be able to fail a request.
   }
 }
 
-async function recordMiss(playlistId: string): Promise<void> {
+async function recordMiss(
+  playlistId: string,
+  source: PlaylistLoadSource
+): Promise<void> {
   try {
     const store = await getKvStore();
     const misses = await store.incr(statsKey("miss"), STATS_TTL_SECONDS);
     const hits = (await store.get<number>(statsKey("hit"))) ?? 0;
+    const negative = (await store.get<number>(statsKey("negative"))) ?? 0;
     const rate = hits + misses > 0 ? hits / (hits + misses) : 0;
     console.log(
-      `[playlist-cache] miss id=${playlistId} hits=${hits} misses=${misses} rate=${rate.toFixed(3)}`
+      `[playlist-cache] miss id=${playlistId} source=${source} hits=${hits} negative=${negative} misses=${misses} rate=${rate.toFixed(3)}`
     );
   } catch {
     // Instrumentation must never be able to fail a request.
   }
 }
 
-/** Today's counters, for anything that wants to read the rate back. */
+/**
+ * Today's counters, for anything that wants to read the rate back. The day
+ * bucket is UTC, so a rate read shortly after 00:00 UTC is measuring a handful
+ * of loads — every playlist's first load of the day is a miss by definition.
+ */
 export async function getCacheStats(): Promise<{
   hits: number;
   misses: number;
+  /** Hits that replayed a cached 404, already included in `hits`. */
+  negativeHits: number;
   hitRate: number;
 }> {
   const store = await getKvStore();
   const hits = (await store.get<number>(statsKey("hit"))) ?? 0;
   const misses = (await store.get<number>(statsKey("miss"))) ?? 0;
+  const negativeHits = (await store.get<number>(statsKey("negative"))) ?? 0;
   const total = hits + misses;
-  return { hits, misses, hitRate: total > 0 ? hits / total : 0 };
+  return { hits, misses, negativeHits, hitRate: total > 0 ? hits / total : 0 };
 }
 
 function cooldownError(secondsRemaining: number): SpotifyApiError {
-  return new SpotifyApiError(
-    `Spotify is rate limiting us right now. Try again in about ${secondsRemaining}s — your playlist URL is fine.`,
-    429,
-    secondsRemaining
-  );
+  return new SpotifyApiError("spotify_cooldown", 429, {
+    retryAfterSeconds: secondsRemaining,
+    params: { seconds: secondsRemaining },
+  });
 }
 
 /**
@@ -281,7 +326,8 @@ function toLoaded(entry: Extract<CacheEntry, { kind: "hit" }>): LoadedPlaylist {
 
 async function fetchAndCache(
   playlistId: string,
-  playlistUrl: string
+  playlistUrl: string,
+  source: PlaylistLoadSource
 ): Promise<LoadedPlaylist> {
   const cooldownUntil = await readCooldownUntil();
   if (cooldownUntil && Date.now() < cooldownUntil) {
@@ -289,14 +335,12 @@ async function fetchAndCache(
   }
 
   if (!(await claimGlobalBudget())) {
-    throw new SpotifyApiError(
-      "Too many new playlists are being loaded across the site right now. Please try again in a minute — your playlist URL is fine.",
-      429,
-      GLOBAL_LOAD_WINDOW_SECONDS
-    );
+    throw new SpotifyApiError("spotify_busy", 429, {
+      retryAfterSeconds: GLOBAL_LOAD_WINDOW_SECONDS,
+    });
   }
 
-  await recordMiss(playlistId);
+  await recordMiss(playlistId, source);
 
   try {
     const { playlist, tracks, truncated } = await getPlaylistWithTracks(playlistUrl);
@@ -333,7 +377,7 @@ async function fetchAndCache(
     if (err instanceof SpotifyApiError && err.status === 404) {
       await writeCache(
         playlistId,
-        { kind: "missing", message: err.message, status: 404 },
+        { kind: "missing", code: err.code, message: err.message, status: 404 },
         NOT_FOUND_TTL_SECONDS
       );
     }
@@ -349,10 +393,13 @@ async function fetchAndCache(
  * caller should use this instead, since a single uncached path is enough to
  * put the shared quota back at risk.
  */
-export async function loadPlaylist(playlistUrl: string): Promise<LoadedPlaylist> {
+export async function loadPlaylist(
+  playlistUrl: string,
+  source: PlaylistLoadSource = "unknown"
+): Promise<LoadedPlaylist> {
   const playlistId = parsePlaylistUrl(playlistUrl);
   if (!playlistId) {
-    throw new SpotifyApiError("Invalid playlist URL", 400);
+    throw new SpotifyApiError("invalid_playlist_url", 400);
   }
 
   // Checked here as well as inside getPlaylistWithTracks so it stays true
@@ -360,10 +407,7 @@ export async function loadPlaylist(playlistUrl: string): Promise<LoadedPlaylist>
   // telling that host "we're rate limited, try again in 60s" would send them
   // back to a URL that is never going to work.
   if (isSpotifyEditorial(playlistId)) {
-    throw new SpotifyApiError(
-      "Spotify editorial/algorithm playlists are not supported. Please use a public playlist you created.",
-      404
-    );
+    throw new SpotifyApiError("playlist_editorial", 404);
   }
 
   const cached = await readCache(playlistId);
@@ -373,15 +417,23 @@ export async function loadPlaylist(playlistUrl: string): Promise<LoadedPlaylist>
   }
   if (cached?.kind === "missing") {
     // A cached 404 is a cache hit too — it is a question answered without
-    // touching Spotify, which is the only thing the rate measures.
-    await recordHit();
-    throw new SpotifyApiError(cached.message, cached.status);
+    // touching Spotify, which is the only thing the rate measures. Counted
+    // separately as well, so a spammed dead link can't quietly inflate it.
+    await recordHit(true);
+    // Entries written before `code` existed carry only a message, and the only
+    // thing cached here is a 404, so that is what they replay as.
+    throw new SpotifyApiError(cached.code ?? "playlist_not_found", cached.status, {
+      detail: cached.code ? undefined : cached.message,
+    });
   }
 
   const existing = inFlight.get(playlistId);
   if (existing) return existing;
 
-  const pending = fetchAndCache(playlistId, playlistUrl);
+  // The source recorded is the one that *started* the fetch — a coalesced
+  // sibling joins a load already in progress and never reaches recordMiss,
+  // which is correct: the line describes the upstream call, not the request.
+  const pending = fetchAndCache(playlistId, playlistUrl, source);
   inFlight.set(playlistId, pending);
   try {
     return await pending;

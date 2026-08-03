@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRoomStatus, RoomError } from "@/lib/room";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { errorResponse } from "@/lib/api-error";
 
 // Room codes are only 4 chars (~1M combos) — without a limit here, an
 // unthrottled client could enumerate the whole code space and read every
@@ -21,7 +22,7 @@ export async function GET(
     "room:status",
     STATUS_LIMIT,
     STATUS_WINDOW_SECONDS,
-    "Too many attempts, please slow down"
+    "rate_limited"
   );
   if (limited) return limited;
 
@@ -29,8 +30,9 @@ export async function GET(
     const status = await getRoomStatus(code);
     return NextResponse.json(status);
   } catch (err: unknown) {
-    const status = err instanceof RoomError ? err.status : 500;
-    const message = err instanceof Error ? err.message : "Failed to load room status";
-    return NextResponse.json({ error: message }, { status });
+    if (err instanceof RoomError) {
+      return errorResponse(err.code, err.status, { params: err.params });
+    }
+    return errorResponse("room_status_failed", 500);
   }
 }

@@ -22,6 +22,13 @@ import { BuzzerButton } from "@/components/buzzer-button";
 import { useBuzzerSocket } from "@/lib/use-buzzer-socket";
 import { JOIN_WANTS_PLAYLIST_PARAM } from "@/lib/room-client";
 import { trackEvent } from "@/lib/analytics";
+import {
+  apiError,
+  describeError,
+  errorMessage,
+  BUZZER_ERROR_CODES,
+} from "@/lib/error-messages";
+import { useErrorLocale } from "@/lib/use-error-locale";
 
 const NAME_STORAGE_KEY = "guesssong_player_name";
 
@@ -47,6 +54,9 @@ export default function BuzzPlayerPage() {
   const [wantsPlaylist, setWantsPlaylist] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  // The player's phone, not the host's screen, decides what language this page
+  // fails in — they scanned a QR and may not share a language with the host.
+  const locale = useErrorLocale();
   // Read from the URL rather than rendered from it, so the form doesn't flash
   // its short version before the query string is known.
   const [hydrated, setHydrated] = useState(false);
@@ -114,7 +124,7 @@ export default function BuzzPlayerPage() {
         // room is over, but the buzzers run all game — so a latecomer scanning
         // the same code still gets a buzzer instead of a dead end.
         if (!res.ok && res.status !== 410) {
-          throw new Error(data.error || "Couldn't submit your playlist");
+          throw apiError(data, "room_submit_failed");
         }
         if (res.ok) {
           trackEvent("room_submission_sent", {
@@ -133,7 +143,7 @@ export default function BuzzPlayerPage() {
         setWantsPlaylist(false);
       } catch (e: unknown) {
         trackEvent("room_submission_failed", { submitted_by: "player", reason: "other" });
-        setJoinError(e instanceof Error ? e.message : "Something went wrong");
+        setJoinError(describeError(e, locale, "room_submit_failed"));
         return;
       } finally {
         setSubmitting(false);
@@ -206,7 +216,13 @@ export default function BuzzPlayerPage() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
         <div className="flex w-full max-w-sm flex-col gap-4 text-center">
-          <p className="text-lg font-semibold text-destructive">{error.message}</p>
+          {/* The Worker's own `message` is English and only a fallback — the
+              code is what this phone renders in its own language. */}
+          <p className="text-lg font-semibold text-destructive">
+            {errorMessage(BUZZER_ERROR_CODES[error.code], locale, {
+              fallback: error.message,
+            })}
+          </p>
           <Button
             variant="secondary"
             onClick={() => {

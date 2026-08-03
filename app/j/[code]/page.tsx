@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { trackEvent } from "@/lib/analytics";
+import { apiError, describeError } from "@/lib/error-messages";
+import { useErrorLocale } from "@/lib/use-error-locale";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,6 +27,9 @@ export default function JoinRoomPage() {
   const [status, setStatus] = useState<SubmitStatus>("idle");
   const [trackCount, setTrackCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // Whoever scanned this QR never chose a language on this site — this page is
+  // usually their first and only one — so their phone decides.
+  const locale = useErrorLocale();
 
   const isValidUrl =
     playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
@@ -57,7 +62,7 @@ export default function JoinRoomPage() {
       const data = await res.json();
       if (!res.ok) {
         tooLate = res.status === 410;
-        throw new Error(data.error || "Couldn't submit your playlist");
+        throw apiError(data, "room_submit_failed");
       }
       setTrackCount(data.trackCount);
       setStatus("done");
@@ -70,7 +75,7 @@ export default function JoinRoomPage() {
         submitted_by: "player",
         reason: tooLate ? "too_late" : "other",
       });
-      setError(e instanceof Error ? e.message : "Something went wrong");
+      setError(describeError(e, locale, "room_submit_failed"));
       setStatus("error");
     }
   }

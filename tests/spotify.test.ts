@@ -303,11 +303,24 @@ describe("Spotify token invalidation on 401", () => {
 describe("SpotifyApiError", () => {
   it("carries the upstream status so callers can distinguish 401 from 404", async () => {
     const { SpotifyApiError } = await freshSpotify();
-    const err = new SpotifyApiError("boom", 401);
+    const err = new SpotifyApiError("playlist_load_failed", 401);
 
     expect(err).toBeInstanceOf(Error);
     expect(err.status).toBe(401);
-    expect(err.message).toBe("boom");
+    expect(err.code).toBe("playlist_load_failed");
+  });
+
+  it("keeps the log message English, and the upstream detail out of the code", async () => {
+    const { SpotifyApiError } = await freshSpotify();
+    const err = new SpotifyApiError("playlist_not_found", 404, {
+      detail: "404 Not Found",
+    });
+
+    // The sentence a player reads is rendered from `code` on their own device
+    // (lib/error-messages.ts). This string is for the server log, so it stays
+    // English and is allowed to carry upstream noise the client never sees.
+    expect(err.message).toContain("404 Not Found");
+    expect(err.code).toBe("playlist_not_found");
   });
 });
 

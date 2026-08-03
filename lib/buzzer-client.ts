@@ -6,10 +6,18 @@
  */
 
 import type { BuzzerRoomHandle } from "@/lib/game-session";
+import { errorMessage, type AppErrorCode } from "@/lib/error-messages";
 
+/**
+ * Kept as its own class because components/room-panel.tsx buckets it separately
+ * in analytics — "the Worker is down for everyone" is a different fact from
+ * "this host did something wrong". Carries a code like every other error the
+ * host can be shown; `message` is the English form, for logs.
+ */
 export class BuzzerUnavailableError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(readonly code: AppErrorCode, detail?: string) {
+    const english = errorMessage(code, "en");
+    super(detail ? `${english} [${detail}]` : english);
     this.name = "BuzzerUnavailableError";
   }
 }
@@ -34,7 +42,8 @@ export async function createBuzzerRoom(): Promise<Omit<BuzzerRoomHandle, "hostNa
   const origin = httpOrigin();
   if (!origin) {
     throw new BuzzerUnavailableError(
-      "Buzzer Mode is not configured on this deployment (NEXT_PUBLIC_BUZZER_WS_URL is unset)"
+      "buzzer_not_configured",
+      "NEXT_PUBLIC_BUZZER_WS_URL is unset"
     );
   }
 
@@ -42,23 +51,23 @@ export async function createBuzzerRoom(): Promise<Omit<BuzzerRoomHandle, "hostNa
   if (!res.ok) {
     if (res.status === 403) {
       throw new BuzzerUnavailableError(
-        "This origin is not allowed by the buzzer Worker — check ALLOWED_ORIGINS in worker/wrangler.jsonc"
+        "buzzer_origin_blocked",
+        "check ALLOWED_ORIGINS in worker/wrangler.jsonc"
       );
     }
     if (res.status === 429) {
       // Reachable by an ordinary host: changing Game Mode discards the open
       // room, so a few rounds of indecision burn through the per-IP budget.
-      // Say what to do about it rather than "please try again".
-      throw new BuzzerUnavailableError(
-        "Too many rooms opened from this network — wait a minute and try again"
-      );
+      // Both translations of this code say what to do about it rather than
+      // "please try again".
+      throw new BuzzerUnavailableError("buzzer_rate_limited");
     }
-    throw new BuzzerUnavailableError("Couldn't open a buzzer room, please try again");
+    throw new BuzzerUnavailableError("buzzer_open_failed", `worker: ${res.status}`);
   }
 
   const data = (await res.json()) as { code?: unknown; hostToken?: unknown };
   if (typeof data.code !== "string" || typeof data.hostToken !== "string") {
-    throw new BuzzerUnavailableError("Buzzer Worker returned an unexpected response");
+    throw new BuzzerUnavailableError("buzzer_bad_response");
   }
   return { code: data.code, hostToken: data.hostToken };
 }
