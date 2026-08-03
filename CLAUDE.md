@@ -27,14 +27,15 @@ There *is* server-side storage, but it is deliberately narrow: a KV layer (`lib/
 1. **Setup** (`app/page.tsx`) — collects playlist URL, player names, clip duration (5–30s). On Start, calls `POST /api/playlist`, shuffles the returned tracks, writes the whole game payload to `sessionStorage` under the key `guesssong_game`, then navigates to `/game`.
 2. **Game** (`app/game/page.tsx`, ~1200 lines, the heart of the app) — reads `guesssong_game` from sessionStorage on mount (redirects to `/` if absent) and runs a phase state machine:
    `waiting → playing → guessing → revealed → (next track | finished)`
-3. **Audio previews** — Spotify deprecated `preview_url` for most tracks (Nov 2024), so when a track has none, the game page fetches `GET /api/preview?track=&artist=`, which searches the **iTunes Search API** first and falls back to **Deezer**. Results are cached per track id in a ref (`previewCache`). Tracks with no preview anywhere show a "no audio" state.
+3. **Audio previews** — Spotify deprecated `preview_url` for most tracks (Nov 2024), so the game page resolves clips itself, through `lib/preview-client.ts`. On mount it prefetches the whole game with one `POST /api/preview/batch`; anything that comes back unresolved falls back to `GET /api/preview` lazily, at the moment the host presses Play. Both search the **iTunes Search API** first and fall back to **Deezer**. Settled results are cached per track id in a ref (`previewCache`); tracks with no clip anywhere show a "no audio" state.
 
 ### API Routes (the only server code)
 
 | Route | Purpose |
 |---|---|
 | `POST /api/playlist` | `{url}` → playlist name + tracks, via Spotify **Client Credentials** flow (`lib/spotify.ts`). Rejects Spotify editorial playlists (IDs starting `37i9` return 404 for new apps). |
-| `GET /api/preview` | Track/artist/id → 30s preview URL (iTunes, then Deezer). No auth required. KV-cached by track id, including negative results. |
+| `GET /api/preview` | Track/artist/id → 30s preview URL (iTunes, then Deezer). No auth required. KV-cached by track id, including negative results. `&refresh=1` re-resolves a URL that stopped playing, on its own much tighter limit. |
+| `POST /api/preview/batch` | `{tracks:[{id,name,artist}]}` → the same lookup for a whole game in one request. |
 | `POST /api/room` | Creates a Mixed Playlist Mode room; returns room code, host token, expiry. |
 | `POST /api/room/[code]/submit` | A player submits their playlist URL to the room. |
 | `GET /api/room/[code]/status` | Poll for who has submitted so far. |
@@ -43,7 +44,7 @@ There *is* server-side storage, but it is deliberately narrow: a KV layer (`lib/
 **Every route is IP rate limited** via `lib/rate-limit.ts` (fixed window on top of `lib/kv.ts`'s atomic `incr`). When adding a route, follow the existing pattern: module-level `X_LIMIT` / `X_WINDOW_SECONDS` constants, then `rateLimit()` → 429 before any expensive work.
 
 Three caches keep upstream request volume flat as traffic grows:
-- **Preview cache** (`app/api/preview/route.ts`) — KV, keyed by Spotify track id. Hits live 30 days, misses 7. Caching misses is the point: tracks with no preview anywhere are the most repeatedly queried, and each uncached miss costs 5 upstream calls. Matters because serverless egress IPs are shared and iTunes/Deezer throttle per IP.
+- **Preview cache** (`lib/preview-cache.ts`) — KV, keyed by track id. Caching misses is the point: tracks with no preview anywhere are the most repeatedly queried, and each uncached miss costs 5 upstream calls. See "Previews are per-track" below, which is the whole reason this is the hottest path in the app.
 - **Playlist cache** (`lib/playlist-cache.ts`) — KV, keyed by playlist id. 6h on a full playlist, 1h on a sampled one. **Every caller must go through `loadPlaylist`, never `getPlaylistWithTracks` directly** — a single uncached path is enough to put the shared quota back at risk.
 - **Spotify token cache** (`lib/spotify.ts`) — module scope, so per-lambda-instance rather than global. Deliberately *not* in KV: a token is the one thing with no fallback, so a KV outage on that path would take down playlist loading entirely. A 401 clears the cache and retries once.
 
@@ -64,6 +65,20 @@ Two things about reading that line, both of which have already cost a debugging 
 - **Trust `source=`, not the log row's method.** Only `POST /api/playlist` and `POST /api/room/[code]/submit` can produce it, but Vercel attributes a line to whichever request the instance was serving, so it often appears against an unrelated `GET`. New callers of `loadPlaylist` should pass a `PlaylistLoadSource`; the default logs `source=unknown`.
 - **`rate` counts a replayed 404 as a hit** — correctly, since it answered without touching Spotify — so a host retrying a dead link pushes it *up*. `negative=` is that subset, and `hits - negative` is the part that describes real playlists. The bucket is a **UTC** day, so a rate read soon after 00:00 UTC is measuring almost nothing.
 
+### Previews are per-track, which makes them the hotter path
+
+`lib/preview-cache.ts` is the same shape of problem as the section above, an order of magnitude worse. Spotify is called once per *playlist*; iTunes and Deezer are called once per *track*, so a cold 50-song game is 50 lookups of up to 5 upstream calls each. Both throttle per IP, and a serverless deploy's egress IPs are shared — from iTunes' side the entire user base is one very noisy client. Per-IP limiting does nothing about it, for the reason spelled out above.
+
+The same three layers, so they read the same way: cache → global budget (`PREVIEW_MAX_LOOKUPS_PER_MINUTE`, counted in *lookups*) → per-source cooldown, all fail-open, all in KV so every instance sees them. `[preview-cache] miss hits=… misses=… unavailable=… rate=…`, readable via `getPreviewCacheStats()`.
+
+Three things here are easy to undo by accident:
+
+- **`absent` and `unavailable` are not the same null, and collapsing them is a real bug that shipped.** `absent` is a fact about the recording — nothing has a clip — and is cached a week. `unavailable` is a fact about *us*: throttled, out of budget, or the request never got through. The old route mapped every failure onto `previewUrl: null` and cached it for seven days, so one throttled minute at peak marked a slice of the catalogue silent for a week, and it never reproduced locally because a laptop's own IP is never the one being throttled. Only a clean, complete reply from upstream may produce `absent`; everything else is `unavailable`, cached 90 seconds. A wrong `absent` lasts a week and is invisible, a wrong `unavailable` costs one retry. **The client half has the same rule** (`lib/preview-client.ts`, and `previewCache` in the game page stores settled answers only).
+- **iTunes signals throttling with `403`, not 429, and Deezer puts its quota error in the body of a `200`.** Reading only 429, or only the status, is how a refusal gets classified as "no result" in the first place.
+- **The cache key is deliberately unversioned**, unlike `lib/playlist-cache.ts`'s. The record is a strict superset of the `{previewUrl}` shape that shipped before it, so legacy entries still read as valid hits. Bumping a version would cold-start every entry in production simultaneously — precisely the upstream burst the module exists to prevent. For the same reason, legacy nulls are read as `absent` even though some are poisoned by the old bug: they age out within a week, and re-resolving all of them at once is the stampede that poisoned them.
+
+Positive entries are held a year, because a recording does not change. What does change is the URL — the clips sit on a CDN that rotates them — so the entry has to be *repairable* rather than merely expiring: the stored `itunesTrackId` lets `&refresh=1` re-resolve with one `lookup?id=` call instead of the five-call search fan-out, and the game page fires it from the `<audio>` element's `error` event, once per track. Drop the refresh path and the year-long TTL becomes a year of dead URLs.
+
 ### Scoring
 
 The host is the judge — there is no automated answer checking. Correct song guess = host taps the player → **+3 pts**; album name = **+1 pt**. One award of each type per round, guarded by `pointsAwarded` / `albumPointsAwarded` flags.
@@ -80,6 +95,7 @@ UPSTASH_REDIS_REST_URL / _TOKEN             # Required in production — see bel
 NEXT_PUBLIC_BASE_URL                        # Optional — defaults to https://www.guessong.app
 NEXT_PUBLIC_GA_MEASUREMENT_ID               # Optional — enables GA4
 SPOTIFY_MAX_LOADS_PER_MINUTE                # Optional — global upstream ceiling, default 40
+PREVIEW_MAX_LOOKUPS_PER_MINUTE              # Optional — global iTunes/Deezer ceiling, default 120
 ```
 
 Without the Upstash pair, `lib/kv.ts` falls back to an in-process `Map`. That is fine for `next dev` and tests, but **not** for multi-instance serverless deploys: rooms created by one lambda would be invisible to another, rate limit counters would reset per instance, and the preview cache would lose most of its hit rate.
@@ -126,7 +142,7 @@ New params do not appear in GA4 reports until they are registered as custom dime
 
 ## Types
 
-`types/index.ts` contains only the `Track` interface — the shape stored in sessionStorage and returned by `/api/playlist`. Shared game types (`GamePayload`, `GamePlayer`, `GameMode`) live in `lib/game-session.ts`; room types and constants (`ROOM_TTL_SECONDS`, `ROOM_MAX_SUBMISSIONS`) live in `types/room.ts`; the game page defines its own local `Phase` type.
+`types/index.ts` contains only the `Track` interface — the shape stored in sessionStorage and returned by `/api/playlist`. Shared game types (`GamePayload`, `GamePlayer`, `GameMode`) live in `lib/game-session.ts`; room types and constants (`ROOM_TTL_SECONDS`, `ROOM_MAX_SUBMISSIONS`) live in `types/room.ts`; preview wire types and `PREVIEW_BATCH_MAX` live in `types/preview.ts`, kept out of `lib/preview-cache.ts` so the browser bundle doesn't pull in `lib/kv.ts` and the Upstash client; the game page defines its own local `Phase` type.
 
 When adding a value to a union that `parseGamePayload` reads, add a type guard alongside it. The existing `mode` line falls back to `"party"` for anything unrecognised, so a new mode would be silently downgraded rather than rejected — follow the `isPlaylistSource` pattern one line above instead.
 

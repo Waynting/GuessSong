@@ -49,6 +49,52 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.1.0",
+    date: "2026-08-03",
+    headline:
+      "Fewer songs turn up silent, and the ones that do play start faster. Plus the messages you get when something goes wrong are finally in your own language.",
+    headlineZh:
+      "更少歌變成沒聲音，會響的也響得更快。另外，出狀況時跳出來的訊息，終於是用你看得懂的語言寫的了。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "Songs that showed up as \"no audio\" often had audio all along. When lots of people were playing at once, the service we get clips from would tell us to slow down — and we wrote that down as \"this song has no clip\" and stopped asking for a week. Now we tell the two apart, and a song is only written off when it really has nothing.",
+        textZh:
+          "以前顯示「沒有音檔」的歌，很多其實是有的。同時上線的人一多，提供試聽片段的服務就會要我們慢一點，而我們把那句話記成了「這首歌沒有試聽」，然後整整一週不再問。現在這兩件事分得清楚了，只有真的找不到才會被放棄。",
+      },
+      {
+        kind: "better",
+        text: "The clips for a whole game are now fetched the moment you land on the game screen, instead of one at a time as you play. The first Play is quicker, and a bad moment on the internet no longer lands on you mid-round.",
+        textZh:
+          "整場遊戲的試聽片段，現在一進遊戲畫面就一次抓齊，不再是玩到哪抓到哪。第一次按播放更快，網路不順的時候也不會剛好卡在你正在出題的那一輪。",
+      },
+      {
+        kind: "better",
+        text: "If a clip goes quiet because its link expired, the game fetches a fresh one and carries on instead of skipping the round.",
+        textZh:
+          "如果某首歌的試聽連結過期而沒聲音，遊戲會自己去換一條新的接著播，而不是整輪跳過。",
+      },
+      {
+        kind: "fixed",
+        text: "Playlists that refused to load at busy times. Spotify limits how much the whole site can ask for, not how much you can, so one person's playlist could fail because of everyone else's. We now remember playlists we have already seen, and when we do get told to wait, we say so instead of telling you your link is wrong.",
+        textZh:
+          "尖峰時段歌單讀不出來的問題。Spotify 限制的是整個網站的總用量，不是你個人的，所以你的歌單可能因為別人而失敗。現在看過的歌單會被記住，真的被要求等待時也會照實說，而不是叫你去檢查自己的連結。",
+      },
+      {
+        kind: "better",
+        text: "Every error message now appears in Chinese or English depending on the phone reading it — so a guest scanning someone else's QR code can read what went wrong, whichever language the host uses.",
+        textZh:
+          "所有錯誤訊息現在會依照每台手機自己的語言顯示中文或英文，所以掃別人 QR code 加入的朋友，不管主持人用哪種語言，都看得懂發生了什麼事。",
+      },
+      {
+        kind: "better",
+        text: "Very long playlists now draw their songs randomly from the whole list instead of always taking the first few hundred, so the same playlist gives you a different game each time.",
+        textZh:
+          "很長的歌單現在會從整份清單裡隨機抽歌，不再每次都拿最前面那幾百首，所以同一份歌單每次玩到的歌都不一樣。",
+      },
+    ],
+  },
+  {
     version: "1.0.0",
     date: "2026-07-30",
     headline:
