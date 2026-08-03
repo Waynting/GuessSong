@@ -74,6 +74,12 @@ describe("room lifecycle", () => {
     const { roomCode } = await createRoom();
     const result = await submitToRoom(roomCode, "Alice", "https://open.spotify.com/playlist/abc");
     expect(result.trackCount).toBe(2);
+    // Named, so the cache's miss log identifies this path even when the log
+    // viewer attributes the line to an unrelated concurrent request.
+    expect(playlistCache.loadPlaylist).toHaveBeenCalledWith(
+      "https://open.spotify.com/playlist/abc",
+      "room-submit"
+    );
   });
 
   it("rejects a duplicate name (case-insensitive) in the same room", async () => {

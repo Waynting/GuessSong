@@ -11,6 +11,8 @@ import { loadPlaylist } from "@/lib/playlist-cache";
 import { poolContributions } from "@/lib/mixed-playlist";
 import { getKvStore } from "@/lib/kv";
 import { stripTrackForStorage } from "@/lib/game-session";
+import { errorMessage, type AppErrorCode } from "@/lib/error-messages";
+import { SpotifyApiError } from "@/lib/spotify";
 import type { Track } from "@/types";
 import {
   ROOM_CODE_LENGTH,
@@ -44,11 +46,30 @@ interface RoomRecord {
   submissions: RoomSubmission[];
 }
 
+/**
+ * `code` is what the route sends and the client renders in its own language —
+ * `message` is the English rendering, and exists for logs. A room is the one
+ * place where the two sides of a failure are reliably different people: the
+ * host reads their laptop, the refused player reads their phone. See
+ * lib/error-messages.ts.
+ */
 export class RoomError extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
+  readonly params?: Record<string, string | number>;
+  readonly retryAfterSeconds?: number;
+
+  constructor(
+    readonly code: AppErrorCode,
+    readonly status: number,
+    options: {
+      /** Fills the message's placeholders. Required by the codes that have one. */
+      params?: Record<string, string | number>;
+      retryAfterSeconds?: number;
+    } = {}
+  ) {
+    super(errorMessage(code, "en", { params: options.params }));
+    this.name = "RoomError";
+    this.params = options.params;
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
 
@@ -116,11 +137,11 @@ export async function createRoom(requestedCode?: string): Promise<{
   if (requestedCode !== undefined) {
     const code = requestedCode.trim().toUpperCase();
     if (!isWellFormedCode(code)) {
-      throw new RoomError("Invalid room code", 422);
+      throw new RoomError("room_code_invalid", 422);
     }
     const existing = await store.get<RoomRecord>(roomKey(code));
     if (existing) {
-      throw new RoomError("That room code is already in use", 409);
+      throw new RoomError("room_code_taken", 409);
     }
     return writeNewRoom(store, code);
   }
@@ -132,14 +153,14 @@ export async function createRoom(requestedCode?: string): Promise<{
     if (existing) continue;
     return writeNewRoom(store, code);
   }
-  throw new RoomError("Could not allocate a room code, please try again", 500);
+  throw new RoomError("room_code_unavailable", 500);
 }
 
 async function requireOpenRoom(code: string) {
   const store = await getKvStore();
   const record = await store.get<RoomRecord>(roomKey(code));
-  if (!record) throw new RoomError("Room not found or expired", 404);
-  if (record.consumed) throw new RoomError("This room has already started", 410);
+  if (!record) throw new RoomError("room_not_found", 404);
+  if (record.consumed) throw new RoomError("room_already_started", 410);
   return { store, record };
 }
 
@@ -154,10 +175,10 @@ function assertCanJoin(record: RoomRecord, trimmedName: string): void {
       (s) => s.playerName.toLowerCase() === trimmedName.toLowerCase()
     )
   ) {
-    throw new RoomError("That name is already taken in this room", 409);
+    throw new RoomError("room_name_taken", 409);
   }
   if (record.submissions.length >= ROOM_MAX_SUBMISSIONS) {
-    throw new RoomError("This room is full", 409);
+    throw new RoomError("room_full", 409);
   }
 }
 
@@ -182,7 +203,7 @@ export async function submitToRoom(
   const { record: openRecord } = await requireOpenRoom(code);
 
   const trimmedName = playerName.trim();
-  if (!trimmedName) throw new RoomError("Name is required", 422);
+  if (!trimmedName) throw new RoomError("room_name_required", 422);
 
   // Every rejection the write loop below can produce, checked against the
   // record we already hold. Advisory only — the loop re-checks under its race
@@ -194,21 +215,32 @@ export async function submitToRoom(
 
   let tracks: Track[];
   try {
-    ({ tracks } = await loadPlaylist(playlistUrl));
+    ({ tracks } = await loadPlaylist(playlistUrl, "room-submit"));
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to load playlist";
-    throw new RoomError(message, 422);
+    // Carry the upstream code through rather than flattening it. A player
+    // whose submission lands during a Spotify cooldown is not holding a broken
+    // playlist, and telling them so sends them back to editing a URL that was
+    // always fine — the same failure /api/playlist is careful not to make. The
+    // 429 keeps its status for the same reason: the client has to be able to
+    // tell "your playlist is wrong" from "we are throttled".
+    if (err instanceof SpotifyApiError) {
+      throw new RoomError(err.code, err.status === 429 ? 429 : 422, {
+        params: err.params,
+        retryAfterSeconds: err.retryAfterSeconds,
+      });
+    }
+    throw new RoomError("playlist_load_failed", 422);
   }
   if (tracks.length < 1) {
-    throw new RoomError("This playlist has no tracks", 422);
+    throw new RoomError("playlist_empty", 422);
   }
   const strippedTracks = tracks.map(stripTrackForStorage);
 
   const store = await getKvStore();
   for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt++) {
     const fresh = await store.get<RoomRecord>(roomKey(code));
-    if (!fresh) throw new RoomError("Room not found or expired", 404);
-    if (fresh.consumed) throw new RoomError("This room has already started", 410);
+    if (!fresh) throw new RoomError("room_not_found", 404);
+    if (fresh.consumed) throw new RoomError("room_already_started", 410);
     assertCanJoin(fresh, trimmedName);
 
     const updated: RoomRecord = {
@@ -229,13 +261,13 @@ export async function submitToRoom(
     }
     // Lost the race — retry against whatever the winner left behind.
   }
-  throw new RoomError("Room is busy, please try again", 409);
+  throw new RoomError("room_busy", 409);
 }
 
 export async function getRoomStatus(code: string): Promise<RoomStatusResponse> {
   const store = await getKvStore();
   const record = await store.get<RoomRecord>(roomKey(code));
-  if (!record) throw new RoomError("Room not found or expired", 404);
+  if (!record) throw new RoomError("room_not_found", 404);
 
   return {
     submissions: record.submissions.map((s) => ({
@@ -261,13 +293,13 @@ export async function consumeRoomPool(
 
   for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt++) {
     const fresh = await store.get<RoomRecord>(roomKey(code));
-    if (!fresh) throw new RoomError("Room not found or expired", 404);
-    if (fresh.consumed) throw new RoomError("This room has already started", 410);
+    if (!fresh) throw new RoomError("room_not_found", 404);
+    if (fresh.consumed) throw new RoomError("room_already_started", 410);
     if (!timingSafeEqualStrings(fresh.hostToken, hostToken)) {
-      throw new RoomError("Only the room's host can start the game", 403);
+      throw new RoomError("room_not_host", 403);
     }
     if (fresh.submissions.length < 1) {
-      throw new RoomError("No submissions yet", 422);
+      throw new RoomError("room_no_submissions", 422);
     }
 
     const tracks = poolContributions(
@@ -290,7 +322,7 @@ export async function consumeRoomPool(
     // them, so re-reading will hit the `fresh.consumed` guard above and
     // throw 410 on the next iteration.
   }
-  throw new RoomError("Room is busy, please try again", 409);
+  throw new RoomError("room_busy", 409);
 }
 
 /** Constant-time comparison so wrong host-token guesses can't be timed. */

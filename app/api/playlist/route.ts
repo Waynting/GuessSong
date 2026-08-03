@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { loadPlaylist } from "@/lib/playlist-cache";
 import { SpotifyApiError } from "@/lib/spotify";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { errorResponse } from "@/lib/api-error";
 
 // Still the most expensive route we have, but no longer unbounded: loads go
 // through lib/playlist-cache.ts, so a repeat of the same playlist costs zero
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
     "playlist:load",
     PLAYLIST_LIMIT,
     PLAYLIST_WINDOW_SECONDS,
-    "Too many playlist loads, please slow down"
+    "rate_limited_playlist"
   );
   if (limited) return limited;
 
@@ -40,29 +41,32 @@ export async function POST(req: NextRequest) {
     const { url } = body as { url: string };
 
     if (!url || typeof url !== "string") {
-      return NextResponse.json({ error: "Missing playlist URL" }, { status: 400 });
+      return errorResponse("missing_playlist_url", 400);
     }
 
-    const { name, tracks, totalTracks, truncated } = await loadPlaylist(url);
+    const { name, tracks, totalTracks, truncated } = await loadPlaylist(
+      url,
+      "playlist-api"
+    );
 
     if (tracks.length < 1) {
-      return NextResponse.json(
-        { error: "This playlist has no tracks." },
-        { status: 400 }
-      );
+      return errorResponse("playlist_empty", 400);
     }
 
     return NextResponse.json({ name, tracks, totalTracks, truncated });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Failed to fetch playlist";
     const status = statusFor(err);
-    console.error("[/api/playlist]", status, message);
+    // English, from the code — this line is a server log, and the sentence the
+    // host reads is rendered on their device from `code` instead.
+    console.error("[/api/playlist]", status, err instanceof Error ? err.message : err);
 
-    const headers =
-      err instanceof SpotifyApiError && err.status === 429 && err.retryAfterSeconds
-        ? { "Retry-After": String(Math.ceil(err.retryAfterSeconds)) }
-        : undefined;
+    if (err instanceof SpotifyApiError) {
+      return errorResponse(err.code, status, {
+        params: err.params,
+        retryAfter: err.status === 429 ? err.retryAfterSeconds : undefined,
+      });
+    }
 
-    return NextResponse.json({ error: message }, { status, headers });
+    return errorResponse("playlist_load_failed", status);
   }
 }

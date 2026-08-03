@@ -1,22 +1,48 @@
 import { Track } from "@/types";
+import { errorMessage, type AppErrorCode } from "@/lib/error-messages";
 
 const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 
-/** Carries the HTTP status alongside the message so callers can react to 401 vs 404. */
+export interface SpotifyApiErrorOptions {
+  /**
+   * Seconds from Spotify's Retry-After header on a 429. lib/playlist-cache.ts
+   * turns this into a global cooldown, so it has to survive the throw rather
+   * than being flattened into the message.
+   */
+  retryAfterSeconds?: number;
+  /** Fills the message's placeholders — `{seconds}` on the cooldown codes. */
+  params?: Record<string, string | number>;
+  /**
+   * Upstream detail worth having in the server log and nowhere else: Spotify's
+   * own message, the status line. Appended to `message`, never sent to the
+   * client, because the client renders `code` in its own language.
+   */
+  detail?: string;
+}
+
+/**
+ * Carries the HTTP status and an app error code alongside the message, so
+ * callers can react to 401 vs 404 and the client can render the failure in the
+ * reader's language (see lib/error-messages.ts).
+ *
+ * `message` is derived from the code in English and exists for logs. Route
+ * handlers must send `code`, not this string.
+ */
 export class SpotifyApiError extends Error {
+  readonly retryAfterSeconds?: number;
+  readonly params?: Record<string, string | number>;
+
   constructor(
-    message: string,
+    readonly code: AppErrorCode,
     readonly status: number,
-    /**
-     * Seconds from Spotify's Retry-After header on a 429. lib/playlist-cache.ts
-     * turns this into a global cooldown, so it has to survive the throw rather
-     * than being flattened into the message.
-     */
-    readonly retryAfterSeconds?: number
+    options: SpotifyApiErrorOptions = {}
   ) {
-    super(message);
+    const english = errorMessage(code, "en", { params: options.params });
+    super(options.detail ? `${english} [${options.detail}]` : english);
     this.name = "SpotifyApiError";
+    this.retryAfterSeconds = options.retryAfterSeconds;
+    this.params = options.params;
   }
 }
 
@@ -37,10 +63,11 @@ function parseRetryAfter(response: Response): number | undefined {
  * caller's IP — every user of the site shares one quota. The old message said
  * "Make sure the playlist is public", which is not just unhelpful but actively
  * harmful: it reads as "your URL is wrong", so the host edits it and submits
- * again, spending more of the quota that is already exhausted.
+ * again, spending more of the quota that is already exhausted. Both
+ * translations of this code are written to that constraint — see
+ * lib/error-messages.ts.
  */
-const RATE_LIMITED_MESSAGE =
-  "Spotify is rate limiting us right now (too many playlist loads across the whole site). Please wait a minute and try again — your playlist URL is fine.";
+const RATE_LIMITED_CODE = "spotify_rate_limited" as const;
 
 /**
  * Client-credentials tokens live for an hour, but every call used to mint a
@@ -88,7 +115,9 @@ async function getClientAccessToken(): Promise<string> {
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    throw new Error("Spotify Client ID and Secret must be set");
+    throw new SpotifyApiError("spotify_not_configured", 500, {
+      detail: "SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET are unset",
+    });
   }
 
   const response = await fetch(SPOTIFY_TOKEN_URL, {
@@ -106,11 +135,12 @@ async function getClientAccessToken(): Promise<string> {
     // Leave the cache untouched on failure — an existing (possibly still
     // valid) entry is more useful than clearing it because a refresh blipped.
     throw new SpotifyApiError(
-      response.status === 429
-        ? RATE_LIMITED_MESSAGE
-        : `Failed to get access token: ${response.status} ${errorText}`,
+      response.status === 429 ? RATE_LIMITED_CODE : "spotify_auth_failed",
       response.status,
-      parseRetryAfter(response)
+      {
+        retryAfterSeconds: parseRetryAfter(response),
+        detail: `token endpoint: ${response.status} ${errorText}`,
+      }
     );
   }
 
@@ -207,14 +237,18 @@ export async function fetchPlaylist(
     console.error("Spotify playlist fetch error:", response.status, errorData);
 
     if (response.status === 404) {
-      throw new SpotifyApiError("無法找到此歌單。請確認：1) 歌單是公開的 2) 歌單是你自己建立的（不是 Spotify 編輯歌單）", 404);
+      throw new SpotifyApiError("playlist_not_found", 404);
     }
 
     if (response.status === 429) {
-      throw new SpotifyApiError(RATE_LIMITED_MESSAGE, 429, parseRetryAfter(response));
+      throw new SpotifyApiError(RATE_LIMITED_CODE, 429, {
+        retryAfterSeconds: parseRetryAfter(response),
+      });
     }
 
-    throw new SpotifyApiError(`Failed to fetch playlist: ${response.status} - ${errorData.error?.message || response.statusText}. Make sure the playlist is public.`, response.status);
+    throw new SpotifyApiError("playlist_load_failed", response.status, {
+      detail: `playlist: ${response.status} ${errorData.error?.message || response.statusText}`,
+    });
   }
 
   return response.json();
@@ -270,14 +304,18 @@ async function fetchTrackPage(
     console.error("Spotify tracks fetch error:", response.status, errorData, "URL:", url);
 
     if (response.status === 404) {
-      throw new SpotifyApiError("無法找到此歌單。請確認：1) 歌單是公開的 2) 歌單是你自己建立的（不是 Spotify 編輯歌單）", 404);
+      throw new SpotifyApiError("playlist_not_found", 404);
     }
 
     if (response.status === 429) {
-      throw new SpotifyApiError(RATE_LIMITED_MESSAGE, 429, parseRetryAfter(response));
+      throw new SpotifyApiError(RATE_LIMITED_CODE, 429, {
+        retryAfterSeconds: parseRetryAfter(response),
+      });
     }
 
-    throw new SpotifyApiError(`Failed to fetch tracks: ${response.status} - ${errorData.error?.message || response.statusText}. Make sure the playlist is public and accessible.`, response.status);
+    throw new SpotifyApiError("playlist_load_failed", response.status, {
+      detail: `tracks: ${response.status} ${errorData.error?.message || response.statusText}`,
+    });
   }
 
   const data = await response.json();
@@ -404,11 +442,11 @@ export async function getPlaylistWithTracks(
 ): Promise<{ playlist: SpotifyPlaylist; tracks: Track[]; truncated: boolean }> {
   const playlistId = parsePlaylistUrl(playlistUrl);
   if (!playlistId) {
-    throw new Error("Invalid playlist URL");
+    throw new SpotifyApiError("invalid_playlist_url", 400);
   }
 
   if (isSpotifyEditorial(playlistId)) {
-    throw new Error("Spotify editorial/algorithm playlists are not supported. Please use a public playlist you created.");
+    throw new SpotifyApiError("playlist_editorial", 404);
   }
 
   // Two attempts: a cached token can be rejected mid-flight (revoked, clock

@@ -6,8 +6,9 @@
  */
 
 import { getKvStore } from "@/lib/kv";
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { errorResponse } from "@/lib/api-error";
+import type { AppErrorCode } from "@/lib/error-messages";
+import type { NextResponse, NextRequest } from "next/server";
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -35,23 +36,27 @@ export function getClientIp(req: NextRequest): string {
  * Route guard: resolves the caller's IP, counts the request against
  * `bucket:<ip>`, and returns a ready-to-return 429 when the window is spent.
  *
- *   const limited = await enforceRateLimit(req, "room:create", LIMIT, WINDOW, "…");
+ *   const limited = await enforceRateLimit(req, "room:create", LIMIT, WINDOW, "rate_limited");
  *   if (limited) return limited;
  *
  * Returning the response rather than throwing keeps the guard visible at the
  * top of each handler — the check and the early return sit on adjacent lines
  * instead of being hidden in a catch. Every route must run this before any
  * expensive work (upstream fetch, KV read, playlist pagination).
+ *
+ * `code` rather than a sentence: the phones that hit these limits are the ones
+ * scanning a QR into someone else's room, and they read the refusal in their
+ * own language. See lib/error-messages.ts.
  */
 export async function enforceRateLimit(
   req: NextRequest,
   bucket: string,
   limit: number,
   windowSeconds: number,
-  message: string
+  code: AppErrorCode
 ): Promise<NextResponse | null> {
   const ip = getClientIp(req);
   const { allowed } = await rateLimit(`${bucket}:${ip}`, limit, windowSeconds);
   if (allowed) return null;
-  return NextResponse.json({ error: message }, { status: 429 });
+  return errorResponse(code, 429);
 }

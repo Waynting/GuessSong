@@ -199,8 +199,8 @@ describe("in-flight coalescing", () => {
   });
 
   it("clears the in-flight entry after a failure, so a later retry is not stuck", async () => {
-    upstream().mockRejectedValueOnce(new spotify.SpotifyApiError("boom", 500));
-    await expect(loadPlaylist(URL_A)).rejects.toThrow("boom");
+    upstream().mockRejectedValueOnce(new spotify.SpotifyApiError("playlist_load_failed", 500));
+    await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ status: 500 });
 
     upstream().mockResolvedValue(upstreamResult(["a"]));
     await expect(loadPlaylist(URL_A)).resolves.toMatchObject({ totalTracks: 1 });
@@ -209,9 +209,9 @@ describe("in-flight coalescing", () => {
 
 describe("404 negative caching", () => {
   it("remembers a missing playlist so a retry burst costs one upstream call", async () => {
-    upstream().mockRejectedValue(new spotify.SpotifyApiError("no such playlist", 404));
+    upstream().mockRejectedValue(new spotify.SpotifyApiError("playlist_not_found", 404));
 
-    await expect(loadPlaylist(URL_A)).rejects.toThrow("no such playlist");
+    await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ code: "playlist_not_found" });
     await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ status: 404 });
     await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ status: 404 });
 
@@ -219,7 +219,7 @@ describe("404 negative caching", () => {
   });
 
   it("holds a 404 for far less time than a successful load", async () => {
-    upstream().mockRejectedValue(new spotify.SpotifyApiError("gone", 404));
+    upstream().mockRejectedValue(new spotify.SpotifyApiError("playlist_not_found", 404));
     await expect(loadPlaylist(URL_A)).rejects.toThrow();
     const missTtl = kv.writes.at(-1)!.ttlSeconds;
 
@@ -234,7 +234,7 @@ describe("404 negative caching", () => {
   });
 
   it("does not cache a 5xx — that is Spotify's problem, not the playlist's", async () => {
-    upstream().mockRejectedValue(new spotify.SpotifyApiError("upstream down", 503));
+    upstream().mockRejectedValue(new spotify.SpotifyApiError("playlist_load_failed", 503));
 
     await expect(loadPlaylist(URL_A)).rejects.toThrow();
     await expect(loadPlaylist(URL_A)).rejects.toThrow();
@@ -245,7 +245,7 @@ describe("404 negative caching", () => {
 
 describe("429 cooldown", () => {
   it("parks further uncached loads after Spotify reports a 429", async () => {
-    upstream().mockRejectedValueOnce(new spotify.SpotifyApiError("slow down", 429, 45));
+    upstream().mockRejectedValueOnce(new spotify.SpotifyApiError("spotify_rate_limited", 429, { retryAfterSeconds: 45 }));
     await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ status: 429 });
 
     // A different playlist, and the upstream mock is healthy again — but the
@@ -259,7 +259,7 @@ describe("429 cooldown", () => {
   it("still serves cached playlists during a cooldown", async () => {
     await loadPlaylist(URL_A);
 
-    upstream().mockRejectedValueOnce(new spotify.SpotifyApiError("slow down", 429));
+    upstream().mockRejectedValueOnce(new spotify.SpotifyApiError("spotify_rate_limited", 429));
     await expect(loadPlaylist(URL_B)).rejects.toMatchObject({ status: 429 });
 
     // The party already holding a loaded playlist must not be taken down by
@@ -269,7 +269,7 @@ describe("429 cooldown", () => {
 
   it("clamps a huge Retry-After to a bearable wait", async () => {
     upstream().mockRejectedValueOnce(
-      new spotify.SpotifyApiError("slow down", 429, 86400)
+      new spotify.SpotifyApiError("spotify_rate_limited", 429, { retryAfterSeconds: 86400 })
     );
     await expect(loadPlaylist(URL_A)).rejects.toThrow();
 
@@ -278,7 +278,7 @@ describe("429 cooldown", () => {
   });
 
   it("applies a floor when Spotify sends no Retry-After at all", async () => {
-    upstream().mockRejectedValueOnce(new spotify.SpotifyApiError("slow down", 429));
+    upstream().mockRejectedValueOnce(new spotify.SpotifyApiError("spotify_rate_limited", 429));
     await expect(loadPlaylist(URL_A)).rejects.toThrow();
 
     const cooldown = kv.writes.find((w) => w.key === "spotify:cooldown");
@@ -286,7 +286,7 @@ describe("429 cooldown", () => {
   });
 
   it("tells the user to wait rather than to fix their URL", async () => {
-    upstream().mockRejectedValueOnce(new spotify.SpotifyApiError("429 whatever", 429, 60));
+    upstream().mockRejectedValueOnce(new spotify.SpotifyApiError("spotify_rate_limited", 429, { retryAfterSeconds: 60 }));
     const err = await loadPlaylist(URL_A).catch((e) => e);
 
     expect(err.message).toMatch(/rate limit/i);
@@ -363,7 +363,7 @@ describe("cache hit-rate stats", () => {
   });
 
   it("counts a cached 404 as a hit — it answered without touching Spotify", async () => {
-    upstream().mockRejectedValue(new spotify.SpotifyApiError("gone", 404));
+    upstream().mockRejectedValue(new spotify.SpotifyApiError("playlist_not_found", 404));
     await expect(loadPlaylist(URL_A)).rejects.toThrow();
     await expect(loadPlaylist(URL_A)).rejects.toThrow();
 
@@ -372,8 +372,54 @@ describe("cache hit-rate stats", () => {
     expect(stats.hits).toBe(1);
   });
 
+  it("reports replayed 404s separately, so a dead link can't inflate the rate", async () => {
+    // Two loads of a good playlist (1 miss, 1 hit) and three retries of a dead
+    // one. The raw rate reads 0.800, which without this breakdown is
+    // indistinguishable from a cache doing genuinely well.
+    await loadPlaylist(URL_A);
+    await loadPlaylist(URL_A);
+
+    upstream().mockRejectedValue(new spotify.SpotifyApiError("playlist_not_found", 404));
+    await expect(loadPlaylist(URL_B)).rejects.toThrow();
+    await expect(loadPlaylist(URL_B)).rejects.toThrow();
+    await expect(loadPlaylist(URL_B)).rejects.toThrow();
+
+    const stats = await getCacheStats();
+    expect(stats.hits).toBe(3);
+    expect(stats.negativeHits).toBe(2);
+    // Subtracting them leaves the rate that actually describes real playlists.
+    expect(stats.hits - stats.negativeHits).toBe(1);
+  });
+
   it("reports a zero rate rather than NaN before anything has loaded", async () => {
     expect((await getCacheStats()).hitRate).toBe(0);
+    expect((await getCacheStats()).negativeHits).toBe(0);
+  });
+});
+
+describe("miss log", () => {
+  /**
+   * The log viewer attributes a line to whichever request the instance was
+   * serving, which under concurrent invocations can be a route that never
+   * calls this file. The line has to identify its own caller, or reading the
+   * method off the log row points at a code path that cannot produce it.
+   */
+  it("names the caller that triggered the upstream load", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await loadPlaylist(URL_A, "room-submit");
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("source=room-submit"));
+    log.mockRestore();
+  });
+
+  it("says so when a caller does not identify itself", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await loadPlaylist(URL_A);
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("source=unknown"));
+    log.mockRestore();
   });
 });
 

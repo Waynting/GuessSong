@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { consumeRoomPool, RoomError } from "@/lib/room";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { errorResponse } from "@/lib/api-error";
 import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
 
 // hostToken already gates the actual pool consumption, but this route is
@@ -20,7 +21,7 @@ export async function GET(
     "room:pool",
     POOL_LIMIT,
     POOL_WINDOW_SECONDS,
-    "Too many attempts, please slow down"
+    "rate_limited"
   );
   if (limited) return limited;
 
@@ -30,7 +31,7 @@ export async function GET(
     : DEFAULT_SAMPLED_PER_PLAYER;
 
   if (!Number.isFinite(sampledPerPlayer) || sampledPerPlayer < 1) {
-    return NextResponse.json({ error: "Invalid sampledPerPlayer" }, { status: 400 });
+    return errorResponse("room_invalid_sample_size", 400);
   }
 
   const hostToken = req.headers.get("x-host-token") ?? "";
@@ -39,8 +40,9 @@ export async function GET(
     const pool = await consumeRoomPool(code, sampledPerPlayer, hostToken);
     return NextResponse.json(pool);
   } catch (err: unknown) {
-    const status = err instanceof RoomError ? err.status : 500;
-    const message = err instanceof Error ? err.message : "Failed to load pool";
-    return NextResponse.json({ error: message }, { status });
+    if (err instanceof RoomError) {
+      return errorResponse(err.code, err.status, { params: err.params });
+    }
+    return errorResponse("room_start_failed", 500);
   }
 }

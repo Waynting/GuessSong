@@ -29,6 +29,7 @@
  */
 
 import { buzzerJoinUrl, createBuzzerRoom } from "@/lib/buzzer-client";
+import { AppError, apiError } from "@/lib/error-messages";
 import type { BuzzerRoomHandle } from "@/lib/game-session";
 
 export interface OpenRoom {
@@ -65,7 +66,7 @@ export async function openRoom({
   hostName,
 }: OpenRoomOptions): Promise<OpenRoom> {
   if (!collectsPlaylists && !buzzer) {
-    throw new Error("A room needs at least one job to do");
+    throw new AppError("room_needs_a_job");
   }
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -96,7 +97,7 @@ export async function openRoom({
       continue;
     }
     if (!res.ok) {
-      throw new Error(data.error || "Failed to open the room");
+      throw apiError(data, "room_open_failed");
     }
 
     return {
@@ -107,7 +108,7 @@ export async function openRoom({
     };
   }
 
-  throw new Error("Couldn't find a free room code, please try again");
+  throw new AppError("room_code_unavailable");
 }
 
 /**

@@ -29,6 +29,8 @@ import { buildRoster, openRoom, roomJoinUrl, type OpenRoom } from "@/lib/room-cl
 import { useBuzzerSocket } from "@/lib/use-buzzer-socket";
 import { roomJobs, trackEvent } from "@/lib/analytics";
 import { DEFAULT_HOST_NAME } from "@/lib/game-session";
+import { apiError, describeError, errorMessage } from "@/lib/error-messages";
+import { useErrorLocale } from "@/lib/use-error-locale";
 import type { RoomSubmissionSummary } from "@/types/room";
 
 const HOST_NAME_STORAGE_KEY = "guesssong_host_name";
@@ -71,6 +73,7 @@ export function RoomPanel({
   const [hostSubmitting, setHostSubmitting] = useState(false);
   const [hostTrackCount, setHostTrackCount] = useState<number | null>(null);
   const [hostSubmitError, setHostSubmitError] = useState<string | null>(null);
+  const locale = useErrorLocale();
 
   useEffect(() => {
     const saved = window.localStorage.getItem(HOST_NAME_STORAGE_KEY);
@@ -158,9 +161,9 @@ export function RoomPanel({
         reason: e instanceof BuzzerUnavailableError ? "buzzer_unavailable" : "other",
       });
       setError(
-        e instanceof BuzzerUnavailableError || e instanceof Error
-          ? e.message
-          : "Couldn't open the room"
+        e instanceof BuzzerUnavailableError
+          ? errorMessage(e.code, locale)
+          : describeError(e, locale, "room_open_failed")
       );
     } finally {
       setOpening(false);
@@ -194,7 +197,7 @@ export function RoomPanel({
       const data = await res.json();
       if (!res.ok) {
         tooLate = res.status === 410;
-        throw new Error(data.error || "Couldn't add your playlist");
+        throw apiError(data, "room_host_submit_failed");
       }
       window.localStorage.setItem(HOST_NAME_STORAGE_KEY, trimmed);
       setHostTrackCount(data.trackCount);
@@ -209,7 +212,7 @@ export function RoomPanel({
         submitted_by: "host",
         reason: tooLate ? "too_late" : "other",
       });
-      setHostSubmitError(e instanceof Error ? e.message : "Something went wrong");
+      setHostSubmitError(describeError(e, locale, "room_host_submit_failed"));
     } finally {
       setHostSubmitting(false);
     }

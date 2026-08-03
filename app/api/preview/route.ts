@@ -154,7 +154,7 @@ export async function GET(req: NextRequest) {
     "preview",
     PREVIEW_LIMIT,
     PREVIEW_WINDOW_SECONDS,
-    "Too many preview lookups, please slow down"
+    "rate_limited_preview"
   );
   if (limited) return limited;
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createRoom, RoomError } from "@/lib/room";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { errorResponse } from "@/lib/api-error";
 import { ROOM_CODE_LENGTH } from "@/types/room";
 
 const CREATE_ROOM_LIMIT = 10;
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
     "room:create",
     CREATE_ROOM_LIMIT,
     CREATE_ROOM_WINDOW_SECONDS,
-    "Too many rooms created, please slow down"
+    "rate_limited_room_create"
   );
   if (limited) return limited;
 
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
   try {
     const parsed = CreateRoomSchema.safeParse(await req.json());
     if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid room code" }, { status: 422 });
+      return errorResponse("room_code_invalid", 422);
     }
     requestedCode = parsed.data.code;
   } catch {
@@ -44,8 +45,12 @@ export async function POST(req: NextRequest) {
     const { roomCode, expiresAt, hostToken } = await createRoom(requestedCode);
     return NextResponse.json({ roomCode, expiresAt, hostToken });
   } catch (err: unknown) {
-    const status = err instanceof RoomError ? err.status : 500;
-    const message = err instanceof Error ? err.message : "Failed to create room";
-    return NextResponse.json({ error: message }, { status });
+    if (err instanceof RoomError) {
+      return errorResponse(err.code, err.status, {
+        params: err.params,
+        retryAfter: err.retryAfterSeconds,
+      });
+    }
+    return errorResponse("room_open_failed", 500);
   }
 }
