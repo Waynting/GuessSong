@@ -3,9 +3,11 @@ import { getKvStore } from "@/lib/kv";
 
 const redisMock = vi.hoisted(() => ({
   get: vi.fn(),
+  mget: vi.fn(),
   set: vi.fn(),
   del: vi.fn(),
   incr: vi.fn(),
+  incrby: vi.fn(),
   expire: vi.fn(),
 }));
 
@@ -49,6 +51,28 @@ describe("getKvStore (in-memory fallback)", () => {
     expect(await store.incr("counter1", 60)).toBe(1);
     expect(await store.incr("counter1", 60)).toBe(2);
     expect(await store.incr("counter1", 60)).toBe(3);
+  });
+
+  it("increments by more than one for a caller that already knows its count", async () => {
+    // The preview batch route claims budget and records stats for a whole game
+    // at once; without this it would spend one command per track and undo the
+    // saving mget just made.
+    const store = await getKvStore();
+    expect(await store.incr("counter3", 60, 12)).toBe(12);
+    expect(await store.incr("counter3", 60, 3)).toBe(15);
+    expect(await store.incr("counter3", 60)).toBe(16);
+  });
+
+  it("reads many keys in order, with null for the ones that aren't there", async () => {
+    const store = await getKvStore();
+    await store.set("m1", "one", 60);
+    await store.set("m3", "three", 60);
+
+    // Order and length must match the keys exactly — a shorter result would
+    // misalign values onto the wrong keys, which for previews means the wrong
+    // song's audio.
+    expect(await store.mget(["m1", "missing", "m3"])).toEqual(["one", null, "three"]);
+    expect(await store.mget([])).toEqual([]);
   });
 
   it("resets the counter once its TTL has elapsed", async () => {
@@ -132,5 +156,40 @@ describe("getKvStore (Upstash backend)", () => {
     const second = await store.incr("counter", 60);
     expect(second).toBe(2);
     expect(redisMock.expire).not.toHaveBeenCalled();
+  });
+
+  it("uses INCRBY for a bulk increment, and still recognises it opening the window", async () => {
+    const { getKvStore: freshGetKvStore } = await import("@/lib/kv");
+    const store = await freshGetKvStore();
+
+    // A batch that opens a window with +12 is the first increment of it, so
+    // the TTL is its to set — keying that off `count === 1` would leave the
+    // counter with no expiry and freeze the window open forever.
+    redisMock.incrby.mockResolvedValueOnce(12);
+    expect(await store.incr("budget", 60, 12)).toBe(12);
+    expect(redisMock.incrby).toHaveBeenCalledWith("budget", 12);
+    expect(redisMock.expire).toHaveBeenCalledWith("budget", 60);
+
+    redisMock.expire.mockClear();
+    redisMock.incrby.mockResolvedValueOnce(20);
+    expect(await store.incr("budget", 60, 8)).toBe(20);
+    expect(redisMock.expire).not.toHaveBeenCalled();
+  });
+
+  it("sends one MGET, and pads a short reply rather than misaligning it", async () => {
+    const { getKvStore: freshGetKvStore } = await import("@/lib/kv");
+    const store = await freshGetKvStore();
+
+    redisMock.mget.mockResolvedValueOnce(["a", null]);
+    expect(await store.mget(["k1", "k2", "k3"])).toEqual(["a", null, null]);
+    expect(redisMock.mget).toHaveBeenCalledWith("k1", "k2", "k3");
+  });
+
+  it("never sends MGET with no keys, which Redis rejects", async () => {
+    const { getKvStore: freshGetKvStore } = await import("@/lib/kv");
+    const store = await freshGetKvStore();
+
+    expect(await store.mget([])).toEqual([]);
+    expect(redisMock.mget).not.toHaveBeenCalled();
   });
 });
