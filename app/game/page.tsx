@@ -14,6 +14,8 @@ import {
   type GamePlayer as Player,
   type BuzzerRoomHandle,
 } from "@/lib/game-session";
+import { fetchPreview, fetchPreviewBatch } from "@/lib/preview-client";
+import { isPreviewSettled, type PreviewBatchTrack } from "@/types/preview";
 import { BuzzerHostPanel, type BuzzerControls } from "@/components/buzzer-host-panel";
 import type { RoundHistoryEntry } from "@/lib/round-history";
 import { buildTasteCard } from "@/lib/taste-card";
@@ -111,7 +113,15 @@ export default function GamePage() {
   const phaseRef = useRef<Phase>("waiting");
   phaseRef.current = phase;
   const loadingSkipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Only ever holds *settled* answers — a found URL, or a confirmed null for a
+   * song nothing has a clip for. An "unavailable" is never written here: it
+   * means the server could not ask, and remembering it would turn one throttled
+   * moment into a track that stays silent for the rest of the game.
+   */
   const previewCache = useRef<Record<string, string | null>>({});
+  /** One repair attempt per track, so a genuinely dead URL can't loop. */
+  const refreshedTracks = useRef<Set<string>>(new Set());
   const gameStartTimeRef = useRef<number>(Date.now());
   const finishedTrackedRef = useRef(false);
   const roundsPlayedRef = useRef(0);
@@ -181,6 +191,40 @@ export default function GamePage() {
     setBuzzerRoom(data.buzzerRoom ?? null);
     gameStartTimeRef.current = Date.now();
   }, [router]);
+
+  /**
+   * Resolve the whole game's previews in one request, before the first round.
+   *
+   * Not just a latency win. Resolving lazily put an upstream lookup on the
+   * critical path of every round, so a throttled minute reached the host as a
+   * dead Play button mid-party — the one moment there is nothing to do about
+   * it. Done here, the same throttling costs a few seconds before anyone has
+   * pressed anything, and the tracks it couldn't answer for simply fall back to
+   * the per-track path as the game reaches them.
+   *
+   * Deliberately not awaited by anything: the host can start immediately, and
+   * playClip reads whatever has landed by then.
+   */
+  useEffect(() => {
+    if (tracks.length === 0) return;
+    let cancelled = false;
+
+    const pending: PreviewBatchTrack[] = tracks
+      .filter((t) => !t.previewUrl && previewCache.current[t.id] === undefined)
+      .map((t) => ({ id: t.id, name: t.name, artist: t.artists[0] ?? "" }));
+    if (pending.length === 0) return;
+
+    void fetchPreviewBatch(pending).then((resolved) => {
+      if (cancelled) return;
+      for (const [id, result] of resolved) {
+        if (isPreviewSettled(result.status)) previewCache.current[id] = result.previewUrl;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tracks]);
 
   const stopClip = useCallback(() => {
     audioRef.current?.pause();
@@ -275,26 +319,29 @@ export default function GamePage() {
     const track = tracks[currentIndex];
     if (!audio || !track) return;
 
-    // Resolve preview URL — use cache, track field, or fetch from Deezer proxy
-    let previewUrl = previewCache.current[track.id] ?? track.previewUrl ?? null;
+    // Spotify's own URL when it has one, then whatever the prefetch resolved.
+    const cached = previewCache.current[track.id];
+    let previewUrl = track.previewUrl ?? cached ?? null;
+    let missReason: "absent" | "unavailable" = "absent";
 
-    if (!previewUrl) {
+    // `undefined` means nobody has asked yet. A cached `null` is a settled
+    // "nothing anywhere has a clip for this", and re-asking it on every press
+    // of Play is the load the cache exists to remove.
+    if (!previewUrl && cached === undefined) {
       setPreviewLoading(true);
       setLoadingSkipVisible(false);
       loadingSkipTimerRef.current = setTimeout(() => setLoadingSkipVisible(true), 1500);
-      try {
-        const res = await fetch(
-          // id keys the server-side cache: the same recording shows up under
-          // different name/artist strings across playlists, which would
-          // otherwise fragment the cache and re-hit iTunes for a known track.
-          `/api/preview?track=${encodeURIComponent(track.name)}&artist=${encodeURIComponent(track.artists[0] ?? "")}&id=${encodeURIComponent(track.id)}`
-        );
-        const data = await res.json();
-        previewUrl = data.previewUrl ?? null;
-        previewCache.current[track.id] = previewUrl;
-      } catch {
-        previewUrl = null;
-      }
+
+      const result = await fetchPreview({
+        id: track.id,
+        name: track.name,
+        artist: track.artists[0] ?? "",
+      });
+      previewUrl = result.previewUrl;
+      missReason = result.status === "unavailable" ? "unavailable" : "absent";
+      // Settled answers only — see previewCache's declaration.
+      if (isPreviewSettled(result.status)) previewCache.current[track.id] = result.previewUrl;
+
       if (loadingSkipTimerRef.current) clearTimeout(loadingSkipTimerRef.current);
       setLoadingSkipVisible(false);
       setPreviewLoading(false);
@@ -305,6 +352,7 @@ export default function GamePage() {
         playlist_source: playlistSource,
         track_name: track.name,
         artist: track.artists[0] ?? "",
+        reason: missReason,
       });
       setNoAudio(true);
       return;
@@ -318,6 +366,47 @@ export default function GamePage() {
     clipElapsedRef.current = 0;
     setClipPaused(false);
     startClipTimers();
+  }
+
+  /**
+   * Repair a preview URL that stopped playing.
+   *
+   * Preview clips sit on a CDN that rotates its URLs, so a cached hit can go
+   * dead long before the server's copy of it expires. That is the trade the
+   * year-long positive TTL makes, and this is the other half of it: one
+   * `lookup?id=` call re-resolves the track, where letting the entry expire
+   * instead would mean re-searching every song in the catalogue on a timer.
+   *
+   * Once per track per game. A URL that fails twice is not a rotated one.
+   */
+  async function handleAudioError() {
+    const audio = audioRef.current;
+    const track = tracks[currentIndex];
+    // The element also fires `error` when we clear its src between rounds,
+    // which is us tearing the round down, not a URL going bad.
+    if (!audio?.src || !track) return;
+    if (phaseRef.current !== "playing" && phaseRef.current !== "guessing") return;
+    if (refreshedTracks.current.has(track.id)) return;
+    refreshedTracks.current.add(track.id);
+
+    const result = await fetchPreview(
+      { id: track.id, name: track.name, artist: track.artists[0] ?? "" },
+      { refresh: true }
+    );
+
+    if (!result.previewUrl) {
+      // Nothing left to try. Put the round into the state a track with no clip
+      // starts in, rather than leaving a progress bar counting down silence.
+      stopClip();
+      setNoAudio(true);
+      setPhase("waiting");
+      return;
+    }
+
+    previewCache.current[track.id] = result.previewUrl;
+    audio.src = result.previewUrl;
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
   }
 
   function reveal() {
@@ -1210,6 +1299,7 @@ export default function GamePage() {
         onPlay={() => setAudioPlaying(true)}
         onPause={() => setAudioPlaying(false)}
         onEnded={() => setAudioPlaying(false)}
+        onError={handleAudioError}
       />
 
       <div className={`game-layout${isTrial ? " trial" : ""}`}>

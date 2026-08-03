@@ -14,6 +14,12 @@ import type { GameMode } from "@/lib/game-session";
 
 export type PlaylistSource = "own" | "builtin" | "mixed";
 export type ShareType = "track" | "album" | "artist" | "unknown";
+/**
+ * Why a round had no audio. `absent` is a property of the recording, which is
+ * ours to curate around; `unavailable` is a property of our own throttled
+ * egress IP, which is ours to fix. See types/preview.ts.
+ */
+export type PreviewMissReason = "absent" | "unavailable";
 /** Which end-of-game image the player saved. */
 export type ResultCardType = "scores" | "taste";
 /**
@@ -97,6 +103,18 @@ export type AnalyticsEvent =
         playlist_source: PlaylistSource;
         track_name?: string;
         artist?: string;
+        /**
+         * Which kind of silence this was. Without it the two are one number,
+         * and they call for opposite responses: `absent` is a catalogue gap and
+         * the honest answer is to curate around it, while `unavailable` means
+         * iTunes throttled our shared egress IP and the song is fine. Reading
+         * the second as the first is what sent us hunting for missing songs
+         * that were never missing.
+         *
+         * Optional so existing callers keep compiling; a bucketed enum, never a
+         * raw upstream message, per this file's header.
+         */
+        reason?: PreviewMissReason;
       };
     }
   | {
