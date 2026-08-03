@@ -62,6 +62,8 @@ export type AppErrorCode =
   | "rate_limited_playlist"
   | "rate_limited_preview"
   | "rate_limited_room_create"
+  // Preview lookups
+  | "preview_request_invalid"
   // Rooms
   | "room_code_invalid"
   | "room_code_taken"
@@ -186,6 +188,17 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   rate_limited_room_create: {
     en: "Too many rooms created, please slow down.",
     zh: "開了太多房間，請慢一點。",
+  },
+
+  /**
+   * Like `rate_limited_preview`, never rendered: the game page answers a failed
+   * batch by falling back to per-track lookups, which is what it did before
+   * batching existed. Carried so the route replies in the same shape as every
+   * other one rather than inventing a bare 400.
+   */
+  preview_request_invalid: {
+    en: "That preview request wasn't valid.",
+    zh: "這個試聽片段的請求格式不正確。",
   },
 
   room_code_invalid: {
