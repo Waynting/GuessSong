@@ -251,3 +251,7 @@ The root suite covers the pure logic (pooling, taste card, share-target parsing,
 - **Previews** — a small number of tracks have no 30s clip on either iTunes or Deezer and will show a "no audio" state.
 - **Scoring** — the host is the judge. No automated answer checking.
 - **Found a bug?** — use the "Report a problem" link in the footer.
+
+## License
+
+[MIT](./LICENSE) — fork it, remix it, host your own.
