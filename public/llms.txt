@@ -1,18 +1,22 @@
 # GuessSong
 
-> A free music guessing game for parties. Works with any Spotify playlist. No login required. Local multiplayer.
+> A free music guessing game for parties. Works with any Spotify playlist. No login required. Play on one device, or let everyone join from their own phone.
 
 ## What it does
 
-GuessSong plays a short audio clip from a Spotify playlist and players compete to guess the song title. The host controls pacing; players type guesses in real time. Points are awarded after each round. Works on any device with a browser.
+GuessSong plays a short audio clip from a Spotify playlist and players compete to name the song. Guessing is verbal — players call out the answer and the host, who controls pacing, taps whoever got it right. Points are awarded after each round. Works on any device with a browser.
 
 ## Key facts
 
 - Free to use, no account needed
-- Paste any public Spotify playlist URL to start
-- Supports 2–10+ players on the same device or room
-- Clip duration is configurable (5s, 10s, 15s, 30s)
-- Built with Next.js, runs entirely in the browser (no server state)
+- Paste any public Spotify playlist URL, or pick one of the built-in playlists to start with no setup
+- Clip duration is configurable (5s, 10s, 15s, 20s, 30s), as is the number of songs
+- Scoring: 3 points for the song title, 1 for the album
+- Mixed Playlist Mode merges everyone's playlists into one deduplicated pool — players submit theirs by scanning a QR code, and there's a bonus point for guessing whose playlist a track came from
+- Buzzer Mode gives every player a buzzer on their own phone, so the first press wins the round and the host can play too
+- Available in English and Traditional Chinese
+- Installable as a PWA
+- Built with Next.js; live buzzer rooms run on Cloudflare Durable Objects
 
 ## URL
 
