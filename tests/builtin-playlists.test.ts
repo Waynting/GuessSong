@@ -63,10 +63,13 @@ describe("built-in playlists data", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("does not bake preview URLs in (resolved lazily via /api/preview)", () => {
+  it("carries no previewUrl field (clips are resolved via /api/preview)", () => {
+    // Not merely null — the field is gone. Spotify's preview_url has returned
+    // null for every track since Nov 2024, so baking it in was a permanently
+    // empty column in every payload that carries a Track.
     for (const p of BUILTIN_PLAYLISTS) {
       for (const t of p.tracks) {
-        expect(t.previewUrl ?? null).toBeNull();
+        expect(t).not.toHaveProperty("previewUrl");
       }
     }
   });

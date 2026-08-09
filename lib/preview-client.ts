@@ -57,6 +57,9 @@ export async function fetchPreview(
     // fragment the cache and re-hit iTunes for a track we already know.
     id: track.id,
   });
+  // Lets the server tell the recording apart from a cover when the credit has
+  // been translated — see PreviewBatchTrack.durationMs.
+  if (track.durationMs) params.set("durationMs", String(track.durationMs));
   if (options.refresh) params.set("refresh", "1");
 
   try {

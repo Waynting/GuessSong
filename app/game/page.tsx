@@ -210,8 +210,13 @@ export default function GamePage() {
     let cancelled = false;
 
     const pending: PreviewBatchTrack[] = tracks
-      .filter((t) => !t.previewUrl && previewCache.current[t.id] === undefined)
-      .map((t) => ({ id: t.id, name: t.name, artist: t.artists[0] ?? "" }));
+      .filter((t) => previewCache.current[t.id] === undefined)
+      .map((t) => ({
+        id: t.id,
+        name: t.name,
+        artist: t.artists[0] ?? "",
+        durationMs: t.durationMs,
+      }));
     if (pending.length === 0) return;
 
     void fetchPreviewBatch(pending).then((resolved) => {
@@ -319,9 +324,11 @@ export default function GamePage() {
     const track = tracks[currentIndex];
     if (!audio || !track) return;
 
-    // Spotify's own URL when it has one, then whatever the prefetch resolved.
+    // Whatever the prefetch resolved. There is no Spotify URL to prefer here:
+    // preview_url has been null for every track since Nov 2024, so the clip
+    // always comes from iTunes or Deezer via lib/preview-cache.ts.
     const cached = previewCache.current[track.id];
-    let previewUrl = track.previewUrl ?? cached ?? null;
+    let previewUrl = cached ?? null;
     let missReason: "absent" | "unavailable" = "absent";
 
     // `undefined` means nobody has asked yet. A cached `null` is a settled
@@ -336,6 +343,7 @@ export default function GamePage() {
         id: track.id,
         name: track.name,
         artist: track.artists[0] ?? "",
+        durationMs: track.durationMs,
       });
       previewUrl = result.previewUrl;
       missReason = result.status === "unavailable" ? "unavailable" : "absent";
@@ -390,7 +398,7 @@ export default function GamePage() {
     refreshedTracks.current.add(track.id);
 
     const result = await fetchPreview(
-      { id: track.id, name: track.name, artist: track.artists[0] ?? "" },
+      { id: track.id, name: track.name, artist: track.artists[0] ?? "", durationMs: track.durationMs },
       { refresh: true }
     );
 

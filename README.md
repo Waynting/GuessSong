@@ -54,7 +54,7 @@ Buzzer Mode and Mixed Playlist Mode share a single room code and QR: the host cl
 
 - Spotify playlist import via Client Credentials — no user auth, players never see a Spotify sign-in
 - Three game modes and three playlist sources (above)
-- 30s audio previews resolved from the **iTunes Search API**, falling back to **Deezer**
+- 30s audio previews resolved from the **iTunes Search API**, falling back to **Deezer** — both keyless, so there is nothing to sign up for
 - Blurred album art hint system, live progress bar + countdown, replay from the guessing phase
 - Export the final scoreboard (and the Mixed-mode taste card) as a PNG
 - Fully **bilingual** — English and Traditional Chinese landing pages (`/`, `/zh`), plus every user-facing error string in both languages, picked by device locale
@@ -68,7 +68,7 @@ Buzzer Mode and Mixed Playlist Mode share a single room code and QR: the host cl
 - **[Next.js 15](https://nextjs.org/)** App Router, React 18, TypeScript
 - **Tailwind CSS** + [shadcn/ui](https://ui.shadcn.com/) primitives (the setup and game pages use inline styles instead)
 - **Spotify Web API** (Client Credentials) for playlists
-- **iTunes Search API** → **Deezer** for audio previews
+- **iTunes Search API** → **Deezer** for audio previews — both are public, unauthenticated endpoints: no key, no account, nothing in `.env`
 - **[Upstash Redis](https://upstash.com/)** for rooms, rate limiting, and the playlist/preview caches (falls back to an in-process `Map` locally)
 - **[Cloudflare Workers](https://workers.cloudflare.com/) + Durable Objects** for live buzzer rooms (`worker/`)
 - **[Vitest](https://vitest.dev/)** for both suites; `zod` for request validation, `qrcode` for room QR codes
@@ -103,6 +103,8 @@ cp .env.example .env.local
 | `SPOTIFY_MAX_LOADS_PER_MINUTE` | Optional | Global ceiling on uncached Spotify playlist loads. Default `40`. |
 | `PREVIEW_MAX_LOOKUPS_PER_MINUTE` | Optional | Global ceiling on iTunes/Deezer lookups. Default `120`. |
 | `DEV_ORIGINS` | Optional, dev only | Comma-separated LAN hostnames (no scheme, no port) added to `allowedDevOrigins`. Needed to test from a phone. |
+
+**Nothing above configures the audio lookup, and nothing needs to.** The iTunes Search API and Deezer's public search are unauthenticated — there is no key to obtain and no variable to set, which is why they appear neither in this table nor in `.env.example`. Every 30s clip the game plays comes from one of them. `PREVIEW_MAX_LOOKUPS_PER_MINUTE` is the only related knob and it is a ceiling we impose on ourselves, not a credential: Apple rate-limits by IP rather than by key, and a serverless deploy's egress IPs are shared across the whole user base — see [Caching and admission control](#caching-and-admission-control).
 
 ### 3. Run the dev server
 
@@ -210,7 +212,9 @@ Every route is IP rate limited (`lib/rate-limit.ts`) with a fixed window; limits
 
 ### Audio previews
 
-Spotify deprecated `preview_url` for most tracks in Nov 2024, so the game resolves clips itself. On mount the game page prefetches everything with one `POST /api/preview/batch`; anything unresolved falls back to `GET /api/preview` lazily when the host presses Play. Both search iTunes first, then Deezer.
+Spotify deprecated `preview_url` in Nov 2024 and now returns `null` for **every** track on Client Credentials — measured 0/20 across four markets — so `Track` carries no `previewUrl` field at all and every clip the game plays is resolved by this app. On mount the game page prefetches the whole game with one `POST /api/preview/batch`; anything unresolved falls back to `GET /api/preview` lazily when the host presses Play. Both search the iTunes Search API first, then Deezer, and neither needs credentials.
+
+Choosing *which* result to play takes two signals, because neither survives every case on its own. Credits are routinely translated — iTunes returns 盧廣仲 as "Crowd Lu", 小幸運 as "A Little Happiness" — while a cover shares the original's title by definition, so on a CJK track the only string that lines up often belongs to the wrong recording. Running time is translated by nobody and agrees with Spotify to within a millisecond or two, which is exactly what a re-recording does not do. So the two check each other, and the loosest queries — the title-only ones, where upstream was handed no artist to rank by and answers "Hello" with Pinkfong's nursery rhyme rather than Adele's — are only accepted when one of them verifies. Everything else is handed to the next source.
 
 Preview results are three-way, not two-way: `found`, `absent` (nothing has a clip — cached a week), and `unavailable` (we were throttled or the request never got through — cached 90 seconds). Collapsing those two nulls is a real bug that shipped once: one throttled minute marked a slice of the catalogue silent for a week.
 

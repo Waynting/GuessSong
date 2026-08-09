@@ -236,6 +236,463 @@ describe("preview lookup", () => {
 });
 
 /**
+ * Routes replies by search *term*, which installFetchMock cannot do — every
+ * case below turns on the first query (artist included) and the second (title
+ * only) being answered differently.
+ */
+function installTermMock(replies: {
+  itunes?: Record<string, unknown>;
+  deezer?: Record<string, unknown>;
+}) {
+  const calls: string[] = [];
+  const termOf = (href: string) => {
+    const params = new URL(href).searchParams;
+    return params.get("term") ?? params.get("q") ?? "";
+  };
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL) => {
+      const href = typeof url === "string" ? url : url.toString();
+      calls.push(href);
+      const itunes = href.includes("itunes.apple.com");
+      const body =
+        (itunes ? replies.itunes : replies.deezer)?.[termOf(href)] ??
+        (itunes ? ITUNES_EMPTY : DEEZER_EMPTY);
+      return {
+        ok: true,
+        status: 200,
+        statusText: "",
+        headers: new Headers(),
+        json: async (): Promise<unknown> => body,
+      };
+    })
+  );
+
+  const termsFor = (host: string) =>
+    calls.filter((c) => c.includes(host)).map((c) => termOf(c));
+  return {
+    itunesTerms: () => termsFor("itunes.apple.com"),
+    deezerTerms: () => termsFor("deezer"),
+  };
+}
+
+interface FakeItunesTrack {
+  trackName: string;
+  artistName: string;
+  previewUrl: string;
+  /** iTunes' own field name. Left off to model a result with no running time. */
+  trackTimeMillis?: number;
+}
+
+const itunesResults = (...tracks: FakeItunesTrack[]) => ({
+  results: tracks.map((t, i) => ({ trackId: i + 1, ...t })),
+});
+
+const itunesResult = (trackName: string, artistName: string, previewUrl: string) =>
+  itunesResults({ trackName, artistName, previewUrl });
+
+/**
+ * The title-only query is the one with no artist in it, so upstream ranks by
+ * popularity alone and the top hit is simply the best-known song with that
+ * title. Measured against the real iTunes API: "Hello" returns Pinkfong's
+ * nursery rhyme, "Alone" returns Heart's 1987 single, "小幸運" returns a cover.
+ *
+ * Accepting one of those is worse than silence here. It is cached as `found`
+ * for a year, the refresh path only repairs rotted URLs and never re-picks, and
+ * at the table the clip plays and then the answer card contradicts it.
+ */
+describe("a wrong recording is never accepted for a right title", () => {
+  it("rejects a title-only match by another artist and hands over to Deezer", async () => {
+    const probe = installTermMock({
+      itunes: {
+        // Nothing under the full credit, so the title-only query runs...
+        "Hello Adele": ITUNES_EMPTY,
+        // ...and this is what it really comes back with.
+        Hello: itunesResult("Hello", "Pinkfong", "https://itunes.example/pinkfong.m4a"),
+      },
+      deezer: {
+        'track:"Hello" artist:"Adele"': {
+          data: [
+            {
+              preview: "https://deezer.example/adele.mp3",
+              id: 9,
+              title: "Hello",
+              artist: { name: "Adele" },
+            },
+          ],
+        },
+      },
+    });
+
+    const res = await GET(request({ track: "Hello", artist: "Adele", id: "artist-1" }));
+
+    expect(await previewUrlFrom(res)).toBe("https://deezer.example/adele.mp3");
+    expect(probe.itunesTerms()).toEqual(["Hello Adele", "Hello"]);
+  });
+
+  it("reports absent rather than playing the wrong artist from either source", async () => {
+    installTermMock({
+      itunes: { Alone: itunesResult("Alone", "Heart", "https://itunes.example/heart.m4a") },
+      deezer: {
+        Alone: {
+          data: [
+            {
+              preview: "https://deezer.example/heart.mp3",
+              id: 8,
+              title: "Alone",
+              artist: { name: "Heart" },
+            },
+          ],
+        },
+      },
+    });
+
+    const res = await GET(request({ track: "Alone", artist: "Marshmello", id: "artist-2" }));
+
+    expect(await resultOf(res)).toEqual({ previewUrl: null, status: "absent" });
+  });
+
+  it("still accepts a translated title when the artist is the one asked for", async () => {
+    // Artist is weighed before title on purpose: iTunes returns 小幸運 as
+    // "A Little Happiness", so a title mismatch is weak evidence of anything.
+    installTermMock({
+      itunes: {
+        "小幸運 Hebe Tien": itunesResult(
+          "A Little Happiness",
+          "Hebe Tien",
+          "https://itunes.example/hebe.m4a"
+        ),
+      },
+    });
+
+    const res = await GET(request({ track: "小幸運", artist: "Hebe Tien", id: "artist-3" }));
+
+    expect(await previewUrlFrom(res)).toBe("https://itunes.example/hebe.m4a");
+  });
+
+  it("does not require the artist on the query that already carried it upstream", async () => {
+    // The limit of string matching: Spotify's 田馥甄 is iTunes' "Hebe Tien" and
+    // nothing bridges that. Filtering the artist-carrying query on it would
+    // make every CJK track unplayable, which is why only the title-only query
+    // is gated.
+    installTermMock({
+      itunes: {
+        "小幸運 田馥甄": itunesResult(
+          "A Little Happiness",
+          "Hebe Tien",
+          "https://itunes.example/hebe.m4a"
+        ),
+      },
+    });
+
+    const res = await GET(request({ track: "小幸運", artist: "田馥甄", id: "artist-4" }));
+
+    expect(await previewUrlFrom(res)).toBe("https://itunes.example/hebe.m4a");
+  });
+
+  it("counts a featured credit as the same artist", async () => {
+    installTermMock({
+      itunes: {
+        Alone: itunesResult(
+          "Alone",
+          "Marshmello & Noah Cyrus",
+          "https://itunes.example/marshmello.m4a"
+        ),
+      },
+    });
+
+    const res = await GET(request({ track: "Alone", artist: "Marshmello", id: "artist-5" }));
+
+    expect(await previewUrlFrom(res)).toBe("https://itunes.example/marshmello.m4a");
+  });
+
+  it("does not treat a name that merely starts the same as the same artist", async () => {
+    // Containment on whole tokens only, or "Sia" swallows "Sian Evans".
+    installTermMock({
+      itunes: { Alone: itunesResult("Alone", "Sian Evans", "https://itunes.example/sian.m4a") },
+    });
+
+    const res = await GET(request({ track: "Alone", artist: "Sia", id: "artist-6" }));
+
+    expect(await resultOf(res)).toEqual({ previewUrl: null, status: "absent" });
+  });
+
+  it("asks iTunes once, not twice, when there is no artist to search with", async () => {
+    // `${track} ${artist}`.trim() collapses to the bare title, so the old flat
+    // query list spent a second upstream call re-asking an identical question.
+    const probe = installTermMock({});
+
+    const res = await GET(request({ track: "Song", id: "artist-7" }));
+
+    expect(await resultOf(res)).toEqual({ previewUrl: null, status: "absent" });
+    expect(probe.itunesTerms()).toEqual(["Song"]);
+    expect(probe.deezerTerms()).toEqual(["Song"]);
+  });
+});
+
+/**
+ * The half of the problem artist matching cannot reach.
+ *
+ * A credit gets translated — iTunes returns 盧廣仲 as "Crowd Lu" — and a cover
+ * shares the original's title by definition, so on a CJK track the only string
+ * that lines up belongs to the wrong recording. Running time is translated by
+ * nobody and agrees with Spotify to the millisecond, which is precisely what a
+ * re-recording does not do.
+ */
+describe("running time separates a recording from its cover", () => {
+  const ENGRAVED = () =>
+    itunesResults(
+      {
+        trackName: "刻在我心底的名字",
+        artistName: "佳其",
+        previewUrl: "https://itunes.example/cover.m4a",
+        trackTimeMillis: 268000,
+      },
+      {
+        trackName: 'Your Name Engraved Herein',
+        artistName: "Crowd Lu",
+        previewUrl: "https://itunes.example/crowdlu.m4a",
+        trackTimeMillis: 320166,
+      }
+    );
+
+  it("takes the matching running time over a cover that shares the title", async () => {
+    installTermMock({ itunes: { "刻在我心底的名字 盧廣仲": ENGRAVED() } });
+
+    const res = await GET(
+      request({
+        track: "刻在我心底的名字",
+        artist: "盧廣仲",
+        durationMs: "320165",
+        id: "dur-1",
+      })
+    );
+
+    expect(await previewUrlFrom(res)).toBe("https://itunes.example/crowdlu.m4a");
+  });
+
+  it("falls back to the title match when the caller sent no running time", async () => {
+    // durationMs is optional on the wire, so a client older than this deploy
+    // must still resolve — just less precisely, exactly as it did before.
+    installTermMock({ itunes: { "刻在我心底的名字 盧廣仲": ENGRAVED() } });
+
+    const res = await GET(request({ track: "刻在我心底的名字", artist: "盧廣仲", id: "dur-2" }));
+
+    expect(await previewUrlFrom(res)).toBe("https://itunes.example/cover.m4a");
+  });
+
+  it("picks the closest when the artist has another song of nearly equal length", async () => {
+    // Hebe Tien's Forever Love is 768ms from 小幸運 — inside the tolerance, so
+    // the window alone decides nothing and the smallest drift has to win.
+    installTermMock({
+      itunes: {
+        "小幸運 Hebe Tien": itunesResults(
+          {
+            trackName: "Forever Love",
+            artistName: "Hebe Tien",
+            previewUrl: "https://itunes.example/forever.m4a",
+            trackTimeMillis: 266289,
+          },
+          {
+            trackName: "A Little Happiness",
+            artistName: "Hebe Tien",
+            previewUrl: "https://itunes.example/happiness.m4a",
+            trackTimeMillis: 265522,
+          }
+        ),
+      },
+    });
+
+    const res = await GET(
+      request({ track: "小幸運", artist: "Hebe Tien", durationMs: "265521", id: "dur-3" })
+    );
+
+    expect(await previewUrlFrom(res)).toBe("https://itunes.example/happiness.m4a");
+  });
+
+  it("lets a matching running time stand in for a credit it cannot verify", async () => {
+    // The title-only query normally demands a verified artist. 星野源 comes back
+    // as "Gen Hoshino", so the string never lines up — but 253333ms does, and
+    // that is evidence of the same strength.
+    installTermMock({
+      itunes: {
+        "恋 星野源": ITUNES_EMPTY,
+        恋: itunesResults({
+          trackName: "Koi",
+          artistName: "Gen Hoshino",
+          previewUrl: "https://itunes.example/koi.m4a",
+          trackTimeMillis: 253333,
+        }),
+      },
+    });
+
+    const res = await GET(
+      request({ track: "恋", artist: "星野源", durationMs: "253333", id: "dur-4" })
+    );
+
+    expect(await previewUrlFrom(res)).toBe("https://itunes.example/koi.m4a");
+  });
+
+  it("still rejects a title-only match whose running time disagrees", async () => {
+    installTermMock({
+      itunes: {
+        "Hello Adele": ITUNES_EMPTY,
+        Hello: itunesResults({
+          trackName: "Hello",
+          artistName: "Pinkfong",
+          previewUrl: "https://itunes.example/pinkfong.m4a",
+          trackTimeMillis: 96000,
+        }),
+      },
+    });
+
+    const res = await GET(
+      request({ track: "Hello", artist: "Adele", durationMs: "295502", id: "dur-5" })
+    );
+
+    expect(await resultOf(res)).toEqual({ previewUrl: null, status: "absent" });
+  });
+
+  it("keeps an exact title outside the window over a sibling track inside it", async () => {
+    // The ranking bug the tier list exists to prevent, and a real regression
+    // against 1.1.0. A remaster sits further off Spotify's clock than a sibling
+    // album track does, so ranking the clock above an artist+title match turned
+    // a previously correct pick into a different song entirely.
+    installTermMock({
+      itunes: {
+        "Karma Police Radiohead": itunesResults(
+          {
+            trackName: "Lucky",
+            artistName: "Radiohead",
+            previewUrl: "https://itunes.example/lucky.m4a",
+            trackTimeMillis: 260500, // 500ms out — inside the window
+          },
+          {
+            trackName: "Karma Police",
+            artistName: "Radiohead",
+            previewUrl: "https://itunes.example/karma.m4a",
+            trackTimeMillis: 257000, // 3s out — outside it
+          }
+        ),
+      },
+    });
+
+    const res = await GET(
+      request({ track: "Karma Police", artist: "Radiohead", durationMs: "260000", id: "dur-6" })
+    );
+
+    expect(await previewUrlFrom(res)).toBe("https://itunes.example/karma.m4a");
+  });
+
+  it("treats the tolerance as inclusive, and rejects one millisecond past it", async () => {
+    // Asserted on the title-only query, where a verified running time is the
+    // only thing that can get a result accepted at all.
+    const withDrift = (ms: number) =>
+      installTermMock({
+        itunes: {
+          "Koi Gen Hoshino": ITUNES_EMPTY,
+          Koi: itunesResults({
+            trackName: "Koi",
+            artistName: "星野源",
+            previewUrl: "https://itunes.example/koi.m4a",
+            trackTimeMillis: 253333 + ms,
+          }),
+        },
+      });
+
+    withDrift(2000);
+    expect(
+      await previewUrlFrom(
+        await GET(request({ track: "Koi", artist: "Gen Hoshino", durationMs: "253333", id: "tol-1" }))
+      )
+    ).toBe("https://itunes.example/koi.m4a");
+
+    withDrift(2001);
+    expect(
+      await resultOf(
+        await GET(request({ track: "Koi", artist: "Gen Hoshino", durationMs: "253333", id: "tol-2" }))
+      )
+    ).toEqual({ previewUrl: null, status: "absent" });
+  });
+
+  it("matches a CJK credit with no separator to break on", async () => {
+    // artistMatches falls back to a plain substring when either side is CJK,
+    // because there are no spaces to anchor whole-token matching to. iTunes
+    // does return concatenated billings like this, and the 48 bundled Mandarin
+    // tracks are what depends on the branch. Asserted on the title-only query
+    // so nothing but a verified credit can accept the result.
+    installTermMock({
+      itunes: {
+        "千里之外 周杰倫": ITUNES_EMPTY,
+        千里之外: itunesResults({
+          trackName: "千里之外",
+          artistName: "周杰倫Jay Chou",
+          previewUrl: "https://itunes.example/jay.m4a",
+        }),
+      },
+    });
+
+    const res = await GET(request({ track: "千里之外", artist: "周杰倫", id: "cjk-1" }));
+
+    expect(await previewUrlFrom(res)).toBe("https://itunes.example/jay.m4a");
+  });
+
+  it("reads Deezer's running time as seconds, not milliseconds", async () => {
+    // Deezer reports whole seconds where iTunes reports milliseconds. Drop the
+    // x1000 and every Deezer track silently loses its duration signal — the
+    // suite stays green while translated credits fall through to a cover.
+    installTermMock({
+      deezer: {
+        'track:"泡沫" artist:"鄧紫棋"': {
+          data: [
+            {
+              preview: "https://deezer.example/cover.mp3",
+              id: 1,
+              title: "泡沫",
+              artist: { name: "翻唱歌手" },
+              duration: 210,
+            },
+            {
+              preview: "https://deezer.example/gem.mp3",
+              id: 2,
+              title: "Bubble",
+              artist: { name: "G.E.M." },
+              duration: 259,
+            },
+          ],
+        },
+      },
+    });
+
+    const res = await GET(
+      request({ track: "泡沫", artist: "鄧紫棋", durationMs: "258865", id: "dz-1" })
+    );
+
+    expect(await previewUrlFrom(res)).toBe("https://deezer.example/gem.mp3");
+  });
+
+  it("ignores a malformed running time rather than refusing the lookup", async () => {
+    installTermMock({
+      itunes: {
+        "Song Artist": itunesResults({
+          trackName: "Song",
+          artistName: "Artist",
+          previewUrl: "https://itunes.example/ok.m4a",
+        }),
+      },
+    });
+
+    for (const [i, bad] of ["abc", "-1", "0", "Infinity", ""].entries()) {
+      const res = await GET(
+        request({ track: "Song", artist: "Artist", durationMs: bad, id: `bad-${i}` })
+      );
+      expect(await previewUrlFrom(res), `durationMs=${bad}`).toBe("https://itunes.example/ok.m4a");
+    }
+  });
+});
+
+/**
  * The regression this module was extracted to fix. Each case is a way of being
  * refused that the old route recorded as a fact about the recording.
  */
@@ -478,6 +935,12 @@ describe("preview cache", () => {
     // Production is full of bare `{previewUrl}` records and the key was left
     // unversioned on purpose: bumping it would cold-start every entry at once,
     // which is precisely the upstream burst this module exists to prevent.
+    //
+    // The cost is that 1.2.0's picker fix does not reach them — a URL chosen by
+    // the old picker keeps being served for up to a year. Upgrading them needs
+    // a generation stamp on the record, which is deliberately not in this
+    // release; see CHANGELOG 1.2.0 "Known gaps" for why the mechanism is harder
+    // than it looks.
     const probe = installFetchMock({ itunes: { body: ITUNES_HIT } });
     kv.mem.set("preview:id:old-hit", {
       value: { previewUrl: "https://legacy.example/clip.m4a" },
@@ -606,6 +1069,60 @@ describe("batch lookups", () => {
     const body = (await res.json()) as { previews: Record<string, PreviewResult> };
     return body.previews;
   }
+
+  it("threads each track's running time through to the pick", async () => {
+    // The game page's primary path is one batch for the whole game, so if the
+    // wire drops durationMs here every party silently falls back to matching on
+    // names alone — which is what puts a cover on the answer card.
+    installTermMock({
+      itunes: {
+        "刻在我心底的名字 盧廣仲": itunesResults(
+          {
+            trackName: "刻在我心底的名字",
+            artistName: "佳其",
+            previewUrl: "https://itunes.example/cover.m4a",
+            trackTimeMillis: 268000,
+          },
+          {
+            trackName: "Your Name Engraved Herein",
+            artistName: "Crowd Lu",
+            previewUrl: "https://itunes.example/crowdlu.m4a",
+            trackTimeMillis: 320166,
+          }
+        ),
+      },
+    });
+
+    const res = await POST(
+      batchRequest([
+        { id: "b1", name: "刻在我心底的名字", artist: "盧廣仲", durationMs: 320165 },
+      ])
+    );
+
+    // Without the duration the exact title wins and this is the cover.
+    expect((await previewsFrom(res)).b1.previewUrl).toBe("https://itunes.example/crowdlu.m4a");
+  });
+
+  it("drops a malformed running time instead of refusing the whole batch", async () => {
+    // Unlike id and name, a bad duration only costs precision. Refusing the
+    // batch over it would take every well-formed track down with it.
+    installTermMock({
+      itunes: {
+        "Song 1 Artist": itunesResults({
+          trackName: "Song 1",
+          artistName: "Artist",
+          previewUrl: "https://itunes.example/ok.m4a",
+        }),
+      },
+    });
+
+    const res = await POST(
+      batchRequest([{ id: "sp1", name: "Song 1", artist: "Artist", durationMs: "not-a-number" }])
+    );
+
+    expect(res.status).toBe(200);
+    expect((await previewsFrom(res)).sp1.previewUrl).toBe("https://itunes.example/ok.m4a");
+  });
 
   it("reads the whole game with a single mget", async () => {
     // The reason this route exists is the KV bill: one command for fifty
