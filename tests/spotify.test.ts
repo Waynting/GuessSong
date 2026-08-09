@@ -56,7 +56,6 @@ function fakeSpotifyTrack(index: number) {
     name: `Song ${index}`,
     artists: [{ name: "Artist" }],
     duration_ms: 200000,
-    preview_url: null,
     album: { name: "Album", images: [] },
   };
 }

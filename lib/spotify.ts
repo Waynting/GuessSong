@@ -162,7 +162,9 @@ export interface SpotifyTrack {
   name: string;
   artists: Array<{ name: string }>;
   duration_ms: number;
-  preview_url: string | null; // 30-second preview URL
+  // No preview_url. Spotify deprecated it in Nov 2024 and it comes back null
+  // for every track on Client Credentials — measured 0/20 across four markets.
+  // Clips come from lib/preview-cache.ts (iTunes, then Deezer) instead.
   popularity?: number; // 0-100, used by the Mixed Playlist Mode taste card
   album: {
     name: string;
@@ -427,7 +429,6 @@ export function convertSpotifyTrack(spotifyTrack: SpotifyTrack): Track {
     durationMs: spotifyTrack.duration_ms,
     albumName: spotifyTrack.album.name,
     albumImageUrl: spotifyTrack.album.images[0]?.url,
-    previewUrl: spotifyTrack.preview_url || null, // Store preview URL
     popularity: spotifyTrack.popularity,
     rawJson: spotifyTrack as unknown as Record<string, unknown>,
     createdAt: new Date().toISOString(),

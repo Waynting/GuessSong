@@ -16,7 +16,6 @@ function makeTrack(overrides: Partial<Track> = {}): Track {
     durationMs: 200000,
     albumName: "Album",
     albumImageUrl: "https://img.example/a.jpg",
-    previewUrl: null,
     rawJson: { huge: "blob", nested: { stuff: [1, 2, 3] } },
     createdAt: "2026-01-01T00:00:00.000Z",
     ...overrides,

@@ -166,6 +166,11 @@ const JUNK_VERSION =
  * this catches covers and wrong-song matches (e.g. a different artist's
  * track ranking first). Returns the best metadata match (for album name /
  * artwork), or null when the candidate should be dropped.
+ *
+ * Since 1.2.0 this approximates rather than mirrors the runtime: pickCandidate
+ * also ranks on Spotify's running time, and there is no Spotify duration on
+ * this path because tracks are built from iTunes. The gate below is
+ * deliberately stricter to compensate.
  */
 async function verifyTrackWithItunes(name, artist, aliases = []) {
   const lcName = name.toLowerCase();
@@ -179,7 +184,9 @@ async function verifyTrackWithItunes(name, artist, aliases = []) {
   // "Happy (From 'Despicable Me 2')" → "happy"
   const normName = (s) => (s ?? "").toLowerCase().replace(/\s*[([].*$/, "").trim();
 
-  // Same query order as /api/preview.
+  // Approximates /api/preview's query order. Not identical since 1.2.0: the
+  // runtime drops the title-only follow-up when there is no artist, and gates
+  // it on a verified credit when there is.
   const queries = [`${name} ${artist}`.trim(), name];
 
   for (const q of queries) {
@@ -188,12 +195,18 @@ async function verifyTrackWithItunes(name, artist, aliases = []) {
     // Runtime only falls through to the next query when this one had no preview.
     if (!withPreview.length) continue;
 
-    // Simulate the runtime pick: exact track-name match, else first hit.
+    // A deliberately STRICTER stand-in for the runtime pick, not a simulation
+    // of it. lib/preview-cache.ts's pickCandidate ranks on the credit, the
+    // exact title AND Spotify's running time; there is no Spotify duration on
+    // this path (tracks are built from iTunes), so the clock signal is not
+    // available here. Erring strict is the right side to be wrong on: a track
+    // dropped at bundle time costs one song in a trial playlist, where a bad
+    // one ships to every player.
     const exact = withPreview.find((r) => r.trackName?.toLowerCase() === lcName);
     const runtimePick = exact ?? withPreview[0];
 
-    // Quality gate: drop the candidate if the runtime preview is a cover /
-    // wrong song by another artist.
+    // Quality gate: drop the candidate if the preview is a cover / wrong song
+    // by another artist.
     if (!artistMatches(runtimePick)) return null;
 
     // Metadata: prefer a non-junk result by the right artist whose
@@ -289,7 +302,9 @@ async function main() {
         albumImageUrl: match.artworkUrl100
           ? match.artworkUrl100.replace("100x100", "400x400")
           : undefined,
-        previewUrl: null, // resolved lazily at runtime via /api/preview
+        // No previewUrl: clips are resolved at runtime via /api/preview, and
+        // Track dropped the field in 1.2.0 — emitting it here would put all 48
+        // permanently-null entries straight back into the bundled data.
         createdAt: new Date().toISOString(),
       });
     }
