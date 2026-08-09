@@ -179,14 +179,14 @@ app/
   j/[code]/                  Mixed Playlist Mode join page
   buzz/[code]/               Buzzer Mode player page (holds the live WebSocket)
   share/                     Web Share Target handler + /share/unsupported explainer
-  icons/[size]/              PWA icons generated at the edge
+  icons/[size]/              PWA icons, prerendered at build (never per request)
   api/                       See the table below
   icon.tsx, opengraph-image.tsx, robots.ts, sitemap.ts
 components/                  Buzzer button + host panel, room panel, mixed collector,
                              install banner, changelog modal, ui/ (shadcn primitives)
 lib/                         All shared logic — see "Architecture" below
 worker/                      Cloudflare Worker + BuzzerRoom Durable Object
-tests/                       17 Vitest files, 273 cases
+tests/                       22 Vitest files, 366 cases
 types/                       Track, room, and preview wire types
 ```
 
