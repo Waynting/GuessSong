@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "stats": "node scripts/loop-stats.mjs"
   },
   "dependencies": {
     "@radix-ui/react-label": "^2.1.8",

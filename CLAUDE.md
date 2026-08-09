@@ -10,9 +10,12 @@ npm run build      # Production build
 npm run start      # Start production server
 npm run lint       # Run ESLint
 npm test           # Run vitest suite (tests/)
+npm run stats      # Print the viral-loop counters (needs the Upstash env vars)
 ```
 
 Use `127.0.0.1:8000` (not `localhost`) — the Spotify app is configured for this origin.
+
+**Run `npm run stats` at the start of any session about growth, the loop, retention, or "what should we build next", and lead with what it says.** Not a nicety. The product's own telemetry went unread for eight weeks across four separate attempts to go and open GA4, and every feature decision in that period was made on an n of 1. The counters exist so that question has an answer; a command nobody runs is the same failure with a shorter path. If the Upstash variables are missing, say so and ask for them rather than reasoning from guesses.
 
 ## What This Is
 
@@ -135,6 +138,20 @@ Two conventions worth keeping:
 - **Every funnel needs a denominator.** `room_join_opened` exists so a QR code that people scan but fail to get through is distinguishable from one nobody scanned. Pure helpers that shape params (e.g. `roomJobs()`) live here rather than in the calling component, because the test suite only reaches `lib/`.
 
 New params do not appear in GA4 reports until they are registered as custom dimensions (Admin → Custom definitions, scope **Event**), and registration is not retroactive.
+
+### The loop counters are a second, deliberate copy
+
+Everything about the viral loop is recorded twice: once in GA4 through `trackEvent`, and once in KV through `lib/loop-stats.ts` (written by `app/r/[surface]` and `app/api/pulse`, read by `npm run stats`). This is not redundancy to clean up.
+
+**KV is authoritative for any decision.** GA4 is for cohorting and for questions nobody has asked yet. The two will disagree — an ad blocker kills the GA4 event and not the redirect, a spent rate-limit window drops the KV increment and not the GA4 event — and the gap between them is itself a reading of how much of this audience blocks analytics. The reason the second copy exists at all is that GA4 requires someone to go and look, and the measured rate at which that happens here is zero.
+
+Three things in that path are easy to undo by accident:
+
+- **The loop link must stay a real navigation to `/r/[surface]`.** Replacing it with a click handler that reports and then routes loses the click it is measuring: browsers cancel in-flight requests as a document tears down, and this fires on the click that leaves the page. That is also why it is a plain `<a>` and not `next/link` — prefetching a counting endpoint invents hits — and why `/r` is in `app/robots.ts`'s disallow list.
+- **`/r/[surface]` must redirect on every branch.** Unknown segment, spent limiter, KV unavailable: the visitor still reaches `/`, and only the count is lost. The person clicking is precisely the person the loop exists to reach.
+- **Counters carry a liveness marker and are held 30 days, not the 7 the cache stats use.** `mget` returns null for a key that was never written, which is indistinguishable from a genuine zero, and "the CTA does nothing" is the most important negative result available here — without the marker it would render as "no data yet" forever. The 30 days is because a report that looks a week back would otherwise expire its own oldest day.
+
+Every surface name is declared once in `lib/loop-links.ts` and derived from there by the link, the analytics param, and the server-side validator. Hand-syncing those three fails silently: a stale validator still redirects, the counter just stops, and that arm reads as "nobody clicked it".
 
 ## Styling Conventions
 

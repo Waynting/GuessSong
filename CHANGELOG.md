@@ -83,6 +83,16 @@ half nobody had written.
   a genuine zero looks like too — without it, "the CTA does nothing", the single
   most important negative result available here, would render as "no data yet"
   forever.
+- **`npm run stats`** (`scripts/loop-stats.mjs`), which prints the counters as a
+  table: shown/followed/rate per surface, games started, repeat hosts, the
+  distribution by host game number, and how many clicks the limiter dropped.
+  Keys are **discovered** (`KEYS loop:stats:*`) rather than rebuilt from a
+  hardcoded list, so this file holds no second copy of the metric names — that
+  drift would be silent, printing a confident table of zeros for keys nobody
+  writes, and discovery also means a metric added later appears here on its own.
+  The output leads with the caveats, because every number in it is a floor and
+  the failure mode is reading a low one as "the CTA does not work" rather than
+  as "we could not see that it did".
 - **`dayBucket()` in `lib/kv.ts`**, replacing the copies that had accumulated in
   `lib/playlist-cache.ts` and `lib/preview-cache.ts`. The writer and the reader
   of a day-bucketed counter always live in different modules, so the exact
@@ -149,10 +159,16 @@ half nobody had written.
   someone scanning a QR out of a forwarded image rather than typing an address,
   which is a large improvement over nothing but still the only surface whose hit
   does not originate on a page of ours.
-- **No digest yet.** The counters are being written and nothing reads them. That
-  is the next change, and until it lands this release has the same defect as
-  everything before it: the numbers exist and require a human to go and fetch
-  them.
+- **`npm run stats` is the only reader, and it is a manual command.** A
+  scheduled push was designed and then dropped on the maintainer's call, which
+  was the right call: a webhook adds a deploy surface, three environment
+  variables and another feed to read, and the variable that actually predicts
+  whether a number gets looked at is not push-versus-pull but whether reading
+  it requires leaving the editor. What makes the command work is the line in
+  CLAUDE.md telling an agent to run it — delivery moved from a human habit with
+  a 0/4 record to something that happens at the start of a session. If that
+  line gets deleted, this reverts to the same defect every release before it
+  had.
 - `host_game_index` is capped at 10 in KV to bound the key space. Fine for the
   question being asked; it would need revisiting before anyone studies the tail.
 - The buzzer wire protocol still has no end-of-game signal (`BuzzerPhase` is
