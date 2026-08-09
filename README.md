@@ -256,6 +256,24 @@ The root suite covers the pure logic (pooling, taste card, share-target parsing,
 - **Scoring** — the host is the judge. No automated answer checking.
 - **Found a bug?** — use the "Report a problem" link in the footer.
 
+## Docs
+
+This README gets you running. [`docs/`](docs/README.md) explains the parts that
+need more than a paragraph:
+
+- [**architecture**](docs/architecture.md) — the system in diagrams: the
+  Vercel/Cloudflare split, one game end to end, and the four-layer shape shared
+  by all three caches
+- [**viral-loop**](docs/viral-loop.md) — the five loop surfaces, and how to run
+  and read `npm run stats` without drawing the wrong conclusion
+- [**operations**](docs/operations.md) — deploying (the Worker is manual),
+  reading the cache logs, and symptom-by-symptom troubleshooting
+- [**decisions**](docs/decisions.md) — why there are no accounts, why buzzer
+  rooms are Durable Objects, and what was considered and rejected
+
+`CLAUDE.md` is the other half: the invariants and hazards, written for whoever
+or whatever edits this next.
+
 ## License
 
 [MIT](./LICENSE) — fork it, remix it, host your own.
