@@ -14,6 +14,8 @@ import {
   apiError,
   describeError,
   errorMessage,
+  shouldRememberAllRejections,
+  shouldRememberRejection,
 } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
@@ -27,7 +29,7 @@ import {
   MixedPlaylistCollector,
   type MixedContribution,
 } from "@/components/mixed-playlist-collector";
-import { poolContributions } from "@/lib/mixed-playlist";
+import { mixedRosterKey, poolContributions } from "@/lib/mixed-playlist";
 
 const CLIP_DURATIONS = [5, 10, 15, 20, 30];
 const SONG_COUNTS: (number | "all")[] = [10, 20, 30, 50, "all"];
@@ -171,6 +173,23 @@ export default function SetupPage() {
   const [mounted, setMounted] = useState(false);
   const locale = useErrorLocale();
   const firstInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * The last submission that failed in a way the submission itself determines,
+   * and the sentence the host was shown for it.
+   *
+   * Start is already disabled while a load is in flight, but a refused playlist
+   * comes back from the negative cache in about 100ms, so the button re-enables
+   * between mashes and every extra tap is another billed invocation that can
+   * only replay the same refusal. Keyed on what was submitted — the URL for a
+   * single playlist, the whole roster for a mix — so changing it needs no
+   * explicit reset: the key simply stops matching.
+   *
+   * One ref rather than one per mode: the modes share a Start button, and a
+   * host who switches mode has changed the question, so losing the other
+   * mode's memo costs at most one request.
+   */
+  const lastRejectedRef = useRef<{ key: string; message: string } | null>(null);
 
   // What the one room has to do, given the modes picked above. Pass-the-phone
   // with the buzzer off needs no room at all, and never opens one.
@@ -327,6 +346,16 @@ export default function SetupPage() {
       setError(errorMessage("players_required", locale));
       return;
     }
+    // Same link, same refusal. Re-show it rather than spending a request to be
+    // told the identical thing — see `lastRejectedRef`. Deliberately silent
+    // about the shortcut: from the host's side this is the error they are
+    // already looking at, and the fix is still to change the link.
+    const submissionKey = `own:${playlistUrl}`;
+    const rejected = lastRejectedRef.current;
+    if (rejected && rejected.key === submissionKey) {
+      setError(rejected.message);
+      return;
+    }
     setLoading(true);
     trackEvent("playlist_submitted", { playlist_source: "own" });
     try {
@@ -374,7 +403,14 @@ export default function SetupPage() {
       });
       router.push("/game");
     } catch (e: unknown) {
-      setError(describeError(e, locale, "playlist_load_failed"));
+      const message = describeError(e, locale, "playlist_load_failed");
+      // Only failures the URL itself determines are remembered. A throttled or
+      // unknown one has to stay retryable — the host's link may be perfect and
+      // the next attempt may well be the one that works.
+      lastRejectedRef.current = shouldRememberRejection(e)
+        ? { key: submissionKey, message }
+        : null;
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -390,6 +426,24 @@ export default function SetupPage() {
       );
       return;
     }
+    // Same roster, same refusal — the single-playlist reasoning one flow over,
+    // except a mash here re-fires one request per contributor rather than one.
+    const submissionKey = `mixed:${mixedRosterKey(
+      mixedContributions.map((c) => c.playlistUrl)
+    )}`;
+    const rejected = lastRejectedRef.current;
+    if (rejected && rejected.key === submissionKey) {
+      setError(rejected.message);
+      return;
+    }
+    /**
+     * Whether every contributor that failed did so for a reason the link
+     * itself decides. Computed inside the try, where the individual reasons
+     * are still in scope, and read in the catch, where only the aggregate
+     * `mixed_playlists_failed` survives — and that code is not evidence of
+     * anything permanent on its own. See `shouldRememberAllRejections`.
+     */
+    let allFailuresFinal = false;
     setLoading(true);
     trackEvent("playlist_submitted", { playlist_source: "mixed" });
     try {
@@ -435,6 +489,11 @@ export default function SetupPage() {
         .map((r, i) => (r.status === "rejected" ? mixedContributions[i].name : null))
         .filter((n): n is string => n !== null);
       if (failedNames.length > 0) {
+        allFailuresFinal = shouldRememberAllRejections(
+          results
+            .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+            .map((r) => r.reason)
+        );
         throw new AppError("mixed_playlists_failed", { names: failedNames.join(", ") });
       }
 
@@ -480,7 +539,12 @@ export default function SetupPage() {
       });
       router.push("/game");
     } catch (e: unknown) {
-      setError(describeError(e, locale, "playlist_load_failed"));
+      const message = describeError(e, locale, "playlist_load_failed");
+      // `allFailuresFinal` stays false for the throttled rethrow above and for
+      // anything that failed before the per-contributor loop, so both remain
+      // retryable — a shared quota clears on its own.
+      lastRejectedRef.current = allFailuresFinal ? { key: submissionKey, message } : null;
+      setError(message);
     } finally {
       setLoading(false);
     }
