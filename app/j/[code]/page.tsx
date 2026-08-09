@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LoopCtaButton, LoopFooter } from "@/components/loop-cta";
 
 type SubmitStatus = "idle" | "loading" | "done" | "error";
 
@@ -90,11 +91,18 @@ export default function JoinRoomPage() {
               Received {trackCount} track{trackCount === 1 ? "" : "s"} from your playlist.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-col gap-4">
             <p className="text-sm text-muted-foreground">
               You can close this page now — the host will start the game once everyone&apos;s in.
               No one else can see your playlist.
             </p>
+            {/* This screen used to end here. It is the one moment on this page
+                where the player has finished the task, has nothing left to do,
+                and is still looking — which makes it the best placement in the
+                whole flow and, until now, a dead end. */}
+            <LoopCtaButton surface="join_submitted">
+              Host your own game →
+            </LoopCtaButton>
           </CardContent>
         </Card>
       </main>
@@ -136,6 +144,7 @@ export default function JoinRoomPage() {
             {status === "loading" ? "Submitting..." : "Submit Playlist"}
           </Button>
           {error && <p className="text-sm text-destructive">{error}</p>}
+          <LoopFooter surface="join_footer" />
         </CardContent>
       </Card>
     </main>

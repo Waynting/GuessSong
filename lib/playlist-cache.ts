@@ -28,7 +28,7 @@
  * "broken" — same contract as app/api/preview/route.ts, which this follows.
  */
 
-import { getKvStore } from "@/lib/kv";
+import { dayBucket, getKvStore } from "@/lib/kv";
 import {
   getPlaylistWithTracks,
   isSpotifyEditorial,
@@ -232,8 +232,7 @@ async function claimGlobalBudget(): Promise<boolean> {
  * as things get healthier, and a sudden run of lines is itself the signal.
  */
 function statsKey(kind: "hit" | "miss" | "negative"): string {
-  const day = new Date().toISOString().slice(0, 10);
-  return `playlist:stats:${day}:${kind}`;
+  return `playlist:stats:${dayBucket()}:${kind}`;
 }
 
 const STATS_TTL_SECONDS = 7 * 24 * 60 * 60;

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { getKvStore } from "@/lib/kv";
+import { dayBucket, getKvStore } from "@/lib/kv";
 
 const redisMock = vi.hoisted(() => ({
   get: vi.fn(),
@@ -191,5 +191,37 @@ describe("getKvStore (Upstash backend)", () => {
 
     expect(await store.mget([])).toEqual([]);
     expect(redisMock.mget).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The writer and the reader of a day-bucketed counter always live in different
+ * modules, so the exact output string is the contract between them. A change
+ * here does not break a build or throw — it silently addresses a different key
+ * and every counter reads zero from then on. Hence pinning the literal.
+ */
+describe("dayBucket", () => {
+  it("is the UTC calendar date, exactly YYYY-MM-DD", () => {
+    expect(dayBucket(new Date("2026-08-09T12:34:56.789Z"))).toBe("2026-08-09");
+  });
+
+  it("splits on the UTC midnight boundary, not a local one", () => {
+    expect(dayBucket(new Date("2026-08-09T23:59:59.999Z"))).toBe("2026-08-09");
+    expect(dayBucket(new Date("2026-08-10T00:00:00.000Z"))).toBe("2026-08-10");
+  });
+
+  it("ignores the host timezone, so a lambda and a laptop agree", () => {
+    // 2026-08-09T22:00Z is already the 10th in UTC+10 and still the 9th in UTC.
+    // Whichever zone the process happens to run in, the bucket is the UTC one.
+    const instant = new Date("2026-08-09T22:00:00.000Z");
+    expect(dayBucket(instant)).toBe("2026-08-09");
+    expect(dayBucket(instant)).toBe(instant.toISOString().slice(0, 10));
+  });
+
+  it("defaults to now, so callers do not each reach for a clock", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2027-01-02T03:04:05.000Z"));
+    expect(dayBucket()).toBe("2027-01-02");
+    vi.useRealTimers();
   });
 });

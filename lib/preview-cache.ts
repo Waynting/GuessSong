@@ -71,7 +71,7 @@
  * next time they're written.
  */
 
-import { getKvStore, type KvStore } from "@/lib/kv";
+import { dayBucket, getKvStore, type KvStore } from "@/lib/kv";
 import type { PreviewResult, PreviewStatus } from "@/types/preview";
 
 export type { PreviewResult, PreviewStatus };
@@ -216,8 +216,7 @@ function cooldownKey(source: PreviewSource): string {
 }
 
 function statsKey(kind: "hit" | "miss" | "unavailable"): string {
-  const day = new Date().toISOString().slice(0, 10);
-  return `preview:stats:${day}:${kind}`;
+  return `preview:stats:${dayBucket()}:${kind}`;
 }
 
 /* ------------------------------------------------------------------ */

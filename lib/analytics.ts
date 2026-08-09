@@ -11,6 +11,7 @@ import type { ShareOutcome } from "@/lib/result-image";
 // Type-only, so the analytics <-> game-session cycle is erased at compile time
 // and never becomes a runtime import cycle.
 import type { GameMode } from "@/lib/game-session";
+import type { ArrivedFrom, LoopSurface } from "@/lib/loop-links";
 
 export type PlaylistSource = "own" | "builtin" | "mixed";
 export type ShareType = "track" | "album" | "artist" | "unknown";
@@ -74,6 +75,33 @@ export type AnalyticsEvent =
          * one meaningless line.
          */
         game_mode?: GameMode;
+        /**
+         * Which loop surface this host came in through, or `organic`.
+         *
+         * Last loop touch within `LOOP_REF_TTL_MS`, not same-pageview: the
+         * conversion happens at a *later* party, so crediting only the visit
+         * that carried the `?ref=` would record almost every real conversion
+         * as organic and report a working loop as dead.
+         *
+         * Always produced by `arrivedFrom()`, never read straight off the URL
+         * — `/?ref=` is public and this is a GA4 param.
+         */
+        arrived_from?: ArrivedFrom;
+        /**
+         * How many games this device has hosted, this one included. 1 for a
+         * first-time host.
+         *
+         * A raw integer, not a bucket: CLAUDE.md's bucketing rule is about
+         * *failure* params, where the value comes from an upstream string and
+         * the hazard is cardinality and user input. Every count param already
+         * here (`round_index`, `player_count`, `rounds_played`) is raw, and
+         * bucketing at collection time would freeze the boundaries before the
+         * distribution is known. The KV counter behind the digest caps its own
+         * key space separately, where the cardinality actually matters.
+         *
+         * Absent on solo trials, which are one person and not a party.
+         */
+        host_game_index?: number;
       };
     }
   | {
@@ -268,6 +296,38 @@ export type AnalyticsEvent =
        *  release can be checked against how many people actually read it. */
       name: "changelog_opened";
       params: { version: string };
+    }
+  | {
+      /**
+       * A loop surface was rendered to someone. The denominator.
+       *
+       * Without it a click count cannot be read at all: twelve out of fifteen
+       * is a working call to action and twelve out of nine thousand is a dead
+       * one, and the two call for opposite responses. Deliberately not reusing
+       * `room_join_opened`, which fires per page load rather than per person
+       * (a phone that drops Wi-Fi and reloads counts twice) and so is a floor
+       * rather than a denominator.
+       */
+      name: "loop_surface_shown";
+      params: { surface: LoopSurface };
+    }
+  | {
+      /**
+       * Someone followed a loop link back to the setup page.
+       *
+       * The GA4 copy of a number the server also counts on `/r/[surface]`.
+       * Both exist on purpose and they will disagree: an ad blocker kills this
+       * one and not the redirect, a spent rate-limit window drops the redirect's
+       * count and not this one. **KV is authoritative for the digest**; this
+       * half is here for cohorting and for the questions nobody has thought of
+       * yet — and the gap between the two is itself a reading of how much of
+       * this audience blocks analytics.
+       *
+       * Fired with the navigation, so it must be sent in a way that survives
+       * the page tearing down. See `lib/pulse-client.ts`.
+       */
+      name: "player_to_host_click";
+      params: { surface: LoopSurface };
     };
 
 export type AnalyticsEventName = AnalyticsEvent["name"];

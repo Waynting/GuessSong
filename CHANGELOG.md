@@ -5,6 +5,167 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-08-09
+
+Buzzer Mode has been putting a phone in every hand for weeks, and none of those
+phones were ever told what they were holding. `app/buzz/[code]/page.tsx` was 264
+lines containing zero `<a>` tags and not one occurrence of the string
+"GuessSong"; `app/j/[code]/page.tsx` ended at a confirmation card with nowhere
+to go; `lib/result-image.ts` printed "Played with GuessSong" on the one artifact
+that leaves the party, with no address on it. The expensive half of a viral loop
+— rooms, live sockets, share cards — already shipped. This release is the cheap
+half nobody had written.
+
+### Added
+
+- **A way back to the product from every player-facing surface.** Five of them,
+  each named once in `lib/loop-links.ts` and derived from there everywhere else.
+  The name is needed in three places at once — the link's `href`, the analytics
+  param, and the server-side validator — and hand-syncing them fails *silently*:
+  a renamed href against a stale validator still redirects, the counter just
+  stops incrementing, and that arm reads as "nobody clicked it". You would then
+  correctly conclude the CTA was useless and delete one that was working. Same
+  single-union trick `lib/buzzer-protocol.ts` uses across the Worker boundary.
+  - `buzz_footer` on all three of the buzzer page's return paths, including the
+    pre-join form — the calmest screen on that phone, and the only moment there
+    that is not competing with a song.
+  - `buzz_cta`, a full-width button on the live buzzer screen, shown only
+    between rounds and never before the first has resolved. Gated on
+    `snapshot.roundIndex >= 1 && phase === "idle"`, **not** on a `locked → idle`
+    transition: `handleResolve` in `worker/src/buzzer-room.ts` reaches `idle`
+    from both `open` and `locked`, so a round nobody buzzed at is
+    indistinguishable from one that was answered. `roundIndex` advances only on
+    `host:next`, which is exactly "a round finished", and reading it off the
+    snapshot means it survives a reconnect where the snapshot is adopted whole.
+    Rendered always and hidden when inactive, so appearing between rounds cannot
+    shove the buzz button down the screen under someone's thumb.
+  - `join_submitted` on the Mixed Playlist confirmation screen, which was a dead
+    end and is the one moment on that page where the player has finished the
+    task and is still looking.
+  - `game_over`, a QR on the host's Game Over screen. The highest-attention
+    surface the product has and the only one it never used: the music has
+    stopped, every person in the room is looking at a television, and they all
+    still have the phone they spent the last half hour buzzing with. The trial
+    overlay has shipped "Start a Party Game →" since launch; the party path, the
+    one with five other people in it, had nothing.
+  - `share`, a QR drawn into the result card itself.
+- **`POST /api/pulse`**, for the two facts the browser knows and no existing
+  request carries: that a loop surface was rendered, and that a hosted game
+  started with the device's game index. Sent with `navigator.sendBeacon`,
+  because both fire immediately before a navigation and an in-flight `fetch` is
+  cancelled as the document tears down — the measurement would be lost exactly
+  in the cases worth measuring, and lost silently. Body validated field by field
+  in `lib/pulse.ts`: it is unauthenticated by necessity (the people it measures
+  have no accounts), so the body is as trustworthy as a query string, and one of
+  its values becomes part of a KV key.
+- **`host_game_index`**, a per-device count of hosted games in `localStorage`
+  (`lib/host-session.ts`). `>= 2` is the number this whole line of work is
+  waiting on — proof that someone came back — and it is deliberately reported as
+  a **floor**: iOS evicts script-writable storage after seven days without a
+  visit, which is precisely the gap between two parties, private windows start
+  empty, and a laptop passed around a room is several hosts wearing one
+  identity. Raw integer in GA4, not a bucket: CLAUDE.md's bucketing rule is
+  about *failure* params, where the value comes from an upstream string; every
+  count param already there (`round_index`, `player_count`, `rounds_played`) is
+  raw, and bucketing at collection freezes the boundaries before the
+  distribution is known.
+- **`arrived_from` on `game_started`**, credited to the last loop touch within
+  60 days rather than to the visit that carried the `?ref=`. The conversion is
+  not same-session — somebody taps a CTA on a friend's sofa and hosts their own
+  party a fortnight later — so attributing only within the pageview would record
+  almost every real conversion as organic and report a working loop as dead.
+- **Server-side counters** in `lib/loop-stats.ts`, held 30 days rather than the
+  7 `lib/playlist-cache.ts` uses. A weekly digest whose window ends a couple of
+  days back would expire the oldest day of every report right before reading it,
+  and an expired key is indistinguishable from one never written. Also carries a
+  **liveness marker**, bumped unconditionally alongside every other counter,
+  because `mget` returns null for a key that was never created and that is what
+  a genuine zero looks like too — without it, "the CTA does nothing", the single
+  most important negative result available here, would render as "no data yet"
+  forever.
+- **`dayBucket()` in `lib/kv.ts`**, replacing the copies that had accumulated in
+  `lib/playlist-cache.ts` and `lib/preview-cache.ts`. The writer and the reader
+  of a day-bucketed counter always live in different modules, so the exact
+  string is the contract between them; a divergence throws nothing and simply
+  addresses a different key. UTC, so a lambda and a laptop agree. Pinned by a
+  test asserting the literal.
+
+### Changed
+
+- **The loop link is a real navigation to `/r/[surface]`, not a click handler.**
+  The click being measured is the click that leaves the page, so a background
+  report fired at that moment is the report most likely to be cancelled. Routing
+  through the server makes the navigation itself the measurement — there is
+  nothing left to cancel. Plain `<a>` rather than `next/link`, because
+  prefetching a counting endpoint would inflate it with hits nobody made, and
+  `/r` is disallowed in `app/robots.ts` for the same reason.
+  - **The visitor always reaches the setup page.** Unknown segment, spent rate
+    limit, KV unavailable: every branch still redirects, and only the count is
+    allowed to be lost. The person clicking is precisely the person the feature
+    exists to reach; refusing them to protect an integer would be an own goal.
+    Same fail-open contract as `lib/playlist-cache.ts`'s global budget.
+  - The limiter is sized for a household rather than a person (120/hour), since
+    it is keyed by IP and a party is a dozen phones behind one Wi-Fi address —
+    `app/api/room/[code]/status` is the standing lesson on what a per-device
+    budget does to a whole room. Throttled clicks are counted separately so the
+    undercount appears in the digest instead of quietly depressing the rate.
+  - `Cache-Control: no-store`, or an intermediary caches the 302 and every later
+    click from that network is served without reaching the counter: the redirect
+    would keep working while the measurement silently stopped.
+- **The result card footer is a QR, not a line of text.** It used to read
+  "Played with GuessSong" — a brand with no address — so anyone who saw it in a
+  group chat had to already know the name, which is the audience it does not
+  need to reach. Printing the URL as text is barely better; nobody retypes a URL
+  off a screenshot. `drawCardFooter` is now async and takes the code, and
+  `CARD_FOOTER_HEIGHT` is exported so the two callers that size the canvas
+  cannot drift from what the footer draws.
+  - **The URL is deliberately not also added to the `navigator.share` payload.**
+    iOS drops `url` when a file is attached, and several Android targets drop
+    the *file* when a `url` is present. Risking the image, which is the entire
+    payload, to add a link one platform throws away is a bad trade.
+- `?ref=` is read from `window.location.search` in an effect, **not**
+  `useSearchParams`. `app/page.tsx` is a client component that is still
+  statically prerendered, carries the FAQ structured data, and takes
+  essentially all of the site's traffic; an unsuspended `useSearchParams` either
+  fails the Next 15 build or opts the page out of prerendering, and there is no
+  Suspense boundary anywhere in this app. Verified against `next build`: `/`
+  remains `○ (Static)`.
+- `?ref=` is validated through `isLoopSurface` before it can reach a GA4 param.
+  `/?ref=` is a public URL, and CLAUDE.md's analytics rule against user input in
+  params is the same hazard by a shorter path. Anything unrecognised is
+  `organic`.
+- Impressions are counted once per surface per tab. `room_join_opened` fires per
+  page load — a phone that drops Wi-Fi and reloads counts twice, as this file
+  already noted in 1.0.0 — which makes it a floor rather than a denominator.
+
+### Known gaps
+
+- **`arrived_from: "organic"` is a catch-all.** Every lost attribution lands
+  there: a PWA launched from the home screen, a stripped query string, a URL
+  retyped without its path. Since organic is already effectively all of the
+  traffic, the loop's share of starts is a floor and a low number cannot be read
+  as "the CTA does not work" without ruling out "we could not see it".
+- **The `share` arm is the weakest link and stays that way.** It now depends on
+  someone scanning a QR out of a forwarded image rather than typing an address,
+  which is a large improvement over nothing but still the only surface whose hit
+  does not originate on a page of ours.
+- **No digest yet.** The counters are being written and nothing reads them. That
+  is the next change, and until it lands this release has the same defect as
+  everything before it: the numbers exist and require a human to go and fetch
+  them.
+- `host_game_index` is capped at 10 in KV to bound the key space. Fine for the
+  question being asked; it would need revisiting before anyone studies the tail.
+- The buzzer wire protocol still has no end-of-game signal (`BuzzerPhase` is
+  `idle | open | locked`, `ClientMessage` has no `host:end`), so the player's
+  phone cannot react to the game finishing. `buzz_cta` uses "a round has
+  resolved" as the nearest available proxy. If its conversion comes in clearly
+  below `join_submitted`, that gap is the signal that the protocol change is
+  worth making.
+- Route handlers still have no unit tests anywhere in this repo. The two added
+  here are shells over `lib/loop-redirect.ts` and `lib/pulse.ts`, which are
+  tested, but the 302 status, the `Location` header and the `Cache-Control` are
+  verified only by reading them.
+
 ## [1.2.0] - 2026-08-09
 
 ### Fixed
