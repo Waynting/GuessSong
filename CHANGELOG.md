@@ -5,6 +5,66 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-08-10
+
+Vercel's Fluid Compute bills Active CPU, and this project was at 79.9% of the
+Hobby month's 4 hours. Two things were spending it, and neither was the work the
+app exists to do. A two-minute sample of production logs put **42 of 54 billed
+invocations (78%) on `POST /api/playlist` returning 404** — one host, one dead
+link, tapped over and over. The other 10 were image routes that were supposed to
+be built once and were being rendered per request instead.
+
+Neither is visible on the page: the images come out byte-identical, and the
+retry loop looked like a working error message. Both are the kind of cost that
+only shows up on the bill.
+
+### Fixed
+
+- **The three generated-image routes no longer run per request.** `app/icon.tsx`,
+  `app/opengraph-image.tsx` and `app/icons/[size]/route.tsx` each carried
+  `export const runtime = "edge"`, which opts a route out of static generation —
+  Next says so in a build warning that is easy to read past, and the route table
+  showed them as `ƒ` while the logs showed `edge-function` / `cache: MISS`. They
+  were satori rasterisations, the most CPU-expensive thing here, and the OG image
+  is fetched once per share. Deleting three lines makes them `○`/`●`; the
+  prerendered bytes are identical to what production was serving (685 / 125706 /
+  3460 / 10094 / 5583). `app/icons/[size]` also gains `generateStaticParams` and
+  `dynamicParams = false`, so the three sizes prerender and any other segment
+  404s without an invocation at all.
+- **A refused playlist is no longer re-requested.** A 404 comes back from
+  `lib/playlist-cache.ts`'s negative cache in about 100ms — faster than the Start
+  button re-enables — so a host mashing Start produced bursts of fourteen
+  identical requests 150–300ms apart, each a billed invocation replaying a
+  decision already made. `isDeterministicPlaylistFailure` (`lib/error-messages.ts`)
+  names the codes where resubmitting the same URL provably cannot answer
+  differently; `app/page.tsx` re-shows the error instead of sending. Measured:
+  6 taps → 1 request, and editing the link rearms it.
+- **Mixed Playlist Mode gets the same guard, keyed on the whole roster**
+  (`mixedRosterKey`, `lib/mixed-playlist.ts`), where a mash cost one request per
+  contributor. Measured: 6 taps on a two-contributor roster → 2 requests, and
+  swapping a contributor rearms it. `mixed_playlists_failed` is an aggregate and
+  is *not* treated as final on its own — `shouldRememberAllRejections` requires
+  every individual rejection to be deterministic, so one contributor's transient
+  500 cannot write off the whole party.
+
+### Changed
+
+- `/icons/<anything-else>` now returns Next's 404 page rather than a plain-text
+  "Not found" body. Same status, no invocation, and nothing reads that body —
+  `public/manifest.json` only ever requests the three real sizes.
+
+### Known gaps
+
+- Throttling codes are deliberately excluded from the deterministic set, so a
+  host throttled by Spotify's shared quota can still retry. `tests/error-messages.test.ts`
+  pins that in both directions, including a complement test that defaults any
+  newly added `AppErrorCode` to retryable.
+- `app/j/[code]` and `app/buzz/[code]` are still `ƒ` — pure client components
+  paying an SSR invocation per QR scan. They did not appear once in the sampled
+  logs, and making them static risks rendering the wrong room code before
+  hydration, so they were left alone.
+- The 78% figure is one two-minute sample, not a 30-day average.
+
 ## [1.3.0] - 2026-08-09
 
 Buzzer Mode has been putting a phone in every hand for weeks, and none of those
