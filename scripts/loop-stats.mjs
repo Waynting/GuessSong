@@ -29,12 +29,39 @@
  * objection does not apply.
  *
  * Usage:
- *   export UPSTASH_REDIS_REST_URL=... UPSTASH_REDIS_REST_TOKEN=...
  *   npm run stats            # last 7 complete days
  *   npm run stats -- 30      # last 30
+ *
+ * Credentials come from `.env.local` or `.env` (both gitignored), or from the
+ * environment if you would rather export them.
  */
 
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
 const PREFIX = "loop:stats:";
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * Same files Next reads, so there is one place to keep these.
+ *
+ * `process.loadEnvFile` is a Node built-in (20.12+) — no dotenv, which would be
+ * a dependency added purely to read a file the runtime already parses.
+ *
+ * **Order is inverted on purpose.** It does not overwrite a variable that is
+ * already set, so first writer wins; loading `.env.local` first is what gives
+ * it precedence over `.env`, matching Next. Anything exported in the shell was
+ * set before either call and still beats both.
+ */
+for (const file of [".env.local", ".env"]) {
+  try {
+    process.loadEnvFile(join(repoRoot, file));
+  } catch {
+    // Absent, or unreadable. Either is fine — the check below is the one that
+    // decides whether we actually have what we need.
+  }
+}
 
 const url = process.env.UPSTASH_REDIS_REST_URL;
 const token = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -42,6 +69,7 @@ const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 if (!url || !token) {
   console.error(
     "Missing UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN.\n" +
+      "Looked in .env.local, .env, and the environment.\n\n" +
       "These are the production values — the local fallback in lib/kv.ts is an\n" +
       "in-process Map, so there is nothing to read without them. Copy them from\n" +
       "the Vercel project's environment variables."
@@ -55,16 +83,40 @@ if (!Number.isInteger(days) || days < 1 || days > 30) {
   process.exit(1);
 }
 
-/** One Upstash REST command. */
+/**
+ * One Upstash REST command.
+ *
+ * Failures are rewritten before they surface. The raw ones are an undici
+ * `TypeError: fetch failed` with a stack into Node internals, which says
+ * nothing about the two things actually likely to be wrong here — a typo'd URL
+ * or a token from the wrong project.
+ */
 async function redis(command) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(command),
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(command),
+    });
+  } catch (cause) {
+    throw new Error(
+      `Could not reach Upstash at ${url}\n` +
+        `  ${cause instanceof Error ? cause.message : String(cause)}\n` +
+        "  Check UPSTASH_REDIS_REST_URL — it should be the full https:// REST\n" +
+        "  endpoint from the Vercel project, not the redis:// connection string."
+    );
+  }
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(
+      "Upstash rejected the token.\n" +
+        "  UPSTASH_REDIS_REST_TOKEN does not match UPSTASH_REDIS_REST_URL —\n" +
+        "  usually a token copied from a different database."
+    );
+  }
   if (!res.ok) {
     throw new Error(`Upstash ${res.status}: ${await res.text()}`);
   }
@@ -89,7 +141,13 @@ function pct(numerator, denominator) {
   return `${((numerator / denominator) * 100).toFixed(1).padStart(5)}%`;
 }
 
-const keys = (await redis(["KEYS", `${PREFIX}*`])) ?? [];
+let keys;
+try {
+  keys = (await redis(["KEYS", `${PREFIX}*`])) ?? [];
+} catch (err) {
+  console.error(`\n${err instanceof Error ? err.message : String(err)}\n`);
+  process.exit(1);
+}
 if (keys.length === 0) {
   console.log(
     `No counters found under "${PREFIX}".\n\n` +
