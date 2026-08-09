@@ -32,6 +32,7 @@ interface BatchRequestTrack {
   id?: unknown;
   name?: unknown;
   artist?: unknown;
+  durationMs?: unknown;
 }
 
 /**
@@ -51,10 +52,14 @@ function parseTracks(body: unknown): PreviewQuery[] | null {
     // An id is required here, unlike on the GET: the response is a map keyed by
     // it, so an entry without one has nowhere to be returned to.
     if (!id || !name) return null;
+    // Unlike id and name, a bad duration is not worth refusing the batch over:
+    // it only sharpens the match, so dropping it costs precision, not a result.
+    const duration = typeof raw?.durationMs === "number" ? raw.durationMs : 0;
     queries.push({
       id,
       track: name,
       artist: typeof raw?.artist === "string" ? raw.artist.trim() : "",
+      ...(Number.isFinite(duration) && duration > 0 ? { durationMs: duration } : {}),
     });
   }
   return queries;

@@ -1,6 +1,7 @@
 /**
  * Resolves a 30s preview clip for one track, since Spotify stopped populating
- * preview_url for most tracks in Nov 2024.
+ * preview_url in Nov 2024 and now returns null for every track on Client
+ * Credentials — measured 0/20 across four markets.
  *
  * All of the interesting behaviour — caching, the three-way found/absent/
  * unavailable outcome, the global lookup budget, the per-source cooldowns —
@@ -35,10 +36,14 @@ const REFRESH_WINDOW_SECONDS = 10 * 60;
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const track = searchParams.get("track") ?? "";
-  const artist = searchParams.get("artist") ?? "";
+  // Trimmed to match POST /api/preview/batch. Untrimmed, the same track through
+  // the two routes can pick different recordings and write both under one key.
+  const track = (searchParams.get("track") ?? "").trim();
+  const artist = (searchParams.get("artist") ?? "").trim();
   const id = searchParams.get("id") ?? "";
   const refresh = searchParams.get("refresh") === "1";
+  const duration = Number(searchParams.get("durationMs"));
+  const durationMs = Number.isFinite(duration) && duration > 0 ? duration : undefined;
 
   if (!track) {
     return NextResponse.json<PreviewResult>({ previewUrl: null, status: "absent" });
@@ -53,6 +58,6 @@ export async function GET(req: NextRequest) {
   );
   if (limited) return limited;
 
-  const result = await getPreview({ id, track, artist }, { refresh });
+  const result = await getPreview({ id, track, artist, durationMs }, { refresh });
   return NextResponse.json<PreviewResult>(result);
 }

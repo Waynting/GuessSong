@@ -34,6 +34,13 @@ export interface PreviewBatchTrack {
   id: string;
   name: string;
   artist: string;
+  /**
+   * Spotify's running time, used to tell the recording apart from a cover.
+   * The only matching signal that survives translation: iTunes returns 盧廣仲
+   * as "Crowd Lu", but 320165ms is 320165ms. Optional so an older client still
+   * resolves — it just falls back to matching on names alone.
+   */
+  durationMs?: number;
 }
 
 export interface PreviewBatchRequest {

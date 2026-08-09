@@ -1,8 +1,9 @@
 /**
  * Cache and admission control in front of the 30s preview lookups.
  *
- * Spotify stopped populating `preview_url` for most tracks in Nov 2024, so the
- * clip a round plays is resolved from iTunes, then Deezer. Both throttle per
+ * Spotify stopped populating `preview_url` in Nov 2024 and now returns null for
+ * every track on Client Credentials (measured 0/20 across four markets), so
+ * every clip a round plays is resolved from iTunes, then Deezer. Both throttle per
  * IP, and a serverless deploy's egress IPs are shared across the whole user
  * base — from iTunes' side the entire site is one very noisy client.
  *
@@ -17,7 +18,10 @@
  *                           │ miss
  *                           ├─ budget ── spent ──→ unavailable, no upstream
  *                           │ claimed
- *                           └─ per-source cooldown ─→ iTunes ×2 ─→ Deezer ×3
+ *                           └─ per-source cooldown ─→ iTunes ×1-2 ─→ Deezer ×1-3
+ *
+ * (the title-only query on each source only runs when there is an artist to
+ *  verify the answer against — see "Why the title-only queries verify" below)
  *
  * ## Three outcomes, not two
  *
@@ -39,6 +43,23 @@
  * Only a clean, complete reply from upstream may produce `absent`. Everything
  * else is `unavailable`. That asymmetry is the whole point: a wrong `absent`
  * lasts a week and is invisible, a wrong `unavailable` costs one retry.
+ *
+ * ## Why the title-only queries verify the artist and the others do not
+ *
+ * Each source is asked progressively looser questions, and the last one drops
+ * the artist entirely. That query gets ranked by popularity alone, so its top
+ * hit is just the best-known song with that title: iTunes answers "Hello" with
+ * Pinkfong's nursery rhyme, "Alone" with Heart's 1987 single. Taking one is
+ * worse than reporting no audio — it is cached as `found` for a year, refresh
+ * only repairs rotted URLs and never re-picks, and at the table the clip plays
+ * and then the answer card contradicts it.
+ *
+ * So the title-only queries require a verified artist and otherwise hand over
+ * to the next source. The queries that *did* carry the artist upstream do not,
+ * and must not: iTunes returns 小幸運 as "A Little Happiness" by "Hebe Tien"
+ * where Spotify says 田馥甄, so a string check applied there would make CJK
+ * tracks unplayable across the board. Upstream's own ranking is the artist
+ * signal on those; artistMatches is only ever a veto where there was none.
  *
  * ## Why the cache key is not versioned
  *
@@ -62,6 +83,12 @@ export interface PreviewQuery {
   id: string;
   track: string;
   artist: string;
+  /**
+   * Spotify's running time for this track, when the caller knows it. Used only
+   * to choose between upstream candidates — it is not part of the cache key,
+   * so adding it cold-starts nothing.
+   */
+  durationMs?: number;
 }
 
 /**
@@ -97,6 +124,26 @@ interface PreviewRecord {
   resolvedAt?: number;
 }
 
+/**
+ * NOTE: entries written before the artist/duration picker shipped are still
+ * served as hits, so this release's fix reaches only tracks nobody has played
+ * yet. Upgrading them needs a picker-generation stamp on the record — which was
+ * built here and then backed out, because the mechanism has to answer three
+ * things this file makes hard, and getting any of them wrong is worse than the
+ * stale pick it repairs:
+ *
+ *   - a re-pick must NOT take the `lookup?id=` shortcut in resolveAndStore, or
+ *     it re-confirms the very recording under suspicion and stamps it current;
+ *   - re-picks must have their own admission budget, or one warm 25-track game
+ *     spends a fifth of PREVIEW_MAX_LOOKUPS_PER_MINUTE re-resolving clips that
+ *     already play, and every game does this on deploy day;
+ *   - it must converge under throttling. Keeping the old URL without stamping
+ *     it means the next request tries again, forever, and the retries are what
+ *     sustain the throttling.
+ *
+ * See CHANGELOG 1.2.0 "Known gaps".
+ */
+
 /** Recordings don't change. URL rot is handled by refresh, not by expiry. */
 const FOUND_TTL_SECONDS = 365 * 24 * 60 * 60;
 /** Shorter, so a track that gains a preview later isn't written off forever. */
@@ -107,6 +154,17 @@ const ABSENT_TTL_SECONDS = 7 * 24 * 60 * 60;
  * Short enough that nobody plays a whole game against a stale refusal.
  */
 const UNAVAILABLE_TTL_SECONDS = 90;
+
+/**
+ * Ceiling on ONE upstream call, so a hung socket cannot stall a request
+ * indefinitely.
+ *
+ * It does not bound a whole resolution: five sequential calls at this timeout
+ * is 12.5s against BATCH_DEADLINE_MS's 6s, and that deadline only gates when a
+ * resolution *starts*. Clipping a track's work to the batch's remaining time
+ * needs the deadline threaded into askUpstream, which this does not do.
+ */
+const UPSTREAM_TIMEOUT_MS = 2500;
 
 /**
  * Proactive ceiling on how many *lookups* the whole site sends upstream per
@@ -357,11 +415,168 @@ function statusOutcome(res: { ok: boolean; status: number; headers: Headers }): 
   return null;
 }
 
-interface ItunesResult {
+/**
+ * The subset of an upstream result this module actually decides on. iTunes and
+ * Deezer disagree about field names and nesting, but the picking rules are the
+ * same for both, so each is mapped onto this before any of them apply.
+ */
+interface Candidate {
   previewUrl?: string;
   trackId?: number;
   trackName?: string;
   artistName?: string;
+  /** Normalised to milliseconds: iTunes reports `trackTimeMillis`, Deezer whole seconds. */
+  durationMs?: number;
+}
+
+/**
+ * How close two running times must be to be the same recording.
+ *
+ * Measured against live data: the true match agrees with Spotify to within a
+ * millisecond or two, because both carry the same mastered length. The window
+ * is wider than that only to absorb Deezer, which reports whole seconds.
+ *
+ * Still wide enough to admit a *different* song by the same artist — 小幸運 and
+ * Hebe Tien's Forever Love are 768ms apart — so duration ranks candidates
+ * rather than selecting one, and the closest wins.
+ */
+const DURATION_TOLERANCE_MS = 2000;
+
+/** Everything a pick is decided on. Never the track id — that keys the cache, not the search. */
+type QueryTarget = Pick<PreviewQuery, "track" | "artist" | "durationMs">;
+
+/** One attempt against one source. `requireVerified` is passed through to pickCandidate. */
+interface SourceQuery {
+  q: string;
+  requireVerified?: boolean;
+}
+
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+function normalizeName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+/**
+ * Whether two credit strings name the same act.
+ *
+ * Loose in one direction on purpose: iTunes credits "Marshmello & Noah Cyrus"
+ * where Spotify's first artist is just "Marshmello", so containment counts. On
+ * whole-token boundaries only, or "Sia" would match "Sian Evans" — except for
+ * CJK, which has no spaces to anchor on and falls back to a plain substring.
+ *
+ * What it cannot do is see through translation: Spotify's 田馥甄 is iTunes'
+ * "Hebe Tien", and no string comparison bridges that. That limit is the whole
+ * reason this is only ever a *requirement* on title-only queries, never a
+ * filter on the ones that already carried the artist upstream.
+ */
+function artistMatches(candidate: string | undefined, wanted: string): boolean {
+  const a = normalizeName(candidate ?? "");
+  const b = normalizeName(wanted);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (CJK.test(a) || CJK.test(b)) return a.includes(b) || b.includes(a);
+  return ` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `);
+}
+
+interface PickOptions {
+  /**
+   * Reject anything that cannot be tied to the track we were asked for, by
+   * either its credit or its running time.
+   *
+   * Set on the title-only queries, and only on those. There the search term
+   * carried no artist at all, so upstream had nothing to rank by and the top
+   * result is just the most popular song with that title: searching "Hello"
+   * returns Pinkfong's nursery-rhyme cover rather than Adele's, "Alone" returns
+   * Heart's 1987 single rather than Marshmello's. Accepting one of those writes
+   * the wrong recording into KV as `found`, which is held for a year and which
+   * the refresh path will never revisit — it repairs rotted URLs, not wrong
+   * songs. For a guessing game that is worse than silence: the clip plays, and
+   * then the answer card contradicts it.
+   */
+  requireVerified?: boolean;
+}
+
+/**
+ * Chooses which upstream result to play, strongest evidence first.
+ *
+ * Three signals, none of which survives every case alone. The credit is the
+ * obvious one but is routinely translated — iTunes calls 盧廣仲 "Crowd Lu". The
+ * running time is translated by nobody and matches the original to the
+ * millisecond, which is exactly what a cover does not do. The title sits
+ * between them, and its two directions are NOT symmetric, which is the whole
+ * reason this is a tier list rather than a weighted score:
+ *
+ *   a title MATCH is strong evidence  — few unrelated recordings share a title
+ *   a title MISS is weak evidence     — it usually just means "translated"
+ *
+ * So the ranking flips on whether the artist is verified. With the artist
+ * confirmed, a title miss means "different song by the same artist" and the
+ * title outranks the clock. With the artist unverifiable, a title match means
+ * "someone else's cover of it" and the clock outranks the title. Collapsing
+ * those two into one rule is how an earlier cut of this function picked a
+ * same-artist song 500ms away over the exact title 3s away — a remaster is
+ * further off the clock than a sibling track is, so a correct pick became a
+ * wrong one.
+ *
+ * Ties inside a tier go to the closest running time, then to upstream's own
+ * ranking.
+ */
+function pickCandidate(
+  candidates: Candidate[] | undefined,
+  query: QueryTarget,
+  options: PickOptions = {}
+): SourceOutcome {
+  if (!Array.isArray(candidates)) return { kind: "unavailable", throttled: false };
+
+  const { track, artist, durationMs } = query;
+  const playable = candidates.filter((c) => c.previewUrl);
+  // Normalised the same way credits are. Comparing raw lowercase would let a
+  // typographic apostrophe ("Don't" vs "Don’t") or a stray double space defeat
+  // the strongest signal in the list, in a way the artist check is immune to.
+  const wantedTitle = normalizeName(track);
+  const sameTitle = (c: Candidate) => normalizeName(c.trackName ?? "") === wantedTitle;
+  const sameArtist = (c: Candidate) => artistMatches(c.artistName, artist);
+  const drift = (c: Candidate) =>
+    durationMs && c.durationMs ? Math.abs(c.durationMs - durationMs) : Infinity;
+
+  // Four tiers, not six. A finer "…and the running time agrees" tier above
+  // each of the first two would never change the outcome: its members all sit
+  // inside the tolerance while every other member of the tier below sits
+  // outside it, so the closest-drift tie-break already elects the same
+  // candidate. Spelling them out anyway would be code no test could reach.
+  const tiers: Array<(c: Candidate) => boolean> = [
+    (c) => sameArtist(c) && sameTitle(c),
+    sameArtist,
+    // Artist unverifiable — a translated credit. The clock is all that is left,
+    // and it is the tier that rescues CJK tracks from their own covers.
+    (c) => drift(c) <= DURATION_TOLERANCE_MS,
+    // Below here nothing ties the result to what was asked for, which is what
+    // `requireVerified` refuses on a query that carried no artist upstream.
+    ...(options.requireVerified ? [] : [sameTitle, () => true]),
+  ];
+
+  let match: Candidate | undefined;
+  for (const inTier of tiers) {
+    const members = playable.filter(inTier);
+    if (members.length === 0) continue;
+    // `<` keeps the earlier candidate on a tie, so an all-unknown tier falls
+    // back to the order upstream ranked them in.
+    match = members.reduce((best, c) => (drift(c) < drift(best) ? c : best));
+    break;
+  }
+
+  if (match?.previewUrl) {
+    return { kind: "found", previewUrl: match.previewUrl, trackId: match.trackId };
+  }
+  // No usable result. `empty` covers both "upstream has no clip for this" and
+  // "it offered one but it isn't our song": either way upstream answered
+  // cleanly, so the next source gets its turn and nothing gets recorded as a
+  // fact about us rather than about the recording.
+  return { kind: "empty" };
 }
 
 async function fetchJson(url: string, headers: Record<string, string>): Promise<
@@ -369,13 +584,26 @@ async function fetchJson(url: string, headers: Record<string, string>): Promise<
 > {
   let res: Response;
   try {
-    res = await fetch(url, { headers });
+    // A batch gates only the *start* of each resolution against its deadline,
+    // so one stalled upstream call can carry the whole function past the
+    // platform's wall-clock limit — and a batch that dies returns nothing at
+    // all, which is strictly worse than returning what it had. Bounding each
+    // call keeps the overrun to one timeout rather than one hung socket.
+    res = await fetch(url, { headers, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
   } catch {
+    // Covers the abort too: a timeout is "we could not ask", never "no clip".
     return { ok: false, outcome: { kind: "unavailable", throttled: false } };
   }
 
   const bad = statusOutcome(res);
-  if (bad) return { ok: false, outcome: bad };
+  if (bad) {
+    // Nothing reads the body on this path, and an undici response holds its
+    // connection until the body is consumed or cancelled. This is the 403/429
+    // branch — the highest-volume one during exactly the throttling event where
+    // socket pressure is least affordable.
+    void res.body?.cancel().catch(() => {});
+    return { ok: false, outcome: bad };
+  }
 
   try {
     return { ok: true, res, body: await res.json() };
@@ -385,45 +613,79 @@ async function fetchJson(url: string, headers: Record<string, string>): Promise<
   }
 }
 
-function pickItunes(results: ItunesResult[] | undefined, track: string): SourceOutcome {
-  if (!Array.isArray(results)) return { kind: "unavailable", throttled: false };
-  // Prefer an exact track-name match, fall back to the first with a preview.
-  const exact = results.find(
-    (r) => r.previewUrl && r.trackName?.toLowerCase() === track.toLowerCase()
-  );
-  const match = exact ?? results.find((r) => r.previewUrl);
-  if (match?.previewUrl) {
-    return { kind: "found", previewUrl: match.previewUrl, trackId: match.trackId };
-  }
-  // Results with no preview among them is a real answer: iTunes knows the
-  // catalogue and has no clip for it.
-  return { kind: "empty" };
+interface ItunesResult {
+  previewUrl?: string;
+  trackId?: number;
+  trackName?: string;
+  artistName?: string;
+  trackTimeMillis?: number;
 }
 
-async function queryItunes(term: string, track: string): Promise<SourceOutcome> {
+const fromItunes = (r: ItunesResult): Candidate => ({
+  previewUrl: r.previewUrl,
+  trackId: r.trackId,
+  trackName: r.trackName,
+  artistName: r.artistName,
+  durationMs: r.trackTimeMillis,
+});
+
+async function queryItunes(
+  term: string,
+  query: QueryTarget,
+  options: PickOptions = {}
+): Promise<SourceOutcome> {
   const url = `https://itunes.apple.com/search?term=${encodeURIComponent(
     term
   )}&media=music&entity=musicTrack&limit=10`;
   const got = await fetchJson(url, { Accept: "application/json" });
   if (!got.ok) return got.outcome;
-  return pickItunes((got.body as { results?: ItunesResult[] })?.results, track);
+  // `?.map` keeps a missing array as undefined, which pickCandidate reads as
+  // "upstream did not answer" rather than "it answered with nothing".
+  const results = (got.body as { results?: ItunesResult[] })?.results;
+  return pickCandidate(results?.map(fromItunes), query, options);
 }
 
-/** The cheap repair path: one call, no searching, when we already know the id. */
-async function lookupItunes(trackId: number, track: string): Promise<SourceOutcome> {
+/**
+ * The cheap repair path: one call, no searching, when we already know the id.
+ *
+ * Never requires the artist. An id names exactly one recording, so whatever
+ * comes back is by construction the track that was resolved last time — there
+ * is no ranking here for a wrong song to win.
+ */
+async function lookupItunes(trackId: number, query: QueryTarget): Promise<SourceOutcome> {
   const got = await fetchJson(`https://itunes.apple.com/lookup?id=${trackId}`, {
     Accept: "application/json",
   });
   if (!got.ok) return got.outcome;
-  return pickItunes((got.body as { results?: ItunesResult[] })?.results, track);
+  const results = (got.body as { results?: ItunesResult[] })?.results;
+  return pickCandidate(results?.map(fromItunes), query);
 }
+
+/** Deezer's field syntax delimits with double quotes and offers no escape for one. */
+const stripQuotes = (value: string) => value.replace(/"/g, " ").trim();
 
 interface DeezerResult {
   preview?: string;
   id?: number;
+  title?: string;
+  artist?: { name?: string };
+  /** Whole seconds, where iTunes reports milliseconds. */
+  duration?: number;
 }
 
-async function queryDeezer(q: string): Promise<SourceOutcome> {
+const fromDeezer = (r: DeezerResult): Candidate => ({
+  previewUrl: r.preview,
+  trackId: r.id,
+  trackName: r.title,
+  artistName: r.artist?.name,
+  durationMs: typeof r.duration === "number" ? r.duration * 1000 : undefined,
+});
+
+async function queryDeezer(
+  q: string,
+  query: QueryTarget,
+  options: PickOptions = {}
+): Promise<SourceOutcome> {
   const url = `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=10`;
   const got = await fetchJson(url, {
     "User-Agent": "Mozilla/5.0",
@@ -439,9 +701,7 @@ async function queryDeezer(q: string): Promise<SourceOutcome> {
   }
   if (!Array.isArray(body?.data)) return { kind: "unavailable", throttled: false };
 
-  const match = body.data.find((r) => r.preview);
-  if (match?.preview) return { kind: "found", previewUrl: match.preview, trackId: match.id };
-  return { kind: "empty" };
+  return pickCandidate(body.data.map(fromDeezer), query, options);
 }
 
 interface Resolution {
@@ -462,20 +722,24 @@ const UNRESOLVED: Resolution = { status: "unavailable", previewUrl: null };
  * mid-question, the answer is `unavailable` — we do not know, and saying
  * otherwise for a week is the defect this module exists to prevent.
  */
-async function askUpstream(track: string, artist: string): Promise<Resolution> {
+async function askUpstream(query: QueryTarget): Promise<Resolution> {
+  const { track, artist } = query;
   let blocked = false;
 
   const ask = async (
     source: PreviewSource,
-    queries: string[],
-    run: (q: string) => Promise<SourceOutcome>
+    attempts: SourceQuery[],
+    // Named `attempt`, not `query`: `query` is askUpstream's QueryTarget, and a
+    // callback moved inside `ask` would otherwise silently rebind to the
+    // per-attempt one with no type error to show for it.
+    run: (attempt: SourceQuery) => Promise<SourceOutcome>
   ): Promise<Resolution | null> => {
     if (await isCoolingDown(source)) {
       blocked = true;
       return null;
     }
-    for (const q of queries) {
-      const outcome = await run(q);
+    for (const attempt of attempts) {
+      const outcome = await run(attempt);
       if (outcome.kind === "found") {
         return {
           status: "found",
@@ -497,17 +761,40 @@ async function askUpstream(track: string, artist: string): Promise<Resolution> {
     return null;
   };
 
-  const fromItunes = await ask("itunes", [`${track} ${artist}`.trim(), track], (q) =>
-    queryItunes(q, track)
-  );
-  if (fromItunes) return fromItunes;
+  const withArtist = `${track} ${artist}`.trim();
 
-  const fromDeezer = await ask(
-    "deezer",
-    [`track:"${track}" artist:"${artist}"`, `${track} ${artist}`.trim(), track],
-    queryDeezer
+  // The title-only follow-up is appended only when there is an artist to check
+  // the answer against. Without one it is also byte-identical to the query
+  // above it, so the old flat list spent a second upstream call re-asking a
+  // question it had just had answered.
+  const viaItunes = await ask(
+    "itunes",
+    [{ q: withArtist }, ...(artist ? [{ q: track, requireVerified: true }] : [])],
+    ({ q, requireVerified }) => queryItunes(q, query, { requireVerified })
   );
-  if (fromDeezer) return fromDeezer;
+  if (viaItunes) return viaItunes;
+
+  const viaDeezer = await ask(
+    "deezer",
+    artist
+      ? [
+          // Deezer's field syntax is the most precise question either source
+          // accepts, which is what makes handing over an iTunes result that
+          // failed its checks worth the extra call rather than giving up.
+          //
+          // Quotes are stripped rather than escaped: a track name containing
+          // one would otherwise close the field early and let the rest of the
+          // title read as Deezer search operators. Nothing is gained by that
+          // today — the bare-term queries below already let a caller search
+          // freely — but the escaping burden is invisible to the next edit.
+          { q: `track:"${stripQuotes(track)}" artist:"${stripQuotes(artist)}"` },
+          { q: withArtist },
+          { q: track, requireVerified: true },
+        ]
+      : [{ q: track }],
+    ({ q, requireVerified }) => queryDeezer(q, query, { requireVerified })
+  );
+  if (viaDeezer) return viaDeezer;
 
   return blocked ? UNRESOLVED : { status: "absent", previewUrl: null };
 }
@@ -538,7 +825,7 @@ async function resolveAndStore(
   let resolution: Resolution | null = null;
 
   if (existing?.itunesTrackId && !(await isCoolingDown("itunes"))) {
-    const outcome = await lookupItunes(existing.itunesTrackId, query.track);
+    const outcome = await lookupItunes(existing.itunesTrackId, query);
     if (outcome.kind === "found") {
       resolution = {
         status: "found",
@@ -552,7 +839,7 @@ async function resolveAndStore(
     // around by finding the re-release.
   }
 
-  resolution ??= await askUpstream(query.track, query.artist);
+  resolution ??= await askUpstream(query);
 
   await writeRecord(key, toRecord(resolution), resolution.status);
   return { previewUrl: resolution.previewUrl, status: resolution.status };
