@@ -17,6 +17,8 @@ Use `127.0.0.1:8000` (not `localhost`) — the Spotify app is configured for thi
 
 **Run `npm run stats` at the start of any session about growth, the loop, retention, or "what should we build next", and lead with what it says.** Not a nicety. The product's own telemetry went unread for eight weeks across four separate attempts to go and open GA4, and every feature decision in that period was made on an n of 1. The counters exist so that question has an answer; a command nobody runs is the same failure with a shorter path. If the Upstash variables are missing, say so and ask for them rather than reasoning from guesses.
 
+**Read `dev_docs/loop-stats-how-to-read.md` before interpreting the output.** Every number it prints is a floor, and the failure mode is reading a low one as "the CTA does not work" rather than "we could not see that it did".
+
 ## What This Is
 
 **GuessSong** — a local party music guessing game built on **Next.js 15 App Router**. The host pastes a public Spotify playlist URL, adds player names, and plays short audio clips; everyone guesses out loud and the host awards points. **No login and no user accounts** — a single game's state lives in React state, handed off between pages via `sessionStorage`.
