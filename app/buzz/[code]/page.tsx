@@ -29,6 +29,7 @@ import {
   BUZZER_ERROR_CODES,
 } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
+import { LoopCtaButton, LoopFooter } from "@/components/loop-cta";
 
 const NAME_STORAGE_KEY = "guesssong_player_name";
 
@@ -203,6 +204,10 @@ export default function BuzzPlayerPage() {
             {submitting ? "Submitting..." : wantsPlaylist ? "Submit & Join" : "Join Room"}
           </Button>
           {joinError && <p className="text-sm text-destructive">{joinError}</p>}
+          {/* The calmest screen on this phone: the player has just scanned a
+              code, the room has not started, and they are reading. It is the
+              only moment here that is not competing with a song. */}
+          <LoopFooter surface="buzz_footer" />
         </div>
       </main>
     );
@@ -233,6 +238,9 @@ export default function BuzzPlayerPage() {
           >
             Try a different name
           </Button>
+          {/* A dead end by definition — the room is gone or the name is taken.
+              Somewhere to go is worth more here than on any working screen. */}
+          <LoopFooter surface="buzz_footer" />
         </div>
       </main>
     );
@@ -256,9 +264,34 @@ export default function BuzzPlayerPage() {
         onBuzz={buzz}
       />
 
-      <p className="px-1 pb-1 text-center text-xs text-muted-foreground">
+      <p className="px-1 text-center text-xs text-muted-foreground">
         Hold your phone ready. Buzz the moment the clip starts, then shout the answer.
       </p>
+
+      {/*
+        Between rounds only, and never before the first round has resolved —
+        a player who has not yet buzzed at anything has no idea what this app
+        does and is the wrong person to ask.
+
+        `roundIndex` is the right signal and `phase` transitions are not:
+        `handleResolve` in the Worker reaches `idle` from both `open` and
+        `locked`, so a round nobody buzzed at looks identical to one that was
+        answered. `roundIndex` advances only on `host:next`
+        (worker/src/buzzer-room.ts), which is exactly "a round finished".
+        Reading it off the snapshot rather than a ref also means it survives a
+        reconnect, where the whole snapshot is adopted wholesale.
+
+        Rendered always and hidden when inactive so it can never reflow the
+        buzz button underneath someone's thumb.
+      */}
+      <div className="px-1 pb-1">
+        <LoopCtaButton
+          surface="buzz_cta"
+          active={snapshot?.phase === "idle" && (snapshot?.roundIndex ?? 0) >= 1}
+        >
+          Host the next one →
+        </LoopCtaButton>
+      </div>
     </main>
   );
 }

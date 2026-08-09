@@ -17,15 +17,18 @@ import {
 import { fetchPreview, fetchPreviewBatch } from "@/lib/preview-client";
 import { isPreviewSettled, type PreviewBatchTrack } from "@/types/preview";
 import { BuzzerHostPanel, type BuzzerControls } from "@/components/buzzer-host-panel";
+import { LoopQr } from "@/components/loop-qr";
 import type { RoundHistoryEntry } from "@/lib/round-history";
 import { buildTasteCard } from "@/lib/taste-card";
 import {
+  CARD_FOOTER_HEIGHT,
   createResultCanvas,
   drawCardBackground,
   drawCardHeader,
   drawCardFooter,
   shareOrDownloadCanvas,
 } from "@/lib/result-image";
+import { loopQrDataUrl } from "@/lib/loop-qr";
 
 type Phase = "waiting" | "playing" | "guessing" | "revealed" | "finished";
 
@@ -568,8 +571,9 @@ export default function GamePage() {
     const W = 640;
     const rowH = 64;
     const headerH = 200;
-    const footerH = 80;
+    const footerH = CARD_FOOTER_HEIGHT;
     const H = headerH + sortedPlayers.length * rowH + footerH;
+    const qr = await loopQrDataUrl();
     const { canvas, ctx } = createResultCanvas(W, H);
 
     drawCardBackground(ctx, W, H);
@@ -622,7 +626,7 @@ export default function GamePage() {
     });
 
     const footerY = headerH + sortedPlayers.length * rowH + 20;
-    drawCardFooter(ctx, W, footerY);
+    await drawCardFooter(ctx, W, footerY, qr);
     const outcome = await shareOrDownloadCanvas(
       canvas,
       `guesssong-results-${Date.now()}.png`,
@@ -646,7 +650,8 @@ export default function GamePage() {
       sharedTracks.length > 0 ? 40 + sharedTracks.length * sharedRowH + 20 : 0;
     const awardCount = (tasteCard.mostObscure ? 1 : 0) + (tasteCard.mostMainstream ? 1 : 0);
     const awardsSectionH = 40 + awardCount * 70 + 20;
-    const footerH = 80;
+    const footerH = CARD_FOOTER_HEIGHT;
+    const qr = await loopQrDataUrl();
     const H = headerH + sharedSectionH + awardsSectionH + footerH;
     const { canvas, ctx } = createResultCanvas(W, H);
 
@@ -723,7 +728,7 @@ export default function GamePage() {
       y += 70;
     }
 
-    drawCardFooter(ctx, W, y + 20);
+    await drawCardFooter(ctx, W, y + 20, qr);
     const outcome = await shareOrDownloadCanvas(
       canvas,
       `guesssong-taste-card-${Date.now()}.png`,
@@ -1807,6 +1812,12 @@ export default function GamePage() {
                   </button>
                 )}
               </div>
+
+              {/* The room is looking at this screen with their phones already
+                  in hand. The trial overlay above has shipped a way onward for
+                  a single player since launch; the party path — the one with
+                  five other people in it — has never had one. */}
+              <LoopQr />
             </div>
           )}
         </main>

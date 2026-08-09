@@ -49,6 +49,34 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.3.0",
+    date: "2026-08-09",
+    headline:
+      "If you played on someone else's phone, you can now find your way back — the game finally tells you what it is called.",
+    headlineZh:
+      "在別人的房間玩過之後，現在找得到回來的路了 —— 這個遊戲總算會告訴你它叫什麼名字。",
+    changes: [
+      {
+        kind: "new",
+        text: "The Game Over screen now shows a QR code. Everyone in the room already has their phone out from buzzing, so anyone who wants to run the next party can just point it at the screen.",
+        textZh:
+          "遊戲結束的畫面現在會顯示一個 QR code。大家搶答完手機本來就還在手上，誰想主辦下一場，對著螢幕掃一下就好。",
+      },
+      {
+        kind: "new",
+        text: "Saved result cards carry a QR code too. Until now a card you sent to a group chat said the name of the game and nothing else, so anyone it reached had to already know where to find us.",
+        textZh:
+          "存下來的成績卡也帶著 QR code 了。以前傳到群組裡的卡片只寫了遊戲名字，收到的人得本來就知道去哪裡找我們才行。",
+      },
+      {
+        kind: "better",
+        text: "The buzzer and playlist pages on your phone now say what this is and link back to it. They used to be a dead end: you buzzed, the game ended, and the page never mentioned the name at all.",
+        textZh:
+          "手機上的搶答頁和交歌單頁，現在會說明這是什麼並附上連結。以前那是死路：你按完搶答鈕、遊戲結束，那個頁面從頭到尾沒提過名字。",
+      },
+    ],
+  },
+  {
     version: "1.2.0",
     date: "2026-08-09",
     headline:

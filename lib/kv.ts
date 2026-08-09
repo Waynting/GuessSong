@@ -34,6 +34,28 @@ export interface KvStore {
   incr(key: string, ttlSeconds: number, by?: number): Promise<number>;
 }
 
+/**
+ * The day segment shared by every day-bucketed counter key in the app.
+ *
+ * It lives here, next to the store, because the writer and the reader are
+ * always in different modules — `lib/loop-redirect.ts` increments a bucket that
+ * `lib/digest.ts` reads back a week later — and the two have to produce a
+ * byte-identical string or they address different keys. That failure is silent:
+ * nothing errors, the counter simply reads zero forever. Three copies of
+ * `new Date().toISOString().slice(0, 10)` were already drifting distance apart
+ * before this existed.
+ *
+ * **UTC, deliberately.** A local-time bucket would move under a server whose
+ * region changes and would disagree between a lambda and a laptop, so a day is
+ * whatever UTC says it is. The visible cost is that a rate read shortly after
+ * 00:00 UTC is measuring almost nothing, which is documented rather than fixed.
+ *
+ * `at` exists so tests can pin the boundary; production never passes it.
+ */
+export function dayBucket(at: Date = new Date()): string {
+  return at.toISOString().slice(0, 10);
+}
+
 type MemoryEntry = { value: unknown; expiresAt: number };
 
 declare global {

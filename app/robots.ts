@@ -9,7 +9,13 @@ export default function robots(): MetadataRoute.Robots {
       allow: "/",
       // /buzz and /j are ephemeral room codes — nothing to index, and crawling
       // them just burns budget on pages that 404 once the room's TTL expires.
-      disallow: ["/game", "/api/", "/share", "/buzz", "/j"],
+      //
+      // /r is the loop redirect. It has no content to index, and every fetch of
+      // it increments a counter — so a crawler, or the link unfurler in
+      // whichever chat app a result card lands in, would report clicks nobody
+      // made. Robots is a request rather than a guarantee, which is part of why
+      // the counter is only ever read as a floor.
+      disallow: ["/game", "/api/", "/share", "/buzz", "/j", "/r"],
     },
     sitemap: `${BASE_URL}/sitemap.xml`,
   };

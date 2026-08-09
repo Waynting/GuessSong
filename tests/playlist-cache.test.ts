@@ -20,6 +20,10 @@ const kv = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/kv", () => ({
+  // `dayBucket` is a pure function over a clock, not a store, so the fake
+  // reproduces it rather than stubbing it — a mocked bucket would let the key
+  // format drift here without any test noticing.
+  dayBucket: (at: Date = new Date()) => at.toISOString().slice(0, 10),
   getKvStore: async () => ({
     async get(key: string) {
       if (kv.flags.failReads) throw new Error("kv unavailable");

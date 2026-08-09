@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import type { Track } from "@/types";
 import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolResponse } from "@/types/room";
 import { trackEvent } from "@/lib/analytics";
+import { arrivedFrom } from "@/lib/loop-links";
+import { bumpHostGameCount, recallLoopRef, rememberLoopRef } from "@/lib/host-session";
+import { reportGameStart } from "@/lib/loop-client";
 import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
 import {
   AppError,
@@ -234,6 +237,7 @@ export default function SetupPage() {
         song_count: data.tracks.length,
         playlist_source: "mixed",
         game_mode: room ? "buzzer" : "party",
+        ...recordHostedStart(),
       });
       trackEvent("room_started", {
         contributor_count: data.players.length,
@@ -252,10 +256,46 @@ export default function SetupPage() {
 
   useEffect(() => {
     setMounted(true);
+    // Read straight off `window.location`, not `useSearchParams`. This page is
+    // a client component that is still statically prerendered — it carries the
+    // FAQ structured data and takes essentially all of the site's traffic — and
+    // an unsuspended `useSearchParams` would either fail the build or opt the
+    // whole page out of prerendering. There is no Suspense boundary anywhere in
+    // this app, and this is not the page to introduce one on.
+    const query = new URLSearchParams(window.location.search);
+
     // Prefill from the share target redirect (/share → /?playlist=...).
-    const shared = new URLSearchParams(window.location.search).get("playlist");
+    const shared = query.get("playlist");
     if (shared) setPlaylistUrl(shared);
+
+    // Attribution from /r/[surface]. Stored rather than used immediately: the
+    // person who just followed a call to action at someone else's party is not
+    // about to host one tonight, so the game this credits is weeks away.
+    const ref = query.get("ref");
+    if (ref) rememberLoopRef(ref);
   }, []);
+
+  /**
+   * Everything a hosted start owes the funnel, in one place.
+   *
+   * Called by the three paths that begin a real party — own playlist, mixed
+   * pool, and the room variant — and deliberately not by `handleQuickStart`,
+   * which is one person trying the app on a built-in playlist. Counting that
+   * as hosting would inflate the single number that answers whether anyone
+   * comes back.
+   *
+   * Has side effects: it advances the device's game counter and beacons the
+   * new index to `/api/pulse`, which is the only path by which that number
+   * reaches the weekly digest. GA4 gets the same value as a param below.
+   */
+  function recordHostedStart() {
+    const hostGameIndex = bumpHostGameCount();
+    reportGameStart(hostGameIndex);
+    return {
+      host_game_index: hostGameIndex,
+      arrived_from: arrivedFrom(recallLoopRef()),
+    };
+  }
 
   const isValidSpotifyUrl = playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
   const isEditorial = playlistUrl.includes("37i9");
@@ -330,6 +370,7 @@ export default function SetupPage() {
         song_count: limited.length,
         playlist_source: "own",
         game_mode: room ? "buzzer" : "party",
+        ...recordHostedStart(),
       });
       router.push("/game");
     } catch (e: unknown) {
@@ -429,6 +470,7 @@ export default function SetupPage() {
         song_count: pooled.length,
         playlist_source: "mixed",
         game_mode: room ? "buzzer" : "party",
+        ...recordHostedStart(),
       });
       trackEvent("mixed_pool_built", {
         contributor_count: mixedContributions.length,
