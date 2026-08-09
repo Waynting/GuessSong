@@ -49,6 +49,28 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.2.0",
+    date: "2026-08-09",
+    headline:
+      "The clip you hear is now the recording on the answer card — not a cover, and not some other song that happened to share the title.",
+    headlineZh:
+      "現在放出來的片段，就是答案卡上的那個版本 —— 不是翻唱，也不是剛好同名的另一首歌。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "Sometimes the clip that played was the wrong recording. We looked songs up by title and took whatever came back first, so a cover version, or an unrelated song with the same name, could win — asking for Adele's Hello could get you a children's version of it. Worse, we remembered that answer for a year. We now check the artist and the exact length of the track before playing anything, and if neither lines up we say there is no audio rather than play you something wrong.",
+        textZh:
+          "有時候放出來的片段根本是別的版本。以前我們用歌名去找，回來第一個就拿來用，所以翻唱版、或是剛好同名的另一首歌都可能被選中 —— 想聽 Adele 的 Hello，放出來的可能是兒歌版。更糟的是，這個錯誤答案會被記住一年。現在我們會先確認歌手，還會比對歌曲的精確長度，兩個都對不上就寧可顯示沒有音檔，也不放錯的給你。",
+      },
+      {
+        kind: "better",
+        text: "Chinese, Japanese and Korean songs are matched far more reliably. The music services we get clips from usually list them under an English name, so checking the artist alone never worked for them — the length of a recording, though, is the same number in every language, and that is what we now compare.",
+        textZh:
+          "中文、日文、韓文歌的比對準確度大幅提升。我們取得片段的音樂服務通常會用英文名稱收錄這些歌，所以光比對歌手名字對它們從來沒用過 —— 但一首錄音的長度，在哪個語言裡都是同一個數字，現在我們比的是這個。",
+      },
+    ],
+  },
+  {
     version: "1.1.0",
     date: "2026-08-03",
     headline:
