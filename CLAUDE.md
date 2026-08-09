@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Longer-form reference lives in [`docs/`](docs/README.md): [architecture](docs/architecture.md) (the system in diagrams), [viral-loop](docs/viral-loop.md) (the loop and how to read `npm run stats`), [operations](docs/operations.md) (deploys and what to do when something breaks), and [decisions](docs/decisions.md) (why it is like this, and what was rejected). This file stays the place for invariants and hazards — rules you must not undo. `docs/` is the place for explanation.
+
 ## Commands
 
 ```bash
@@ -17,7 +19,7 @@ Use `127.0.0.1:8000` (not `localhost`) — the Spotify app is configured for thi
 
 **Run `npm run stats` at the start of any session about growth, the loop, retention, or "what should we build next", and lead with what it says.** Not a nicety. The product's own telemetry went unread for eight weeks across four separate attempts to go and open GA4, and every feature decision in that period was made on an n of 1. The counters exist so that question has an answer; a command nobody runs is the same failure with a shorter path. If the Upstash variables are missing, say so and ask for them rather than reasoning from guesses.
 
-**Read `dev_docs/loop-stats-how-to-read.md` before interpreting the output.** Every number it prints is a floor, and the failure mode is reading a low one as "the CTA does not work" rather than "we could not see that it did".
+**Read `docs/viral-loop.md` before interpreting the output.** Every number it prints is a floor, and the failure mode is reading a low one as "the CTA does not work" rather than "we could not see that it did".
 
 ## What This Is
 
