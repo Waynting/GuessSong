@@ -49,6 +49,28 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.3.1",
+    date: "2026-08-10",
+    headline:
+      "When a playlist will not open, the game says so straight away instead of making you wait for the same answer twice.",
+    headlineZh:
+      "遇到打不開的歌單，現在會馬上告訴你，不用再等一次一樣的答案。",
+    changes: [
+      {
+        kind: "better",
+        text: "Tapping Start again on a playlist we cannot open now answers instantly. Before, every tap went off and came back with the same message.",
+        textZh:
+          "歌單打不開時再按一次「開始遊戲」，會立刻顯示原因。以前每按一次都要重新問一遍，再回來給你同樣的訊息。",
+      },
+      {
+        kind: "better",
+        text: "The app icons and the preview image on shared links are now made ahead of time, so pages and shared links open faster.",
+        textZh:
+          "App 圖示和分享連結的預覽圖改成事先做好，開啟頁面或點開分享連結都更快。",
+      },
+    ],
+  },
+  {
     version: "1.3.0",
     date: "2026-08-09",
     headline:

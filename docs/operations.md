@@ -120,6 +120,43 @@ investigation went hunting for songs that were never missing.
 Note that iTunes signals throttling with **403**, not 429, and Deezer returns
 its quota error in the body of a **200**.
 
+### "Vercel says the CPU budget is nearly spent"
+
+Fluid Compute bills **Active CPU** — time your code actually runs. Waiting on
+Spotify, iTunes or Upstash is free, so the bill is not a story about slow
+upstreams. It is a story about how many function invocations happen at all, and
+how expensive each one is. Hobby is 4 CPU-hours a month; going over does not
+cost money, it suspends the project until you deal with it.
+
+Do not reason about this from the code. Get the distribution first:
+
+```bash
+vercel logs <production-deployment-url> --json > /tmp/logs.jsonl
+```
+
+Then count by `source` and `requestPath`. Only `source: "serverless"` and
+`source: "edge-function"` are billed; `source: "static"` is served from the CDN
+and costs nothing. That one command is what turned a guess into an answer here —
+the two things that had been quietly dominating the bill were:
+
+- **Routes that should have been static and were not.** A page or route handler
+  carrying `export const runtime = "edge"` is opted out of static generation, so
+  it runs per request. Next prints a warning at build time and it is easy to
+  read past. The reliable check is the route table from `npm run build`: `○` and
+  `●` cost nothing, `ƒ` runs every time. Three image routes were `ƒ` for months
+  and nothing on the page looked wrong, because the bytes are identical either
+  way.
+- **A client retrying something that can never succeed.** A cached 404 answers
+  in ~100ms, which is faster than a button re-enables, so a host tapping Start on
+  a dead playlist generated bursts of fourteen billed invocations that all
+  replayed the same cached refusal. Per-IP rate limiting does not catch this —
+  the bursts sit well inside the allowance. See CLAUDE.md's
+  `isDeterministicPlaylistFailure` note for why only some failures may be
+  written off this way.
+
+The general shape: an expensive-looking route with a good cache is usually fine,
+and a cheap route invoked in a loop is usually the problem.
+
 ### "Spotify says 429"
 
 The cooldown in `lib/playlist-cache.ts` parks all *uncached* loads for the

@@ -18,6 +18,23 @@ export interface PooledTrack extends Track {
 }
 
 /**
+ * A stable identity for one roster of contributor playlists.
+ *
+ * The single-playlist start remembers a doomed submission by its URL string;
+ * mixed mode has no single URL, so it remembers the whole roster. Sorted, so
+ * that dragging the same people into a different order is recognised as the
+ * same question — reordering cannot change which playlists are unreadable.
+ * Removing or fixing one contributor does change it, which is exactly when
+ * asking again is worth a request.
+ *
+ * `JSON.stringify` rather than `join`, so a URL containing the delimiter
+ * cannot make two different rosters collide into one key.
+ */
+export function mixedRosterKey(playlistUrls: string[]): string {
+  return JSON.stringify([...playlistUrls].sort());
+}
+
+/**
  * Normalize a track's name + primary artist into a cross-platform dedupe
  * key. Strips remaster/live/feat. suffixes and punctuation/casing noise so
  * the same song contributed from different playlists (or platforms, once

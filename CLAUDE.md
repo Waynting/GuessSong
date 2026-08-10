@@ -94,7 +94,11 @@ The host is the judge — there is no automated answer checking. Correct song gu
 
 ### SEO / Metadata
 
-Production domain is `https://www.guessong.app` (fallback in `app/layout.tsx`, `app/sitemap.ts`, `app/robots.ts`). `app/layout.tsx` also injects GA4 when `NEXT_PUBLIC_GA_MEASUREMENT_ID` is set. `app/opengraph-image.tsx` and `app/icon.tsx` generate images at build time.
+Production domain is `https://www.guessong.app` (fallback in `app/layout.tsx`, `app/sitemap.ts`, `app/robots.ts`). `app/layout.tsx` also injects GA4 when `NEXT_PUBLIC_GA_MEASUREMENT_ID` is set.
+
+**The five generated images must stay build-time, which means none of them may declare `runtime = "edge"`.** `app/opengraph-image.tsx`, `app/icon.tsx` and the three sizes of `app/icons/[size]` are rasterised by satori, the most CPU-expensive thing the app does. All three carried `runtime = "edge"` from the day they were written until this was found, and edge *disables static generation for the route* — Next says so in a build warning that is easy to read past ("Using edge runtime on a page currently disables static generation for that page"). They were `ƒ` in the route table, ran per request as `edge-function`, and showed up in production logs as `cache: MISS`. The fix was deleting three lines; the output bytes are identical either way, so nothing about this is visible on the page and nothing but the route table will tell you it regressed. `app/icons/[size]` additionally needs its `generateStaticParams` + `dynamicParams = false` to stay — that pair is what prerenders the three sizes and 404s everything else without an invocation.
+
+After touching any of them, check `npm run build`'s route table: `/icon` and `/opengraph-image` must be `○`, `/icons/[size]` must be `●` with all three sizes listed under it. An `ƒ` there is the regression.
 
 ## Environment Variables
 
@@ -126,9 +130,12 @@ A release updates **both** of these, and they are not the same document:
 
 Clients render with `errorMessage` / `describeError` and get the locale from `useErrorLocale()` (device language, resolved in an effect so the server-rendered join pages don't hydrate against a different string). `apiError(body, fallbackCode)` turns a failed response into an `AppError`; the fallback should name what the caller was doing, not `unknown`.
 
-Two things `tests/error-messages.test.ts` will catch, both easy to do by accident:
+Three things `tests/error-messages.test.ts` will catch, all easy to do by accident:
 - **A placeholder only exists if its callers pass params.** `{seconds}` with no `params` renders literally at the player, so the test pins the exact set of codes allowed to have one.
 - **No throttling message may blame the host's playlist**, in *either* language. That is the `spotify_*` hazard documented above, and a translation is just as capable of reintroducing it.
+- **No throttling code may join `isDeterministicPlaylistFailure`.** That predicate names the codes where resubmitting the identical URL provably cannot answer differently — the URL is malformed, or `lib/playlist-cache.ts` is replaying a 404 it will keep replaying for `NOT_FOUND_TTL_SECONDS`. `app/page.tsx` uses it to re-show the error the host already has instead of spending a request to be told it again, keyed on the exact URL string so editing the link needs no explicit reset. This is the same `spotify_*` hazard one step further on: a spent quota clears by itself, so listing a throttling code there would strand a host whose playlist was always fine behind a button that has quietly stopped asking. `playlist_load_failed`, `unknown` and `server_error` stay out for the mirror-image reason — "we don't know" must not harden into "don't ask".
+
+  Why it exists: a refused playlist returns from the negative cache in ~100ms, which is faster than the Start button re-enables, so a host mashing Start on a private link generated bursts of fourteen identical `POST /api/playlist` calls 150–300ms apart. In a two-minute production log sample those 404s were **78% of all billed function invocations** — the single largest consumer of the Vercel Active-CPU budget, well ahead of anything doing real work. Nothing upstream was being hit; the cost was the invocations themselves, which is exactly the class of waste a per-IP rate limit does not catch (the bursts sat comfortably inside the 30-per-10-minute allowance).
 
 The buzzer Worker keeps its own wire codes (`BuzzerErrorCode` in `lib/buzzer-protocol.ts`, which is shared verbatim with the Worker and must stay dependency-free). `BUZZER_ERROR_CODES` maps them onto app codes — that mapping is the only thing connecting the two, so a new wire code needs an entry there.
 

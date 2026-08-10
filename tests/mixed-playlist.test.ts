@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { fingerprint, poolContributions, type PlaylistContribution } from "@/lib/mixed-playlist";
+import {
+  fingerprint,
+  mixedRosterKey,
+  poolContributions,
+  type PlaylistContribution,
+} from "@/lib/mixed-playlist";
 import type { Track } from "@/types";
 
 function makeTrack(overrides: Partial<Track> = {}): Track {
@@ -95,5 +100,34 @@ describe("poolContributions", () => {
 
   it("returns an empty pool for no contributions", () => {
     expect(poolContributions([], 8)).toEqual([]);
+  });
+});
+
+describe("mixedRosterKey", () => {
+  it("reads a reordered roster as the same question", () => {
+    // Order cannot change which playlists are unreadable, so reordering must
+    // not buy another round of requests.
+    expect(mixedRosterKey(["b", "a", "c"])).toBe(mixedRosterKey(["a", "b", "c"]));
+  });
+
+  it("changes when a contributor is added, removed, or swapped", () => {
+    const roster = mixedRosterKey(["a", "b"]);
+    expect(mixedRosterKey(["a"])).not.toBe(roster);
+    expect(mixedRosterKey(["a", "b", "c"])).not.toBe(roster);
+    expect(mixedRosterKey(["a", "z"])).not.toBe(roster);
+  });
+
+  it("does not collide when a URL contains the delimiter", () => {
+    // The reason this is JSON and not a join: these two rosters are different
+    // and a naive `join(",")` would render both as the same string.
+    expect(mixedRosterKey(["a,b"])).not.toBe(mixedRosterKey(["a", "b"]));
+  });
+
+  it("leaves the caller's array alone", () => {
+    // It sorts, and sorting in place would quietly reorder the contributor
+    // list the component is rendering from.
+    const urls = ["c", "a", "b"];
+    mixedRosterKey(urls);
+    expect(urls).toEqual(["c", "a", "b"]);
   });
 });

@@ -1,6 +1,9 @@
 import { ImageResponse } from "next/og";
 
-export const runtime = "edge";
+// See app/icon.tsx: `runtime = "edge"` opts the route out of static generation,
+// so this 1200x630 render ran on demand. It is the single most expensive render
+// in the app (~125KB PNG) and it is fetched by link crawlers, i.e. once per
+// share — the hottest thing in a viral loop. Built once, now.
 export const alt = "GuessSong — Spotify Party Game";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";

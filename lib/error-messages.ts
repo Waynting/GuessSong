@@ -398,6 +398,53 @@ export function errorMessage(
 }
 
 /**
+ * Codes that describe the *link*, not the moment.
+ *
+ * Resubmitting a byte-identical URL after one of these cannot produce a
+ * different answer: `lib/playlist-cache.ts` caches the 404 for
+ * NOT_FOUND_TTL_SECONDS (10 minutes), so for that whole window the server is
+ * replaying a decision it has already made, and the ones that never reach
+ * Spotify at all are pure string checks on the URL.
+ *
+ * This exists because of what the production logs actually show. A host who
+ * pastes a private playlist gets a 404 back in ~100ms — fast enough that the
+ * Start button re-enables between mashes — and the observed result is bursts of
+ * fourteen identical `POST /api/playlist` calls 150-300ms apart. Every one is a
+ * billed function invocation spent re-reading the same cached refusal, and they
+ * were 78% of all billed invocations in a two-minute sample.
+ *
+ * ## What must never be listed here
+ *
+ * Only failures that are a fact about the URL. Every throttling code is
+ * excluded, and must stay excluded: `spotify_rate_limited`, `spotify_cooldown`
+ * and `spotify_busy` are facts about a shared quota that clears on its own, so
+ * suppressing the retry would strand a host whose playlist was always fine —
+ * the same class of mistake as the message that used to tell throttled hosts to
+ * check their URL was public. `playlist_load_failed`, `unknown` and
+ * `server_error` are excluded for the opposite reason: we do not know what went
+ * wrong, and "we don't know" must never harden into "don't bother asking".
+ *
+ * `tests/error-messages.test.ts` pins both halves of that.
+ */
+const DETERMINISTIC_PLAYLIST_CODES = new Set<AppErrorCode>([
+  "missing_playlist_url",
+  "playlist_url_required",
+  "invalid_playlist_url",
+  "playlist_not_found",
+  "playlist_editorial",
+  "playlist_empty",
+]);
+
+/**
+ * Whether resubmitting the same playlist URL is guaranteed to fail the same
+ * way. Callers use it to re-show the error they already have instead of
+ * spending a request to be told it again — see the set above.
+ */
+export function isDeterministicPlaylistFailure(code: unknown): boolean {
+  return isAppErrorCode(code) && DETERMINISTIC_PLAYLIST_CODES.has(code);
+}
+
+/**
  * An error that already knows which message it is. Thrown by the client-side
  * helpers (`lib/room-client.ts`, `lib/buzzer-client.ts`) and by every `fetch`
  * wrapper, so a `catch` block can localise without re-deriving what went wrong
@@ -464,4 +511,37 @@ export function describeError(
     });
   }
   return errorMessage(fallback, locale);
+}
+
+/**
+ * Whether a failed playlist submit should be remembered, so that resubmitting
+ * the identical URL re-shows the error instead of spending another request.
+ *
+ * Lives here rather than at the call site for the reason `roomJobs()` does: the
+ * suite only reaches `lib/`, and this is the half worth protecting. It is two
+ * conditions, and dropping either one is a bug with no symptom in development —
+ * lose the `AppError` check and a dropped connection (a `TypeError`, no `code`
+ * at all) starts being remembered as though the link were bad, stranding a host
+ * behind a button that has stopped asking; lose the code check and every
+ * failure is remembered, throttling included.
+ */
+export function shouldRememberRejection(err: unknown): boolean {
+  return err instanceof AppError && isDeterministicPlaylistFailure(err.code);
+}
+
+/**
+ * The same question for a batch: may this whole submission be written off?
+ *
+ * Mixed Playlist Mode loads every contributor's playlist at once and reports
+ * them as one `mixed_playlists_failed`, which is emphatically NOT a
+ * deterministic code — it aggregates whatever went wrong, and a single 500 or
+ * dropped socket lands in it alongside genuinely private links. Reading the
+ * aggregate as final would strand a whole party on one contributor's transient
+ * blip, so the decision has to be made from the individual reasons instead.
+ *
+ * Requires at least one reason, because `[].every()` is `true` and "nothing
+ * failed" must never be read as "everything failed permanently".
+ */
+export function shouldRememberAllRejections(reasons: unknown[]): boolean {
+  return reasons.length > 0 && reasons.every(shouldRememberRejection);
 }

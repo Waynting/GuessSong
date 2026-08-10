@@ -8,6 +8,9 @@ import {
   detectErrorLocale,
   errorMessage,
   isAppErrorCode,
+  isDeterministicPlaylistFailure,
+  shouldRememberAllRejections,
+  shouldRememberRejection,
   type AppErrorCode,
   type ErrorLocale,
 } from "@/lib/error-messages";
@@ -86,6 +89,129 @@ describe("the message table", () => {
     }
   });
 });
+
+describe("isDeterministicPlaylistFailure", () => {
+  it("suppresses a retry only for failures the URL itself decides", () => {
+    // The whole set, not a sample. A member dropped from it silently restores
+    // the retry storm this exists to stop, and nothing else would catch that.
+    for (const code of [
+      "missing_playlist_url",
+      "playlist_url_required",
+      "invalid_playlist_url",
+      "playlist_not_found",
+      "playlist_editorial",
+      "playlist_empty",
+    ] as const) {
+      expect(isDeterministicPlaylistFailure(code), code).toBe(true);
+    }
+  });
+
+  it("holds every other code retryable", () => {
+    // The complement, derived rather than listed: a code added to the union
+    // later defaults to retryable, and if someone makes it deterministic they
+    // have to come here and say so deliberately.
+    const deterministic = new Set([
+      "missing_playlist_url",
+      "playlist_url_required",
+      "invalid_playlist_url",
+      "playlist_not_found",
+      "playlist_editorial",
+      "playlist_empty",
+    ]);
+    for (const code of CODES) {
+      if (deterministic.has(code)) continue;
+      expect(isDeterministicPlaylistFailure(code), code).toBe(false);
+    }
+  });
+
+  it("never suppresses a retry after throttling", () => {
+    // The counterpart of "never blames the host's playlist" above, and the same
+    // hazard one step later: a spent quota clears by itself, so a host whose
+    // link was always fine has to be able to press Start again and succeed.
+    // Listing any of these as deterministic would strand them on a dead button.
+    for (const code of [
+      "spotify_rate_limited",
+      "spotify_cooldown",
+      "spotify_busy",
+      "rate_limited",
+      "rate_limited_playlist",
+    ] as const) {
+      expect(isDeterministicPlaylistFailure(code), code).toBe(false);
+    }
+  });
+
+  it("never suppresses a retry after a failure of unknown cause", () => {
+    // "We don't know what happened" must not harden into "don't bother asking".
+    for (const code of ["playlist_load_failed", "unknown", "server_error"] as const) {
+      expect(isDeterministicPlaylistFailure(code), code).toBe(false);
+    }
+  });
+
+  it("says no to anything that isn't a code at all", () => {
+    for (const value of [undefined, null, "", "not_a_code", 7]) {
+      expect(isDeterministicPlaylistFailure(value)).toBe(false);
+    }
+  });
+});
+
+describe("shouldRememberRejection", () => {
+  it("remembers a playlist that the link itself dooms", () => {
+    expect(shouldRememberRejection(new AppError("playlist_not_found"))).toBe(true);
+    expect(shouldRememberRejection(new AppError("playlist_editorial"))).toBe(true);
+  });
+
+  it("forgets a throttling refusal, so the host can try again", () => {
+    expect(shouldRememberRejection(new AppError("spotify_rate_limited"))).toBe(false);
+    expect(shouldRememberRejection(new AppError("spotify_cooldown"))).toBe(false);
+    expect(shouldRememberRejection(new AppError("rate_limited_playlist"))).toBe(false);
+  });
+
+  it("forgets anything that isn't an AppError", () => {
+    // The case with no symptom in development: a dropped connection throws a
+    // TypeError with no `code`, and remembering it would leave the host tapping
+    // a button that had quietly stopped sending anything.
+    expect(shouldRememberRejection(new TypeError("Failed to fetch"))).toBe(false);
+    expect(shouldRememberRejection(new Error("boom"))).toBe(false);
+    expect(shouldRememberRejection(undefined)).toBe(false);
+    expect(shouldRememberRejection({ code: "playlist_not_found" })).toBe(false);
+  });
+});
+
+describe("shouldRememberAllRejections", () => {
+  it("writes off a roster only when every contributor is finally doomed", () => {
+    expect(
+      shouldRememberAllRejections([
+        new AppError("playlist_not_found"),
+        new AppError("playlist_editorial"),
+      ])
+    ).toBe(true);
+  });
+
+  it("keeps the whole roster retryable if even one failure was transient", () => {
+    // The reason the aggregate code cannot be trusted: four private links and
+    // one dropped socket still reads as `mixed_playlists_failed`, and writing
+    // that off would strand the party on the one contributor who was fine.
+    expect(
+      shouldRememberAllRejections([
+        new AppError("playlist_not_found"),
+        new TypeError("Failed to fetch"),
+      ])
+    ).toBe(false);
+    expect(
+      shouldRememberAllRejections([
+        new AppError("playlist_not_found"),
+        new AppError("spotify_rate_limited"),
+      ])
+    ).toBe(false);
+  });
+
+  it("treats no rejections as nothing to write off", () => {
+    // `[].every()` is true, so without the length guard a clean run would
+    // arm the memo and block the next start outright.
+    expect(shouldRememberAllRejections([])).toBe(false);
+  });
+});
+
 
 describe("detectErrorLocale", () => {
   it("reads Chinese from any of its tags", () => {
