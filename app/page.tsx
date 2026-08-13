@@ -23,16 +23,23 @@ import { isBuzzerConfigured } from "@/lib/buzzer-client";
 import type { OpenRoom } from "@/lib/room-client";
 import { RoomPanel } from "@/components/room-panel";
 import { ChangelogModal } from "@/components/changelog-modal";
-import { BUILTIN_PLAYLISTS, type BuiltinPlaylist } from "@/lib/builtin-playlists";
 import { InstallBanner } from "@/components/install-banner";
 import {
   MixedPlaylistCollector,
   type MixedContribution,
 } from "@/components/mixed-playlist-collector";
 import { mixedRosterKey, poolContributions } from "@/lib/mixed-playlist";
+import {
+  SONG_COUNTS,
+  MAX_SONG_COUNT,
+  DEFAULT_SONG_COUNT_STATE,
+  selectPreset,
+  typeCustom,
+  commitCustom,
+  isCustomSelected,
+} from "@/lib/song-count";
 
 const CLIP_DURATIONS = [5, 10, 15, 20, 30];
-const SONG_COUNTS: (number | "all")[] = [10, 20, 30, 50, "all"];
 const MIXED_SAMPLE_COUNTS = [5, 8, 10, 12];
 const MIXED_MIN_CONTRIBUTORS = 2;
 
@@ -153,7 +160,9 @@ export default function SetupPage() {
   const [playlistUrl, setPlaylistUrl] = useState("");
   const [players, setPlayers] = useState<string[]>(["", ""]);
   const [clipDuration, setClipDuration] = useState(15);
-  const [songCount, setSongCount] = useState<number | "all">(20);
+  // Selected count + the custom field's text, moved together so the transitions
+  // between them stay in lib/song-count.ts where the suite can reach them.
+  const [songCount, setSongCount] = useState(DEFAULT_SONG_COUNT_STATE);
   // Buzzer Mode is opt-in per game, and only offered when the deployment has a
   // Worker to talk to — no point showing a toggle that can only fail.
   const [buzzerEnabled, setBuzzerEnabled] = useState(false);
@@ -298,10 +307,9 @@ export default function SetupPage() {
    * Everything a hosted start owes the funnel, in one place.
    *
    * Called by the three paths that begin a real party — own playlist, mixed
-   * pool, and the room variant — and deliberately not by `handleQuickStart`,
-   * which is one person trying the app on a built-in playlist. Counting that
-   * as hosting would inflate the single number that answers whether anyone
-   * comes back.
+   * pool, and the room variant. Any future path that is one person trying the
+   * app rather than hosting for a room must stay out of it: counting those
+   * would inflate the single number that answers whether anyone comes back.
    *
    * Has side effects: it advances the device's game counter and beacons the
    * new index to `/api/pulse`, which is the only path by which that number
@@ -368,7 +376,8 @@ export default function SetupPage() {
       if (!res.ok) throw apiError(data, "playlist_load_failed");
 
       const shuffled = [...data.tracks].sort(() => Math.random() - 0.5);
-      const limited = songCount === "all" ? shuffled : shuffled.slice(0, songCount);
+      const limited =
+        songCount.count === "all" ? shuffled : shuffled.slice(0, songCount.count);
 
       // Opened from the room step before we got here, so players have already
       // had time to scan in. `undefined` when Buzzer Mode is off.
@@ -550,25 +559,6 @@ export default function SetupPage() {
     }
   }
 
-  function handleQuickStart(playlist: BuiltinPlaylist) {
-    const shuffled = [...playlist.tracks].sort(() => Math.random() - 0.5);
-    const payload = buildGamePayload({
-      tracks: shuffled,
-      players: [{ name: "You", score: 0 }],
-      playlistName: playlist.name,
-      clipDuration,
-      playlistSource: "builtin",
-      mode: "trial",
-    });
-    sessionStorage.setItem(GAME_STORAGE_KEY, JSON.stringify(payload));
-    trackEvent("game_started", {
-      player_count: 1,
-      clip_duration: clipDuration,
-      playlist_source: "builtin",
-    });
-    router.push("/game");
-  }
-
   return (
     <>
       <script
@@ -672,6 +662,30 @@ export default function SetupPage() {
           color: #000;
           box-shadow: 0 0 16px rgba(29,185,84,0.4);
         }
+
+        /* Same pill, but a field. The spinners are hidden because they are the
+           wrong affordance at this size and clip the text inside the radius. */
+        .count-input {
+          width: 92px;
+          text-align: center;
+          color: var(--text);
+          -moz-appearance: textfield;
+        }
+        .count-input::-webkit-outer-spin-button,
+        .count-input::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        .count-input:focus {
+          outline: none;
+          border-color: var(--green);
+        }
+        .count-input::placeholder { color: var(--muted); font-weight: 600; }
+        /* Selected reads the same here as on a pill. Without it a committed
+           custom count is dark text in a dark field while every preset lights
+           up green, so the row looks like nothing is chosen. */
+        .count-input.active { color: #000; }
+        .count-input.active::placeholder { color: rgba(0,0,0,0.45); }
 
         .link-btn {
           display: inline-flex;
@@ -802,83 +816,6 @@ export default function SetupPage() {
         }
         .faq-a a { color: #1DB954; }
         .faq-a a:hover { text-decoration: underline; }
-
-        .trial-divider {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin: 24px 0 14px;
-        }
-        .trial-divider::before, .trial-divider::after {
-          content: '';
-          flex: 1;
-          height: 1px;
-          background: var(--border);
-        }
-        .trial-divider span {
-          font-size: 11px;
-          font-weight: 600;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: var(--muted);
-          white-space: nowrap;
-        }
-
-        .trial-card {
-          width: 100%;
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          background: var(--surface);
-          border: 1px solid var(--border);
-          border-radius: 12px;
-          padding: 14px 16px;
-          cursor: pointer;
-          text-align: left;
-          font-family: 'Outfit', sans-serif;
-          color: var(--text);
-          transition: border-color 0.15s, background 0.15s, transform 0.1s;
-        }
-        .trial-card:hover {
-          border-color: var(--green);
-          background: rgba(29,185,84,0.05);
-          transform: translateY(-1px);
-        }
-        .trial-card:active { transform: translateY(0); }
-        .trial-card-emoji {
-          width: 44px;
-          height: 44px;
-          border-radius: 10px;
-          background: var(--surface2);
-          border: 1px solid var(--border);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 22px;
-          flex-shrink: 0;
-        }
-        .trial-card-name {
-          font-size: 15px;
-          font-weight: 600;
-          color: var(--text);
-          line-height: 1.2;
-        }
-        .trial-card-desc {
-          font-size: 12px;
-          color: var(--muted);
-          margin-top: 3px;
-          line-height: 1.4;
-        }
-        .trial-card-arrow {
-          margin-left: auto;
-          flex-shrink: 0;
-          color: var(--green);
-          font-size: 18px;
-          font-weight: 700;
-          opacity: 0.7;
-          transition: opacity 0.15s, transform 0.15s;
-        }
-        .trial-card:hover .trial-card-arrow { opacity: 1; transform: translateX(2px); }
 
         .waveform-bar {
           animation: waveform 2.4s ease-in-out infinite alternate;
@@ -1201,19 +1138,39 @@ export default function SetupPage() {
             {setupMode === "single" && (
               <div>
                 <p className="section-label">Number of Songs</p>
-                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                   {SONG_COUNTS.map((c) => (
                     <button
                       key={c}
-                      className={`pill${songCount === c ? " active" : ""}`}
-                      onClick={() => setSongCount(c)}
+                      className={`pill${songCount.count === c ? " active" : ""}`}
+                      onClick={() => setSongCount(selectPreset(c))}
                     >
                       {c === "all" ? "All" : c}
                     </button>
                   ))}
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={MAX_SONG_COUNT}
+                    className={`pill count-input${isCustomSelected(songCount) ? " active" : ""}`}
+                    placeholder="Custom"
+                    aria-label={`Custom number of songs, 1 to ${MAX_SONG_COUNT}`}
+                    value={songCount.field}
+                    onChange={(e) => {
+                      // Read the value out before the updater, which React runs
+                      // later: `e.target` is the live input, so a second
+                      // keystroke landing first would make the callback read a
+                      // different value than the event carried.
+                      const raw = e.target.value;
+                      setSongCount((s) => typeCustom(s, raw));
+                    }}
+                    onBlur={() => setSongCount(commitCustom)}
+                  />
                 </div>
                 <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                  How many tracks to play from the shuffled playlist.
+                  How many tracks to play from the shuffled playlist. Type any number up
+                  to {MAX_SONG_COUNT} — a shorter playlist just plays every track it has.
                 </p>
               </div>
             )}
@@ -1357,37 +1314,6 @@ export default function SetupPage() {
                   {error}
                 </div>
               )}
-            </div>
-          </div>
-
-          {/* Built-in playlists — zero-friction trial */}
-          <div className={mounted ? "fade-in fade-in-3" : ""}>
-            <div className="trial-divider">
-              <span>Try it now — no playlist needed</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {BUILTIN_PLAYLISTS.map((playlist) => (
-                <button
-                  key={playlist.id}
-                  className="trial-card"
-                  onClick={() => handleQuickStart(playlist)}
-                >
-                  <span className="trial-card-emoji" aria-hidden>
-                    {playlist.coverEmoji}
-                  </span>
-                  <span>
-                    <span className="trial-card-name" style={{ display: "block" }}>
-                      {playlist.name}
-                    </span>
-                    <span className="trial-card-desc" style={{ display: "block" }}>
-                      {playlist.description} · {playlist.tracks.length} tracks
-                    </span>
-                  </span>
-                  <span className="trial-card-arrow" aria-hidden>
-                    →
-                  </span>
-                </button>
-              ))}
             </div>
           </div>
 
