@@ -31,11 +31,7 @@ import { roomJobs, trackEvent } from "@/lib/analytics";
 import { DEFAULT_HOST_NAME } from "@/lib/game-session";
 import { apiError, describeError, errorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
-import {
-  ROOM_POLL_INTERVAL_MS,
-  canPollAgainAfter,
-  pollTickAction,
-} from "@/lib/room-poll";
+import { canPollAgainAfter, pollIntervalMs, pollTickAction } from "@/lib/room-poll";
 import { ROOM_TTL_SECONDS, type RoomSubmissionSummary } from "@/types/room";
 
 const HOST_NAME_STORAGE_KEY = "guesssong_host_name";
@@ -71,6 +67,13 @@ export function RoomPanel({
   const [copied, setCopied] = useState(false);
   const [submissions, setSubmissions] = useState<RoomSubmissionSummary[]>([]);
   const submissionTotalRef = useRef(0);
+  /**
+   * When the roster last moved, which is what `pollIntervalMs` reads to decide
+   * how hard to keep asking. A ref rather than state on purpose: it changes on
+   * every arrival and nothing renders from it, so making it state would rerun
+   * the poll effect and restart the loop each time somebody scanned in.
+   */
+  const lastRosterChangeRef = useRef(0);
   // The host's own contribution. They are holding the screen everyone else is
   // scanning, so they are the one player with no phone to scan it from.
   const [hostPlaylistUrl, setHostPlaylistUrl] = useState("");
@@ -123,6 +126,9 @@ export function RoomPanel({
       setSubmissions(data.submissions);
       if (data.total > submissionTotalRef.current) {
         submissionTotalRef.current = data.total;
+        // Somebody just arrived, so the room is filling: drop back to the fast
+        // rung of the ladder for whoever else is scanning right now.
+        lastRosterChangeRef.current = Date.now();
         trackEvent("room_submission_received", { total: data.total });
       }
       return true;
@@ -151,13 +157,22 @@ export function RoomPanel({
    *   visibility       a background tab still fires timers; it just skips the
    *                    fetch, and polls once on return so the roster is current
    *
-   * All three decisions are `lib/room-poll.ts`, which the test suite can reach;
+   * A fourth bounds the *rate* rather than the total: `pollIntervalMs` backs off
+   * once the roster stops moving, so a lobby waiting on nothing stops costing
+   * what one filling up does. Every arrival resets it, so an active room polls
+   * exactly as fast as it always did.
+   *
+   * All four decisions are `lib/room-poll.ts`, which the test suite can reach;
    * what is left here is only the scheduling around them.
    */
   useEffect(() => {
     if (!room?.collectsPlaylists) return;
     const code = room.code;
     const deadline = Date.now() + ROOM_TTL_SECONDS * 1000;
+    // A room that has just opened counts as fresh activity: the host is looking
+    // at the QR waiting for the first name, which is the moment the fast rung
+    // is for.
+    lastRosterChangeRef.current = Date.now();
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;
@@ -187,7 +202,7 @@ export function RoomPanel({
         return;
       }
       if (stopped) return;
-      timer = setTimeout(tick, ROOM_POLL_INTERVAL_MS);
+      timer = setTimeout(tick, pollIntervalMs(Date.now() - lastRosterChangeRef.current));
     };
 
     void tick();
