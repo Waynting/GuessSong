@@ -93,9 +93,31 @@ export function loopStatsKeys(
 }
 
 /**
- * Bumped alongside every other counter, and never conditionally.
+ * The day this instance has already written the liveness marker for.
  *
- * Without it a day with no clicks and a day the counters never ran look
+ * The marker answers one yes/no question — did the counters run at all today —
+ * and its reader treats it that way: `scripts/loop-stats.mjs` only asks whether
+ * the count is above zero, never what it is. Writing it alongside *every*
+ * metric therefore bought nothing and doubled the cost of the whole loop
+ * namespace; `recordGameStart` alone spent six commands where four would do,
+ * and three of the six were the same key.
+ *
+ * Once per instance per UTC day is the cheapest thing that still cannot go
+ * wrong. A lambda that serves one request writes it; a lambda that serves ten
+ * thousand still writes it once; a fleet of instances writes it a handful of
+ * times, which is a handful more than necessary and far fewer than before. The
+ * only way to lose the marker is for every instance that ran that day to fail
+ * its write, which is the KV outage the marker would be reporting anyway.
+ *
+ * Set only after a successful write, so an instance that fails once still tries
+ * again on its next event rather than believing it has already reported.
+ */
+let livenessWrittenForDay: string | null = null;
+
+/**
+ * Bumps a counter, and the day's liveness marker if this instance has not yet.
+ *
+ * Without the marker a day with no clicks and a day the counters never ran look
  * identical: `mget` returns null for a key that was never created, which is
  * exactly what a genuine zero also looks like. Printing both as "no data yet"
  * would hide the single most important negative result this whole exercise can
@@ -107,10 +129,20 @@ async function bump(metric: string, by = 1): Promise<void> {
     const store = await getKvStore();
     const day = dayBucket();
     await store.incr(key(day, metric), LOOP_STATS_TTL_SECONDS, by);
+    if (livenessWrittenForDay === day) return;
     await store.incr(key(day, "live"), LOOP_STATS_TTL_SECONDS);
+    livenessWrittenForDay = day;
   } catch {
     // Instrumentation must never be able to fail a request.
   }
+}
+
+/**
+ * Test seam: the liveness memo is module state that outlives a single test, so
+ * without this every case after the first would see the marker already written.
+ */
+export function __resetLivenessForTests(): void {
+  livenessWrittenForDay = null;
 }
 
 /** A loop surface was rendered to someone. The denominator. */

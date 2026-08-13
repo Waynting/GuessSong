@@ -25,11 +25,15 @@ const {
   recordLoopClick,
   recordLoopImpression,
   recordLoopThrottled,
+  __resetLivenessForTests,
 } = await import("@/lib/loop-stats");
 
 beforeEach(() => {
   kv.incrs = [];
   kv.failWrites = false;
+  // The liveness memo is per-process, so without this every case after the
+  // first would run against an instance that has already reported today.
+  __resetLivenessForTests();
 });
 
 const keysWritten = () => kv.incrs.map((i) => i.key);
@@ -70,17 +74,53 @@ describe("the key format is the contract between writer and reader", () => {
 });
 
 describe("the liveness marker", () => {
-  it("is bumped by every recorded event, so a real zero is not 'no data'", async () => {
-    const live = loopStatsKeys("2026-08-09", LOOP_SURFACES).live;
+  const live = loopStatsKeys("2026-08-09", LOOP_SURFACES).live;
+
+  it("is written by the first recorded event of any kind, so a real zero is not 'no data'", async () => {
     for (const record of [
       () => recordLoopImpression("join_footer"),
       () => recordLoopClick("join_footer"),
       () => recordLoopThrottled(),
+      () => recordGameStart(1),
     ]) {
       kv.incrs = [];
+      __resetLivenessForTests();
       await record();
       expect(keysWritten()).toContain(live);
     }
+  });
+
+  it("is not rewritten by later events from the same instance", async () => {
+    // Its reader (`scripts/loop-stats.mjs`) only asks whether the count is
+    // above zero, so every write after the first was a command spent on an
+    // answer already in KV — and it was spent on *every* counter, doubling the
+    // cost of the whole namespace.
+    await recordLoopImpression("join_footer");
+    kv.incrs = [];
+    await recordLoopClick("join_footer");
+    expect(keysWritten()).not.toContain(live);
+  });
+
+  it("costs one command per metric, plus the marker once", async () => {
+    // recordGameStart is the worst case: three metrics, which used to mean six
+    // commands because each carried its own copy of the marker.
+    await recordGameStart(2);
+    const marker = kv.incrs.filter((i) => i.key === live);
+    expect(marker).toHaveLength(1);
+    expect(kv.incrs).toHaveLength(4);
+  });
+
+  it("retries the marker on a later event when its write failed", async () => {
+    // Marking it written before knowing the write landed would cost the day's
+    // liveness to a single unlucky request — and a missing marker reads as
+    // "the counters never ran", the loudest wrong answer this file can give.
+    kv.failWrites = true;
+    await recordLoopClick("share");
+    kv.failWrites = false;
+
+    kv.incrs = [];
+    await recordLoopClick("share");
+    expect(keysWritten()).toContain(live);
   });
 });
 
