@@ -49,6 +49,34 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.3.2",
+    date: "2026-08-13",
+    headline:
+      "Playlists load again, and a mixed game now plays the full number of songs you picked.",
+    headlineZh:
+      "歌單恢復正常，混合歌單也會照你選的首數播好播滿。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "For a while no playlist would load at all, and the message blamed your link. The link was fine — our storage had hit its monthly limit and the whole site went down with it. The game now keeps working when that happens.",
+        textZh:
+          "有一陣子不管貼什麼歌單都讀不進來，畫面還叫你檢查連結。連結沒問題，是我們的儲存空間用完了當月額度，整個網站跟著掛掉。現在就算再發生一次，遊戲也照常玩得下去。",
+      },
+      {
+        kind: "fixed",
+        text: "Mixed Playlist games were quietly shorter than the number you asked for, and the more taste two players shared the shorter it got — two people who like the same music could pick 8 songs each and get 12 instead of 16. Now it fills up to the full amount.",
+        textZh:
+          "混合歌單以前會偷偷變短，而且兩個人口味越接近就越短——都選每人 8 首，最後可能只播到 12 首而不是 16 首。現在會補滿到你選的數量。",
+      },
+      {
+        kind: "better",
+        text: "Once a room has expired or the game has started, the app stops checking on it. Before, a forgotten tab kept asking about that room all day.",
+        textZh:
+          "房間過期或遊戲開始之後，就不再繼續查詢它的狀態。之前忘了關的分頁會整天一直問下去。",
+      },
+    ],
+  },
+  {
     version: "1.3.1",
     date: "2026-08-10",
     headline:
