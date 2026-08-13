@@ -2,13 +2,13 @@
 
 A local party music guessing game powered by Spotify playlists. Live at **[guessong.app](https://www.guessong.app)**.
 
-No login, no accounts. The host pastes a public Spotify playlist URL (or picks a built-in one), everyone guesses out loud, and the host awards points.
+No login, no accounts. The host pastes a public Spotify playlist URL, everyone guesses out loud, and the host awards points.
 
 Current version: **1.1.0** — see [CHANGELOG.md](./CHANGELOG.md).
 
 ## How It Works
 
-1. **Setup** — Paste a public Spotify playlist URL (or pick a built-in trial playlist), add player names, choose a clip length and song count, hit Start
+1. **Setup** — Paste a public Spotify playlist URL, add player names, choose a clip length and song count, hit Start
 2. **Play** — A short audio clip plays; everyone guesses the song
 3. **Score** — The host taps whoever got it right
 4. **Finish** — Final scoreboard with a shareable results image
@@ -93,7 +93,7 @@ cp .env.example .env.local
 
 | Variable | Required? | Notes |
 |---|---|---|
-| `SPOTIFY_CLIENT_ID` | For pasted playlists | App-level Client Credentials, not user login — no redirect URI. Get them at [developer.spotify.com](https://developer.spotify.com/dashboard). Skip if you only want the built-in trial playlists. |
+| `SPOTIFY_CLIENT_ID` | Yes | App-level Client Credentials, not user login — no redirect URI. Get them at [developer.spotify.com](https://developer.spotify.com/dashboard). Every playlist comes from Spotify, so nothing loads without these. |
 | `SPOTIFY_CLIENT_SECRET` | ⤴ | |
 | `UPSTASH_REDIS_REST_URL` | Production | Backs rooms, rate limits, and both caches (`lib/kv.ts`). Unset locally → in-process `Map`, which is fine for one `next dev` process but **not** for multi-instance serverless. Free tier at [upstash.com](https://upstash.com). |
 | `UPSTASH_REDIS_REST_TOKEN` | ⤴ | |
@@ -159,14 +159,6 @@ ipconfig getifaddr en0            # macOS Wi-Fi — e.g. 10.107.0.98
 | `npm run test` | Durable Object tests, run inside workerd via `@cloudflare/vitest-pool-workers` |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run types` | Regenerate `worker-configuration.d.ts` |
-
-**Maintenance**
-
-```bash
-node scripts/fetch-builtin-playlists.mjs   # re-curate lib/builtin-playlists-data.json
-```
-
-Verifies every bundled track still has a working 30s iTunes preview. Needs the Spotify credentials.
 
 ## Project Layout
 

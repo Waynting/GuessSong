@@ -124,7 +124,7 @@ export default function GamePage() {
   const [mode, setMode] = useState<GameMode>("party");
   const [installCta, setInstallCta] = useState(false);
   // Buzzer Mode only. Null in every other mode, which is also how the panel
-  // stays entirely out of the party/trial render path.
+  // stays entirely out of the party render path.
   const [buzzerRoom, setBuzzerRoom] = useState<BuzzerRoomHandle | null>(null);
   // Handed up by the panel so this page's existing Reveal / Next / scoring
   // buttons drive the room, instead of the panel growing its own copies.
@@ -160,9 +160,6 @@ export default function GamePage() {
   const refreshedTracks = useRef<Set<string>>(new Set());
   const gameStartTimeRef = useRef<number>(Date.now());
   const finishedTrackedRef = useRef(false);
-  const roundsPlayedRef = useRef(0);
-
-  const isTrial = mode === "trial";
 
   /**
    * The clip transport, identical in "playing" and "guessing".
@@ -192,11 +189,6 @@ export default function GamePage() {
         <button className="btn-primary" onClick={reveal}>
           Reveal Answer →
         </button>
-        {isTrial && (
-          <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={nextTrack}>
-            Skip →
-          </button>
-        )}
       </>
     );
   }
@@ -519,27 +511,16 @@ export default function GamePage() {
     setTimeout(() => setScorePulse(null), 600);
   }
 
-  /** Mark the current trial round as guessed correctly (+1, once per round). */
-  function markTrialCorrect() {
-    if (pointsAwarded) return;
-    setPointsAwarded(true);
-    setPlayers((prev) =>
-      prev.map((p, i) => (i === 0 ? { ...p, score: p.score + 1 } : p))
-    );
-  }
-
   /** Fire game_finished exactly once (guards endGame + nextTrack double entry). */
   function trackGameFinished() {
     if (finishedTrackedRef.current) return;
     finishedTrackedRef.current = true;
-    roundsPlayedRef.current = countRoundsPlayed(currentIndex, phase);
     trackEvent("game_finished", {
-      rounds_played: roundsPlayedRef.current,
+      rounds_played: countRoundsPlayed(currentIndex, phase),
       total_tracks: tracks.length,
       duration_seconds: Math.round((Date.now() - gameStartTimeRef.current) / 1000),
       playlist_source: playlistSource,
       game_mode: mode,
-      ...(isTrial ? { correct_count: players[0]?.score ?? 0 } : {}),
       // The reach denominator: how many phones this game actually touched.
       // Only meaningful in buzzer mode, so it's omitted elsewhere rather than
       // reported as 0 and dragging the average down.
@@ -819,7 +800,6 @@ export default function GamePage() {
           background: #111;
         }
         /* Trial mode: no sidebar, main area takes the full width */
-        .game-layout.trial { grid-template-columns: 1fr; }
 
         .top-bar {
           grid-column: 1 / -1;
@@ -1350,7 +1330,7 @@ export default function GamePage() {
         onError={handleAudioError}
       />
 
-      <div className={`game-layout${isTrial ? " trial" : ""}`}>
+      <div className="game-layout">
         {/* TOP BAR */}
         <header className="top-bar">
           <div className="round-badge">
@@ -1363,19 +1343,6 @@ export default function GamePage() {
           </div>
           <span className="playlist-name">{playlistName}</span>
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            {isTrial && (
-              <span
-                style={{
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  color: "#1DB954",
-                  letterSpacing: "0.06em",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Correct: {players[0]?.score ?? 0}
-              </span>
-            )}
             {phase !== "finished" && (
               <button
                 className="end-game-btn"
@@ -1491,7 +1458,7 @@ export default function GamePage() {
             {/* Buzzer Mode: the room code, the queue, and the host's verdict
                 buttons. Rendered above the phase content so the host's eyes and
                 thumb stay in one place all game. Absent unless a room was
-                created at setup, so party/trial games are untouched. */}
+                created at setup, so party games are untouched. */}
             {buzzerRoom && phase !== "finished" && (
               <BuzzerHostPanel
                 roomCode={buzzerRoom.code}
@@ -1598,30 +1565,6 @@ export default function GamePage() {
                   )}
                 </div>
 
-                {isTrial ? (
-                  <>
-                    {/* Trial mode: self-scored, no player picker */}
-                    {pointsAwarded ? (
-                      <p style={{ textAlign: "center", color: "#1DB954", fontSize: "13px", marginBottom: "14px" }}>
-                        +1 — nice ear!
-                      </p>
-                    ) : (
-                      <div className="player-picker" style={{ marginBottom: "14px" }}>
-                        <button className="player-pick-btn" onClick={markTrialCorrect}>
-                          I got it ✓
-                        </button>
-                      </div>
-                    )}
-                    <button
-                      className="btn-primary"
-                      onClick={nextTrack}
-                      style={{ flex: "none", display: "block", margin: "0 auto", minWidth: "180px", width: "fit-content" }}
-                    >
-                      {currentIndex + 1 >= tracks.length ? "See Results →" : "Next →"}
-                    </button>
-                  </>
-                ) : (
-                  <>
                 {/* Song scoring — 3 pts. In Buzzer Mode the room already knows
                     who got there first, so listing every player again would be
                     asking the host to re-answer a question the server settled.
@@ -1751,45 +1694,12 @@ export default function GamePage() {
                 <button className="btn-primary" onClick={nextTrack} style={{ flex: "none", display: "block", margin: "0 auto", minWidth: "180px", width: "fit-content" }}>
                   {currentIndex + 1 >= tracks.length ? "See Final Scores →" : "Next Track →"}
                 </button>
-                  </>
-                )}
               </div>
             )}
           </div>
 
-          {/* Finished overlay — trial mode: simple result + party CTA */}
-          {phase === "finished" && isTrial && (
-            <div className="finished-overlay" style={{ justifyContent: "center" }}>
-              <div className="finished-header">
-                <p style={{ fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#555", marginBottom: "4px" }}>
-                  Trial Complete
-                </p>
-                <h1 className="finished-title">
-                  You got {players[0]?.score ?? 0} / {roundsPlayedRef.current}
-                </h1>
-                <p style={{ color: "#444", fontSize: "13px" }}>{playlistName}</p>
-                <p style={{ color: "#888", fontSize: "14px", marginTop: "16px", lineHeight: 1.5 }}>
-                  Next time, bring your friends — GuessSong is built for parties.
-                </p>
-              </div>
-              {installCta && (
-                <div style={{ marginTop: "28px", display: "flex", justifyContent: "center" }}>
-                  <InstallCta onInstall={handleInstall} />
-                </div>
-              )}
-              <div className="finished-btn-row" style={{ marginTop: installCta ? "0" : "28px" }}>
-                <button className="btn-lg green" onClick={() => router.push("/")}>
-                  Start a Party Game →
-                </button>
-                <button className="btn-lg outline" onClick={playAgain}>
-                  Play Again
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Finished overlay (full screen inside main) */}
-          {phase === "finished" && !isTrial && (
+          {phase === "finished" && (
             <div className="finished-overlay">
               {/* Header */}
               <div className="finished-header">
@@ -1849,16 +1759,14 @@ export default function GamePage() {
               </div>
 
               {/* The room is looking at this screen with their phones already
-                  in hand. The trial overlay above has shipped a way onward for
-                  a single player since launch; the party path — the one with
-                  five other people in it — has never had one. */}
+                  in hand, which is the one moment in the game when a way onward
+                  costs the host nothing to offer. */}
               <LoopQr />
             </div>
           )}
         </main>
 
-        {/* SIDEBAR SCOREBOARD — hidden in trial mode */}
-        {!isTrial && (
+        {/* SIDEBAR SCOREBOARD */}
         <aside className="sidebar">
           <div className="sidebar-header">Scoreboard</div>
           <div className="score-list">
@@ -1878,7 +1786,6 @@ export default function GamePage() {
             })}
           </div>
         </aside>
-        )}
       </div>
 
       <style>{`

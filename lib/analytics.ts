@@ -13,7 +13,7 @@ import type { ShareOutcome } from "@/lib/result-image";
 import type { GameMode } from "@/lib/game-session";
 import type { ArrivedFrom, LoopSurface } from "@/lib/loop-links";
 
-export type PlaylistSource = "own" | "builtin" | "mixed";
+export type PlaylistSource = "own" | "mixed";
 export type ShareType = "track" | "album" | "artist" | "unknown";
 /**
  * Why a round had no audio. `absent` is a property of the recording, which is
@@ -98,8 +98,6 @@ export type AnalyticsEvent =
          * bucketing at collection time would freeze the boundaries before the
          * distribution is known. The KV counter behind the digest caps its own
          * key space separately, where the cardinality actually matters.
-         *
-         * Absent on solo trials, which are one person and not a party.
          */
         host_game_index?: number;
       };
@@ -119,7 +117,6 @@ export type AnalyticsEvent =
         total_tracks: number;
         duration_seconds: number;
         playlist_source: PlaylistSource;
-        correct_count?: number; // trial mode only
         game_mode?: GameMode;
         /** Buzzer mode only: most phones connected at once. The reach denominator. */
         peak_phone_count?: number;

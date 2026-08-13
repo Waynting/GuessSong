@@ -119,19 +119,18 @@ describe("trackEvent", () => {
       trackEvent("game_started", {
         player_count: 1,
         clip_duration: 10,
-        playlist_source: "builtin",
+        playlist_source: "mixed",
       });
       trackEvent("round_completed", {
         round_index: 3,
         skipped: true,
-        playlist_source: "builtin",
+        playlist_source: "mixed",
       });
       trackEvent("game_finished", {
         rounds_played: 12,
         total_tracks: 16,
         duration_seconds: 240,
-        playlist_source: "builtin",
-        correct_count: 7,
+        playlist_source: "mixed",
       });
       trackEvent("preview_miss", {
         playlist_source: "own",
