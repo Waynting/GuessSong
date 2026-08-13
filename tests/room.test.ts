@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as playlistCache from "@/lib/playlist-cache";
+import { getKvStore } from "@/lib/kv";
 import { createRoom, submitToRoom, getRoomStatus, consumeRoomPool } from "@/lib/room";
 import type { Track } from "@/types";
 
@@ -20,6 +21,28 @@ function makeTrack(overrides: Partial<Track> = {}): Track {
     durationMs: 200000,
     createdAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
+  };
+}
+
+/**
+ * Holds every `loadPlaylist` call open and hands back the resolvers, so a test
+ * can park several submissions at the slow step and let them all reach the
+ * write together. Counting microtasks by hand is what this replaces — the
+ * number of awaits before the fetch is an implementation detail, and a test
+ * that encodes it starts passing for the wrong reason the moment it changes.
+ */
+function gateLoadPlaylist() {
+  const gates: Array<(v: Awaited<ReturnType<typeof playlistCache.loadPlaylist>>) => void> = [];
+  vi.mocked(playlistCache.loadPlaylist).mockImplementation(
+    () => new Promise((resolve) => gates.push(resolve))
+  );
+  return {
+    gates,
+    /** Runs the event loop until `count` submissions are waiting on a playlist. */
+    async waitFor(count: number) {
+      for (let i = 0; i < 100 && gates.length < count; i++) await Promise.resolve();
+      expect(gates).toHaveLength(count);
+    },
   };
 }
 
@@ -168,6 +191,88 @@ describe("room lifecycle", () => {
 
     const status = await getRoomStatus(roomCode);
     expect(status.submissions.map((s) => s.playerName).sort()).toEqual(["Alice", "Bob"]);
+  });
+
+  it("gives the name to exactly one of two players racing for it", async () => {
+    // Both get past the pre-fetch duplicate check — neither can see the other
+    // yet — and then both try to write. The claim is a single atomic field set,
+    // so one wins outright; there is no window in which the second overwrites
+    // the first and both are told they are in.
+    const { roomCode } = await createRoom();
+    const { gates, waitFor } = gateLoadPlaylist();
+
+    const first = submitToRoom(roomCode, "Alice", "url-1");
+    const second = submitToRoom(roomCode, "ALICE", "url-2");
+    await waitFor(2);
+
+    gates[0](loaded([makeTrack({ id: "a" })]));
+    gates[1](loaded([makeTrack({ id: "b" })]));
+    const outcomes = await Promise.allSettled([first, second]);
+
+    expect(outcomes.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const rejected = outcomes.find((r) => r.status === "rejected");
+    expect(rejected && (rejected as PromiseRejectedResult).reason).toMatchObject({
+      status: 409,
+    });
+
+    const status = await getRoomStatus(roomCode);
+    expect(status.total).toBe(1);
+  });
+
+  it("lists the roster in arrival order", async () => {
+    // Contributions live in hash fields, which have no order of their own. A
+    // roster that reshuffled between polls would be a visible defect on the one
+    // screen a whole room is looking at.
+    vi.mocked(playlistCache.loadPlaylist).mockResolvedValue(loaded([makeTrack()]));
+    const { roomCode } = await createRoom();
+
+    for (const name of ["Alice", "Bob", "Carol"]) {
+      await submitToRoom(roomCode, name, `url-${name}`);
+    }
+
+    const status = await getRoomStatus(roomCode);
+    expect(status.submissions.map((s) => s.playerName)).toEqual(["Alice", "Bob", "Carol"]);
+  });
+
+  it("refuses a submission that lands after the host has started", async () => {
+    // The one thing still worth re-reading for after the claim: a player who
+    // was fetching a playlist while the host pressed Start must be told the
+    // game began, not shown a tick for a playlist nothing will ever play.
+    const { roomCode, hostToken } = await createRoom();
+    vi.mocked(playlistCache.loadPlaylist).mockResolvedValueOnce(loaded([makeTrack({ id: "a" })]));
+    await submitToRoom(roomCode, "Alice", "url-1");
+
+    const { gates, waitFor } = gateLoadPlaylist();
+    const late = submitToRoom(roomCode, "Bob", "url-2");
+    await waitFor(1);
+
+    await consumeRoomPool(roomCode, 8, hostToken);
+    gates[0](loaded([makeTrack({ id: "b" })]));
+
+    await expect(late).rejects.toMatchObject({ status: 410 });
+  });
+
+  it("releases the room when a consume finds no tracks to pool", async () => {
+    // Claiming `consumed` is how the consume race is decided, so it has to
+    // happen before we know whether the track keys are still there. If they are
+    // not, the host's Start failed — and a failed Start must not leave them
+    // holding a room that can never be started again.
+    vi.mocked(playlistCache.loadPlaylist).mockResolvedValue(loaded([makeTrack()]));
+    const { roomCode, hostToken } = await createRoom();
+    await submitToRoom(roomCode, "Alice", "url-1");
+
+    const store = await getKvStore();
+    await store.del(`room:v2:${roomCode}:t:alice`);
+
+    await expect(consumeRoomPool(roomCode, 8, hostToken)).rejects.toMatchObject({
+      status: 422,
+    });
+    // Not 410: the room is open again, so a retry after the tracks are
+    // resubmitted can still work.
+    await expect(getRoomStatus(roomCode)).resolves.toMatchObject({ total: 1 });
+    await expect(consumeRoomPool(roomCode, 8, hostToken)).rejects.toMatchObject({
+      status: 422,
+    });
   });
 
   it("only lets one of two concurrent pool-consume calls succeed", async () => {
