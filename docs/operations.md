@@ -103,6 +103,66 @@ Two traps in reading those lines, both of which have cost a debugging detour:
 
 ## 5. Symptoms
 
+### "Every route returns 500 with an empty body"
+
+Check the Upstash request quota first. The free plan allows 500,000 commands a
+month, and once it is spent **every** Redis command fails with
+`ERR max requests limit exceeded` until the quota rolls over — days, not the
+seconds a network blip costs.
+
+The signature is a `500` with `content-length: 0` and no `code` in the body,
+on every route at once including `/api/playlist` and `/api/preview`, while `/`
+itself still serves `200` because the static pages touch no KV:
+
+```
+curl -i -X POST https://www.guessong.app/api/playlist \
+  -H 'Content-Type: application/json' -d '{"url":"<any public playlist>"}'
+```
+
+An empty body is the tell. Every handled failure in this app answers with
+`{error, code}` — see `lib/api-error.ts` — so a response with neither did not
+come from a handler at all. What the host sees is the generic "couldn't load
+the playlist", which points at their URL and is actively misleading: the
+playlist is usually fine, and they will re-copy the link and retry instead of
+reporting an outage.
+
+This used to be a total outage rather than a degradation, because
+`enforceRateLimit` runs at the top of all seven API routes *before* their own
+`try`/`catch`, and `lib/rate-limit.ts` was the one KV consumer that did not
+fail open. It does now, so an exhausted quota costs the per-IP ceiling and the
+KV-backed features instead of the site. What still degrades while the quota is
+spent:
+
+- **Rooms and Mixed Playlist Mode stop**, cleanly — `room_open_failed` rather
+  than a bare 500. They *are* the KV, so there is nothing to fall back to.
+- **Every cache misses**, so each playlist load reaches Spotify and each track
+  reaches iTunes/Deezer. The site works and is slower.
+- **The global budgets and the 429 cooldown are gone too**, since they are KV
+  counters that also fail open. This is the accepted trade — losing the safety
+  net means "back to how it was", not "nobody can play" — but it does mean the
+  shared Spotify quota is running unprotected. Restore Upstash before assuming
+  a Spotify 429 is a separate incident.
+- **The loop counters stop**, so `npm run stats` under-reports that window.
+  The liveness marker (see `docs/viral-loop.md`) is what keeps this readable as
+  a gap rather than a genuine zero.
+
+Sustained command volume is worth a look before raising the plan, and the room
+panel's roster poll is the first place to look, because it was how this quota
+was spent. `/api/room/[code]/status` runs every 4s and costs two commands a
+tick — the route's rate-limit `incr`, then the room read. It used to be a bare
+`setInterval` bounded only by the panel staying mounted, so a host who opened a
+room and left the tab parked kept polling at ~15 requests a minute forever,
+against rooms that `ROOM_TTL_SECONDS` had already deleted; the 404s were
+swallowed and retried. That is ~43k commands a day per abandoned tab, on a
+budget of 500k a *month*, buying nothing.
+
+`components/room-panel.tsx` now stops on all three: a terminal status (404
+gone, 410 already started), a deadline of `ROOM_TTL_SECONDS` from mount, and a
+hidden tab (which skips the fetch and polls once on return). If that loop is
+ever refactored back toward `setInterval`, all three have to survive it — none
+of them is visible in the UI, and the cost of losing them shows up weeks later
+as this symptom.
+
 ### "Songs have no audio"
 
 First distinguish the two causes, because they call for opposite responses:
