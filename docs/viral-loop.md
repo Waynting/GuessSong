@@ -22,18 +22,22 @@ cards — had already shipped. This is the cheap half nobody had written.
 
 ---
 
-## 2. The five surfaces
+## 2. The six surfaces
 
 Each is declared **once** in `lib/loop-links.ts` and derived from there by the
-link, the analytics param, and the server-side validator.
+link, the analytics param, and the server-side validator. The order below is the
+order of that declaration, which reads down the funnel: the two passive footers,
+the two moments a player has just finished doing something, then the two QR
+codes.
 
 | Surface | Where | When |
 |---|---|---|
-| `buzz_footer` | buzzer page, all three return paths | always, including the pre-join form |
-| `buzz_cta` | buzzer page, full-width button | between rounds, after the first resolves |
-| `join_submitted` | Mixed Playlist confirmation screen | after a playlist is submitted |
-| `game_over` | QR on the host's Game Over screen | party mode, end of game |
-| `share` | QR drawn into the result card image | wherever the picture ends up |
+| `buzz_footer` | buzzer page, all three return paths (`app/buzz/[code]/page.tsx:210`, `:243`) | always, including the pre-join form |
+| `buzz_cta` | buzzer page, full-width button (`app/buzz/[code]/page.tsx:289`) | between rounds, after the first resolves |
+| `join_footer` | Mixed Playlist submit page (`app/j/[code]/page.tsx:147`) | always |
+| `join_submitted` | Mixed Playlist confirmation screen (`app/j/[code]/page.tsx:103`) | after a playlist is submitted |
+| `game_over` | QR on the host's Game Over screen (`app/game/page.tsx`, `<LoopQr />`) | party mode, end of game |
+| `share` | QR drawn into the result card image (`lib/result-image.ts`'s `drawCardFooter`) | wherever the picture ends up |
 
 ### Why one declaration
 
@@ -161,6 +165,7 @@ Surface            shown    followed     rate
 buzz_cta            136          14    10.3%
 buzz_footer         120           4     3.3%
 game_over            22           9    40.9%
+join_footer          44           2     4.5%
 join_submitted       31           7    22.6%
 share                14           1     7.1%
 
@@ -176,7 +181,7 @@ Games by host's game number
 | Field | Meaning |
 |---|---|
 | `Days with any activity` | days that recorded anything. **Read this first** |
-| `shown` | the surface was rendered, once per surface per tab |
+| `shown` | the surface was rendered, once per surface per tab. `share` is the exception — see below |
 | `followed` | someone clicked and the server saw it |
 | `rate` | `followed ÷ shown` |
 | `Games started` | real hosted parties. Solo built-in trials are excluded |
@@ -197,8 +202,17 @@ did".**
   Only the direction of this number over time means anything.
 - **`followed` misses clicks that never reached the server.** Throttled ones are
   reported separately; a dropped connection is invisible.
-- **`share` is the weakest arm.** It needs someone to scan a QR out of a
-  forwarded image — the only surface whose hit does not start on a page of ours.
+- **`share` is the weakest arm, and its `shown` counts something else.** It
+  needs someone to scan a QR out of a forwarded image — the only surface whose
+  hit does not start on a page of ours. There is no element to render, so its
+  impression is fired by `recordCardImpression` in `app/game/page.tsx` when a
+  card is actually saved (`shared` or `downloaded`; a dismissed share sheet
+  leaves no image and so no QR in the world). The unit is therefore **a party
+  that produced at least one card**, not a card — the per-tab dedup means saving
+  both the scores card and the taste card counts once. Its `followed` can also
+  arrive weeks later from a device that has never seen this site, so numerator
+  and denominator are not the same population and the `rate` is a spread
+  indicator, not a conversion.
 - **`organic` is a catch-all** for every lost attribution: a PWA launched from
   the home screen, a stripped query string, a retyped bare domain. Organic is
   already nearly all traffic, so the loop's share of starts is a floor.
@@ -218,6 +232,7 @@ working call to action deleted. Collect two weeks first. Shapes, not numbers:
 |---|---|---|
 | `Days with any activity` is 0 | **plumbing, not a result** — a real zero still bumps the liveness marker | check credentials, that `/r` deployed, that robots did not over-block |
 | one arm's `shown` is 0, others fine | that surface is not being counted at all | its surface string or `active` condition broke — it is not that nobody saw it |
+| `shown` is 0 but `followed` is not | **proof** it is the impression that is missing, not the surface | a click cannot arrive from a surface nobody was shown, so the link works and only the denominator is absent — check that something actually calls `reportLoopImpression` for it |
 | arms differ sharply | placement and timing are being measured | make the low arm look like the high arm; do not delete it |
 | `buzz_cta` well below `join_submitted` | "a round resolved" is the wrong proxy for the right moment | that is the signal that changing the buzzer protocol for a real end-of-game CTA is worth it |
 | `Repeat hosts` share rising | someone actually came back | monetisation moves from next quarter to next month |

@@ -27,8 +27,10 @@ import {
   drawCardHeader,
   drawCardFooter,
   shareOrDownloadCanvas,
+  type ShareOutcome,
 } from "@/lib/result-image";
 import { loopQrDataUrl } from "@/lib/loop-qr";
+import { reportLoopImpression } from "@/lib/loop-client";
 
 type Phase = "waiting" | "playing" | "guessing" | "revealed" | "finished";
 
@@ -55,6 +57,37 @@ function InstallCta({ onInstall }: { onInstall: () => void }) {
       </button>
     </div>
   );
+}
+
+/**
+ * The `share` surface's denominator, which it went without until now.
+ *
+ * Every other surface is a DOM node, so `components/loop-cta.tsx` and
+ * `components/loop-qr.tsx` can report an impression when it renders. This one
+ * is a QR painted into a canvas by `drawCardFooter`, so nothing ever fired and
+ * `npm run stats` printed `shown=0` against a non-zero `followed` — a rate of
+ * `—` for the one arm that reaches people who have never seen a page of ours.
+ * `lib/analytics.ts` is explicit that a funnel without a denominator cannot be
+ * read; this is that rule applied to the loop's weakest and least visible arm.
+ *
+ * **Only the outcomes that leave an artifact count.** `dismissed` means the
+ * share sheet was opened and backed out of and `failed` means there was never
+ * a blob — in both cases no image exists, so no QR entered the world and an
+ * impression would be a denominator for a card nobody has. `downloaded` counts
+ * alongside `shared` even though `lib/result-image.ts` notes that only the
+ * latter can spread on its own: a file in the camera roll still gets forwarded
+ * later, and over-counting the denominator understates the rate, which is the
+ * safe direction (same reasoning as `lib/loop-client.ts`'s storage fallback).
+ *
+ * The unit is therefore **a party that produced at least one card**, not a
+ * card: `reportLoopImpression` dedupes per tab session, so saving both the
+ * scores card and the taste card counts once. That matches how `game_over` is
+ * counted and keeps the two QR arms comparable to each other.
+ */
+function recordCardImpression(outcome: ShareOutcome): void {
+  if (outcome === "shared" || outcome === "downloaded") {
+    reportLoopImpression("share");
+  }
 }
 
 export default function GamePage() {
@@ -632,6 +665,7 @@ export default function GamePage() {
       `guesssong-results-${Date.now()}.png`,
       "GuessSong results"
     );
+    recordCardImpression(outcome);
     trackEvent("result_shared", {
       card_type: "scores",
       outcome,
@@ -734,6 +768,7 @@ export default function GamePage() {
       `guesssong-taste-card-${Date.now()}.png`,
       "GuessSong taste card"
     );
+    recordCardImpression(outcome);
     trackEvent("result_shared", {
       card_type: "taste",
       outcome,

@@ -49,6 +49,34 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.4.0",
+    date: "2026-08-13",
+    headline:
+      "Rooms are steadier when a crowd scans at once, and the whole app leans much less on its storage.",
+    headlineZh:
+      "一群人同時掃碼時房間更穩，整個 app 對儲存空間的用量也降了一大截。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "When several people submitted a playlist at the same instant — which is what happens when everyone scans the QR code together — one of them could quietly go missing from the room. Two people can no longer end up sharing one name either.",
+        textZh:
+          "好幾個人同一瞬間送出歌單時——大家一起掃 QR code 就是這樣——其中一個人可能會悄悄從房間裡消失。現在也不會再有兩個人共用同一個名字。",
+      },
+      {
+        kind: "better",
+        text: "Last month the site went down because our storage hit its monthly limit. We went through everything that touches it: the room screen now checks less often once nobody new is arriving, and the parts that fetch song clips stopped asking the same question over and over. Same game, a fraction of the usage.",
+        textZh:
+          "上個月網站掛掉，是因為儲存空間用完了當月額度。我們把所有會用到它的地方重新檢查過一遍：沒有新人加入時，房間畫面就不再一直查詢；抓歌曲片段的部分也不會再重複問同一個問題。玩法完全一樣，用量只剩一小部分。",
+      },
+      {
+        kind: "better",
+        text: "The room list still updates just as fast while people are joining — it only slows down after a stretch where nobody new has arrived, and speeds straight back up the moment someone does.",
+        textZh:
+          "有人陸續加入的時候，房間名單更新速度跟以前一模一樣；只有在一段時間都沒有新人時才會放慢，而且一有人加入就立刻恢復。",
+      },
+    ],
+  },
+  {
     version: "1.3.2",
     date: "2026-08-13",
     headline:

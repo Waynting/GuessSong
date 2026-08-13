@@ -80,12 +80,25 @@ No endpoint, by design; an endpoint would need an auth story for what is a
 two-line grep. In the Vercel logs:
 
 ```
-[playlist-cache] miss id=… source=… hits=… negative=… misses=… rate=…
-[preview-cache]  miss hits=… misses=… unavailable=… rate=…
+[playlist-cache] miss id=… source=… misses=…
+[preview-cache]  miss hits=… misses=… unavailable=…
 ```
 
 Both log **only on a miss**, so the instrumentation gets quieter as things get
 healthier and a sudden run of lines is itself the signal.
+
+**The lines describe one request, not the day.** They used to carry a cumulative
+`rate=`, which meant reading two more counters back out of KV on every miss — on
+the path that is by definition already the expensive one — to compose a sentence
+for a log nobody tails. The cumulative view moved to where it is actually read:
+
+```bash
+npm run stats            # the loop counters
+```
+
+…and, for the caches, `getCacheStats()` / `getPreviewCacheStats()`, which answer
+on demand rather than on every miss. `misses=` in the playlist line is still the
+running day total, because it is what `incr` returns and so costs nothing.
 
 Two traps in reading those lines, both of which have cost a debugging detour:
 
@@ -93,11 +106,11 @@ Two traps in reading those lines, both of which have cost a debugging detour:
   `POST /api/room/[code]/submit` can emit the line, but Vercel attributes it to
   whichever request the instance happened to be serving, so it frequently
   appears against an unrelated `GET`.
-- **`rate` counts a replayed 404 as a hit.** Correctly — it answered without
-  touching Spotify — so a host retrying a dead link pushes the rate *up*.
-  `negative=` is that subset; `hits - negative` is the part describing real
-  playlists. The bucket is a **UTC** day, so a rate read just after 00:00 UTC is
-  measuring almost nothing.
+- **A replayed 404 counts as a hit** in `getCacheStats()`. Correctly — it
+  answered without touching Spotify — so a host retrying a dead link pushes the
+  rate *up*. `negativeHits` is that subset; `hits - negativeHits` is the part
+  describing real playlists. The bucket is a **UTC** day, so a rate read just
+  after 00:00 UTC is measuring almost nothing.
 
 ---
 

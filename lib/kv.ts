@@ -32,6 +32,38 @@ export interface KvStore {
    * undo the saving `mget` just made.
    */
   incr(key: string, ttlSeconds: number, by?: number): Promise<number>;
+
+  /**
+   * Reads every field of a hash as one command. `{}` for a key that is not
+   * there, which is indistinguishable from an empty hash — Redis does not keep
+   * those, so the two really are the same state.
+   */
+  hgetall<T>(key: string): Promise<Record<string, T>>;
+
+  /**
+   * Sets a field only if it does not already exist, and says whether it did.
+   * Atomic, and the reason the hash primitives exist at all.
+   *
+   * lib/room.ts's writers used to read the whole room record, edit it, write it
+   * back, and then read it *again* to find out whether a concurrent writer had
+   * clobbered them — a retry loop around a race that get/set cannot actually
+   * close. Claiming one field is a single command that either wins or loses,
+   * with nothing to verify and nothing to retry. A QR room is a group of phones
+   * submitting within the same few seconds, so this is the ordinary case there,
+   * not an edge one.
+   *
+   * Does **not** touch the key's expiry, in either backend: Redis leaves a TTL
+   * alone on a field write, and a caller that reset it on every submit would
+   * quietly extend a room past the `expiresAt` it already told its clients.
+   * Call `expire` once, when the hash is created.
+   */
+  hsetnx(key: string, field: string, value: unknown): Promise<boolean>;
+
+  /** Removes one field. Used to roll back a claim that turned out to be too late. */
+  hdel(key: string, field: string): Promise<void>;
+
+  /** Sets a key's TTL. Separate from the write, per the note on `hsetnx`. */
+  expire(key: string, ttlSeconds: number): Promise<void>;
 }
 
 /**
@@ -78,17 +110,42 @@ function getMemoryMap(): Map<string, MemoryEntry> {
   return globalThis.__guesssongKvMemoryStore;
 }
 
+/** The entry for `key` if it exists and has not expired; otherwise undefined. */
+function liveEntry(key: string): MemoryEntry | undefined {
+  const map = getMemoryMap();
+  const entry = map.get(key);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiresAt) {
+    map.delete(key);
+    return undefined;
+  }
+  return entry;
+}
+
+/**
+ * A hash's fields live in a Map under the same entry shape as everything else,
+ * so TTL handling is shared.
+ *
+ * Throws on a key that already holds a plain value, which is what Redis does
+ * (`WRONGTYPE`) and therefore what dev has to do too — the whole point of the
+ * fallback store is that `next dev` behaves like production. Quietly replacing
+ * the value would hide exactly the mistake that made lib/room.ts's key prefix
+ * need a version bump, and hide it only until deploy.
+ */
+function liveHash(key: string): Map<string, unknown> | undefined {
+  const entry = liveEntry(key);
+  if (!entry) return undefined;
+  if (!(entry.value instanceof Map)) {
+    throw new Error(`WRONGTYPE: ${key} holds a plain value, not a hash`);
+  }
+  return entry.value;
+}
+
 function createMemoryStore(): KvStore {
   const store: KvStore = {
     async get<T>(key: string) {
-      const map = getMemoryMap();
-      const entry = map.get(key);
-      if (!entry) return null;
-      if (Date.now() > entry.expiresAt) {
-        map.delete(key);
-        return null;
-      }
-      return entry.value as T;
+      const entry = liveEntry(key);
+      return entry ? (entry.value as T) : null;
     },
     async mget<T>(keys: string[]) {
       return Promise.all(keys.map((key) => store.get<T>(key)));
@@ -111,8 +168,40 @@ function createMemoryStore(): KvStore {
       map.set(key, { value: next, expiresAt: entry.expiresAt });
       return next;
     },
+    async hgetall<T>(key: string) {
+      const hash = liveHash(key);
+      return hash ? (Object.fromEntries(hash) as Record<string, T>) : {};
+    },
+    async hsetnx(key, field, value) {
+      let hash = liveHash(key);
+      if (!hash) {
+        hash = new Map<string, unknown>();
+        // No expiry until `expire` sets one, exactly as Redis behaves for a key
+        // created by HSETNX. lib/room.ts is what makes sure that call follows.
+        getMemoryMap().set(key, { value: hash, expiresAt: Number.POSITIVE_INFINITY });
+      }
+      if (hash.has(field)) return false;
+      hash.set(field, value);
+      return true;
+    },
+    async hdel(key, field) {
+      liveHash(key)?.delete(field);
+    },
+    async expire(key, ttlSeconds) {
+      const entry = liveEntry(key);
+      if (entry) entry.expiresAt = Date.now() + ttlSeconds * 1000;
+    },
   };
   return store;
+}
+
+function decodeField<T>(value: unknown): T {
+  if (typeof value !== "string") return value as T;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return value as T;
+  }
 }
 
 function hasUpstashEnv(): boolean {
@@ -154,6 +243,29 @@ async function getUpstashStore(): Promise<KvStore> {
         // the first increment of it.
         if (count === by) await redis.expire(key, ttlSeconds);
         return count;
+      },
+      async hgetall<T>(key: string) {
+        const raw = await redis.hgetall<Record<string, unknown>>(key);
+        if (!raw) return {};
+        // The client parses JSON values on the way out, but hands back anything
+        // that is not JSON as the raw string — a bare uuid, for instance. Decode
+        // defensively rather than assuming one or the other, because the two
+        // shapes differ only at runtime and a wrong guess is a crash in the
+        // middle of somebody's party.
+        const out: Record<string, T> = {};
+        for (const [field, value] of Object.entries(raw)) {
+          out[field] = decodeField<T>(value);
+        }
+        return out;
+      },
+      async hsetnx(key, field, value) {
+        return (await redis.hsetnx(key, field, value)) === 1;
+      },
+      async hdel(key, field) {
+        await redis.hdel(key, field);
+      },
+      async expire(key, ttlSeconds) {
+        await redis.expire(key, ttlSeconds);
       },
     };
   }
