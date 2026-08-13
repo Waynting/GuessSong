@@ -285,11 +285,85 @@ async function claimLookupBudget(count = 1): Promise<boolean> {
   }
 }
 
-async function isCoolingDown(source: PreviewSource): Promise<boolean> {
-  try {
+/**
+ * The cooldown is asked about once per source *per track*, so a cold 25-song
+ * batch spent up to 50 KV reads discovering the same two answers — more
+ * commands than the writes the batch actually performs, on the one quota this
+ * app pays for. It is a coarse, site-wide, minute-scale signal being polled at
+ * per-track resolution.
+ *
+ * Two memos, with different lifetimes, because the two answers are not equally
+ * safe to hold:
+ *
+ * - **"cooling until T"** is trusted until T with no re-read at all. A cooldown
+ *   is only ever *started*, never cancelled early, so the worst a stale one
+ *   costs is skipping a source slightly longer than KV would have said — and
+ *   the whole point of the cooldown is to not ask.
+ * - **"not cooling"** is held for `COOLDOWN_MEMO_MS` only, because it is the
+ *   answer that spends upstream calls. That window is the one thing this trades
+ *   away: a cooldown another instance starts is invisible here for up to that
+ *   long. It is deliberately far below `MIN_COOLDOWN_SECONDS`, so a cooldown is
+ *   never missed entirely — only joined late.
+ *
+ * Within one instance there is no delay at all: `startCooldown` primes the memo
+ * on the way past, so the request that discovers a 403 parks the source for
+ * every later track in the same batch without a round trip.
+ */
+const COOLDOWN_MEMO_MS = 5000;
+
+interface CooldownMemo {
+  /** Epoch ms the source is parked until. 0 when it is not parked. */
+  until: number;
+  /** When this was learned, for ageing out the "not cooling" answer. */
+  readAt: number;
+}
+
+const cooldownMemo = new Map<PreviewSource, CooldownMemo>();
+
+/**
+ * A batch resolves several tracks at once, so without this every worker in the
+ * first wave asks KV before any of them has an answer to memoize — the memo
+ * only starts paying from the *second* wave, and a batch smaller than
+ * `BATCH_CONCURRENCY` never benefits at all. Same shape, and the same reason,
+ * as lib/playlist-cache.ts's in-flight map.
+ */
+const cooldownInFlight = new Map<PreviewSource, Promise<CooldownMemo>>();
+
+function readCooldown(source: PreviewSource): Promise<CooldownMemo> {
+  const existing = cooldownInFlight.get(source);
+  if (existing) return existing;
+
+  const pending = (async () => {
     const entry = await (await store()).get<{ until: number }>(cooldownKey(source));
-    return typeof entry?.until === "number" && Date.now() < entry.until;
+    const memo: CooldownMemo = {
+      until: typeof entry?.until === "number" ? entry.until : 0,
+      readAt: Date.now(),
+    };
+    cooldownMemo.set(source, memo);
+    return memo;
+  })();
+  // Cleared on rejection too, so one failed read does not park the source's
+  // lookups behind a permanently broken promise. Every caller — including this
+  // one — gets the tracked promise rather than the raw one, so a rejection is
+  // never left unhandled on a branch nobody awaited.
+  const tracked = pending.finally(() => cooldownInFlight.delete(source));
+  cooldownInFlight.set(source, tracked);
+  return tracked;
+}
+
+async function isCoolingDown(source: PreviewSource): Promise<boolean> {
+  const now = Date.now();
+  const memo = cooldownMemo.get(source);
+  if (memo) {
+    if (now < memo.until) return true;
+    if (now - memo.readAt < COOLDOWN_MEMO_MS) return false;
+  }
+  try {
+    const fresh = await readCooldown(source);
+    return Date.now() < fresh.until;
   } catch {
+    // Not memoized: a KV failure is not an answer about the source, and
+    // remembering it as "not cooling" would suppress the next real read.
     return false;
   }
 }
@@ -306,13 +380,27 @@ async function startCooldown(source: PreviewSource, retryAfterSeconds?: number):
     MAX_COOLDOWN_SECONDS,
     Math.max(MIN_COOLDOWN_SECONDS, retryAfterSeconds ?? DEFAULT_COOLDOWN_SECONDS)
   );
+  const until = Date.now() + seconds * 1000;
+  // Primed before the write, and kept even if the write throws: this instance
+  // has just been refused by this source, which is reason enough to stop asking
+  // regardless of whether the rest of the fleet can be told about it.
+  cooldownMemo.set(source, { until, readAt: Date.now() });
   try {
-    await (await store()).set(cooldownKey(source), { until: Date.now() + seconds * 1000 }, seconds);
+    await (await store()).set(cooldownKey(source), { until }, seconds);
     console.warn(`[preview-cache] ${source} throttled us; pausing it for ${seconds}s`);
   } catch {
     // Best effort — losing the coordinated backoff costs us the shared signal,
     // not correctness. Each request still fails on its own.
   }
+}
+
+/**
+ * Test seam. The memo is module state that outlives a single test, and a
+ * cooldown left primed by one case would silently skip the source in the next.
+ */
+export function __resetPreviewMemoForTests(): void {
+  cooldownMemo.clear();
+  cooldownInFlight.clear();
 }
 
 /* ------------------------------------------------------------------ */
@@ -334,6 +422,14 @@ interface Outcomes {
  * sudden run of lines is itself the signal. `unavailable=` is the one to watch
  * — it rising while `misses` stays flat is throttling, and it is the number
  * that used to be silently recorded as a catalogue gap instead.
+ *
+ * **The line reports this call, not the running day totals.** It used to read
+ * `hit` and `unavailable` back out of KV so it could print a cumulative rate,
+ * which cost two extra commands on every miss — the path that is by definition
+ * already spending the most — to compose a sentence for a log nobody tails.
+ * `getPreviewCacheStats` still answers the cumulative question, on demand, for
+ * the one caller that actually asks it (`npm run stats`). What a log line is
+ * good for is the shape of a single request, and that needs no read at all.
  */
 async function recordOutcomes(counts: Outcomes): Promise<void> {
   try {
@@ -344,12 +440,9 @@ async function recordOutcomes(counts: Outcomes): Promise<void> {
     }
     if (counts.misses <= 0) return;
 
-    const misses = await kv.incr(statsKey("miss"), STATS_TTL_SECONDS, counts.misses);
-    const hits = (await kv.get<number>(statsKey("hit"))) ?? 0;
-    const unavailable = (await kv.get<number>(statsKey("unavailable"))) ?? 0;
-    const rate = hits + misses > 0 ? hits / (hits + misses) : 0;
+    await kv.incr(statsKey("miss"), STATS_TTL_SECONDS, counts.misses);
     console.log(
-      `[preview-cache] miss hits=${hits} misses=${misses} unavailable=${unavailable} rate=${rate.toFixed(3)}`
+      `[preview-cache] miss hits=${counts.hits} misses=${counts.misses} unavailable=${counts.unavailable}`
     );
   } catch {
     // Instrumentation must never be able to fail a request.

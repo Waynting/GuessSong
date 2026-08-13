@@ -24,7 +24,9 @@ const kv = vi.hoisted(() => {
   const writes: Array<{ key: string; value: unknown; ttlSeconds: number }> = [];
   const flags = { failReads: false, failWrites: false };
   const counts = { mget: 0 };
-  return { mem, writes, flags, counts };
+  /** Every single-key read, in order — see the cooldown-memo test. */
+  const reads: string[] = [];
+  return { mem, writes, flags, counts, reads };
 });
 
 vi.mock("@/lib/kv", () => {
@@ -37,6 +39,7 @@ vi.mock("@/lib/kv", () => {
   return {
     getKvStore: async () => ({
       async get(key: string) {
+        kv.reads.push(key);
         return read(key);
       },
       async mget(keys: string[]) {
@@ -179,12 +182,17 @@ function writeFor(key: string) {
   return kv.writes.find((w) => w.key === key);
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   kv.mem.clear();
   kv.writes.length = 0;
   kv.flags.failReads = false;
   kv.flags.failWrites = false;
   kv.counts.mget = 0;
+  kv.reads.length = 0;
+  // The per-source cooldown is memoized in module scope, so a case that parks
+  // iTunes would otherwise keep it parked for every case after it.
+  const { __resetPreviewMemoForTests } = await import("@/lib/preview-cache");
+  __resetPreviewMemoForTests();
 });
 
 afterEach(() => {
@@ -799,6 +807,25 @@ describe("per-source cooldown", () => {
     await GET(request({ track: "Song", artist: "Artist", id: "a" }));
 
     expect(writeFor("preview:cooldown:itunes")?.ttlSeconds).toBe(600);
+  });
+
+  it("asks KV about a cooldown once per source, not once per track", async () => {
+    // The cooldown is a site-wide, minute-scale signal, and it used to be read
+    // per source *per track* — a cold 25-song game spent 50 KV reads learning
+    // the same two answers, more commands than the batch's own writes. There is
+    // nothing on screen to notice if this regresses; Upstash's monthly bill is
+    // the only symptom, which is why it is pinned here.
+    installFetchMock({ itunes: { body: ITUNES_EMPTY }, deezer: { body: DEEZER_EMPTY } });
+
+    const tracks = Array.from({ length: 8 }, (_, n) => ({
+      id: `cool${n}`,
+      name: `Song ${n}`,
+      artist: "Artist",
+    }));
+    await POST(batchRequest(tracks));
+
+    const cooldownReads = kv.reads.filter((k) => k.startsWith("preview:cooldown:"));
+    expect(cooldownReads).toHaveLength(2); // one iTunes, one Deezer
   });
 
   it("does not park a source over a dropped connection", async () => {
