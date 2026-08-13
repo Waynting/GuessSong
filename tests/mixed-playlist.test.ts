@@ -18,6 +18,22 @@ function makeTrack(overrides: Partial<Track> = {}): Track {
   };
 }
 
+/** `n` tracks that share nothing with any other prefix's tracks. */
+function solo(prefix: string, n: number): Track[] {
+  return Array.from({ length: n }, (_, i) =>
+    makeTrack({
+      id: `${prefix}-${i}`,
+      name: `${prefix} Song ${i}`,
+      artists: [`${prefix} Artist ${i}`],
+    })
+  );
+}
+
+/** The same recording as submitted by someone else — same fingerprint, own id. */
+function copy(track: Track): Track {
+  return { ...track, id: `${track.id}-copy` };
+}
+
 describe("fingerprint", () => {
   it("is case- and whitespace-insensitive", () => {
     expect(fingerprint("Blinding Lights", ["The Weeknd"])).toBe(
@@ -62,40 +78,89 @@ describe("poolContributions", () => {
     expect(pooled[0].contributors.sort()).toEqual(["Alice", "Bob"]);
   });
 
-  it("caps each contributor at sampledPerPlayer tracks", () => {
-    const bigPlaylist: Track[] = Array.from({ length: 50 }, (_, i) =>
-      makeTrack({ id: `big-${i}`, name: `Big Song ${i}`, artists: [`Artist ${i}`] })
-    );
-    const smallPlaylist: Track[] = Array.from({ length: 5 }, (_, i) =>
-      makeTrack({ id: `small-${i}`, name: `Small Song ${i}`, artists: [`Small Artist ${i}`] })
-    );
+  it("splits evenly when both contributors have plenty to give", () => {
     const contributions: PlaylistContribution[] = [
-      { playerName: "BigLister", tracks: bigPlaylist },
-      { playerName: "SmallLister", tracks: smallPlaylist },
+      { playerName: "Alice", tracks: solo("a", 50) },
+      { playerName: "Bob", tracks: solo("b", 50) },
     ];
 
     const pooled = poolContributions(contributions, 8);
 
-    const bigCount = pooled.filter((t) => t.contributors.includes("BigLister")).length;
-    const smallCount = pooled.filter((t) => t.contributors.includes("SmallLister")).length;
-    expect(bigCount).toBeLessThanOrEqual(8);
-    expect(smallCount).toBeLessThanOrEqual(5);
+    expect(pooled).toHaveLength(16);
+    expect(pooled.filter((t) => t.contributors.includes("Alice"))).toHaveLength(8);
+    expect(pooled.filter((t) => t.contributors.includes("Bob"))).toHaveLength(8);
   });
 
-  it("counts a shared track against every one of its contributors' quotas", () => {
-    const shared = makeTrack({ id: "shared", name: "Shared Song", artists: ["Someone"] });
-    const aloneTracks: Track[] = Array.from({ length: 10 }, (_, i) =>
-      makeTrack({ id: `a-${i}`, name: `Solo Song ${i}`, artists: [`Solo Artist ${i}`] })
-    );
+  it("fills the game to contributors x sampledPerPlayer despite overlap", () => {
+    // The regression: a shared song spends a slot from every contributor of it,
+    // so this pair used to return ~12 of the 16 the host asked for, and the
+    // more taste they had in common the shorter the game got.
+    const shared = solo("shared", 20);
     const contributions: PlaylistContribution[] = [
-      { playerName: "Alice", tracks: [shared, ...aloneTracks] },
-      { playerName: "Bob", tracks: [{ ...shared, id: "shared-bob-copy" }] },
+      { playerName: "Alice", tracks: [...solo("a", 20), ...shared] },
+      { playerName: "Bob", tracks: [...solo("b", 20), ...shared.map(copy)] },
     ];
 
-    const pooled = poolContributions(contributions, 3);
+    expect(poolContributions(contributions, 8)).toHaveLength(16);
+  });
 
-    const aliceCount = pooled.filter((t) => t.contributors.includes("Alice")).length;
-    expect(aliceCount).toBeLessThanOrEqual(3);
+  it("backfills from whoever still has tracks when someone runs short", () => {
+    const contributions: PlaylistContribution[] = [
+      { playerName: "BigLister", tracks: solo("big", 50) },
+      { playerName: "SmallLister", tracks: solo("small", 5) },
+    ];
+
+    const pooled = poolContributions(contributions, 8);
+
+    // SmallLister cannot reach 8, so the shortfall is made up by the only
+    // contributor who can — the game stays 16 songs long rather than 13.
+    expect(pooled).toHaveLength(16);
+    expect(pooled.filter((t) => t.contributors.includes("SmallLister"))).toHaveLength(5);
+    expect(pooled.filter((t) => t.contributors.includes("BigLister"))).toHaveLength(11);
+  });
+
+  it("never returns more tracks than there are distinct songs", () => {
+    // Two people with identical taste. A 16-song game here would have to repeat
+    // songs, which is worse than an honest 10-song one.
+    const identical = solo("shared", 10);
+    const contributions: PlaylistContribution[] = [
+      { playerName: "Alice", tracks: identical },
+      { playerName: "Bob", tracks: identical.map(copy) },
+    ];
+
+    const pooled = poolContributions(contributions, 8);
+
+    expect(pooled).toHaveLength(10);
+    expect(new Set(pooled.map((t) => t.name)).size).toBe(10);
+  });
+
+  it("gives nobody less than the fair pass would have", () => {
+    // Backfill only ever adds. Whatever the relaxation does, a contributor with
+    // enough tracks still clears sampledPerPlayer.
+    const contributions: PlaylistContribution[] = [
+      { playerName: "Alice", tracks: solo("a", 30) },
+      { playerName: "Bob", tracks: solo("b", 30) },
+      { playerName: "Cara", tracks: solo("c", 2) },
+    ];
+
+    const pooled = poolContributions(contributions, 5);
+
+    for (const name of ["Alice", "Bob"]) {
+      expect(
+        pooled.filter((t) => t.contributors.includes(name)).length
+      ).toBeGreaterThanOrEqual(5);
+    }
+    expect(pooled).toHaveLength(15);
+  });
+
+  it("does not let one name that submitted twice buy two players' worth", () => {
+    const contributions: PlaylistContribution[] = [
+      { playerName: "Alice", tracks: solo("a", 50) },
+      { playerName: "Alice", tracks: solo("a2", 50) },
+    ];
+
+    // One distinct contributor, so one player's worth of songs.
+    expect(poolContributions(contributions, 8)).toHaveLength(8);
   });
 
   it("returns an empty pool for no contributions", () => {
