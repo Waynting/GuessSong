@@ -9,6 +9,9 @@ const redisMock = vi.hoisted(() => ({
   incr: vi.fn(),
   incrby: vi.fn(),
   expire: vi.fn(),
+  hgetall: vi.fn(),
+  hsetnx: vi.fn(),
+  hdel: vi.fn(),
 }));
 
 vi.mock("@upstash/redis", () => ({
@@ -81,6 +84,68 @@ describe("getKvStore (in-memory fallback)", () => {
     expect(await store.incr("counter2", 1)).toBe(1);
     vi.advanceTimersByTime(1500);
     expect(await store.incr("counter2", 1)).toBe(1);
+  });
+
+  it("reads a whole hash, and an absent key as an empty one", async () => {
+    const store = await getKvStore();
+    expect(await store.hgetall("no-such-hash")).toEqual({});
+
+    await store.hsetnx("h1", "meta", { code: "AB7K" });
+    await store.hsetnx("h1", "p:alice", { playerName: "Alice" });
+    expect(await store.hgetall("h1")).toEqual({
+      meta: { code: "AB7K" },
+      "p:alice": { playerName: "Alice" },
+    });
+  });
+
+  it("sets a hash field only when it is free, and says which happened", async () => {
+    // The whole point of the primitive: lib/room.ts decides a race on this
+    // boolean, so a store that reported success either way would silently let
+    // two players share one name.
+    const store = await getKvStore();
+    expect(await store.hsetnx("h2", "p:alice", { tracks: 1 })).toBe(true);
+    expect(await store.hsetnx("h2", "p:alice", { tracks: 99 })).toBe(false);
+    expect(await store.hgetall("h2")).toEqual({ "p:alice": { tracks: 1 } });
+  });
+
+  it("removes a hash field", async () => {
+    const store = await getKvStore();
+    await store.hsetnx("h3", "a", 1);
+    await store.hsetnx("h3", "b", 2);
+    await store.hdel("h3", "a");
+    expect(await store.hgetall("h3")).toEqual({ b: 2 });
+  });
+
+  it("leaves a hash immortal until expire is called, as Redis does", async () => {
+    // HSETNX creates a key with no TTL. lib/room.ts is what makes sure the
+    // second call follows, and it deletes the key if that call fails — a room
+    // whose expiry never landed would hold its code forever.
+    vi.useFakeTimers();
+    const store = await getKvStore();
+    await store.hsetnx("h4", "meta", { code: "CD8M" });
+
+    vi.advanceTimersByTime(60 * 60 * 1000);
+    expect(await store.hgetall("h4")).toEqual({ meta: { code: "CD8M" } });
+
+    await store.expire("h4", 60);
+    vi.advanceTimersByTime(61 * 1000);
+    expect(await store.hgetall("h4")).toEqual({});
+  });
+
+  it("does not reset a hash's TTL when a later field is added", async () => {
+    // A room that reset its expiry on every submit would outlive the
+    // `expiresAt` it already handed its clients, and the roster poll uses that
+    // value as its own stop condition.
+    vi.useFakeTimers();
+    const store = await getKvStore();
+    await store.hsetnx("h5", "meta", 1);
+    await store.expire("h5", 60);
+
+    vi.advanceTimersByTime(50 * 1000);
+    await store.hsetnx("h5", "p:late", 1);
+    vi.advanceTimersByTime(11 * 1000);
+
+    expect(await store.hgetall("h5")).toEqual({});
   });
 
   it("shares state across separate getKvStore() calls", async () => {
@@ -191,6 +256,51 @@ describe("getKvStore (Upstash backend)", () => {
 
     expect(await store.mget([])).toEqual([]);
     expect(redisMock.mget).not.toHaveBeenCalled();
+  });
+
+  it("turns HSETNX's 0/1 into the boolean the caller decides a race on", async () => {
+    const { getKvStore: freshGetKvStore } = await import("@/lib/kv");
+    const store = await freshGetKvStore();
+
+    redisMock.hsetnx.mockResolvedValueOnce(1);
+    expect(await store.hsetnx("room:v2:AB7K", "p:alice", { n: 1 })).toBe(true);
+    redisMock.hsetnx.mockResolvedValueOnce(0);
+    expect(await store.hsetnx("room:v2:AB7K", "p:alice", { n: 1 })).toBe(false);
+  });
+
+  it("reads a missing hash as empty rather than null", async () => {
+    const { getKvStore: freshGetKvStore } = await import("@/lib/kv");
+    const store = await freshGetKvStore();
+
+    redisMock.hgetall.mockResolvedValueOnce(null);
+    expect(await store.hgetall("room:v2:ZZZZ")).toEqual({});
+  });
+
+  it("decodes hash fields whether the client parsed them or not", async () => {
+    // The client JSON-parses what it can and hands back the rest as the raw
+    // string, so a room's `meta` object and its bare uuid `consumed` marker come
+    // back in two different shapes. Guessing one of them is a crash mid-party.
+    const { getKvStore: freshGetKvStore } = await import("@/lib/kv");
+    const store = await freshGetKvStore();
+
+    redisMock.hgetall.mockResolvedValueOnce({
+      meta: { code: "AB7K" },
+      "p:bob": '{"playerName":"Bob"}',
+      consumed: "1f2e3d4c-not-json",
+    });
+    expect(await store.hgetall("room:v2:AB7K")).toEqual({
+      meta: { code: "AB7K" },
+      "p:bob": { playerName: "Bob" },
+      consumed: "1f2e3d4c-not-json",
+    });
+  });
+
+  it("sets a TTL as its own command", async () => {
+    const { getKvStore: freshGetKvStore } = await import("@/lib/kv");
+    const store = await freshGetKvStore();
+
+    await store.expire("room:v2:AB7K", 1800);
+    expect(redisMock.expire).toHaveBeenCalledWith("room:v2:AB7K", 1800);
   });
 });
 
