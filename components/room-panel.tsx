@@ -31,10 +31,14 @@ import { roomJobs, trackEvent } from "@/lib/analytics";
 import { DEFAULT_HOST_NAME } from "@/lib/game-session";
 import { apiError, describeError, errorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
-import type { RoomSubmissionSummary } from "@/types/room";
+import {
+  ROOM_POLL_INTERVAL_MS,
+  canPollAgainAfter,
+  pollTickAction,
+} from "@/lib/room-poll";
+import { ROOM_TTL_SECONDS, type RoomSubmissionSummary } from "@/types/room";
 
 const HOST_NAME_STORAGE_KEY = "guesssong_host_name";
-const ROOM_POLL_INTERVAL_MS = 4000;
 
 export interface RoomPanelProps {
   /** Collect playlist URLs from players (Mixed Playlist Mode's QR flow). */
@@ -104,27 +108,115 @@ export function RoomPanel({
     onSubmissionsChange?.(submissions);
   }, [submissions, onSubmissionsChange]);
 
-  const pollStatus = useCallback(async (code: string) => {
+  /**
+   * One poll. Returns false when the mailbox can never answer differently,
+   * which is the loop's signal to stop asking rather than to retry.
+   */
+  const pollStatus = useCallback(async (code: string): Promise<boolean> => {
     try {
       const res = await fetch(`/api/room/${code}/status`);
+      // Which statuses are terminal is policy, and lives in lib/room-poll.ts
+      // where the test suite can reach it.
+      if (!canPollAgainAfter(res.status)) return false;
+      if (!res.ok) return true;
       const data = await res.json();
-      if (!res.ok) return;
       setSubmissions(data.submissions);
       if (data.total > submissionTotalRef.current) {
         submissionTotalRef.current = data.total;
         trackEvent("room_submission_received", { total: data.total });
       }
+      return true;
     } catch {
       // Transient network hiccup while polling — the next tick retries.
+      return true;
     }
   }, []);
 
+  /**
+   * The roster poll, which has to be able to stop.
+   *
+   * This was a bare `setInterval` that ran for as long as the panel was
+   * mounted, and it is the single most expensive thing the app does to Upstash:
+   * two commands a tick (the route's rate-limit `incr`, then the room read),
+   * every four seconds, per open tab. A host who opens a room and walks away —
+   * or just leaves the setup tab parked behind another — spends ~43k commands a
+   * day against a quota of 500k a *month*, and none of it buys anything, since
+   * `ROOM_TTL_SECONDS` deletes the room half an hour in and every poll after
+   * that is a 404 the old code quietly swallowed and retried forever. A dozen
+   * abandoned tabs is the whole monthly budget, spent invisibly on rooms that
+   * no longer exist. Three bounds, because the leak had three ways to run:
+   *
+   *   terminal status  the room is gone or already started — stop for good
+   *   deadline         nothing outlives ROOM_TTL_SECONDS, so neither does this
+   *   visibility       a background tab still fires timers; it just skips the
+   *                    fetch, and polls once on return so the roster is current
+   *
+   * All three decisions are `lib/room-poll.ts`, which the test suite can reach;
+   * what is left here is only the scheduling around them.
+   */
   useEffect(() => {
     if (!room?.collectsPlaylists) return;
     const code = room.code;
-    pollStatus(code);
-    const id = setInterval(() => pollStatus(code), ROOM_POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    const deadline = Date.now() + ROOM_TTL_SECONDS * 1000;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+
+    const stop = () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+    };
+
+    // setTimeout rather than setInterval: a poll that outlasts the interval
+    // would otherwise stack up ticks behind it, which is how a slow network
+    // turns one poller into several.
+    const tick = async () => {
+      if (stopped) return;
+      const action = pollTickAction({
+        now: Date.now(),
+        deadline,
+        visible: document.visibilityState === "visible",
+      });
+      if (action === "stop") {
+        stop();
+        return;
+      }
+      if (action === "fetch" && !(await pollStatus(code))) {
+        stop();
+        return;
+      }
+      if (stopped) return;
+      timer = setTimeout(tick, ROOM_POLL_INTERVAL_MS);
+    };
+
+    void tick();
+
+    const onVisibilityChange = () => {
+      if (stopped) return;
+      // Through the same policy as a tick, not just a visibility check: a tab
+      // restored hours later must not spend a request rediscovering a room the
+      // deadline already knows has expired.
+      const action = pollTickAction({
+        now: Date.now(),
+        deadline,
+        visible: document.visibilityState === "visible",
+      });
+      if (action === "stop") {
+        stop();
+        return;
+      }
+      if (action !== "fetch") return;
+      void pollStatus(code).then((keepGoing) => {
+        if (!keepGoing) stop();
+      });
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [room?.collectsPlaylists, room?.code, pollStatus]);
 
   useEffect(() => {
@@ -206,7 +298,7 @@ export function RoomPanel({
         track_count: data.trackCount,
       });
       // Don't wait for the next poll tick to prove it worked.
-      pollStatus(room.code);
+      void pollStatus(room.code);
     } catch (e: unknown) {
       trackEvent("room_submission_failed", {
         submitted_by: "host",
