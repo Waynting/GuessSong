@@ -53,7 +53,7 @@ Full annotated list in `.env.example`. What actually breaks without each:
 
 | Variable | Missing means |
 |---|---|
-| `SPOTIFY_CLIENT_ID` / `_SECRET` | pasting a playlist URL fails; the three built-in trial playlists still work |
+| `SPOTIFY_CLIENT_ID` / `_SECRET` | no playlist loads at all — every game starts from a pasted URL, so this is total |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | falls back to an in-process `Map`. Fine for `next dev`; **broken on Vercel** — rooms created by one lambda are invisible to another, rate limits reset per instance, caches lose most of their hit rate |
 | `NEXT_PUBLIC_BUZZER_WS_URL` | Buzzer Mode reports rooms unavailable rather than failing at connect time |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | no GA4. The KV loop counters still work |

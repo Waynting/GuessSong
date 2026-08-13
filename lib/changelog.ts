@@ -49,6 +49,27 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.5.0",
+    date: "2026-08-13",
+    headline:
+      "You can now pick any number of songs, and the sample playlists on the home page are gone.",
+    headlineZh: "現在可以自己決定要玩幾首歌，首頁的範例歌單則已移除。",
+    changes: [
+      {
+        kind: "new",
+        text: "Number of Songs has a box you can type into. The buttons are still there for 10, 20, 30, 50 or the whole playlist, but if you want a 7-song round before dinner, type 7. Anything up to 500 works, and a shorter playlist simply plays every track it has.",
+        textZh:
+          "「歌曲數量」多了一個可以自己輸入的欄位。10、20、30、50 和整份歌單的按鈕都還在，但如果你想在晚餐前玩個 7 首，直接輸入 7 就好。最多可以到 500 首；歌單比你輸入的數字短的話，就把它整份播完。",
+      },
+      {
+        kind: "better",
+        text: "The three sample playlists on the home page have been removed, along with the solo round they started. GuessSong is a game for a room full of people, and the home page now says only that: paste a playlist, add names, play.",
+        textZh:
+          "首頁上的三份範例歌單已經移除，連同它們開啟的單人模式一起。GuessSong 是給一屋子人一起玩的遊戲，首頁現在只講這件事：貼上歌單、加入名字、開始玩。",
+      },
+    ],
+  },
+  {
     version: "1.4.0",
     date: "2026-08-13",
     headline:

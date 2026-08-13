@@ -47,15 +47,15 @@ describe("GameMode round-trip (regression: silent downgrade to party)", () => {
 
     const parsed = parseGamePayload(JSON.stringify(payload));
 
-    // Before isGameMode(), the ternary at the old line 125 rewrote anything
-    // that wasn't "trial" to "party" — a buzzer game silently became a party
-    // game on reload, with no error anywhere.
+    // Before isGameMode(), a ternary rewrote every mode it did not name to
+    // "party" — a buzzer game silently became a party game on reload, with no
+    // error anywhere.
     expect(parsed?.mode).toBe("buzzer");
     expect(parsed?.buzzerRoom).toEqual({ code: "AB7K", hostToken: "secret-token", hostName: "Wayn" });
   });
 
   it("still round-trips the pre-existing modes", () => {
-    for (const mode of ["party", "trial"] as const) {
+    for (const mode of ["party"] as const) {
       const parsed = parseGamePayload(
         JSON.stringify(
           buildGamePayload({

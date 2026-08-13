@@ -68,18 +68,18 @@ describe("buildGamePayload", () => {
     expect(payload).not.toHaveProperty("playableTracks");
   });
 
-  it("builds a builtin/trial payload and defaults totalTracks to tracks.length", () => {
+  it("defaults totalTracks to tracks.length", () => {
     const payload = buildGamePayload({
       tracks: [makeTrack({ id: "a" }), makeTrack({ id: "b" }), makeTrack({ id: "c" })],
       players: [{ name: "You", score: 0 }],
       playlistName: "Western Classics",
       clipDuration: 15,
-      playlistSource: "builtin",
-      mode: "trial",
+      playlistSource: "own",
+      mode: "party",
     });
 
-    expect(payload.playlistSource).toBe("builtin");
-    expect(payload.mode).toBe("trial");
+    expect(payload.playlistSource).toBe("own");
+    expect(payload.mode).toBe("party");
     expect(payload.totalTracks).toBe(3);
     expect(payload.players).toEqual([{ name: "You", score: 0 }]);
   });
@@ -90,8 +90,8 @@ describe("buildGamePayload", () => {
       players: [{ name: "You", score: 0 }],
       playlistName: "Mix",
       clipDuration: 5,
-      playlistSource: "builtin",
-      mode: "trial",
+      playlistSource: "own",
+      mode: "party",
     });
     const parsed = parseGamePayload(JSON.stringify(payload));
     expect(parsed).toEqual(payload);
@@ -165,12 +165,16 @@ describe("parseGamePayload", () => {
     expect(parsed!.mode).toBe("party");
   });
 
-  it("parses explicit builtin/trial fields", () => {
+  it("reads a retired builtin/trial payload back as own/party", () => {
+    // The built-in trial playlists were removed, and a game already in
+    // sessionStorage when that shipped still has to be playable. The allow-list
+    // fallback is what makes retiring a member of either union safe: it lands
+    // on the party path rather than failing to parse and dumping the host at /.
     const parsed = parseGamePayload(
       JSON.stringify({ tracks: [], playlistSource: "builtin", mode: "trial" })
     );
-    expect(parsed!.playlistSource).toBe("builtin");
-    expect(parsed!.mode).toBe("trial");
+    expect(parsed!.playlistSource).toBe("own");
+    expect(parsed!.mode).toBe("party");
   });
 
   it("parses explicit mixed playlistSource", () => {
@@ -203,7 +207,7 @@ describe("parseGamePayload", () => {
 
 // Regression: ISSUE-001 — rounds_played overcounted by 1 when the game ended
 // during the "waiting" phase (round not yet started), inflating game_finished
-// data and the trial "You got X / Y" denominator.
+// data.
 // Found by /qa on 2026-06-11
 // Report: .gstack/qa-reports/qa-report-127-0-0-1-8000-2026-06-11.md
 describe("countRoundsPlayed", () => {

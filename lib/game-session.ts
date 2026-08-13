@@ -17,7 +17,7 @@ export const GAME_STORAGE_KEY = "guesssong_game";
  */
 export const DEFAULT_HOST_NAME = "Host";
 
-export type GameMode = "party" | "trial" | "buzzer";
+export type GameMode = "party" | "buzzer";
 
 export interface GamePlayer {
   name: string;
@@ -59,20 +59,24 @@ export interface GamePayload {
   buzzerRoom?: BuzzerRoomHandle;
 }
 
-const PLAYLIST_SOURCES: PlaylistSource[] = ["own", "builtin", "mixed"];
+const PLAYLIST_SOURCES: PlaylistSource[] = ["own", "mixed"];
 
 function isPlaylistSource(value: unknown): value is PlaylistSource {
   return typeof value === "string" && (PLAYLIST_SOURCES as string[]).includes(value);
 }
 
-const GAME_MODES: GameMode[] = ["party", "trial", "buzzer"];
+const GAME_MODES: GameMode[] = ["party", "buzzer"];
 
 /**
- * Allow-list, not a ternary. The previous `d.mode === "trial" ? "trial" : "party"`
- * silently rewrote every unrecognised mode to "party", so adding a member to
- * GameMode changed behaviour without failing anywhere — a sessionStorage
- * round-trip would quietly downgrade a buzzer game into a party game. Extend
- * GAME_MODES whenever GameMode grows and this stays honest.
+ * Allow-list, not a ternary. A ternary that named one mode and sent everything
+ * else to "party" is what this replaced: adding a member to GameMode changed
+ * behaviour without failing anywhere, so a sessionStorage round-trip quietly
+ * downgraded a buzzer game into a party game. Extend GAME_MODES whenever
+ * GameMode grows and this stays honest.
+ *
+ * The fallback is also what retires a mode safely: a game already in
+ * sessionStorage under a mode that no longer exists reads back as "party" and
+ * keeps playing, rather than failing to parse and dumping the host at /.
  */
 function isGameMode(value: unknown): value is GameMode {
   return typeof value === "string" && (GAME_MODES as string[]).includes(value);
@@ -153,8 +157,7 @@ export function mergeRoomRoster(players: GamePlayer[], roster: string[]): GamePl
  * Number of rounds actually played when a game ends. A round counts only
  * once its clip has started; ending during "waiting" means the current
  * round was never played. Keeps game_finished's rounds_played consistent
- * with the number of round_completed events and the trial "You got X / Y"
- * denominator.
+ * with the number of round_completed events.
  */
 export function countRoundsPlayed(currentIndex: number, phase: string): number {
   return currentIndex + (phase === "waiting" ? 0 : 1);

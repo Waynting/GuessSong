@@ -79,7 +79,7 @@ export type { PreviewResult, PreviewStatus };
 export type PreviewSource = "itunes" | "deezer";
 
 export interface PreviewQuery {
-  /** Spotify (or built-in) track id. Keys the cache when present. */
+  /** Spotify track id. Keys the cache when present. */
   id: string;
   track: string;
   artist: string;

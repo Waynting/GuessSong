@@ -193,7 +193,15 @@ Every surface name is declared once in `lib/loop-links.ts` and derived from ther
 
 `types/index.ts` contains only the `Track` interface — the shape stored in sessionStorage and returned by `/api/playlist`. Shared game types (`GamePayload`, `GamePlayer`, `GameMode`) live in `lib/game-session.ts`; room types and constants (`ROOM_TTL_SECONDS`, `ROOM_MAX_SUBMISSIONS`) live in `types/room.ts`; preview wire types and `PREVIEW_BATCH_MAX` live in `types/preview.ts`, kept out of `lib/preview-cache.ts` so the browser bundle doesn't pull in `lib/kv.ts` and the Upstash client; the game page defines its own local `Phase` type.
 
-When adding a value to a union that `parseGamePayload` reads, add a type guard alongside it. The existing `mode` line falls back to `"party"` for anything unrecognised, so a new mode would be silently downgraded rather than rejected — follow the `isPlaylistSource` pattern one line above instead.
+When adding a value to a union that `parseGamePayload` reads, extend that union's allow-list array alongside it (`GAME_MODES`, `PLAYLIST_SOURCES`). Both lines are guards rather than ternaries precisely so a forgotten entry is a value that reads back as the default instead of a member that silently changes behaviour.
+
+**The same fallback is what makes retiring a value safe, and it is the only reason removing one is not a breaking change.** `mode: "trial"` and `playlistSource: "builtin"` were deleted in 1.5.0, and a game sitting in a host's sessionStorage at deploy time still had them. Because the guard falls through to `"party"` / `"own"` rather than rejecting the payload, that game keeps playing instead of failing to parse and bouncing the host to `/` mid-party. `tests/game-session.test.ts` pins it. Anything that "tightens" these guards into rejecting unknown values breaks every in-flight game on every deploy that touches a union.
+
+## Number of Songs
+
+`lib/song-count.ts` holds the control's whole state machine, in `lib/` rather than `app/page.tsx` because the suite only reaches `lib/`. `SongCountState` is `{count, field}` — the count is the answer, the field is what has been typed, and they are separate because a number input passes through states that are not yet a count.
+
+**`typeCustom` rejects out-of-range input and `commitCustom` clamps it. That asymmetry is deliberate and collapsing it reintroduces a shipped bug.** Rejecting per keystroke is what stops a half-typed "150" from committing 1 and then 15. Clamping on blur is what stops the field from being left showing 99 after the host typed 999 — the last in-range prefix, a number nobody typed, from a rule nothing on screen states. One rule for both events gets one of those two wrong.
 
 ## Skill routing
 

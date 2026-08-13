@@ -11,7 +11,7 @@ const COPY: Record<ShareType, { title: string; body: string }> = {
   },
   album: {
     title: "Albums aren't supported yet",
-    body: "Album support is on the roadmap. For now, share a playlist — or try one of the built-in playlists on the home page.",
+    body: "Album support is on the roadmap. For now, open a playlist the album's songs live in (or any playlist you like) and share that instead.",
   },
   artist: {
     title: "That's an artist page",

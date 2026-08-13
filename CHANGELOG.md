@@ -5,6 +5,73 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-08-13
+
+A host-facing control and a deletion, which are the same change seen twice: the
+setup page now asks how many songs and accepts any answer, and it no longer
+offers to play for you. The built-in trial playlists went with the cards, and
+"trial" mode went with them — it had exactly one entry point.
+
+The deletion is the larger half. `lib/builtin-playlists-data.json` was 48 baked
+tracks shipped in the browser bundle for a path that ended in a single-player
+scoreboard, and `app/game/page.tsx` carried a parallel render tree for it:
+its own scoring control, its own finished overlay, its own top-bar counter, its
+own grid. Removing the entry point without the branches would have left ~90
+lines that nothing could reach and a `GameMode` member nothing could produce.
+
+### Added
+
+- **`lib/song-count.ts`** — the Number of Songs control's whole state machine,
+  in `lib/` rather than the component because that is what the suite can reach.
+  `SongCountState` is `{count, field}`: the count is the answer, the field is
+  what has been typed. They are separate because a number input passes through
+  states that are not yet a count (`""`, `"-"`, `"1"` on the way to `"150"`),
+  and the game must not follow the field there.
+  - `typeCustom` runs per keystroke and **rejects** out-of-range input rather
+    than clamping it, so a half-typed number cannot commit.
+  - `commitCustom` runs on blur and **clamps** instead, so 999 answers 500.
+    Rejecting on commit is what the first draft did, and it left the field
+    showing 99 — the last in-range prefix, a number nobody typed, from a rule
+    nothing on screen states. Caught in the browser, not by a test.
+  - `MAX_SONG_COUNT` mirrors `MAX_PLAYLIST_TRACKS` by copy, not import:
+    `lib/spotify.ts` is server code and importing it into the setup page would
+    pull the Spotify client into the browser bundle.
+- `tests/song-count.test.ts` — 26 cases over the pure layer, including the
+  clamp regression, blur idempotency, and an invariant sweep asserting the
+  control can never land on a count the game cannot honour.
+
+### Removed
+
+- **The "Try it now — no playlist needed" section and its three cards**
+  (`app/page.tsx`), plus `handleQuickStart`, the `.trial-*` CSS, and
+  `lib/builtin-playlists.ts` / `-data.json` / `scripts/fetch-builtin-playlists.mjs`
+  / `tests/builtin-playlists.test.ts`.
+- **`GameMode`'s `"trial"` and `PlaylistSource`'s `"builtin"`**, and every
+  branch behind them in `app/game/page.tsx`: `isTrial`, `markTrialCorrect`, the
+  Skip button, the "Correct: N" badge, the trial finished overlay, the
+  `.game-layout.trial` grid, and the `!isTrial` guard that was hiding the
+  sidebar. `correct_count` leaves `game_finished` for the same reason.
+- `roundsPlayedRef` in `app/game/page.tsx` — the trial overlay's "You got X / Y"
+  was its only reader outside `trackGameFinished`, so it had become a ref that
+  carried a value between two adjacent lines.
+
+### Changed
+
+- `parseGamePayload`'s allow-list fallback is now also the retirement path: a
+  game sitting in sessionStorage under `mode: "trial"` when this deploys reads
+  back as `party` and keeps playing, rather than failing to parse and dumping
+  the host at `/`. `tests/game-session.test.ts` pins that.
+
+### Known gaps
+
+- The Number of Songs control is single-playlist only. Mixed mode still offers
+  `MIXED_SAMPLE_COUNTS` (5/8/10/12) per player with no custom field; the same
+  `lib/song-count.ts` state machine would fit it, and the server-side
+  `sampled_per_player_invalid` code already exists to validate the wire value.
+- `app/share/unsupported/page.tsx`'s album copy used to point at the built-in
+  playlists as the way out. It now suggests opening a playlist instead, which
+  is honest but a weaker landing for someone who arrived by sharing an album.
+
 ## [1.4.0] - 2026-08-13
 
 Upstash command volume, audited end to end after 1.3.2's outage traced back to

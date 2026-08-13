@@ -79,9 +79,9 @@ export function getHostGameCount(): number {
  * path that *does* reach here twice — "Play again", which routes back through
  * setup — is a genuine second game and must count as one.
  *
- * Solo trials on a built-in playlist do not call this. They are one person
- * with no party, so counting them as hosting would inflate the only number
- * that answers whether anyone comes back.
+ * Only paths that start a real party call this. Anything that is one person
+ * trying the app must stay out: counting it as hosting would inflate the only
+ * number that answers whether anyone comes back.
  */
 export function bumpHostGameCount(): number {
   return withStorage((storage) => {

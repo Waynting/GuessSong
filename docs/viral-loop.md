@@ -184,7 +184,7 @@ Games by host's game number
 | `shown` | the surface was rendered, once per surface per tab. `share` is the exception — see below |
 | `followed` | someone clicked and the server saw it |
 | `rate` | `followed ÷ shown` |
-| `Games started` | real hosted parties. Solo built-in trials are excluded |
+| `Games started` | real hosted parties — only the paths that call `recordHostedStart` |
 | `Repeat hosts` | games at index ≥ 2. **The number this work is waiting on** |
 
 ---
