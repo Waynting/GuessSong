@@ -256,6 +256,14 @@ async function recordHit(negative = false): Promise<void> {
   }
 }
 
+/**
+ * `misses=` is the running day total and is free — it is what `incr` returns.
+ * The line used to carry `hits=`, `negative=` and a cumulative `rate=` as well,
+ * which cost two extra KV reads on every miss to compose a sentence for a log
+ * nobody tails. `getCacheStats` answers the cumulative question on demand, for
+ * the caller that actually asks it (`npm run stats`), which is where this
+ * project has decided numbers are read.
+ */
 async function recordMiss(
   playlistId: string,
   source: PlaylistLoadSource
@@ -263,11 +271,8 @@ async function recordMiss(
   try {
     const store = await getKvStore();
     const misses = await store.incr(statsKey("miss"), STATS_TTL_SECONDS);
-    const hits = (await store.get<number>(statsKey("hit"))) ?? 0;
-    const negative = (await store.get<number>(statsKey("negative"))) ?? 0;
-    const rate = hits + misses > 0 ? hits / (hits + misses) : 0;
     console.log(
-      `[playlist-cache] miss id=${playlistId} source=${source} hits=${hits} negative=${negative} misses=${misses} rate=${rate.toFixed(3)}`
+      `[playlist-cache] miss id=${playlistId} source=${source} misses=${misses}`
     );
   } catch {
     // Instrumentation must never be able to fail a request.
