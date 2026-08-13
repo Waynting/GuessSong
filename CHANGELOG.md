@@ -5,6 +5,125 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-08-13
+
+Upstash command volume, audited end to end after 1.3.2's outage traced back to
+a spent monthly quota. The audit found that rooms were not the main consumer —
+they are one of five, and the two largest were an idle browser tab and a log
+line. Reviewing the room path for what it actually spent turned up the lost-write
+race that `### Fixed` describes, which is the reason this is a minor and not a
+patch. Nothing here changes what the app does; a party plays identically.
+
+Rough per-command accounting before and after, for the paths that dominate:
+
+| Path | Before | After |
+|---|---|---|
+| Roster poll, 30-min lobby, nobody arriving after minute two | 900 | 240 |
+| Cold 25-track preview batch, cooldown reads alone | up to 50 | 2 |
+| `recordGameStart` (one hosted game) | 6 | 4, then 3 |
+| Playlist/preview miss, log line only | 2 extra each | 0 |
+| `consumeRoomPool` | 3–15 | 3 |
+
+### Changed
+
+- **The roster poll backs off when nothing is happening** (`pollIntervalMs` in
+  `lib/room-poll.ts`). It was a flat 4s for the life of the room, which is two
+  Upstash commands a tick whether or not anyone is still scanning — 450 ticks
+  over `ROOM_TTL_SECONDS`, almost all of them re-reading a roster that stopped
+  changing in minute two. The ladder is 4s → 8s after a minute of silence → 20s
+  after five, and **every arrival resets it**, so a room that is filling polls
+  exactly as fast as it did before. Returning to a backgrounded tab still polls
+  immediately. The existing three bounds (terminal status, deadline, visibility)
+  are unchanged; this bounds the *rate* where those bound the total.
+- **The per-source preview cooldown is memoized in module scope**
+  (`lib/preview-cache.ts`). It is a site-wide, minute-scale signal that
+  `askUpstream` consulted once per source *per track*: a cold 25-song game spent
+  up to 50 KV reads learning the same two answers, more commands than the
+  batch's own writes. A known-future `until` is now trusted without re-reading;
+  "not cooling" is held 5s, far below `MIN_COOLDOWN_SECONDS`, because it is the
+  answer that spends upstream calls. Concurrent resolutions share one read
+  through an in-flight map — without it a batch smaller than `BATCH_CONCURRENCY`
+  never benefited at all. `startCooldown` primes the memo, so a 403 parks the
+  source for the rest of the batch with no round trip.
+- **The loop liveness marker is written once per instance per UTC day**
+  (`lib/loop-stats.ts`). Its reader (`scripts/loop-stats.mjs`) only asks whether
+  the count is above zero, so bumping it alongside every metric doubled the cost
+  of the whole `loop:stats:` namespace — `recordGameStart` spent six commands,
+  three of them on the same key. Recorded as written only after the write
+  lands, so a single failed request cannot cost the day its marker.
+- **Cache miss logs no longer read counters back to compose themselves**
+  (`recordMiss`, `recordOutcomes`). Both spent two extra KV reads per miss —
+  on the path that is by definition already the expensive one — printing a
+  cumulative `rate=` for a log nobody tails. The lines now describe the request
+  they belong to; `getCacheStats()` / `getPreviewCacheStats()` / `npm run stats`
+  answer the cumulative question when someone asks it. Documented in
+  `docs/operations.md` §4 and `CLAUDE.md`.
+
+### Added
+
+- **The `share` surface finally has a denominator.** Every other loop surface is
+  a DOM node, so `components/loop-cta.tsx` and `components/loop-qr.tsx` can
+  report an impression when it renders. This one is a QR painted into a canvas
+  by `drawCardFooter`, so nothing ever fired: `npm run stats` printed `shown=0`
+  against a non-zero `followed`, and a rate of `—` for the one arm that reaches
+  people who have never seen a page of ours. `recordCardImpression` in
+  `app/game/page.tsx` fires it when a card is actually saved. Only `shared` and
+  `downloaded` count — a dismissed sheet and a failed render leave no image, so
+  no QR entered the world and an impression would be a denominator for a card
+  nobody has. The unit is therefore **a party that produced at least one card**,
+  not a card, since the per-tab dedup folds the scores card and the taste card
+  into one. `docs/viral-loop.md` §2 and §6 now say so, and its troubleshooting
+  table gains the `shown=0 but followed>0` row that names this exact shape.
+
+### Fixed
+
+- **Room writes are atomic.** `lib/room.ts` stored the whole room as one JSON
+  value, so two players submitting within the same few seconds — the ordinary
+  case for a QR everyone scans at once — both read it, both added themselves,
+  and the second write dropped the first. There is no CAS on get/set, so the
+  code re-read before writing and read *again* afterwards to detect a clobber,
+  retrying up to five times: four commands on the happy path, ten under
+  contention, and a narrowed window rather than a closed one. A room is now a
+  hash and a contribution is a single `hsetnx` on `p:<folded name>` — one
+  command that wins or loses, with nothing to verify and nothing to retry.
+  `consumeRoomPool` decides its race the same way, on `consumed`.
+- **The roster poll no longer carries the pool.** Track lists moved out of the
+  room record into `room:v2:<CODE>:t:<folded name>`, so a poll reads names and
+  counts instead of dragging every contributor's full playlist across the wire
+  every few seconds to render a dozen chips. `consumeRoomPool` collects them
+  with one `mget`, once, at kickoff.
+- **`createRoom` cannot hand the same code to two hosts.** The check-then-write
+  pair became a single `hsetnx` claim. It also deletes the key if the follow-up
+  `expire` fails, rather than leaving a room with no TTL holding a code Buzzer
+  Mode may be about to reuse.
+
+### Known gaps
+
+- **Rooms open across this deploy will 404.** The key prefix is versioned
+  (`room:v2:`) because the old value is a string and every command here is now a
+  hash command — an unversioned key would answer `WRONGTYPE`, not a polite 404.
+  Old keys are unreachable and age out within `ROOM_TTL_SECONDS`; a host
+  mid-lobby at deploy time sees "room not found" and reopens.
+- **`ROOM_MAX_SUBMISSIONS` may be exceeded by one under a dead heat.** The cap
+  is checked before the playlist fetch and deliberately not re-enforced after
+  the claim: rolling a winner back because a simultaneous submit pushed the
+  count over would turn away someone who did arrive in time. Thirteen
+  contributors instead of twelve is the worse-case outcome, and it is harmless.
+- **A cooldown started by another instance is joined up to 5s late.** Bounded by
+  `COOLDOWN_MEMO_MS` and far below the 30s floor a cooldown ever lasts, so a
+  cooldown is never missed — only entered slightly after it was declared.
+- **A submission landing in the same instant as Start may be pooled and still
+  told 410.** Claiming `consumed` is what decides the consume race, so it has to
+  happen before a simultaneous submit is knowable; if that submit's `hsetnx` won
+  first, its tracks are in the pool while its author sees "the game already
+  started". The old code had the mirror of this (told 410, *not* pooled) through
+  a wider window. Closing it needs a transaction, which get/set/hash cannot
+  give; the visible cost is one confusing message on a millisecond boundary.
+- **The `share` impression can only ever be a floor.** Its `followed` may arrive
+  weeks later from a device that has never seen the site, so numerator and
+  denominator are not the same population and the rate is a spread indicator,
+  not a conversion. `docs/viral-loop.md` §6 spells this out.
+
 ## [1.3.2] - 2026-08-13
 
 A user reported that a public playlist would not load. It loaded fine from
