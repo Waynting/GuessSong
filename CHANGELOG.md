@@ -5,6 +5,77 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-08-13
+
+A user reported that a public playlist would not load. It loaded fine from
+Spotify — the app returned `500` with an empty body on **every** API route, and
+the client, having no `code` to render, fell through to `playlist_load_failed`:
+"Couldn't load that playlist." The message pointed at the host's URL, so they
+re-copied the link from the web player and the desktop app before reporting it.
+
+The cause was Upstash's monthly request cap (500,000 on the free plan) being
+spent, which fails every Redis command until the quota rolls over — days, not
+the seconds a blip costs. Investigating what spent it turned up a second bug,
+and reviewing that turned up a third.
+
+### Fixed
+
+- **`lib/rate-limit.ts` now fails open on a KV error.** It was the only KV
+  consumer in the app that did not — `lib/playlist-cache.ts`,
+  `lib/preview-cache.ts` and `lib/loop-stats.ts` all wrap their calls, and
+  `app/api/pulse/route.ts` even implements the rule locally with a "fail open"
+  comment. `enforceRateLimit` runs at the top of all seven API routes *before*
+  each handler's own `try`/`catch` (`/api/preview` has no `try` at all), so a
+  throwing `incr` escaped the handler and Next answered with a bare 500 and no
+  body. A limiter reads like the one place to fail *closed*, which is why this
+  survived review; the trade is documented at the callsite and in `CLAUDE.md`.
+  Giving up the per-IP ceiling costs little here — the limits mostly blunt
+  guessing against `lib/room.ts`'s 4-char code space, and rooms live in the same
+  KV that is already unreachable. Failure logging is throttled to one line a
+  minute so an exhausted quota is visible without one line per request.
+- **`poolContributions` backfills to the length the host asked for.** A song two
+  contributors both added spends a slot from each of their quotas, so the pool
+  shrank as overlap rose and nothing on the setup screen said so. Measured over
+  3,000 pools of two 40-track playlists at 8 per player: 50% overlap returned
+  12.5 tracks instead of 16, identical playlists returned 8, and each player's
+  *exclusive* tracks fell faster than the total (8 → 4.5 at 50%). The fair pass
+  is unchanged and still runs first; `sampledPerPlayer` is now a starting cap
+  that rises one notch at a time until the target is met or the pool runs dry,
+  raised uniformly so nobody passes `cap` until everyone has reached it. Pool
+  size is now exactly `contributors x sampledPerPlayer` at every overlap level,
+  bounded by the number of distinct songs — a full-length game that repeats a
+  song is worse than an honest short one.
+- **The room roster poll can now stop.** `components/room-panel.tsx` ran a bare
+  `setInterval` bounded only by the panel staying mounted, at two Upstash
+  commands a tick every 4s. A host who opened a room and left the tab parked
+  polled at ~15 requests a minute indefinitely, against rooms `ROOM_TTL_SECONDS`
+  had already deleted — the 404s were swallowed and retried. That is ~43k
+  commands a day per abandoned tab on a 500k-a-month plan. Three bounds now:
+  a terminal status (404 gone, 410 already started), a deadline of
+  `ROOM_TTL_SECONDS` from mount, and a hidden tab (skips the fetch, polls once
+  on return). `setTimeout` replaces `setInterval` so a slow poll cannot stack
+  ticks behind it.
+
+### Changed
+
+- **New `lib/room-poll.ts`.** The three bounds above were written inside the
+  component, where nothing could test them — `vitest.config.ts` collects only
+  `tests/**/*.test.ts` and there is no React testing stack, which is what
+  `lib/analytics.ts` means by keeping its param helpers out of the calling
+  component. `pollTickAction` and `canPollAgainAfter` are pure and now carry the
+  policy; the component keeps only the scheduling. The deadline is checked
+  *before* the fetch, so the last tick of a room's life no longer spends a
+  request learning what the deadline already knew.
+
+### Known gaps
+
+- The Upstash quota is still spent at the time of this release. The site works,
+  but rooms and Mixed Playlist Mode are down until it rolls over, every cache
+  misses, and the global Spotify/preview budgets — themselves KV counters that
+  fail open — are not enforcing. See `docs/operations.md` §5.
+- The scheduling left in `components/room-panel.tsx` (timer wiring, listener
+  cleanup) is still untested; only the policy moved to `lib/`.
+
 ## [1.3.1] - 2026-08-10
 
 Vercel's Fluid Compute bills Active CPU, and this project was at 79.9% of the
