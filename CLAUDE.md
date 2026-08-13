@@ -98,6 +98,8 @@ The host is the judge — there is no automated answer checking. Correct song gu
 
 Production domain is `https://www.guessong.app` (fallback in `app/layout.tsx`, `app/sitemap.ts`, `app/robots.ts`). `app/layout.tsx` also injects GA4 when `NEXT_PUBLIC_GA_MEASUREMENT_ID` is set.
 
+**AdSense's loader lives in `app/layout.tsx`'s `<head>`, not in a `next/script`.** Google's site review looks for it there, and `afterInteractive` would inject it into the body instead. It renders only when `NODE_ENV === "production"`, so `next dev` never reports impressions against the account. `public/ads.txt` carries the same publisher id with the `ca-` prefix stripped — AdSense flags "Earnings at risk" if the file is missing or the two disagree, so changing `NEXT_PUBLIC_ADSENSE_CLIENT_ID` means changing both.
+
 **The five generated images must stay build-time, which means none of them may declare `runtime = "edge"`.** `app/opengraph-image.tsx`, `app/icon.tsx` and the three sizes of `app/icons/[size]` are rasterised by satori, the most CPU-expensive thing the app does. All three carried `runtime = "edge"` from the day they were written until this was found, and edge *disables static generation for the route* — Next says so in a build warning that is easy to read past ("Using edge runtime on a page currently disables static generation for that page"). They were `ƒ` in the route table, ran per request as `edge-function`, and showed up in production logs as `cache: MISS`. The fix was deleting three lines; the output bytes are identical either way, so nothing about this is visible on the page and nothing but the route table will tell you it regressed. `app/icons/[size]` additionally needs its `generateStaticParams` + `dynamicParams = false` to stay — that pair is what prerenders the three sizes and 404s everything else without an invocation.
 
 After touching any of them, check `npm run build`'s route table: `/icon` and `/opengraph-image` must be `○`, `/icons/[size]` must be `●` with all three sizes listed under it. An `ƒ` there is the regression.
@@ -109,6 +111,7 @@ SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET   # Required — Client Credentials on
 UPSTASH_REDIS_REST_URL / _TOKEN             # Required in production — see below
 NEXT_PUBLIC_BASE_URL                        # Optional — defaults to https://www.guessong.app
 NEXT_PUBLIC_GA_MEASUREMENT_ID               # Optional — enables GA4
+NEXT_PUBLIC_ADSENSE_CLIENT_ID               # Optional — AdSense publisher id, defaults to ca-pub-2238954049312975
 SPOTIFY_MAX_LOADS_PER_MINUTE                # Optional — global upstream ceiling, default 40
 PREVIEW_MAX_LOOKUPS_PER_MINUTE              # Optional — global iTunes/Deezer ceiling, default 120
 ```

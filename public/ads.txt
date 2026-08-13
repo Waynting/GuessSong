@@ -1,0 +1,4 @@
+# Served at https://www.guessong.app/ads.txt out of public/.
+# AdSense reports "Earnings at risk" until this file exists and the publisher
+# id matches NEXT_PUBLIC_ADSENSE_CLIENT_ID in app/layout.tsx (minus the "ca-").
+google.com, pub-2238954049312975, DIRECT, f08c47fec0942fa0

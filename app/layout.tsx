@@ -5,6 +5,10 @@ import "./globals.css";
 
 const GA_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "https://www.guessong.app";
+// The publisher id is a public identifier, not a secret — it ships in the
+// script URL on every page and in public/ads.txt, which has to match it.
+const ADSENSE_CLIENT =
+  process.env.NEXT_PUBLIC_ADSENSE_CLIENT_ID || "ca-pub-2238954049312975";
 
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
@@ -104,6 +108,17 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
+        {/* AdSense's loader goes in <head>, which is where the account's site
+            review looks for it — next/script's afterInteractive would put it in
+            the body instead. Skipped outside production so localhost and
+            `next dev` never register impressions against the account. */}
+        {ADSENSE_CLIENT && process.env.NODE_ENV === "production" && (
+          <script
+            async
+            src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
+            crossOrigin="anonymous"
+          />
+        )}
       </head>
       <body>
         {/* Catch beforeinstallprompt before React hydrates — Chrome can fire
