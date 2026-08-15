@@ -6,12 +6,12 @@
  *
  *   - **GA4** — cohorting, sessions, the questions nobody has asked yet. Dies
  *     to an ad blocker.
- *   - **KV, via `/api/pulse` and `/r/[surface]`** — the numbers the weekly
- *     digest pushes to a human without anyone opening a dashboard. Dies to a
- *     spent rate-limit window.
+ *   - **KV, via `/api/pulse` and `/r/[surface]`** — the numbers `npm run stats`
+ *     prints without anyone opening a dashboard. Dies to a spent rate-limit
+ *     window.
  *
- * Neither is a superset. KV is authoritative for the digest; the gap between
- * the two is itself a reading of how much of this audience blocks analytics.
+ * Neither is a superset. KV is authoritative; the gap between the two is itself
+ * a reading of how much of this audience blocks analytics.
  *
  * Keeping both calls behind one function is the point: two call sites per
  * surface would drift, and the drift is silent — one number keeps moving, the
@@ -20,6 +20,7 @@
 
 import { trackEvent } from "@/lib/analytics";
 import type { LoopSurface } from "@/lib/loop-links";
+import type { MixedSubMode } from "@/lib/loop-stats";
 import { sendPulse } from "@/lib/pulse-client";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
@@ -71,12 +72,17 @@ export function reportLoopClick(surface: LoopSurface): void {
 }
 
 /**
- * Call as a hosted game starts, with the device's 1-based game index.
+ * Call as a hosted game starts, with the device's 1-based game index and, for
+ * Mixed Playlist Mode, which route collected the playlists.
  *
  * Sent as a beacon because the caller navigates to `/game` immediately after.
- * GA4 gets the same number as a param on `game_started`; this is the copy the
- * digest can read.
+ * GA4 gets the same numbers as params on `game_started`; this is the copy
+ * `npm run stats` can read.
+ *
+ * `mixed` is omitted rather than sent as a sentinel on a single-playlist game,
+ * so the field's presence is the whole signal and nothing has to agree on what
+ * "none" is called.
  */
-export function reportGameStart(hostGameIndex: number): void {
-  sendPulse({ kind: "game_started", hostGameIndex });
+export function reportGameStart(hostGameIndex: number, mixed?: MixedSubMode): void {
+  sendPulse(mixed ? { kind: "game_started", hostGameIndex, mixed } : { kind: "game_started", hostGameIndex });
 }

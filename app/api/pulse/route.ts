@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
   if (event.kind === "loop_impression") {
     await recordLoopImpression(event.surface);
   } else {
-    await recordGameStart(event.hostGameIndex);
+    await recordGameStart(event.hostGameIndex, event.mixed);
   }
 
   return new NextResponse(null, { status: 204 });

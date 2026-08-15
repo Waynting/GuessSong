@@ -72,7 +72,20 @@ export function computeMostObscure(history: RoundHistoryEntry[]): ObscureAward |
   for (const [playerName, totalTracks] of totals) {
     const correctAttributions = correct.get(playerName) ?? 0;
     const rate = correctAttributions / totalTracks;
-    if (!best || rate < best.rate) {
+    // The tiebreak is load-bearing, not tidiness. A cross-culture room is the
+    // case this award exists for and it is also the case where every rate is
+    // 0 — nobody places anybody's music — so `rate < best.rate` never fires and
+    // a plain scan hands the award to whichever name the Map happened to see
+    // first, i.e. whoever submitted earliest. That reads as a finding and is an
+    // accident of insertion order.
+    //
+    // More tracks wins, because twelve songs nobody could place is a stronger
+    // claim than three. `totalTracks` is already the count of that
+    // contributor's solo tracks that were actually played, so this needs no
+    // extra data and no signature change.
+    const better =
+      !best || rate < best.rate || (rate === best.rate && totalTracks > best.totalTracks);
+    if (better) {
       best = { playerName, correctAttributions, totalTracks, rate };
     }
   }

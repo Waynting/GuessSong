@@ -71,7 +71,7 @@ export interface KvStore {
  *
  * It lives here, next to the store, because the writer and the reader are
  * always in different modules — `lib/loop-redirect.ts` increments a bucket that
- * `lib/digest.ts` reads back a week later — and the two have to produce a
+ * `scripts/loop-stats.mjs` reads back a week later — and the two have to produce a
  * byte-identical string or they address different keys. That failure is silent:
  * nothing errors, the counter simply reads zero forever. Three copies of
  * `new Date().toISOString().slice(0, 10)` were already drifting distance apart

@@ -7,13 +7,20 @@
  * numbers have to arrive somewhere without anyone going to fetch them. Four
  * separate attempts to read the GA4 dashboard have not happened, so any plan
  * whose payoff is "and then open Analytics" has a measured completion rate of
- * zero and must be designed around rather than repeated. These counters feed a
- * digest that is pushed. GA4 keeps the cohorting and the exploration; this is
- * the half that gets read.
+ * zero and must be designed around rather than repeated. GA4 keeps the
+ * cohorting and the exploration; this is the half that gets read.
+ *
+ * **The reader is `npm run stats` (`scripts/loop-stats.mjs`), not a pushed
+ * digest.** An emailed weekly digest was designed and then dropped in favour of
+ * a command, so anything here describing "the digest" was describing a file
+ * that does not exist — `lib/digest.ts` was never written. The distinction
+ * matters when adding a metric: the script discovers keys with `KEYS` rather
+ * than being handed a list, so a new counter needs no registration to be
+ * *counted*, only to be *named* well enough to read.
  *
  * The two will disagree, and that is expected: an ad blocker kills the GA4
  * event and not the redirect, while a spent rate-limit window drops the KV
- * increment and not the GA4 event. **KV is authoritative for the digest.**
+ * increment and not the GA4 event. **KV is authoritative.**
  *
  * ## Every function here is fail-soft
  *
@@ -29,12 +36,11 @@ import type { LoopSurface } from "@/lib/loop-links";
 /**
  * 30 days, not the 7 that `lib/playlist-cache.ts` uses for its own stats.
  *
- * The digest reports a week at a time and its window ends a couple of days
- * back, so a 7-day TTL would expire the oldest day or two of every single
- * report right before it was read — and, worse, an expired key is
- * indistinguishable from one that was never written, so the loss would render
- * as "no data yet" rather than as a gap. 30 days also leaves room to miss a
- * few weeks of digests and still be able to look back.
+ * A report reads a week at a time, so a 7-day TTL would expire the oldest day
+ * or two of every single one right before it was read — and, worse, an expired
+ * key is indistinguishable from one that was never written, so the loss would
+ * render as "no data yet" rather than as a gap. 30 days also leaves room to go
+ * a few weeks without looking and still be able to look back.
  */
 export const LOOP_STATS_TTL_SECONDS = 30 * 24 * 60 * 60;
 
@@ -48,16 +54,46 @@ export const LOOP_STATS_TTL_SECONDS = 30 * 24 * 60 * 60;
  */
 export const HOST_INDEX_CEILING = 10;
 
+/**
+ * Which of Mixed Playlist Mode's two collection routes built a game's pool.
+ *
+ * Lives here rather than in `lib/pulse.ts` for the same reason
+ * `HOST_INDEX_CEILING` does: this module owns the `loop:stats:` key space, and
+ * these two strings become the tail of a key. A guard over this list is what
+ * stands between an unauthenticated request body and `mixed_pool:${anything}`.
+ *
+ * The sub-mode rides on `game_started` rather than arriving as an event of its
+ * own, because it is a property of the game that started rather than a second
+ * thing that happened. All three hosted-start paths already send that event
+ * (`recordHostedStart` in `app/page.tsx`), so a separate event would have
+ * described one occurrence twice and doubled a mixed game's KV cost for no
+ * extra fact.
+ *
+ * Both values are needed because neither is visible anywhere else. The
+ * `join_submitted` surface is rendered only by `/j/[code]`, and `roomJoinUrl`
+ * sends players to `/buzz/[code]` whenever the buzzer is on — so a QR room with
+ * a buzzer, which is the ordinary configuration, and the whole `"phone"` route
+ * are both invisible to every counter that existed before this one.
+ */
+export type MixedSubMode = "room" | "phone";
+
+export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
+
 function key(day: string, metric: string): string {
   return `loop:stats:${day}:${metric}`;
 }
 
 /**
- * Every key the digest reads for one day.
+ * Every key one day of counters can hold.
  *
- * Exported so the reader and the writers derive their keys from one place —
- * the failure mode of two hand-written key formats is that the digest reads a
- * key nobody writes, reports zero, and never errors.
+ * `scripts/loop-stats.mjs` discovers keys with `KEYS` rather than reading this,
+ * so it is not the reader's contract; it is the writer's own description of
+ * itself, and `tests/loop-stats.test.ts` is what holds the two together. That
+ * makes it easy to forget when adding a metric, and forgetting is silent — the
+ * test asserts with `toContain`, so a key missing from here fails nothing. Add
+ * the field anyway: the value of this function is that one place answers "what
+ * can exist under `loop:stats:`", and a description that is only mostly true is
+ * the kind that gets trusted right up until it is wrong.
  */
 export function loopStatsKeys(
   day: string,
@@ -70,6 +106,7 @@ export function loopStatsKeys(
   impressions: Record<string, string>;
   clicks: Record<string, string>;
   hostIndex: string[];
+  mixedPool: Record<MixedSubMode, string>;
 } {
   const impressions: Record<string, string> = {};
   const clicks: Record<string, string> = {};
@@ -89,6 +126,10 @@ export function loopStatsKeys(
     impressions,
     clicks,
     hostIndex,
+    mixedPool: {
+      room: key(day, "mixed_pool:room"),
+      phone: key(day, "mixed_pool:phone"),
+    },
   };
 }
 
@@ -175,11 +216,18 @@ export function recordLoopThrottled(): Promise<void> {
  * without interaction, which is exactly the gap between two parties, so a host
  * on a monthly rhythm reads as first-time forever.
  */
-export async function recordGameStart(hostGameIndex: number): Promise<void> {
+export async function recordGameStart(
+  hostGameIndex: number,
+  mixed?: MixedSubMode
+): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
     : 1;
   await bump("games");
   await bump(`host_index:${index}`);
   if (index >= 2) await bump("repeat_host");
+  // One extra command on a mixed game and none on any other. The alternative
+  // considered was a second pulse event, which would have carried its own
+  // liveness marker and cost a mixed game eight commands where this costs five.
+  if (mixed) await bump(`mixed_pool:${mixed}`);
 }

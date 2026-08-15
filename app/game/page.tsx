@@ -13,12 +13,15 @@ import {
   type GameMode,
   type GamePlayer as Player,
   type BuzzerRoomHandle,
+  type MixedPlaylistMeta,
 } from "@/lib/game-session";
 import { fetchPreview, fetchPreviewBatch } from "@/lib/preview-client";
 import { isPreviewSettled, type PreviewBatchTrack } from "@/types/preview";
 import { BuzzerHostPanel, type BuzzerControls } from "@/components/buzzer-host-panel";
 import { LoopQr } from "@/components/loop-qr";
 import type { RoundHistoryEntry } from "@/lib/round-history";
+import { describeRounds, summarizeRounds } from "@/lib/round-summary";
+import { formatMixList } from "@/lib/mix-export";
 import { buildTasteCard } from "@/lib/taste-card";
 import {
   CARD_FOOTER_HEIGHT,
@@ -121,6 +124,9 @@ export default function GamePage() {
   const [noAudio, setNoAudio] = useState(false);
   const [loadingSkipVisible, setLoadingSkipVisible] = useState(false);
   const [playlistSource, setPlaylistSource] = useState<PlaylistSource>("own");
+  const [mixedMeta, setMixedMeta] = useState<MixedPlaylistMeta | null>(null);
+  const [mixCopied, setMixCopied] = useState(false);
+  const [mixFallback, setMixFallback] = useState<string | null>(null);
   const [mode, setMode] = useState<GameMode>("party");
   const [installCta, setInstallCta] = useState(false);
   // Buzzer Mode only. Null in every other mode, which is also how the panel
@@ -217,6 +223,11 @@ export default function GamePage() {
     setPlaylistSource(data.playlistSource);
     setMode(data.mode);
     setBuzzerRoom(data.buzzerRoom ?? null);
+    // The roster, kept separately from the tracks on purpose. `contributorNames`
+    // is the only record of somebody whose playlist was sampled down to nothing:
+    // they are absent from every track, so anything derived from `tracks` erases
+    // them from an evening they took part in.
+    setMixedMeta(data.mixedPlaylistMeta ?? null);
     gameStartTimeRef.current = Date.now();
   }, [router]);
 
@@ -581,6 +592,30 @@ export default function GamePage() {
     router.push("/");
   }
 
+  /**
+   * Put the merged tracklist on the clipboard.
+   *
+   * The failure path shows the text instead of silently doing nothing: clipboard
+   * access is refused often enough (insecure context, Safari outside a user
+   * gesture, a locked-down work phone) that a button which sometimes no-ops
+   * teaches the host it is broken. A selectable block still gets the list to the
+   * group chat, which is the whole point of the button.
+   */
+  async function copyMixList() {
+    const text = formatMixList({
+      tracks,
+      contributorNames: mixedMeta?.contributorNames ?? [],
+      playlistName,
+    });
+    try {
+      await navigator.clipboard.writeText(text);
+      setMixCopied(true);
+      window.setTimeout(() => setMixCopied(false), 2500);
+    } catch {
+      setMixFallback(text);
+    }
+  }
+
   async function downloadResultImage() {
     const W = 640;
     const rowH = 64;
@@ -664,7 +699,12 @@ export default function GamePage() {
     const sharedSectionH =
       sharedTracks.length > 0 ? 40 + sharedTracks.length * sharedRowH + 20 : 0;
     const awardCount = (tasteCard.mostObscure ? 1 : 0) + (tasteCard.mostMainstream ? 1 : 0);
-    const awardsSectionH = 40 + awardCount * 70 + 20;
+    // Zero awards means zero height, matching how `sharedSectionH` above is
+    // computed. Without this the card reserved room for a heading it then drew
+    // over nothing: both awards are absent exactly when a room shares no taste
+    // and carries no popularity data, which is the cross-culture case this card
+    // is most likely to be saved from.
+    const awardsSectionH = awardCount > 0 ? 40 + awardCount * 70 + 20 : 0;
     const footerH = CARD_FOOTER_HEIGHT;
     const qr = await loopQrDataUrl();
     const H = headerH + sharedSectionH + awardsSectionH + footerH;
@@ -708,11 +748,13 @@ export default function GamePage() {
       y += 20;
     }
 
-    ctx.fillStyle = "#1DB954";
-    ctx.font = "bold 13px sans-serif";
-    ctx.letterSpacing = "1px";
-    ctx.fillText("AWARDS", 40, y + 24);
-    y += 40;
+    if (awardCount > 0) {
+      ctx.fillStyle = "#1DB954";
+      ctx.font = "bold 13px sans-serif";
+      ctx.letterSpacing = "1px";
+      ctx.fillText("AWARDS", 40, y + 24);
+      y += 40;
+    }
 
     if (tasteCard.mostObscure) {
       ctx.font = "13px sans-serif";
@@ -762,6 +804,9 @@ export default function GamePage() {
   const isRevealed = phase === "revealed" || phase === "finished";
   const showAlbumArt = isRevealed || albumHintShown;
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+  // Null on an empty history, so an abandoned or non-mixed game renders nothing
+  // rather than a sentence made of zeroes.
+  const roundSummaryLine = describeRounds(summarizeRounds(roundHistory));
   const maxScore = sortedPlayers[0]?.score ?? 0;
 
   if (tracks.length === 0) {
@@ -1255,12 +1300,44 @@ export default function GamePage() {
         }
         .final-score.podium { color: #888; }
 
+        /* Quiet on purpose. This is a description of the evening, not a result,
+           and it sits directly under a scoreboard that already has the room's
+           attention. */
+        .round-summary {
+          color: #666;
+          font-size: 13px;
+          text-align: center;
+          margin: 4px 0 0;
+          flex-shrink: 0;
+          max-width: 480px;
+        }
+
+        /* Wraps rather than scrolls horizontally, because the point is to
+           select all of it. */
+        .mix-fallback {
+          width: 100%;
+          max-width: 480px;
+          height: 160px;
+          margin-top: 12px;
+          padding: 10px 12px;
+          background: #1a1a1a;
+          color: #ddd;
+          border: 1px solid #333;
+          border-radius: 8px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 12px;
+          line-height: 1.5;
+          resize: vertical;
+          flex-shrink: 0;
+        }
+
         .finished-btn-row {
           display: flex;
           gap: 12px;
           flex-shrink: 0;
           width: 100%;
           max-width: 480px;
+          flex-wrap: wrap;
         }
         .btn-lg {
           flex: 1;
@@ -1741,6 +1818,15 @@ export default function GamePage() {
                 </div>
               )}
 
+              {/* How the scoring actually went, which the scoreboard cannot
+                  show: two rooms reach the same final scores with completely
+                  different rounds behind them. Mixed only, because
+                  `setRoundHistory` only records mixed rounds — a non-mixed game
+                  would render a line built from an empty array. */}
+              {playlistSource === "mixed" && roundSummaryLine && (
+                <p className="round-summary">{roundSummaryLine}</p>
+              )}
+
               {installCta && <InstallCta onInstall={handleInstall} />}
 
               {/* Buttons — always visible, pinned at bottom */}
@@ -1756,7 +1842,25 @@ export default function GamePage() {
                     Save Taste Card
                   </button>
                 )}
+                {playlistSource === "mixed" && (
+                  <button className="btn-lg outline" onClick={copyMixList}>
+                    {mixCopied ? "Copied ✓" : "Copy the Mix"}
+                  </button>
+                )}
               </div>
+
+              {/* Clipboard refused. Showing the text is not a consolation
+                  prize — it is the same payload by a route the browser cannot
+                  veto. */}
+              {mixFallback && (
+                <textarea
+                  className="mix-fallback"
+                  readOnly
+                  value={mixFallback}
+                  onFocus={(e) => e.currentTarget.select()}
+                  aria-label="The mixed playlist, ready to copy"
+                />
+              )}
 
               {/* The room is looking at this screen with their phones already
                   in hand, which is the one moment in the game when a way onward

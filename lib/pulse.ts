@@ -22,11 +22,15 @@
  */
 
 import { isLoopSurface, type LoopSurface } from "@/lib/loop-links";
-import { HOST_INDEX_CEILING } from "@/lib/loop-stats";
+import { HOST_INDEX_CEILING, MIXED_SUB_MODES, type MixedSubMode } from "@/lib/loop-stats";
+
+function isMixedSubMode(value: unknown): value is MixedSubMode {
+  return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
+}
 
 export type PulseEvent =
   | { kind: "loop_impression"; surface: LoopSurface }
-  | { kind: "game_started"; hostGameIndex: number };
+  | { kind: "game_started"; hostGameIndex: number; mixed?: MixedSubMode };
 
 /**
  * Narrows an untrusted request body, or returns null.
@@ -55,7 +59,15 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // never have been accepted in the first place, and rejecting it outright
     // would drop a real game over a corrupted counter.
     const clamped = Math.max(1, Math.min(Math.trunc(index), HOST_INDEX_CEILING));
-    return { kind: "game_started", hostGameIndex: clamped };
+    // Dropped rather than rejected when it is not one of the two known values,
+    // for the same reason the index above is clamped rather than rejected: the
+    // game is real either way, and losing the sub-mode costs one row of detail
+    // while losing the game costs the only number anyone reads. An unrecognised
+    // string must never survive to `mixed_pool:${value}` — that is the field
+    // that becomes a KV key.
+    return isMixedSubMode(raw.mixed)
+      ? { kind: "game_started", hostGameIndex: clamped, mixed: raw.mixed }
+      : { kind: "game_started", hostGameIndex: clamped };
   }
 
   return null;

@@ -72,6 +72,51 @@ describe("computeMostObscure", () => {
     expect(result?.rate).toBe(1);
   });
 
+  it("breaks an all-zero tie by who contributed more, not by insertion order", () => {
+    // The cross-culture room: nobody places anybody's music, so every rate is 0
+    // and a plain `rate < best.rate` scan never fires. Before the tiebreak this
+    // crowned whoever the Map saw first, i.e. whoever submitted earliest — an
+    // award that reads as a finding and is an accident of ordering.
+    const award = computeMostObscure([
+      { trackId: "a1", contributors: ["Ana"], songWinner: null, albumWinner: null, sourceWinner: null },
+      { trackId: "b1", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null },
+      { trackId: "b2", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null },
+      { trackId: "b3", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null },
+    ]);
+    expect(award).toEqual({
+      playerName: "Ben",
+      correctAttributions: 0,
+      totalTracks: 3,
+      rate: 0,
+    });
+  });
+
+  it("still prefers the lower rate over the larger sample", () => {
+    // The tiebreak must only apply on an exact tie. Ana at 0/1 is more obscure
+    // than Ben at 5/10 however many tracks Ben brought.
+    const history = [
+      { trackId: "a1", contributors: ["Ana"], songWinner: null, albumWinner: null, sourceWinner: null },
+      ...Array.from({ length: 10 }, (_, i) => ({
+        trackId: `b${i}`,
+        contributors: ["Ben"],
+        songWinner: null,
+        albumWinner: null,
+        sourceWinner: i < 5 ? "Ana" : null,
+      })),
+    ];
+    expect(computeMostObscure(history)?.playerName).toBe("Ana");
+  });
+
+  it("is stable when the rate and the track count both tie", () => {
+    const history = [
+      { trackId: "a1", contributors: ["Ana"], songWinner: null, albumWinner: null, sourceWinner: null },
+      { trackId: "b1", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null },
+    ];
+    const first = computeMostObscure(history);
+    expect(first).not.toBeNull();
+    expect(computeMostObscure(history)).toEqual(first);
+  });
+
   it("returns null with no history", () => {
     expect(computeMostObscure([])).toBeNull();
   });

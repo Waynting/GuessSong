@@ -8,6 +8,7 @@ import { trackEvent } from "@/lib/analytics";
 import { arrivedFrom } from "@/lib/loop-links";
 import { bumpHostGameCount, recallLoopRef, rememberLoopRef } from "@/lib/host-session";
 import { reportGameStart } from "@/lib/loop-client";
+import type { MixedSubMode } from "@/lib/loop-stats";
 import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
 import {
   AppError,
@@ -115,7 +116,13 @@ const FAQS: { q: string; a: string }[] = [
 ];
 
 type SetupMode = "single" | "mixed";
-type MixedSubMode = "room" | "phone";
+
+// `MixedSubMode` is imported rather than redeclared here. It was a local copy
+// with the same two members until the KV counters started keying off it, and a
+// second copy of a union whose members become part of a key is the shape that
+// drifts silently: the toggle would keep working, the counter would keep
+// counting, and they would be counting different things. Same reason
+// `lib/loop-links.ts` declares its surfaces once.
 
 function SpotifyIcon() {
   return (
@@ -265,7 +272,7 @@ export default function SetupPage() {
         song_count: data.tracks.length,
         playlist_source: "mixed",
         game_mode: room ? "buzzer" : "party",
-        ...recordHostedStart(),
+        ...recordHostedStart("room"),
       });
       trackEvent("room_started", {
         contributor_count: data.players.length,
@@ -313,11 +320,19 @@ export default function SetupPage() {
    *
    * Has side effects: it advances the device's game counter and beacons the
    * new index to `/api/pulse`, which is the only path by which that number
-   * reaches the weekly digest. GA4 gets the same value as a param below.
+   * reaches `npm run stats`. GA4 gets the same value as a param below.
+   *
+   * `mixed` names which route collected the playlists, and the two mixed
+   * callers must pass it. It is the only way either of them appears in KV at
+   * all: the `join_submitted` surface is rendered by `/j/[code]`, but
+   * `roomJoinUrl` sends players to `/buzz/[code]` as soon as the buzzer is on,
+   * and the phone route never shows a join page to anybody. Both were therefore
+   * invisible to every counter, which is not the same as unused — and a
+   * question `npm run stats` cannot answer is one nobody will answer.
    */
-  function recordHostedStart() {
+  function recordHostedStart(mixed?: MixedSubMode) {
     const hostGameIndex = bumpHostGameCount();
-    reportGameStart(hostGameIndex);
+    reportGameStart(hostGameIndex, mixed);
     return {
       host_game_index: hostGameIndex,
       arrived_from: arrivedFrom(recallLoopRef()),
@@ -538,7 +553,7 @@ export default function SetupPage() {
         song_count: pooled.length,
         playlist_source: "mixed",
         game_mode: room ? "buzzer" : "party",
-        ...recordHostedStart(),
+        ...recordHostedStart("phone"),
       });
       trackEvent("mixed_pool_built", {
         contributor_count: mixedContributions.length,
