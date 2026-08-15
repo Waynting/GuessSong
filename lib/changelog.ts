@@ -49,6 +49,35 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.6.0",
+    date: "2026-08-15",
+    headline:
+      "Mixed Playlist games now hand the merged playlist back at the end, and tell you how the guessing actually went.",
+    headlineZh: "混合歌單模式現在會在結束時把合併好的歌單交還給你，並告訴你這一場猜得如何。",
+    changes: [
+      {
+        kind: "new",
+        text: "Copy the Mix. At the end of a Mixed Playlist game there is a button that copies the whole merged tracklist, with each song credited to whoever brought it, ready to paste into your group chat. Anyone who submitted a playlist is named even if none of their songs made the cut — they turned up, so they are on the list.",
+        textZh: "「複製這份混音」。混合歌單模式結束時多了一個按鈕，會把合併後的完整曲目複製起來，每首歌都標著是誰帶來的，可以直接貼到群組裡。有交歌單但一首都沒被抽到的人也會列在名單上 —— 人有來，名字就在。",
+      },
+      {
+        kind: "new",
+        text: "A line under the final scores saying how many songs nobody could name and how many were traced back to the right playlist. Two parties can end on the same scoreboard having had completely different evenings, and this is the part the scoreboard cannot show.",
+        textZh: "最終比分下面多了一行，寫著有幾首歌全場都叫不出名字、有幾首被猜對了出處。兩場派對可能以一樣的比分收場，過程卻完全不同，而那正是比分表看不出來的部分。",
+      },
+      {
+        kind: "fixed",
+        text: "The taste card no longer prints an empty AWARDS heading when a group shares no songs and no awards can be worked out — which is exactly what happens when everyone's music comes from somewhere different.",
+        textZh: "當一群人完全沒有重疊的歌、算不出任何獎項時，品味卡不會再印出一個空的 AWARDS 標題 —— 而那正好是每個人的音樂各來自一方時會發生的情況。",
+      },
+      {
+        kind: "fixed",
+        text: "\"Most obscure taste\" used to go to whoever submitted their playlist first whenever nobody guessed anyone's songs correctly. It now goes to whoever brought the most songs that nobody could place.",
+        textZh: "以前只要全場都沒人猜對任何人的歌，「最冷門品味」就會頒給最早交歌單的那個人。現在會頒給帶了最多首、而且沒人認得出來的那一位。",
+      },
+    ],
+  },
+  {
     version: "1.5.0",
     date: "2026-08-13",
     headline:

@@ -51,6 +51,39 @@ describe("parsePulse — game starts", () => {
   });
 });
 
+describe("parsePulse — the mixed sub-mode", () => {
+  it("accepts both declared sub-modes", () => {
+    for (const mixed of ["room", "phone"] as const) {
+      expect(parsePulse({ kind: "game_started", hostGameIndex: 1, mixed })).toEqual({
+        kind: "game_started",
+        hostGameIndex: 1,
+        mixed,
+      });
+    }
+  });
+
+  it("omits the field entirely on a single-playlist game", () => {
+    const parsed = parsePulse({ kind: "game_started", hostGameIndex: 1 });
+    expect(parsed).toEqual({ kind: "game_started", hostGameIndex: 1 });
+    expect(parsed && "mixed" in parsed).toBe(false);
+  });
+
+  it("drops an undeclared sub-mode rather than letting it reach a KV key", () => {
+    // `mixed_pool:${value}` is a key. An unbounded string arriving there is how
+    // an unauthenticated endpoint turns a counter namespace into a bill.
+    for (const bad of ["Room", "qr", "", "__proto__", 1, true, null, {}]) {
+      const parsed = parsePulse({ kind: "game_started", hostGameIndex: 1, mixed: bad });
+      expect(parsed).toEqual({ kind: "game_started", hostGameIndex: 1 });
+    }
+  });
+
+  it("keeps the game when only the sub-mode is corrupt", () => {
+    // Same trade as the index clamp above: the game is real either way, and
+    // losing one row of detail beats losing the number anyone reads.
+    expect(parsePulse({ kind: "game_started", hostGameIndex: 4, mixed: "nonsense" })).not.toBeNull();
+  });
+});
+
 describe("parsePulse — everything else", () => {
   it("rejects bodies that are not objects", () => {
     for (const bad of [null, undefined, 0, "", "kind", [], true]) {
@@ -71,6 +104,21 @@ describe("parsePulse — everything else", () => {
       hostGameIndex: 99,
     });
     expect(parsed).toEqual({ kind: "loop_impression", surface: "share" });
+  });
+
+  it("still strips unknown fields now that one optional field is legitimate", () => {
+    // `mixed` became a real field on `game_started`, and the risk in adding the
+    // first optional member to a shape that had none is that the parser stops
+    // being a whitelist and starts being a passthrough. This pins that only the
+    // named field survives — including on the event that declares it.
+    const parsed = parsePulse({
+      kind: "game_started",
+      hostGameIndex: 2,
+      mixed: "room",
+      evil: "<script>",
+      surface: "share",
+    });
+    expect(parsed).toEqual({ kind: "game_started", hostGameIndex: 2, mixed: "room" });
   });
 
   it("is not fooled by a prototype-polluting body", () => {

@@ -19,14 +19,20 @@
  * that already lives in `lib/loop-stats.ts`, and that class of drift fails
  * silently — the script would read keys nobody writes and print a confident
  * table of zeros. Discovery also means a metric added later shows up here
- * without anyone remembering to update this file.
+ * without anyone remembering to update this file — though only as far as the
+ * renderers go, which is what the "Other counters" block at the bottom is for.
  *
  * The only shared knowledge is the `loop:stats:` prefix. If that ever changes
  * this prints "no counters found", which is loud rather than wrong.
  *
- * `KEYS` is the wrong tool on a large database. This namespace is a few
- * hundred keys with a 30-day TTL and the command runs by hand, so the usual
- * objection does not apply.
+ * **Discovery uses `SCAN`, not `KEYS`, and that is not a style preference.**
+ * `KEYS` matches against every key in the instance rather than every key under
+ * the prefix, so this namespace's size was never the relevant number:
+ * `lib/preview-cache.ts` writes one key per track and holds positive entries
+ * for a year, and when that set crossed Upstash's ceiling the server began
+ * refusing the command outright. `npm run stats` then exits 1 and prints
+ * nothing, for a reason with no connection to the loop. Anything that walks
+ * this namespace must page a cursor.
  *
  * Usage:
  *   npm run stats            # last 7 complete days
@@ -141,9 +147,43 @@ function pct(numerator, denominator) {
   return `${((numerator / denominator) * 100).toFixed(1).padStart(5)}%`;
 }
 
+/**
+ * Every key under the prefix, walked with `SCAN` rather than `KEYS`.
+ *
+ * `KEYS` was correct about this namespace and wrong about the database. The
+ * loop counters are a few hundred keys with a 30-day TTL — but `KEYS` matches
+ * against *every* key in the instance, and `lib/preview-cache.ts` writes one
+ * per track and holds positive entries for a year. That set grows with the
+ * catalogue, not with the loop, and when it crossed Upstash's ceiling the
+ * server started refusing the command outright:
+ *
+ *     ERR KEYS command is disabled because total number of keys is too large
+ *
+ * The failure mode is what makes this worth the extra code. It is not a slow
+ * report or a partial one: `npm run stats` exits 1 and prints nothing, and it
+ * does so for a reason that has nothing to do with the loop. The one instrument
+ * anybody actually reads went dark because a different namespace grew.
+ *
+ * `SCAN` is O(1) per call and cursor-paged, so it never trips that ceiling.
+ * `MATCH` is applied server-side but *after* the per-call sample, so a page may
+ * legitimately come back empty while the cursor is still non-zero — stopping on
+ * an empty page instead of on cursor 0 is the classic way to read a fraction of
+ * a namespace and report it as the whole thing. `COUNT` is a hint, not a limit.
+ */
+async function scanKeys(match) {
+  const found = [];
+  let cursor = "0";
+  do {
+    const [next, batch] = await redis(["SCAN", cursor, "MATCH", match, "COUNT", "1000"]);
+    cursor = String(next);
+    if (Array.isArray(batch)) found.push(...batch);
+  } while (cursor !== "0");
+  return found;
+}
+
 let keys;
 try {
-  keys = (await redis(["KEYS", `${PREFIX}*`])) ?? [];
+  keys = await scanKeys(`${PREFIX}*`);
 } catch (err) {
   console.error(`\n${err instanceof Error ? err.message : String(err)}\n`);
   process.exit(1);
@@ -157,7 +197,16 @@ if (keys.length === 0) {
   process.exit(0);
 }
 
-const values = await redis(["MGET", ...keys]);
+/**
+ * Chunked because the REST transport puts the whole command in one request, so
+ * a single `MGET` over the namespace grows a request body without bound. 30
+ * days times the metric count is already a few hundred keys and the metric
+ * count only goes up.
+ */
+const values = [];
+for (let i = 0; i < keys.length; i += 256) {
+  values.push(...((await redis(["MGET", ...keys.slice(i, i + 256)])) ?? []));
+}
 const window = new Set(bucketsFor(days));
 
 /** metric -> total, and the set of days that recorded anything at all. */
@@ -237,6 +286,38 @@ if (indices.length > 0) {
     const count = get(`host_index:${n}`);
     const bar = "█".repeat(Math.min(40, Math.round((count / games) * 40)));
     console.log(`  ${String(n).padStart(2)}${n === 10 ? "+" : " "} ${String(count).padStart(5)}  ${bar}`);
+  }
+}
+
+/**
+ * Anything discovered under `loop:stats:` that no block above consumed.
+ *
+ * `KEYS` finds every metric, but every renderer above is written against one
+ * specific key shape, so until this existed a newly added counter was read,
+ * summed, and then silently dropped — and the header of this file promised the
+ * opposite ("a metric added later appears here without anyone editing the
+ * script"). It was true of the discovery and false of the output, which is the
+ * worst place for that split: the number looks like a zero rather than like a
+ * missing renderer, and zero is a real answer here.
+ *
+ * Printing the leftovers generically costs a few lines and closes the class.
+ * A metric that deserves better framing than a raw count gets its own block
+ * above and drops out of this one by being consumed.
+ */
+const RENDERED_EXACT = new Set(["live", "games", "repeat_host", "throttled"]);
+const RENDERED_PREFIXES = ["impression:", "click:", "host_index:"];
+
+const leftovers = [...totals.keys()]
+  .filter(
+    (m) =>
+      !RENDERED_EXACT.has(m) && !RENDERED_PREFIXES.some((p) => m.startsWith(p))
+  )
+  .sort();
+
+if (leftovers.length > 0) {
+  console.log("\nOther counters");
+  for (const metric of leftovers) {
+    console.log(`  ${metric.padEnd(24)}${String(get(metric)).padStart(6)}`);
   }
 }
 

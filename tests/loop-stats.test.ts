@@ -20,6 +20,7 @@ vi.mock("@/lib/kv", () => ({
 const {
   HOST_INDEX_CEILING,
   LOOP_STATS_TTL_SECONDS,
+  MIXED_SUB_MODES,
   loopStatsKeys,
   recordGameStart,
   recordLoopClick,
@@ -59,6 +60,12 @@ describe("the key format is the contract between writer and reader", () => {
     await recordGameStart(3);
     expect(keysWritten()).toContain(expected.games);
     expect(keysWritten()).toContain(expected.hostIndex[2]); // host_index:3
+
+    for (const mixed of ["room", "phone"] as const) {
+      kv.incrs = [];
+      await recordGameStart(1, mixed);
+      expect(keysWritten()).toContain(expected.mixedPool[mixed]);
+    }
   });
 
   it("covers every surface on both sides", () => {
@@ -70,6 +77,17 @@ describe("the key format is the contract between writer and reader", () => {
       expect(keys.clicks[surface]).toBe(`loop:stats:2026-08-09:click:${surface}`);
     }
     expect(keys.hostIndex).toHaveLength(HOST_INDEX_CEILING);
+  });
+
+  it("names a key for every declared mixed sub-mode", () => {
+    // The union and the key map are two places one list has to be right, and
+    // adding a member to the union while forgetting the map fails nothing at
+    // runtime — the counter just never appears.
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    for (const mode of MIXED_SUB_MODES) {
+      expect(keys.mixedPool[mode]).toBe(`loop:stats:2026-08-09:mixed_pool:${mode}`);
+    }
+    expect(Object.keys(keys.mixedPool)).toHaveLength(MIXED_SUB_MODES.length);
   });
 });
 
@@ -108,6 +126,28 @@ describe("the liveness marker", () => {
     const marker = kv.incrs.filter((i) => i.key === live);
     expect(marker).toHaveLength(1);
     expect(kv.incrs).toHaveLength(4);
+  });
+
+  it("adds exactly one command for a mixed game, and none for any other", async () => {
+    // The rejected design was a second pulse event for the pool, which would
+    // have carried its own liveness marker: eight commands for a repeat host's
+    // mixed game where this costs five. Pinning the number is what stops that
+    // creeping back in as "just one more counter".
+    await recordGameStart(2, "room");
+    expect(kv.incrs).toHaveLength(5);
+
+    // Reset the marker memo so the second call pays for it too, otherwise the
+    // comparison is 5-with-a-marker against 3-without and measures the memo
+    // rather than the mixed counter.
+    kv.incrs = [];
+    __resetLivenessForTests();
+    await recordGameStart(2);
+    expect(kv.incrs).toHaveLength(4);
+  });
+
+  it("does not write a mixed key for a single-playlist game", async () => {
+    await recordGameStart(1);
+    expect(keysWritten().some((k) => k.includes("mixed_pool"))).toBe(false);
   });
 
   it("retries the marker on a later event when its write failed", async () => {

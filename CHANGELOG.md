@@ -5,6 +5,128 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-08-15
+
+Mixed Playlist Mode gets an artifact and an instrument, and the loop counters
+learn that it exists at all.
+
+The load-bearing finding is that `npm run stats` could not see Mixed mode.
+`join_submitted` — the highest-converting surface in the product at 32.6%
+(92 shown, 30 followed), against 12.0% for `buzz_cta` and 0.8% for `game_over`
+— is rendered only by `app/j/[code]/page.tsx`, and `roomJoinUrl` sends players
+to `/buzz/[code]?p=1` whenever the buzzer is on (`lib/room-client.ts:125-127`).
+So that number describes *Mixed·QR with the buzzer off* and nothing else: a QR
+room with a buzzer, and the entire `phone` sub-mode, wrote to no counter
+anywhere. It was being read as "Mixed converts at a third" when its denominator
+excluded the ordinary configuration.
+
+The fix is one optional field, not a new event. `recordHostedStart` in
+`app/page.tsx` already beacons `game_started` from all three start paths, so a
+mixed game was already reaching KV — only the discriminator was missing. A
+separate `mixed_pool_built` event was designed and rejected: it would have
+described one occurrence twice and cost a mixed game eight KV commands where
+this costs five.
+
+### Added
+
+- **`mixed` on the `game_started` pulse** (`lib/pulse.ts`, `lib/loop-stats.ts`)
+  — `"room" | "phone"`, absent on a single-playlist game. `MixedSubMode` and
+  `MIXED_SUB_MODES` live in `lib/loop-stats.ts` beside `HOST_INDEX_CEILING`,
+  because that module owns the `loop:stats:` key space and these two strings
+  become the tail of a key. `parsePulse` drops an unrecognised value rather than
+  rejecting the body: the game is real either way, and `mixed_pool:${anything}`
+  from an unauthenticated endpoint is how a counter namespace becomes a bill.
+- **`lib/round-summary.ts`** — `summarizeRounds` / `describeRounds`, the
+  per-round tally printed under the final scores. In `lib/` because the suite
+  only reaches `lib/`, the same reason `lib/song-count.ts` and
+  `lib/room-poll.ts` live there. Counts, never a rate: the denominator is rounds
+  *played*, not rounds possible, so a percentage would invite comparison between
+  games of different lengths stopped for different reasons.
+- **`lib/mix-export.ts`** — `formatMixList`, the merged tracklist as text.
+  **The roster is passed in rather than derived from the tracks.** Deriving it
+  would be shorter and would silently erase anybody whose playlist was sampled
+  down to nothing — `poolContributions` fills to a target and stops, so with
+  enough contributors somebody gets zero, and they queued, scanned, and handed
+  over their music. Text rather than a Spotify playlist because creating one
+  needs user OAuth, and having no accounts is the product's premise.
+- **A generic "Other counters" block in `scripts/loop-stats.mjs`.** `KEYS`
+  discovery already found every metric, but every renderer was written against
+  one key shape, so a newly added counter was read, summed and silently dropped
+  — while the file header promised the opposite. The number then looks like a
+  zero rather than like a missing renderer, and zero is a real answer here.
+  Closing it generically means the next metric never hits this.
+
+### Fixed
+
+- **The taste card drew an `AWARDS` heading over nothing.** `sharedSectionH`
+  was guarded, the awards section was not, so a group with no shared songs and
+  no popularity data got a heading and blank space — which is precisely the
+  cross-culture case the card is most likely to be saved from.
+- **`computeMostObscure` crowned whoever the Map saw first on an all-zero tie.**
+  Every rate is 0 when nobody places anybody's music, so `rate < best.rate`
+  never fired and the award went to whoever submitted earliest. It now breaks
+  the tie on contributed-track count, using the `totals` map the function
+  already builds — no signature change, no extra data.
+- **`mixedPlaylistMeta` had no reader.** Written by both mixed start paths since
+  1.2 and consumed nowhere, so a contributor sampled to zero tracks was
+  invisible to everyone including themselves. `formatMixList` is its first
+  reader.
+
+### Changed
+
+- **`MixedSubMode` is declared once.** `app/page.tsx` had a local copy with the
+  same two members; it is now imported. A second copy of a union whose members
+  become part of a KV key drifts silently — the toggle keeps working, the
+  counter keeps counting, and they count different things.
+- **Five files documented a weekly digest that does not exist.** `lib/kv.ts:74`
+  named `lib/digest.ts` specifically; the cron digest was dropped in favour of
+  `npm run stats` and the comments never followed. Corrected in `lib/kv.ts`,
+  `lib/loop-stats.ts`, `lib/loop-client.ts`, `lib/loop-links.ts` and
+  `lib/analytics.ts`. This cost two wrong conclusions during the review that
+  produced this release.
+- **`loopStatsKeys` gains `mixedPool` and an honest docstring.** It is not the
+  reader's contract — `scripts/loop-stats.mjs` uses `KEYS` — it is the writer's
+  description of itself, held together by one test that asserts with
+  `toContain`, so an omission fails nothing.
+- **`scripts/loop-stats.mjs` walks the namespace with `SCAN`, not `KEYS`.**
+  Found by running `npm run stats` mid-release and getting nothing but
+  `ERR KEYS command is disabled because total number of keys is too large`.
+  `KEYS` matches against every key in the instance, so this namespace's size was
+  never the number that mattered: `lib/preview-cache.ts` writes one key per
+  track and holds positive entries for a year, and that set crossing Upstash's
+  ceiling took the whole report down. **It had been degrading silently before it
+  failed** — the same seven-day window read 5/7 live days, 4918 games and a
+  45.2% `join_submitted` rate under `KEYS`, and 7/7, 6740 and 32.6% under
+  `SCAN`. Every figure from a `KEYS`-era run is a partial sum and the script
+  gave no sign of it. `MGET` is chunked at 256 for the same class of reason: one
+  request body that grows with the namespace.
+
+### Known gaps
+
+- **A room is still single-use.** `consumeRoomPool` claims `consumed` and the
+  room is dead (`lib/room.ts:427`), and `ROOM_TTL_SECONDS` counts down from
+  creation. A second game at the same party needs everyone to re-scan and
+  re-submit. Untouched here; likely to be hit in real use before it is fixed.
+- **The `+2` source guess still has no buzzer affordance.** It uses the player
+  picker even when `buzzerControls` exists, so the most distinctive mechanic in
+  the product is the one part the host must referee by hand.
+- **`game_over` is where the loop's volume is** — 936 impressions in seven days,
+  more than every other surface combined, converting at 0.9%. Its bottleneck is
+  modality, not copy: it is a QR on a TV across the room. Moving it to the
+  phones already holding a socket needs one new `ServerMessage`, which is a
+  Worker deploy. `lib/loop-links.ts:38-41` already documents why `buzz_cta`
+  cannot cover the end of a game.
+- **`game_over` impressions are undercounted.** `firstTimeThisSession` keys
+  sessionStorage by surface alone (`lib/loop-client.ts:39-52`) and `playAgain`
+  is a same-tab `router.push("/")`, so the second game in a tab reports a start
+  and no impression. The rate is therefore *overstated*: real `game_over`
+  conversion is worse than 0.9%. Deliberately deferred — the fix collides with
+  the documented `share`/`game_over` dedupe parity at `app/game/page.tsx:83-85`
+  and changes what `share` counts, and no decision turns on it.
+- **The retreat headcount is unverified.** `ROOM_MAX_SUBMISSIONS` and
+  `BUZZER_MAX_PLAYERS` are both 12, and raising the latter is a Worker deploy
+  because the constant is shared verbatim with it.
+
 ## [1.5.0] - 2026-08-13
 
 A host-facing control and a deletion, which are the same change seen twice: the

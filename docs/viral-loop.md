@@ -264,14 +264,48 @@ figure justifies raising `LOOP_LIMIT` in `app/r/[surface]/route.ts`.
 
 ## 9. Why the script holds no metric list
 
-`scripts/loop-stats.mjs` runs `KEYS loop:stats:*` and parses what comes back
+`scripts/loop-stats.mjs` walks `loop:stats:*` with `SCAN` and parses what comes back
 rather than rebuilding keys from a hardcoded list. That list already exists in
 `lib/loop-stats.ts`, and a second copy would drift silently — the script would
 read keys nobody writes and print a confident table of zeros. Discovery also
-means a metric added later appears here without anyone editing the script.
+means a metric added later appears here without anyone editing the script — as
+far as the *counting* goes. Rendering is per key shape, so a new metric that no
+block recognises falls into the "Other counters" list at the bottom rather than
+being read, summed and silently dropped, which is what used to happen.
 
 The only shared knowledge is the `loop:stats:` prefix, and changing that makes
 the script print "no counters found", which is loud rather than wrong.
 
-`KEYS` is the wrong tool on a large database. This namespace is a few hundred
-keys with a 30-day TTL and the command runs by hand.
+### `SCAN`, not `KEYS`, and the difference is not academic
+
+`KEYS` matches against **every key in the instance**, not every key under the
+prefix — so the size of this namespace was never the number that decided
+whether it worked. `lib/preview-cache.ts` writes one key per track and holds
+positive entries for a year, and when that set crossed Upstash's ceiling the
+server started refusing outright:
+
+```
+ERR KEYS command is disabled because total number of keys is too large, please use SCAN
+```
+
+`npm run stats` then exits 1 and prints nothing, for a reason with no
+connection to the loop. **And it had been wrong before it was loud.** On
+2026-08-15 the same seven-day window read, minutes apart:
+
+| | `KEYS` | `SCAN` |
+|---|---|---|
+| Days with any activity | 5/7 | 7/7 |
+| Games started | 4918 | 6740 |
+| `join_submitted` | 42 shown / 19 followed — 45.2% | 92 / 30 — 32.6% |
+| `game_over` | 936 / 8 — 0.9% | 1274 / 10 — 0.8% |
+
+The truncation was silent and it was not uniform: two whole days of liveness
+markers were missing, which is why the report claimed 5/7 — the exact reading
+§7 says to treat as a plumbing problem rather than a result. **Any figure quoted
+from a run before this fix is a partial sum.** The relative ordering of the
+surfaces survived, which is what §6 says the table is good for; the levels did
+not, which is what §6 says it is not.
+
+`MGET` is chunked at 256 for the neighbouring reason: the REST transport puts
+the whole command in one request body, and that body would otherwise grow with
+the namespace.

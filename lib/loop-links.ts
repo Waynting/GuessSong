@@ -22,7 +22,7 @@
  * same trick `lib/buzzer-protocol.ts` uses to keep the Worker and the client
  * speaking one language. This module stays dependency-free for the same reason
  * that one does: it is imported from a client component, a route handler, and
- * the digest, and nothing here may drag `lib/kv.ts` into a browser bundle.
+ * the KV counters, and nothing here may drag `lib/kv.ts` into a browser bundle.
  */
 
 /**

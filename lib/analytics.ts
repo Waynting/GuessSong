@@ -96,8 +96,8 @@ export type AnalyticsEvent =
          * the hazard is cardinality and user input. Every count param already
          * here (`round_index`, `player_count`, `rounds_played`) is raw, and
          * bucketing at collection time would freeze the boundaries before the
-         * distribution is known. The KV counter behind the digest caps its own
-         * key space separately, where the cardinality actually matters.
+         * distribution is known. The KV counter caps its own key space
+         * separately, where the cardinality actually matters.
          */
         host_game_index?: number;
       };
@@ -315,7 +315,7 @@ export type AnalyticsEvent =
        * The GA4 copy of a number the server also counts on `/r/[surface]`.
        * Both exist on purpose and they will disagree: an ad blocker kills this
        * one and not the redirect, a spent rate-limit window drops the redirect's
-       * count and not this one. **KV is authoritative for the digest**; this
+       * count and not this one. **KV is authoritative**; this
        * half is here for cohorting and for the questions nobody has thought of
        * yet — and the gap between the two is itself a reading of how much of
        * this audience blocks analytics.
