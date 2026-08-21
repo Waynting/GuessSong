@@ -103,6 +103,41 @@ nowhere else, which is the actual bar the policy is asking about.
   lands in English. Better than hiding the section from Chinese readers, but it
   is a seam.
 
+### Fixed after release (2026-08-21, follow-up PR)
+
+Shipped hours after 1.7.0 merged, no version bump: the defect is invisible to
+players, and the repo ties a `package.json` bump to a `lib/changelog.ts` entry
+that the footer overlay prints to them. An entry reading "corrected our hreflang
+annotations" fails the bar every existing entry meets.
+
+- **The policy pages' language clusters were annotated on one side only.**
+  `app/sitemap.ts` gave `/privacy` and `/terms` the full `en`/`zh-TW`/`x-default`
+  set and gave `/zh/privacy` and `/zh/terms` nothing at all. That is precisely
+  what the comment at the top of the same file warns against — "a one-sided
+  declaration is a weaker signal than none" — broken three entries below the
+  line that says it, because the two halves were typed out separately.
+
+  The fix is not the missing values. It is `languageCluster()`: a pair is now
+  one call that computes the annotation set once and hands it to both halves, so
+  writing one side without the other is impossible rather than discouraged. The
+  landing pair goes through it too, which removed the hand-kept
+  `LANGUAGE_ALTERNATES` constant.
+
+- **The four policy pages declared `en` and `zh-TW` but no `x-default`,** unlike
+  `/` and `/zh`. Same cluster, two annotation depths.
+
+- **Both were invisible to the suite, which is the actual finding.**
+  `tests/site-policy.test.ts` asserted that the string `"languages"` appeared in
+  each page — true of a two-tag set and a three-tag set alike. It now parses the
+  block, requires all three tags, and requires both halves of a pair to name
+  identical URLs. `tests/guides.test.ts` gained the property from the other
+  direction: every alternate a sitemap entry names must itself be in the
+  sitemap, carrying an identical set. Both were confirmed to fail against the
+  original defect before being kept.
+
+  A rule stated in a comment did not survive contact with the same file it was
+  written in. That is the lesson worth keeping, not the hreflang.
+
 ## [1.6.0] - 2026-08-15
 
 Mixed Playlist Mode gets an artifact and an instrument, and the loop counters

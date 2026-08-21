@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     "GuessSong 會存什麼、不存什麼，以及有哪些第三方服務參與。這個遊戲沒有帳號、不用登入，遊戲進度留在你自己的瀏覽器裡。",
   alternates: {
     canonical: "/zh/privacy",
-    languages: { en: "/privacy", "zh-TW": "/zh/privacy" },
+    languages: { en: "/privacy", "zh-TW": "/zh/privacy", "x-default": "/privacy" },
   },
 };
 

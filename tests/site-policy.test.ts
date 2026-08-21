@@ -40,17 +40,28 @@ describe("policy pages", () => {
     }
   });
 
-  it("declares each language pair on both sides", () => {
+  it("declares each language pair on both sides, with the same three tags", () => {
     // A one-sided hreflang is a weaker signal than none, the same rule
-    // app/sitemap.ts follows for the / and /zh cluster.
+    // app/sitemap.ts follows. The first version of this test only checked that
+    // the word "languages" appeared, which is why all four pages shipped with
+    // en and zh-TW but no x-default and nothing noticed.
     for (const [en, zh] of [
       ["app/privacy/page.tsx", "app/zh/privacy/page.tsx"],
       ["app/terms/page.tsx", "app/zh/terms/page.tsx"],
     ]) {
       for (const page of [en, zh]) {
         const source = read(page);
-        expect(source, `${page} declares no language alternates`).toContain("languages");
+        const block = source.match(/languages: \{[^}]*\}/)?.[0];
+        expect(block, `${page} declares no language alternates`).toBeDefined();
+        for (const tag of ["en:", '"zh-TW":', '"x-default":']) {
+          expect(block, `${page} is missing ${tag} in its language alternates`).toContain(tag);
+        }
       }
+      // Both halves must name the same URLs, not just the same tags.
+      expect(
+        read(en).match(/languages: \{[^}]*\}/)?.[0],
+        `${en} and ${zh} declare different alternates`
+      ).toBe(read(zh).match(/languages: \{[^}]*\}/)?.[0]);
     }
   });
 });

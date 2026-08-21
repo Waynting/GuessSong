@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     "The terms you accept by using GuessSong: what the game is, what it is not, how it relates to Spotify, iTunes and Deezer, and the limits of the service.",
   alternates: {
     canonical: "/terms",
-    languages: { en: "/terms", "zh-TW": "/zh/terms" },
+    languages: { en: "/terms", "zh-TW": "/zh/terms", "x-default": "/terms" },
   },
 };
 

@@ -129,6 +129,8 @@ Four rules hold this together, and each replaces something that fails silently:
 
 **The guides are English only, deliberately.** `/zh` is written natively rather than translated, so eight translated articles under it would be the one seam in the thing that page is for. The policy pages are bilingual because those have to be readable by the person they bind. `/zh`'s footer links to `/guides` under a Chinese label and lands in English — a known seam, kept because hiding the section from Chinese readers is worse.
 
+**A language pair goes through `languageCluster()` in `app/sitemap.ts`, never two hand-written entries.** The rule it enforces — every URL in a cluster carries the identical annotation set, because a one-sided declaration is a weaker signal than none — was written as a comment at the top of that file and then broken three entries below it, on the policy pages, in the release that added them. The helper computes the set once and gives it to both halves. `tests/guides.test.ts` asserts every alternate a sitemap entry names is itself in the sitemap with a matching set, and `tests/site-policy.test.ts` parses each policy page's `languages` block for all three tags rather than merely grepping for the word.
+
 `/guides`, `/privacy`, `/terms` and `/contact` must stay out of `app/robots.ts`'s disallow list. That list is for ephemeral room codes and the counting redirect; a content page landing in it would be invisible to exactly the crawler it was written for. `tests/site-policy.test.ts` asserts this.
 
 ## Environment Variables
