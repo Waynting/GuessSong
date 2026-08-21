@@ -9,7 +9,6 @@ import { arrivedFrom } from "@/lib/loop-links";
 import { bumpHostGameCount, recallLoopRef, rememberLoopRef } from "@/lib/host-session";
 import { reportGameStart } from "@/lib/loop-client";
 import type { MixedSubMode } from "@/lib/loop-stats";
-import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
 import {
   AppError,
   apiError,
@@ -23,7 +22,8 @@ import { buildGamePayload, GAME_STORAGE_KEY } from "@/lib/game-session";
 import { isBuzzerConfigured } from "@/lib/buzzer-client";
 import type { OpenRoom } from "@/lib/room-client";
 import { RoomPanel } from "@/components/room-panel";
-import { ChangelogModal } from "@/components/changelog-modal";
+import { SiteFooter } from "@/components/site-footer";
+import { getGuide } from "@/lib/guides";
 import { InstallBanner } from "@/components/install-banner";
 import {
   MixedPlaylistCollector,
@@ -88,6 +88,17 @@ async function settleWithConcurrency<T, R>(
 
 // Rendered on the page *and* emitted as FAQPage JSON-LD below — keep the two
 // in sync, Google penalises schema that doesn't match visible content.
+// The three guides linked from the homepage. Resolved through getGuide rather
+// than retyped so the titles here cannot drift from the articles themselves;
+// filtered so a retired slug costs a card instead of crashing the homepage.
+const HOME_GUIDES = [
+  "how-to-host-a-music-quiz-night",
+  "best-playlists-for-a-guess-the-song-game",
+  "spotify-playlist-not-working",
+]
+  .map((slug) => getGuide(slug))
+  .filter((guide): guide is NonNullable<typeof guide> => Boolean(guide));
+
 const FAQS: { q: string; a: string }[] = [
   {
     q: "How do you play the guess the song game?",
@@ -816,6 +827,35 @@ export default function SetupPage() {
           color: #666;
         }
         .seo-p + .seo-p { margin-top: 10px; }
+        .guide-links {
+          margin-top: 14px;
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+          gap: 10px;
+        }
+        .guide-link {
+          display: block;
+          background: #1a1a1a;
+          border: 1px solid #2a2a2a;
+          border-radius: 10px;
+          padding: 14px 16px;
+          text-decoration: none;
+          transition: border-color 0.15s ease;
+        }
+        .guide-link:hover { border-color: #1DB954; }
+        .guide-link-title {
+          color: #f0f0f0;
+          font-size: 14.5px;
+          font-weight: 600;
+          line-height: 1.4;
+          margin-bottom: 4px;
+        }
+        .guide-link-desc {
+          color: #888;
+          font-size: 12.5px;
+          font-weight: 300;
+          line-height: 1.5;
+        }
         .faq-list { margin-top: 12px; display: flex; flex-direction: column; gap: 14px; }
         .faq-q {
           font-size: 13px;
@@ -1363,22 +1403,29 @@ export default function SetupPage() {
             </div>
           </section>
 
-          {/* Footer */}
-          <footer style={{ textAlign: "center", marginTop: "32px", paddingTop: "20px", borderTop: "1px solid var(--border)" }}>
-            <div
-              style={{
-                display: "flex",
-                gap: "10px",
-                justifyContent: "center",
-                alignItems: "center",
-                flexWrap: "wrap",
-              }}
-            >
-              <a href={REPORT_PROBLEM_MAILTO} className="link-btn">Report a problem</a>
-              <span aria-hidden style={{ color: "#333" }}>·</span>
-              <ChangelogModal />
+          {/* Three of the guides, not all eight — this is a teaser under a form,
+              not a second index. HOME_GUIDES names which three; the copy comes
+              from lib/guides.ts so a retitled guide is retitled here too. */}
+          <section className="seo-section">
+            <h2 className="seo-h2">Guides</h2>
+            <p className="seo-p">
+              Longer pieces on running one of these evenings — what to put on, how hard to
+              make it, and what to do when Spotify refuses your link.
+            </p>
+            <div className="guide-links">
+              {HOME_GUIDES.map((guide) => (
+                <a key={guide.slug} href={`/guides/${guide.slug}`} className="guide-link">
+                  <span className="guide-link-title">{guide.navTitle}</span>
+                  <span className="guide-link-desc">{guide.description}</span>
+                </a>
+              ))}
             </div>
-          </footer>
+            <p style={{ marginTop: "14px" }}>
+              <a href="/guides" className="link-btn">All guides →</a>
+            </p>
+          </section>
+
+          <SiteFooter />
 
         </div>
       </main>

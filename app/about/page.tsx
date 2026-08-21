@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
-import { ChangelogModal } from "@/components/changelog-modal";
+import { SiteFooter } from "@/components/site-footer";
+import { GUIDES } from "@/lib/guides";
 
 export const metadata: Metadata = {
   title: "How to Play the Guess the Song Game",
@@ -572,6 +572,25 @@ export default function AboutPage() {
             </div>
           </section>
 
+          {/* Guides */}
+          <section className="fade-in fade-in-6">
+            <p className="eyebrow" style={{ marginBottom: "8px" }}>Guides</p>
+            <h2 className="section-title" style={{ marginBottom: "12px" }}>Go deeper</h2>
+            <p style={{ color: "#999", fontSize: "14px", fontWeight: 300, lineHeight: 1.6, marginBottom: "20px", maxWidth: "560px" }}>
+              This page covers the rules. These cover the evening — what to put on, how hard
+              to set it, how to score it so the last round still matters, and what to do when
+              a playlist refuses to load.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
+              {GUIDES.map((guide) => (
+                <Link key={guide.slug} href={`/guides/${guide.slug}`} className="card feature-card" style={{ textDecoration: "none" }}>
+                  <p className="feature-title">{guide.navTitle}</p>
+                  <p className="feature-desc">{guide.description}</p>
+                </Link>
+              ))}
+            </div>
+          </section>
+
           {/* Star CTA */}
           <section className="fade-in fade-in-6">
             <div className="star-banner">
@@ -598,23 +617,7 @@ export default function AboutPage() {
             </div>
           </section>
 
-          {/* Footer */}
-          <footer style={{ textAlign: "center", paddingTop: "8px", borderTop: "1px solid var(--border)" }}>
-            <div
-              style={{
-                padding: "20px 0 4px",
-                display: "flex",
-                gap: "10px",
-                justifyContent: "center",
-                alignItems: "center",
-                flexWrap: "wrap",
-              }}
-            >
-              <a href={REPORT_PROBLEM_MAILTO} className="link-btn">Report a problem</a>
-              <span aria-hidden style={{ color: "#333" }}>·</span>
-              <ChangelogModal />
-            </div>
-          </footer>
+          <SiteFooter />
         </div>
       </main>
     </>

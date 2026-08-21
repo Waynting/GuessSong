@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { REPORT_PROBLEM_MAILTO } from "@/lib/contact";
-import { ChangelogModal } from "@/components/changelog-modal";
+import { SiteFooter } from "@/components/site-footer";
 
 export const metadata: Metadata = {
   // Unlike the English pages, the H1 here IS the keyword — /zh is not the brand
@@ -428,24 +427,7 @@ export default function ZhPage() {
             </div>
           </section>
 
-          <footer style={{ textAlign: "center", paddingTop: "20px", borderTop: "1px solid var(--border)" }}>
-            <div
-              style={{
-                display: "flex",
-                gap: "10px",
-                justifyContent: "center",
-                alignItems: "center",
-                flexWrap: "wrap",
-              }}
-            >
-              <a href={REPORT_PROBLEM_MAILTO} className="link-btn">回報問題</a>
-              <span aria-hidden style={{ color: "#333" }}>·</span>
-              {/* Chinese notes, to match the page they open from — /zh is written
-                  natively rather than translated, and an English panel here would
-                  be the one seam in it. */}
-              <ChangelogModal locale="zh" />
-            </div>
-          </footer>
+          <SiteFooter locale="zh" />
         </div>
       </main>
     </>

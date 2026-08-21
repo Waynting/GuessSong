@@ -168,6 +168,8 @@ app/
   game/page.tsx              The game — phase machine, playback, scoring, result images
   about/                     "How to play" page
   zh/                        Traditional-Chinese landing page (written natively, not translated)
+  guides/                    Guides index + eight articles (metadata declared in lib/guides.ts)
+  privacy/, terms/, contact/ Policy pages; zh/privacy and zh/terms are the Chinese halves
   j/[code]/                  Mixed Playlist Mode join page
   buzz/[code]/               Buzzer Mode player page (holds the live WebSocket)
   share/                     Web Share Target handler + /share/unsupported explainer

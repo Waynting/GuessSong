@@ -116,6 +116,21 @@ Production domain is `https://www.guessong.app` (fallback in `app/layout.tsx`, `
 
 After touching any of them, check `npm run build`'s route table: `/icon` and `/opengraph-image` must be `○`, `/icons/[size]` must be `●` with all three sizes listed under it. An `ƒ` there is the regression.
 
+### Content pages — the guides, and the policy pages AdSense looks for
+
+`/guides` and its articles, plus `/privacy`, `/terms`, `/contact` and the `/zh` half of the first two, exist because AdSense refused the site under "Low value content" in August 2026. Before them the site had three indexable URLs, two of which were near-duplicates of the first, and no privacy policy at all on a page loading both AdSense and GA4. `CHANGELOG.md` 1.7.0 has the full diagnosis.
+
+Four rules hold this together, and each replaces something that fails silently:
+
+- **`lib/guides.ts` declares a guide once, and four things derive from it** — the route, the `/guides` index, `app/sitemap.ts`, and the "read next" links on its siblings. Hand-syncing those fails the same way `lib/loop-links.ts` does: a guide missing from the sitemap is a page Google never comes back for, and nothing on screen says so. `tests/guides.test.ts` asserts every slug has a directory and vice versa, that each article's own `SLUG` constant matches its path (a copy-pasted article that kept the source's constant renders the wrong canonical under the right URL), and that every guide has at least one inbound sibling link.
+- **`requireGuide`, `guideMetadata` and `formatGuideDate` live in `lib/guides.ts`, not beside the component that calls them.** Same reason `lib/song-count.ts` gives: the suite only reaches `lib/`, and vitest cannot import a `.tsx` module here. `app/guides/guide-shell.tsx` re-exports `guideMetadata` and keeps only the JSX. Moving that logic back into the shell silently drops it out of test range.
+- **`components/site-footer.tsx` is the only place the policy pages are linked from.** It replaced three hand-rolled `<footer>` blocks. A reviewer — Google's or a player's — looks for the privacy policy in the footer, and a page that omits it reads as a page that does not have one; three copies is three chances for one page to lose the link by being edited alone. `tests/site-policy.test.ts` pins that all three landing pages render it, that both privacy pages name AdSense, Analytics and cookies and carry the opt-out link, and that the `/zh` footer contains no English label.
+- **`CATEGORY_BLURB` in `app/guides/page.tsx` is keyed by `GuideCategory`, not `string`.** A new category with no blurb has to be a compile error, not an `undefined` rendered under the heading — the same rule `lib/error-messages.ts` follows for its translation table. `GUIDE_CATEGORIES` is still ordered by hand, and a category added to the union but not to that array makes its guides unreachable from `/guides`; the partition test is what catches that, not the compiler.
+
+**The guides are English only, deliberately.** `/zh` is written natively rather than translated, so eight translated articles under it would be the one seam in the thing that page is for. The policy pages are bilingual because those have to be readable by the person they bind. `/zh`'s footer links to `/guides` under a Chinese label and lands in English — a known seam, kept because hiding the section from Chinese readers is worse.
+
+`/guides`, `/privacy`, `/terms` and `/contact` must stay out of `app/robots.ts`'s disallow list. That list is for ephemeral room codes and the counting redirect; a content page landing in it would be invisible to exactly the crawler it was written for. `tests/site-policy.test.ts` asserts this.
+
 ## Environment Variables
 
 ```
