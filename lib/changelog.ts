@@ -49,6 +49,30 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.7.0",
+    date: "2026-08-21",
+    headline:
+      "There is now a guides section, and every page carries a proper footer with a privacy policy and terms.",
+    headlineZh: "新增了遊戲指南專區，每一頁的頁尾也都有了完整的隱私權政策與服務條款。",
+    changes: [
+      {
+        kind: "new",
+        text: "Guides. Eight longer pieces on running one of these evenings: how to host a music quiz night, how to pick a playlist that actually plays well, what clip length does to a room, how to score a game so the last round still matters, and what to do when a Spotify playlist refuses to load. Linked from the footer of every page.",
+        textZh: "遊戲指南。八篇比較長的文章，講的是怎麼把一場猜歌之夜辦好：怎麼主持、怎麼挑一個真的適合猜的歌單、片段長度會怎麼改變整個房間的氣氛、分數要怎麼算最後一輪才還有意義，以及歌單讀不出來的時候該怎麼辦。每一頁的頁尾都能進去。",
+      },
+      {
+        kind: "new",
+        text: "A privacy policy, terms of use and a contact page — the privacy policy and terms in both English and Chinese. The privacy policy says exactly what is stored and for how long, which for a game with no accounts is a shorter list than you might expect.",
+        textZh: "新增隱私權政策、服務條款和聯絡頁面，其中隱私權政策與服務條款都有中英文版本。隱私權政策明確寫出什麼東西會被存下來、存多久 —— 對一個沒有帳號的遊戲來說，這份清單比你想的短。",
+      },
+      {
+        kind: "better",
+        text: "One footer everywhere. The homepage, the how-to-play page and the Chinese page used to each have their own; now they share one, so the links to the policies, the guides and the release notes are in the same place on every page.",
+        textZh: "頁尾全站統一。首頁、玩法說明頁和中文頁以前各有各的頁尾，現在共用同一個 —— 政策、指南和更新說明的連結，在每一頁都在同一個位置。",
+      },
+    ],
+  },
+  {
     version: "1.6.0",
     date: "2026-08-15",
     headline:

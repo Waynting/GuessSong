@@ -5,6 +5,104 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-08-21
+
+AdSense refused the site under "Low value content" (缺乏價值的內容). This release
+is the response: the policy pages the review looks for, and enough editorial
+content that the site is something other than a form.
+
+The diagnosis was not subtle. `app/robots.ts` disallows `/game`, `/api`,
+`/share`, `/buzz`, `/j` and `/r`, which leaves exactly three indexable URLs —
+`/`, `/about`, `/zh`. `/zh` is `/` in another language and `/about` repeats
+`/`'s FAQ almost verbatim, so the site's unique indexable surface was closer to
+one and a half pages. The homepage's entire prose was the two paragraphs under
+"What is GuessSong?" plus six FAQ answers; everything else on it is form
+controls. And there was no privacy policy at all, on a site whose
+`app/layout.tsx` loads both AdSense and GA4 — that alone is disqualifying, and
+it is the item most likely to have triggered the category.
+
+Eight guides is a judgement, not a target: enough that `/guides` reads as a
+section rather than a gesture, and few enough that every one of them could be
+written from something this project actually knows. Two of them
+(`spotify-playlist-not-working`, `why-spotify-previews-disappeared`) are the
+measured findings already recorded in this file and in CLAUDE.md — the 0/20
+preview result across four markets, the `37i9` 404, the `403`-not-`429`
+throttling signal, the `absent`/`unavailable` distinction. That content exists
+nowhere else, which is the actual bar the policy is asking about.
+
+### Added
+
+- **`/guides` and eight articles under it.** `app/guides/page.tsx` is the index;
+  each article is a real static route at `app/guides/<slug>/page.tsx`. Metadata
+  is declared once in `lib/guides.ts` and derived from there by the route, the
+  index, `app/sitemap.ts` and the "read next" links — the four-copy hand-sync
+  that `lib/loop-links.ts` exists to avoid, and it fails the same silent way
+  here (a guide missing from the sitemap is a page Google never returns for).
+- **`app/guides/guide-shell.tsx`** — wraps every article: title, canonical,
+  dateline, `Article` JSON-LD, related links and closing CTA, all from the slug.
+  `requireGuide` *throws* on an unknown slug rather than rendering a page with
+  holes in it. The slug is written by us in the same file as the prose, so a bad
+  one is a typo that should fail the build, never a visitor's 404. That half —
+  `requireGuide`, `guideMetadata`, `formatGuideDate` — lives in `lib/guides.ts`
+  rather than beside the component, for the reason `lib/song-count.ts` gives:
+  the suite only reaches `lib/`, and a `.tsx` module cannot be imported from it.
+  What stayed in the shell is the part that is actually JSX.
+- **`/privacy`, `/terms`, `/contact`, `/zh/privacy`, `/zh/terms`.** Written
+  against what the code actually does — Client Credentials meaning Spotify is
+  never told who is asking, title-and-artist being all that reaches iTunes and
+  Deezer, room records carrying an expiry from creation, rate-limit counters
+  living for the length of one window. A template would have been faster and
+  wrong in ways a reviewer can check.
+- **`components/site-footer.tsx`** — one footer for the whole site, and the only
+  place the policy pages are linked from. Replaces three hand-rolled `<footer>`
+  blocks in `app/page.tsx`, `app/about/page.tsx` and `app/zh/page.tsx`.
+- **`components/article-shell.tsx`** — shared prose chrome. Server component
+  with no client boundary; these pages are static text and a React state import
+  would cost a bundle for nothing.
+- **`lib/legal.ts`** — the one "last updated" date the four policy pages print.
+  A literal, not a build timestamp: it has to mean "the day the wording changed",
+  not "the day this deployed".
+- **`tests/guides.test.ts`, `tests/site-policy.test.ts`** — 38 assertions over
+  the joins that fail silently. Every slug has a directory and vice versa; every
+  article's `SLUG` constant matches its own path (a copy-pasted article that kept
+  the source's constant renders the wrong canonical under the right URL); every
+  guide has at least one inbound sibling link; the sitemap lists all of them;
+  both privacy pages name AdSense, Analytics and cookies and carry the opt-out
+  link; the `/zh` footer contains no English label; `robots.ts` does not
+  disallow any of the new paths.
+
+### Changed
+
+- `app/sitemap.ts` derives the guide entries from `lib/guides.ts` and adds the
+  five policy URLs, with `hreflang` declared on both sides of each language pair.
+- `app/page.tsx` gains a three-card guides teaser under the FAQ, resolved through
+  `getGuide` rather than retyped, and filtered so a retired slug costs a card
+  instead of crashing the homepage.
+- `app/about/page.tsx` gains a section listing all eight.
+
+### Not done
+
+- **The guides are English only.** `/zh` is written natively rather than
+  translated, so eight translated articles under it would be the one seam in the
+  thing that page is for. The policy pages are bilingual because those have to
+  be readable by the person they bind; the guides can wait for someone to write
+  them in Chinese rather than render them in it.
+- **No `dateModified` maintenance.** `guide-shell.tsx` emits `dateModified`
+  equal to `datePublished`. Correct today, quietly wrong the first time an
+  article is edited. It wants a second field in `lib/guides.ts`, not a build
+  timestamp.
+
+### Known gaps
+
+- Nothing verifies that a guide's prose is still about what its `description`
+  claims. The tests pin the plumbing, not the writing.
+- `GUIDE_CATEGORIES` is ordered by hand. A category added to the union but not
+  to that array makes its guides unreachable from `/guides`; the partition test
+  in `tests/guides.test.ts` is what catches it, not the compiler.
+- The `/zh` footer links to `/guides`, which is English. Labelled in Chinese,
+  lands in English. Better than hiding the section from Chinese readers, but it
+  is a seam.
+
 ## [1.6.0] - 2026-08-15
 
 Mixed Playlist Mode gets an artifact and an instrument, and the loop counters
