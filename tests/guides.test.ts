@@ -214,6 +214,50 @@ describe("sitemap", () => {
     expect(new Set(urls).size).toBe(urls.length);
   });
 
+  it("annotates both halves of every language pair identically", () => {
+    // The rule is written at the top of app/sitemap.ts and was broken three
+    // entries below it in 1.7.0: the policy pages carried en/zh-TW/x-default on
+    // the English half and nothing on the /zh half. A comment did not stop that
+    // and would not stop it again — a one-sided cluster still renders, still
+    // builds, and just reads to Google as a weaker signal than declaring
+    // nothing. This is the assertion that makes it loud.
+    const entries = sitemap();
+    const byUrl = new Map(entries.map((e) => [e.url, e]));
+
+    for (const entry of entries) {
+      const languages = entry.alternates?.languages;
+      if (!languages) continue;
+
+      for (const [tag, target] of Object.entries(languages)) {
+        const href = String(target);
+        // x-default routinely points at a URL already named by another tag;
+        // what matters is that the target is in the sitemap and agrees.
+        const counterpart = byUrl.get(href);
+        expect(
+          counterpart,
+          `${entry.url} names ${tag}=${href}, which is not in the sitemap`
+        ).toBeDefined();
+        expect(
+          counterpart!.alternates?.languages,
+          `${entry.url} and its ${tag} counterpart ${href} declare different alternate sets`
+        ).toEqual(languages);
+      }
+    }
+  });
+
+  it("gives every language pair an x-default", () => {
+    // Without it Google picks the fallback itself, and the whole point of
+    // declaring a cluster is not leaving that to chance.
+    const clustered = sitemap().filter((e) => e.alternates?.languages);
+    expect(clustered.length).toBeGreaterThan(0);
+    for (const entry of clustered) {
+      expect(
+        Object.keys(entry.alternates!.languages!),
+        `${entry.url} declares alternates without an x-default`
+      ).toContain("x-default");
+    }
+  });
+
   it("keeps every URL absolute and on one origin", () => {
     for (const url of urls) {
       expect(url).toMatch(/^https?:\/\//);

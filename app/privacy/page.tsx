@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     "What GuessSong stores, what it does not, and which third parties are involved. GuessSong has no accounts and no login: game state lives in your own browser.",
   alternates: {
     canonical: "/privacy",
-    languages: { en: "/privacy", "zh-TW": "/zh/privacy" },
+    languages: { en: "/privacy", "zh-TW": "/zh/privacy", "x-default": "/privacy" },
   },
 };
 

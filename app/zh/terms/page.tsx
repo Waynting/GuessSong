@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     "使用 GuessSong 即代表你接受的條款：這個遊戲是什麼、不是什麼、它和 Spotify／iTunes／Deezer 的關係，以及服務的限制。",
   alternates: {
     canonical: "/zh/terms",
-    languages: { en: "/terms", "zh-TW": "/zh/terms" },
+    languages: { en: "/terms", "zh-TW": "/zh/terms", "x-default": "/terms" },
   },
 };
 
