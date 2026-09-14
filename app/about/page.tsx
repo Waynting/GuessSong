@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SiteFooter } from "@/components/site-footer";
 import { GUIDES } from "@/lib/guides";
+import { QUIZ_SETUP_HREF } from "@/lib/setup-arrival";
 
 export const metadata: Metadata = {
   title: "How to Play the Guess the Song Game",
   description:
-    "How to play the guess the song game with friends: paste any public Spotify playlist, add players, play short clips and name the track. Includes Mixed Playlist Mode. Free, open source, no login required.",
+    "How to play the guess the song game with friends: paste any public Spotify playlist, add players, play short clips and name the track. Includes Mixed Playlist Mode and the Taste Quiz link. Free, open source, no login required.",
   alternates: { canonical: "/about" },
   openGraph: {
     title: "How to Play the Guess the Song Game | GuessSong",
@@ -114,6 +115,11 @@ const FEATURES = [
     emoji: "📷",
     title: "QR code rooms",
     desc: "No app to install — players scan a code and submit their own playlist from their own phone.",
+  },
+  {
+    emoji: "🔗",
+    title: "Taste Quiz",
+    desc: "Turn a playlist into a link. Friends guess which songs are really yours from their own phone, and a leaderboard says who knows you best.",
   },
   {
     emoji: "🔎",
@@ -524,6 +530,25 @@ export default function AboutPage() {
                 </p>
               </div>
             </div>
+          </section>
+
+          {/* Taste Quiz — the one mode that is not a party. Linked with the
+              explicit ?mode=quiz so the setup page opens on it; a plain "/"
+              lands on Single Playlist with the quiz pill three screens down. */}
+          <section className="fade-in fade-in-3">
+            <p className="eyebrow" style={{ marginBottom: "8px" }}>New · Send a link</p>
+            <h2 className="section-title" style={{ marginBottom: "12px" }}>Taste Quiz 🎧</h2>
+            <p style={{ color: "#999", fontSize: "14px", fontWeight: 300, lineHeight: 1.6, marginBottom: "16px", maxWidth: "560px" }}>
+              Not a party — a link. Paste your playlist, pick how many questions, and send
+              the link to your friends. Each question is two songs and only one is really in
+              your playlist; they guess on their own phone, with a few audio hints for when
+              they&apos;re stuck, and land on a leaderboard of who knows your taste best.
+              Nobody has to be in the same room, nobody logs in, and the link stays open for
+              a week.
+            </p>
+            <Link href={QUIZ_SETUP_HREF} className="link-btn">
+              Make a Taste Quiz →
+            </Link>
           </section>
 
           {/* Scoring */}
