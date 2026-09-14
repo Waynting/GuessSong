@@ -20,9 +20,10 @@ import { loopStatsKeys } from "@/lib/loop-stats";
 import { POST as createQuiz } from "@/app/api/quiz/route";
 import { GET as readQuiz } from "@/app/api/quiz/[code]/route";
 import { POST as answerQuiz } from "@/app/api/quiz/[code]/answer/route";
+import { POST as checkQuiz } from "@/app/api/quiz/[code]/check/route";
 import { GET as hintQuiz } from "@/app/api/quiz/[code]/hint/route";
 import { GET as boardQuiz } from "@/app/api/quiz/[code]/board/route";
-import type { AnswerQuizResponse, CreateQuizResponse, QuizView } from "@/types/quiz";
+import type { AnswerQuizResponse, CheckQuizResponse, CreateQuizResponse, QuizView } from "@/types/quiz";
 import type { Track } from "@/types";
 
 vi.mock("@/lib/playlist-cache", () => ({ loadPlaylist: vi.fn() }));
@@ -73,6 +74,17 @@ const keys = loopStatsKeys(dayBucket(), LOOP_SURFACES);
 async function count(key: string): Promise<number> {
   const store = await getKvStore();
   return (await store.get<number>(key)) ?? 0;
+}
+
+/**
+ * The answer key, read back the way only the server can: the hash is the
+ * only place it is, and an all-correct sheet needs it. Same read
+ * `tests/quiz-store.test.ts` does.
+ */
+async function keyFor(code: string): Promise<number[]> {
+  const store = await getKvStore();
+  const raw = await store.hgetall<unknown>(`quiz:v1:${code}`);
+  return (raw.q as Array<{ answer: number }>).map((q) => q.answer);
 }
 
 /** Each test gets its own address, so the per-IP limiter never crosses tests. */
@@ -199,11 +211,7 @@ describe("the taker's routes", () => {
     expect(await count(keys.quizHint.unavailable)).toBe(before.unavailable + 1);
     expect(await count(keys.quizHint.refresh)).toBe(before.refresh + 1);
 
-    // The key is graded server-side; an all-correct sheet needs it, and the
-    // hash is the only place it is. Same read `tests/quiz-store.test.ts` does.
-    const store = await getKvStore();
-    const raw = await store.hgetall<unknown>(`quiz:v1:${quiz.code}`);
-    const answers = (raw.q as Array<{ answer: number }>).map((q) => q.answer);
+    const answers = await keyFor(quiz.code);
     expect(answers).toHaveLength(view.questionCount);
 
     const answered = await answerQuiz(
@@ -231,6 +239,138 @@ describe("the taker's routes", () => {
     );
     expect(owner.status).toBe(200);
     expect(await count(keys.quiz.board)).toBe(before.board + 1);
+  });
+
+  it("counts a start on the first question's check, once, and no other question's", async () => {
+    const quiz = await make(10);
+    const before = await count(keys.quiz.started);
+    const answers = await keyFor(quiz.code);
+
+    const check = (q: number, pick: number) =>
+      checkQuiz(
+        request(`/api/quiz/${quiz.code}/check`, { method: "POST", body: JSON.stringify({ q, pick }) }),
+        params(quiz.code)
+      );
+
+    // Question zero: the start. The answer comes back whichever half was picked.
+    const first = await check(0, answers[0]);
+    expect(first.status).toBe(200);
+    expect((await first.json()) as CheckQuizResponse).toEqual({ answer: answers[0] });
+    expect(await count(keys.quiz.started)).toBe(before + 1);
+
+    // Every other question: an answer, not a start.
+    for (let q = 1; q < answers.length; q += 1) {
+      const res = await check(q, (answers[q] + 1) % 2);
+      expect(res.status).toBe(200);
+      expect((await res.json()) as CheckQuizResponse).toEqual({ answer: answers[q] });
+    }
+    expect(await count(keys.quiz.started)).toBe(before + 1);
+
+    // Out of range is the store's 422 with the sheet's own code, as on
+    // `answer`; a missing field is the parser's 400. Neither is counted.
+    for (const [q, pick] of [[0, 2], [50, 0], [-1, 0], [0, -1]]) {
+      const res = await check(q, pick);
+      expect(res.status, `q=${q} pick=${pick}`).toBe(422);
+      expect(((await res.json()) as { code: string }).code).toBe("quiz_invalid_answers");
+    }
+    const bare = await checkQuiz(
+      request(`/api/quiz/${quiz.code}/check`, { method: "POST", body: JSON.stringify({ q: 0 }) }),
+      params(quiz.code)
+    );
+    expect(bare.status).toBe(400);
+    expect(((await bare.json()) as { code: string }).code).toBe("quiz_missing_fields");
+    expect(await count(keys.quiz.started)).toBe(before + 1);
+  });
+
+  it("counts no start for a check that answered with anything but a verdict", async () => {
+    // `started` is bumped after `checkQuizAnswer` returns, never before: a
+    // question-zero check on a quiz that is gone, or past this quiz's own
+    // length, or refused by the body parser, or lost to KV is not a friend
+    // who played. Each is also the failure the page reads — a `code`, never
+    // Next's bare 500 with an empty body.
+    const quiz = await make(10);
+    const before = await count(keys.quiz.started);
+    const store = await getKvStore();
+    const post = (code: string, body: string) =>
+      checkQuiz(request(`/api/quiz/${code}/check`, { method: "POST", body }), params(code));
+
+    const gone = await post("ZZZZZZ", JSON.stringify({ q: 0, pick: 0 }));
+    expect(gone.status).toBe(404);
+    expect(((await gone.json()) as { code: string }).code).toBe("quiz_not_found");
+
+    // In the schema's range, past this quiz's ten: the store's 422, with its code.
+    const past = await post(quiz.code, JSON.stringify({ q: 10, pick: 0 }));
+    expect(past.status).toBe(422);
+    expect(((await past.json()) as { code: string }).code).toBe("quiz_invalid_answers");
+
+    // Not JSON at all: the same 400 a missing field gets, before any read.
+    const hgetall = vi.spyOn(store, "hgetall");
+    try {
+      const junk = await post(quiz.code, "{not json");
+      expect(junk.status).toBe(400);
+      expect(((await junk.json()) as { code: string }).code).toBe("quiz_missing_fields");
+      expect(hgetall).not.toHaveBeenCalled();
+    } finally {
+      hgetall.mockRestore();
+    }
+
+    // KV down under the read: a coded 500, and the limiter's own `incr`
+    // has already said yes so the refusal counter does not move either.
+    const down = vi.spyOn(store, "hgetall").mockRejectedValueOnce(new Error("kv down"));
+    try {
+      const failed = await post(quiz.code, JSON.stringify({ q: 0, pick: 0 }));
+      expect(failed.status).toBe(500);
+      expect(((await failed.json()) as { code: string }).code).toBe("server_error");
+    } finally {
+      down.mockRestore();
+    }
+
+    expect(await count(keys.quiz.started)).toBe(before);
+
+    // And the verdict itself is never cached by anything between the phone
+    // and the route: the key for a question is handed over per request.
+    const ok = await post(quiz.code, JSON.stringify({ q: 3, pick: 1 }));
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("counts a refused check as a refusal, on its own generous limit", async () => {
+    const quiz = await make(10);
+    const before = await count(keys.quizThrottled.check);
+    const ip = "10.7.7.7";
+    // Six hundred per window from one address: a room of phones through a
+    // long quiz. The 601st is the refusal, and it is counted as one.
+    for (let i = 0; i < 600; i += 1) {
+      const res = await checkQuiz(
+        request(`/api/quiz/${quiz.code}/check`, { method: "POST", ip, body: JSON.stringify({ q: i % 10, pick: 0 }) }),
+        params(quiz.code)
+      );
+      expect(res.status).toBe(200);
+    }
+    const refused = await checkQuiz(
+      request(`/api/quiz/${quiz.code}/check`, { method: "POST", ip, body: JSON.stringify({ q: 0, pick: 0 }) }),
+      params(quiz.code)
+    );
+    expect(refused.status).toBe(429);
+    expect(await count(keys.quizThrottled.check)).toBe(before + 1);
+
+    // Its own window, not a sibling's: fifty taps must not spend the sheet's
+    // sixty, or the finisher is bounced to the name card — the refusal these
+    // counters exist to see. Read and answer from the same address still go.
+    const refusedRead = await count(keys.quizThrottled.read);
+    const refusedAnswer = await count(keys.quizThrottled.answer);
+    expect((await readQuiz(request(`/api/quiz/${quiz.code}`, { ip }), params(quiz.code))).status).toBe(200);
+    const sheet = await answerQuiz(
+      request(`/api/quiz/${quiz.code}/answer`, {
+        method: "POST",
+        ip,
+        body: JSON.stringify({ name: "after the taps", answers: new Array(10).fill(0) }),
+      }),
+      params(quiz.code)
+    );
+    expect(sheet.status).toBe(200);
+    expect(await count(keys.quizThrottled.read)).toBe(refusedRead);
+    expect(await count(keys.quizThrottled.answer)).toBe(refusedAnswer);
   });
 
   it("counts a refused answer as a refusal, not a completion", async () => {

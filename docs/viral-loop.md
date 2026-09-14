@@ -38,7 +38,7 @@ codes, and last the one surface whose carrier is a URL rather than a QR.
 | `join_submitted` | Mixed Playlist confirmation screen (`app/j/[code]/page.tsx:103`) | after a playlist is submitted |
 | `game_over` | QR on the host's Game Over screen (`app/game/page.tsx`, `<LoopQr />`) | party mode, end of game |
 | `share` | QR drawn into the result card image (`lib/result-image.ts`'s `drawCardFooter`) | wherever the picture ends up |
-| `quiz_result` | the result screen of a Taste Quiz (`app/q/[code]/quiz-client.tsx:530`, `<LoopCtaButton surface="quiz_result">`) | after a taker has submitted their answers |
+| `quiz_result` | the result screen of a Taste Quiz (`app/q/[code]/quiz-client.tsx:1275`, `<LoopCtaButton surface="quiz_result">`) | after a taker has submitted their answers |
 
 `quiz_result` (1.9.0) is the first surface reached by tapping a URL in a group
 chat rather than by scanning a QR off a screen or out of an image. It is kept
@@ -189,7 +189,8 @@ Games by host's game number
 Playlist quiz — the link-shaped surface
   created         12   en 4 · zh 8
   opened          31   2.6 per quiz
-  completed       19    61.3% of opens
+  started         24    77.4% of opens answered a question
+  completed       19    61.3% of opens ·  79.2% of starts
   board            7    58.3% of quizzes had the owner back for results
     acquaintance     7  ██████████████████████████████
     close            6  ██████████████████████████
@@ -214,7 +215,7 @@ Playlist quiz — the link-shaped surface
 ```
 
 (The length, hint and refusal blocks print only once they have something to
-say; a fresh deploy shows the four stages and the verdicts alone.)
+say; a fresh deploy shows the five stages and the verdicts alone.)
 
 | Field | Meaning |
 |---|---|
@@ -224,10 +225,12 @@ say; a fresh deploy shows the four stages and the verdicts alone.)
 | `rate` | `followed ÷ shown` |
 | `Games started` | real hosted parties — only the paths that call `recordHostedStart` |
 | `Repeat hosts` | games at index ≥ 2. **The number this work is waiting on** |
-| `created` / `opened` / `completed` / `board` | the Taste Quiz funnel (`recordQuizStage` in `lib/loop-stats.ts`), bumped by the route that did the thing — `POST /api/quiz`, `GET /api/quiz/[code]`, `POST /api/quiz/[code]/answer`, `GET /api/quiz/[code]/board` — not beaconed from a page, so nothing here is lost to a tab closing. The block is printed only once something has been recorded |
+| `created` / `opened` / `started` / `completed` / `board` | the Taste Quiz funnel (`recordQuizStage` in `lib/loop-stats.ts`), bumped by the route that did the thing — `POST /api/quiz`, `GET /api/quiz/[code]`, `POST /api/quiz/[code]/check` with `q=0`, `POST /api/quiz/[code]/answer`, `GET /api/quiz/[code]/board` — not beaconed from a page, so nothing here is lost to a tab closing. The block is printed only once something has been recorded |
 | `en 4 · zh 8` | the language each quiz was made in (`quiz_locale:<l>`, the `locale` the setup page sends). Which audience the bilingual panel is reaching — the share sentence and the friend's page render in this language |
 | `per quiz` | `opened ÷ created`. Below 1 means quizzes are being made and not sent — a share-step problem, not a quiz problem |
-| `of opens` | `completed ÷ opened`, the quiz itself. **`opened` is a ceiling, not a floor — see §6** |
+| `started` / `answered a question` | the first question's check — the first half tapped, once per attempt, since an answered question is locked. `started ÷ opened` is the intro card: a friend who read it and left. **Dated**: it began with the per-question reveal (1.11.0), so a window straddling that deploy reads low against opens |
+| `of opens` | `completed ÷ opened`, the whole taker side. **`opened` is a ceiling, not a floor — see §6** |
+| `of starts` | `completed ÷ started`, the quiz itself. This, not `of opens`, is the number to read against the length table — but it is a **ceiling on finishing, not a floor**: `completed` is bumped on every replay ("See my result again", and a resend after a lost response) while `started` is bumped once per attempt, so one taker who reopens their result three times is 3 over 1, and the ratio can read above 100%. Read the direction, not the figure |
 | `board` | the owner opened their results page *with the token* — a guessed URL lands on 403 and is not counted. `board ÷ created` is the owner's half of the loop: a quiz whose board is never opened was sent and forgotten. **Also a ceiling** — the page fetches on every mount |
 | the verdict bars | how completed quizzes came out (`quiz_verdict:<bucket>`, from `verdictFor` in `lib/quiz.ts`): `soulmate` ≥ 90%, `close` ≥ 75%, `acquaintance` ≥ 60%, `guessing` ≥ 50% (the band a coin lands in), `stranger` below chance. The difficulty gauge — see §7 |
 | the `questions` table | one row per length that had a quiz made or finished (`quiz_len:created:<n>` / `quiz_len:completed:<n>`). `quizzes` is what hosts chose, tagged `default` / `preset` / `typed` so the typed field's use is visible; `finishers` is answer sheets graded for quizzes of that length; `per quiz` is `finishers ÷ quizzes` — two floors over each other, so unlike `of opens` it needs no ceiling. A row with finishers and no quizzes is a quiz made before the window and finished inside it |
@@ -271,9 +274,13 @@ did".**
   denominator of `of opens`, so that rate reads *low*; `board` inflates the
   numerator of its own rate, so that one reads *high* — either way the
   opposite direction from every other number on this page. `created` and
-  `completed` are floors like the rest:
-  one write per quiz made, one per answer sheet graded, and the length table
-  is built from those two, which is why its `per quiz` needs no correction.
+  `started` are floors like the rest: one write per quiz made, one per
+  attempt's first check. `completed` is one write per sheet the server
+  answered, replays included — "See my result again" re-POSTs the stored row
+  and the route counts it again — so it is exact on sheets and a ceiling on
+  finishers, which is why `of starts` in §5 can read above 100%. The length
+  table is built from `created` and `completed`, so its `per quiz` carries
+  that replay inflation and nothing else: no ceiling in its denominator.
   (The link unfurler in the chat app is not in `opened`: it is bumped by the
   API the page's own script calls, deliberately not by `generateMetadata`,
   which every unfurler fetches.)
@@ -310,7 +317,8 @@ working call to action deleted. Collect two weeks first. Shapes, not numbers:
 | `Repeat hosts` stays low | **not** "nobody returns" | cross-check against GA4 returning users, which rides a cookie and is unaffected by the ITP eviction above |
 | `quiz_result` reads like `share` after two weeks | this audience does not convert off-site, link or QR alike | the reading D9 in `decisions.md` said it would reopen on — a real answer, worth having |
 | `per quiz` below 1 | quizzes are being made and not sent | the share step on the setup page (`components/quiz-panel.tsx`), not the questions |
-| `of opens` well under 40% | takers open and do not finish | read the `questions` table before touching anything: if `per quiz` falls with length, the default is too long — shorten `QUIZ_DEFAULT_QUESTION_COUNT` in `types/quiz.ts`; if it is flat, length is not the reason. Remember `opened` is a ceiling (§6), so `of opens` reads worse than it is, while `per quiz` does not |
+| `of starts` well under 40% | takers start and do not finish | read the `questions` table before touching anything: if `per quiz` falls with length, the default is too long — shorten `QUIZ_DEFAULT_QUESTION_COUNT` in `types/quiz.ts`; if it is flat, length is not the reason |
+| `started` well under `opened` | takers open the card and never tap a half | the intro — the name field and the Start button on `app/q/[code]/quiz-client.tsx` — not the questions. Remember `opened` is a ceiling (§6), so this reads worse than it is |
 | `typed` rows are empty after two weeks | nobody uses the typed field | leave it; it costs nothing on screen. Delete it only if the setup form needs the room |
 | `built shorter` is a large share of `created` | hosts want longer quizzes than their playlists give | say so on the panel (`components/quiz-panel.tsx`) before the link is shared, or cap the picker at the playlist's usable count once it is known |
 | `board` well under `created` | owners send the link and do not come back for results | the board is where the owner's share button is, so this is a second share arm going unused — put the results where the owner already is (the setup page's `QuizPanel` already remembers the last quiz) rather than growing the board |
@@ -319,6 +327,8 @@ working call to action deleted. Collect two weeks first. Shapes, not numbers:
 | `repaired` climbing | the year-long positive cache is rotting under the quiz | expected at a low rate; a jump means the CDN rotated a batch. Nothing to do unless `heard` falls with it |
 | `refused: answer` above 0 | a room of phones behind one address hit the answer limit | raise `QUIZ_ANSWER_LIMIT` in `app/api/quiz/[code]/answer/route.ts` — it was 20 and refused the 21st finisher in an office, which is why it is 60 |
 | `refused: read` above 0 | the same room hit the read limit — opens that never became opens | `QUIZ_READ_LIMIT` in `app/api/quiz/[code]/route.ts`; the two limits are sized together, keep them so |
+| `refused: check` above 0 | a room of phones behind one address answered faster than the check limit — questions answered with no verdict shown, which nobody reports because the page just advances | `QUIZ_CHECK_LIMIT` in `app/api/quiz/[code]/check/route.ts`; it is per question, not per taker, so size it to takers × questions per window. The other half of a lost verdict — timeouts, offline, a slow KV — never reaches the server; GA4's `quiz_check_lost` (bucketed `reason`) is where those are |
+| `refused: card` above 0 | one address asked for more than sixty *uncached* card renders in ten minutes — every one past that was sent the site's generic picture instead | `QUIZ_CARD_LIMIT` in `app/q/[code]/opengraph-image.tsx`. Sixty is sixty different quizzes unfurled through one crawler address; a real chat app's crawler farm spreads over many, so a non-zero here is more likely a scraper than a good day |
 | verdicts pile at `soulmate` | the decoys are too easy to tell from the playlist | the trigger for a Spotify-backed decoy source (`artists/{id}/top-tracks`) — `CHANGELOG.md` 1.9.0, known gaps |
 | verdicts pile at `guessing` and `stranger` | takers are at or below a coin: the decoys are indistinguishable from the playlist, or the link is reaching people who do not know the owner | read the two apart from `close`/`acquaintance` before touching the decoys — a spread that is *only* the bottom two is the sending, not the questions |
 

@@ -133,6 +133,24 @@ export interface AnswerQuizRequest {
   submissionId?: string;
 }
 
+/**
+ * One question answered, for the verdict on it. `pick` is required even
+ * though the answer does not depend on it: the key for a question is handed
+ * over only in exchange for a pick for that question, which is the rule
+ * `getQuizView` keeps one step on.
+ */
+export interface CheckQuizRequest {
+  /** Question index. */
+  q: number;
+  /** Option index the taker chose. */
+  pick: number;
+}
+
+export interface CheckQuizResponse {
+  /** Index of the song that is really in the playlist. Right or wrong is `pick === answer`, the page's to make. */
+  answer: number;
+}
+
 /** One question as the owner's board shows it: the real song, and how many got it. */
 export interface QuizBoardQuestion {
   title: string;

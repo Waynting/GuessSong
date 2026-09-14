@@ -51,6 +51,7 @@ const progress: QuizProgress = {
   code: "ABC234",
   name: "Wayn",
   answers: [1, 0, -1, -1],
+  revealed: [1, 1, -1, -1],
   index: 2,
   hintsLeft: 0,
   charged: [1],
@@ -93,10 +94,12 @@ describe("parseQuizProgress", () => {
   });
 
   it("tolerates the optional fields and rejects the ones a resume cannot do without", () => {
-    const { charged: _charged, at: _at, ...bare } = progress;
-    expect(parseQuizProgress(JSON.stringify([bare]), NOW)).toEqual([{ ...progress, charged: [], at: 0 }]);
+    const { charged: _charged, revealed: _revealed, at: _at, ...bare } = progress;
+    // An entry saved before the reveal shipped has no `revealed`; it resumes, verdicts unknown.
+    expect(parseQuizProgress(JSON.stringify([bare]), NOW)).toEqual([{ ...progress, charged: [], revealed: [], at: 0 }]);
     // A malformed optional field is dropped, not the entry: the resume is worth more than the free re-tap.
     expect(parseQuizProgress(JSON.stringify([{ ...progress, charged: "1" }]), NOW)).toEqual([{ ...progress, charged: [] }]);
+    expect(parseQuizProgress(JSON.stringify([{ ...progress, revealed: [1, "x"] }]), NOW)).toEqual([{ ...progress, revealed: [] }]);
     for (const missing of ["code", "name", "answers", "index", "hintsLeft", "submissionId", "expiresAt"] as const) {
       const entry: Record<string, unknown> = { ...progress };
       delete entry[missing];
@@ -125,7 +128,42 @@ describe("parseQuizProgress", () => {
 describe("fitsQuizProgress", () => {
   it("accepts an entry that matches the quiz as served", () => {
     expect(fitsQuizProgress(progress, quiz)).toBe(true);
-    expect(fitsQuizProgress({ ...progress, answers: [-1, -1, -1, -1], index: 0, hintsLeft: 1, charged: [] }, quiz)).toBe(true);
+    expect(
+      fitsQuizProgress({ ...progress, answers: [-1, -1, -1, -1], revealed: [-1, -1, -1, -1], index: 0, hintsLeft: 1, charged: [] }, quiz)
+    ).toBe(true);
+    // No verdicts at all (an older entry), and a verdict withheld on an answered question (the check never got through).
+    expect(fitsQuizProgress({ ...progress, revealed: [] }, quiz)).toBe(true);
+    expect(fitsQuizProgress({ ...progress, revealed: [1, -1, -1, -1] }, quiz)).toBe(true);
+  });
+
+  it("refuses verdicts that do not fit the questions, or name one the taker never answered", () => {
+    // A verdict is the key for that question, handed over only once it was
+    // answered; one on an unanswered question is not something this page wrote.
+    expect(fitsQuizProgress({ ...progress, revealed: [1, 1, -1] }, quiz)).toBe(false);
+    expect(fitsQuizProgress({ ...progress, revealed: [2, 1, -1, -1] }, quiz)).toBe(false);
+    expect(fitsQuizProgress({ ...progress, revealed: [1, 1, 0, -1] }, quiz)).toBe(false);
+  });
+
+  it("holds the verdicts to the same option range as the answers, and to answered questions only", () => {
+    // Below -1 is not "not told", it is corruption — the same rule the
+    // answers keep. And a verdict on the one unanswered slot at the end is
+    // refused just as one in the middle is: the check is per question, not
+    // "any answered question exists".
+    expect(fitsQuizProgress({ ...progress, revealed: [-2, 1, -1, -1] }, quiz)).toBe(false);
+    expect(fitsQuizProgress({ ...progress, answers: [1, 0, 1, -1], revealed: [1, 1, 0, -1] }, quiz)).toBe(true);
+    expect(fitsQuizProgress({ ...progress, answers: [1, 0, 1, -1], revealed: [1, 1, 0, 0] }, quiz)).toBe(false);
+    // Every question answered and every verdict known: the shape a reload on
+    // the last dwell leaves behind, and the one that must resume.
+    expect(fitsQuizProgress({ ...progress, answers: [1, 0, 1, 0], revealed: [1, 1, 0, 0], index: 3 }, quiz)).toBe(true);
+  });
+
+  it("lets a well-formed but wrong-length verdict list through parsing, and refuses it here", () => {
+    // Parsing keeps any list of integers (an entry is worth more than its
+    // optional field); the fit is where its length is held to this quiz's.
+    // The two rules split so that a resume is never lost to the newer field.
+    const [parsed] = parseQuizProgress(JSON.stringify([{ ...progress, revealed: [1, 1, -1] }]), NOW);
+    expect(parsed.revealed).toEqual([1, 1, -1]);
+    expect(fitsQuizProgress(parsed, quiz)).toBe(false);
   });
 
   it("refuses an entry from a quiz of another shape", () => {

@@ -35,7 +35,7 @@ No `.github/workflows`. Nothing runs the suite before a merge. Before opening a
 pull request:
 
 ```bash
-npm test              # 35 files, 715 tests, ~2s
+npm test              # 40 files, 811 tests, ~2s
 npx tsc --noEmit
 npx eslint app lib components
 npm run build         # see the warning below
@@ -154,7 +154,12 @@ spent:
   answering and the board all read the one hash in KV, and each answers its
   own code (`quiz_create_failed`, `quiz_load_failed`, …) rather than a bare
   500. A link sent before the outage shows "Couldn't load the quiz." until
-  Upstash is back, and its seven-day TTL keeps counting down meanwhile.
+  Upstash is back, and its seven-day TTL keeps counting down meanwhile. A
+  quiz already mid-play degrades rather than stalling: the per-question check
+  fails soft — the question advances with no verdict ("Answered — it counts
+  at the end") and GA4's `quiz_check_lost` is the only record. The link's
+  card falls back to the generic quiz card, held a minute at the edge rather
+  than a day, so it recovers with KV.
 - **Every cache misses**, so each playlist load reaches Spotify and each track
   reaches iTunes/Deezer. The site works and is slower.
 - **The global budgets and the 429 cooldown are gone too**, since they are KV
@@ -225,7 +230,13 @@ the two things that had been quietly dominating the bill were:
   read past. The reliable check is the route table from `npm run build`: `○` and
   `●` cost nothing, `ƒ` runs every time. Three image routes were `ƒ` for months
   and nothing on the page looked wrong, because the bytes are identical either
-  way.
+  way. One `ƒ` image route is deliberate since 1.11.0:
+  `/q/[code]/opengraph-image`, the per-quiz chat card, which cannot be built
+  ahead because the owner's name is in KV. What bounds it is its own
+  `s-maxage` header (one render per quiz per region per day at the edge) and
+  the `quiz:card` limiter, not static generation — CLAUDE.md's "SEO /
+  Metadata" has the rule. Do not "fix" it back to `○`; in the logs a
+  `cache: MISS` on it should be rare, not absent.
 - **A client retrying something that can never succeed.** A cached 404 answers
   in ~100ms, which is faster than a button re-enables, so a host tapping Start on
   a dead playlist generated bursts of fourteen billed invocations that all

@@ -295,19 +295,23 @@ if (indices.length > 0) {
 }
 
 /**
- * The playlist quiz funnel: created → opened → completed → board, then the
- * share surface's own row above. Each stage is a server-side count (the route
- * that did the thing bumps it), so unlike the surface table nothing here is
- * lost to a page tearing down; only a spent rate-limit window can drop one —
- * and those are counted too, per route, in the "refused" line.
+ * The playlist quiz funnel: created → opened → started → completed → board,
+ * then the share surface's own row above. Each stage is a server-side count
+ * (the route that did the thing bumps it), so unlike the surface table
+ * nothing here is lost to a page tearing down; only a spent rate-limit
+ * window can drop one — and those are counted too, per route, in the
+ * "refused" line.
  *
  * Reading it: opens per quiz below 1 means owners are not sending the link —
- * a share-step problem, not a quiz problem. completed ÷ opened is the quiz
- * itself; below about 40% the default is too long, and the length table is
- * what says *which* lengths. board ÷ created is the owner coming back for
- * the results. The verdict spread is the difficulty gauge: a pile at
- * "soulmate" means the decoys are too easy to spot, and that is the trigger
- * for spending an upstream call on better ones.
+ * a share-step problem, not a quiz problem. started ÷ opened is the intro
+ * (a friend who read the card and left); completed ÷ started is the quiz
+ * itself — below about 40% the default is too long, and the length table is
+ * what says *which* lengths. `started` is dated: it is the first question's
+ * check, which shipped with the per-question reveal, so a window straddling
+ * that deploy reads low against opens. board ÷ created is the owner coming
+ * back for the results. The verdict spread is the difficulty gauge: a pile
+ * at "soulmate" means the decoys are too easy to spot, and that is the
+ * trigger for spending an upstream call on better ones.
  *
  * The hint line is the quiz's only per-question upstream path. `heard per
  * completed` next to the allowance says whether the ration holds;
@@ -316,6 +320,7 @@ if (indices.length > 0) {
  */
 const quizCreated = get("quiz:created");
 const quizOpened = get("quiz:opened");
+const quizStarted = get("quiz:started");
 const quizCompleted = get("quiz:completed");
 const quizBoard = get("quiz:board");
 const verdicts = [...totals.keys()]
@@ -345,7 +350,7 @@ function lengthsFor(stage) {
   return out;
 }
 
-if (quizCreated + quizOpened + quizCompleted + quizBoard > 0) {
+if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard > 0) {
   console.log("\nPlaylist quiz — the link-shaped surface");
 
   const locales = [...totals.keys()]
@@ -360,7 +365,10 @@ if (quizCreated + quizOpened + quizCompleted + quizBoard > 0) {
   console.log(
     `  opened      ${String(quizOpened).padStart(6)}   ${(quizCreated ? quizOpened / quizCreated : 0).toFixed(1)} per quiz`
   );
-  console.log(`  completed   ${String(quizCompleted).padStart(6)}   ${pct(quizCompleted, quizOpened)} of opens`);
+  console.log(`  started     ${String(quizStarted).padStart(6)}   ${pct(quizStarted, quizOpened)} of opens answered a question`);
+  console.log(
+    `  completed   ${String(quizCompleted).padStart(6)}   ${pct(quizCompleted, quizOpened)} of opens · ${pct(quizCompleted, quizStarted)} of starts`
+  );
   console.log(
     `  board       ${String(quizBoard).padStart(6)}   ${pct(quizBoard, quizCreated)} of quizzes had the owner back for results`
   );

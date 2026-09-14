@@ -79,9 +79,18 @@ export async function rateLimit(
 
 /** Best-effort client IP from proxy headers; falls back to a shared bucket. */
 export function getClientIp(req: NextRequest): string {
-  const forwarded = req.headers.get("x-forwarded-for");
+  return clientIpFromHeaders(req.headers);
+}
+
+/**
+ * The same read off a bare `Headers` — for the one route that has no
+ * `NextRequest`: a metadata image gets `params` and nothing else, so it
+ * reaches for `headers()` from next/headers instead.
+ */
+export function clientIpFromHeaders(headers: Headers): string {
+  const forwarded = headers.get("x-forwarded-for");
   if (forwarded) return forwarded.split(",")[0].trim();
-  return req.headers.get("x-real-ip") ?? "unknown";
+  return headers.get("x-real-ip") ?? "unknown";
 }
 
 /**

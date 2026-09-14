@@ -88,14 +88,23 @@ export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
  *
  *   created    a host turned a playlist into a link       POST /api/quiz
  *   opened     a friend's phone fetched the quiz          GET /api/quiz/[code]
+ *   started    that phone answered its first question     POST /api/quiz/[code]/check, q=0
  *   completed  that phone sent answers                    POST /api/quiz/[code]/answer
  *   board      the owner came back for the results        GET /api/quiz/[code]/board
  *
- * Written by the four routes rather than beaconed from the page, because each
+ * Written by the five routes rather than beaconed from the page, because each
  * is a request that has already reached the server — there is nothing to lose
  * to a page tearing down. `opened` is counted by the API the page's own script
  * calls and *not* by `generateMetadata`, which every chat app's link unfurler
  * also fetches; counting there would invent opens nobody made.
+ *
+ * `started` is the check on question zero, which the page sends the moment
+ * the first half is tapped and never again for that attempt (an answered
+ * question is locked). It splits `opened → completed` in two: a friend who
+ * read the intro and left, and one who played and stopped. Before it the
+ * two were one number, and `of opens` could not say which page to fix. A
+ * floor, like everything but `opened`: a check that never reached the
+ * server — offline, or refused by the limiter — is a start nobody counted.
  *
  * `board` is the owner's half of the loop: a quiz whose board is never opened
  * is a link that was sent and forgotten, and `board ÷ created` is the only
@@ -109,9 +118,9 @@ export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
  * `completed` ≈ `impression:quiz_result` is a plumbing check: a gap means the
  * result screen stopped rendering the call to action.
  */
-export type QuizStage = "created" | "opened" | "completed" | "board";
+export type QuizStage = "created" | "opened" | "started" | "completed" | "board";
 
-export const QUIZ_STAGES: readonly QuizStage[] = ["created", "opened", "completed", "board"];
+export const QUIZ_STAGES: readonly QuizStage[] = ["created", "opened", "started", "completed", "board"];
 
 /**
  * The two ends of a quiz's length: how many questions it was built with, and
@@ -176,22 +185,28 @@ const HINT_STATUS_SET: ReadonlySet<string> = new Set<PreviewStatus>([
  * A refused request is a stage the funnel above cannot see: a 429 on `answer`
  * is a friend who finished every question and was bounced back to the name
  * card, a 429 on `read` is an open that never became one, a 429 on `hint` is
- * a clip the page reports as "no clip" for a reason that was ours. The answer
- * limit was raised from 20 to 60 because the 21st finisher in an office was
- * being refused, and that was found from a report — nothing counted it.
+ * a clip the page reports as "no clip" for a reason that was ours, a 429 on
+ * `check` is a question answered with no verdict shown — the page advances
+ * without one, so nobody reports it — and a refusal on `card` is a chat
+ * card drawn with the site's generic picture instead of the quiz's. The
+ * answer limit was raised from 20 to 60 because the 21st finisher in an
+ * office was being refused, and that was found from a report — nothing
+ * counted it.
  *
  * A limiter refusal means KV is up (the `incr` that said no succeeded), so
  * unlike most of this file's counters this one is written in exactly the
  * situation it describes.
  */
-export type QuizThrottledRoute = "create" | "read" | "answer" | "hint" | "board";
+export type QuizThrottledRoute = "create" | "read" | "check" | "answer" | "hint" | "board" | "card";
 
 export const QUIZ_THROTTLED_ROUTES: readonly QuizThrottledRoute[] = [
   "create",
   "read",
+  "check",
   "answer",
   "hint",
   "board",
+  "card",
 ];
 
 function key(day: string, metric: string): string {
@@ -255,6 +270,7 @@ export function loopStatsKeys(
     quiz: {
       created: key(day, "quiz:created"),
       opened: key(day, "quiz:opened"),
+      started: key(day, "quiz:started"),
       completed: key(day, "quiz:completed"),
       board: key(day, "quiz:board"),
     },

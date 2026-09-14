@@ -14,11 +14,28 @@
  *
  * A question is two songs, one real, and the screen is nothing but the two of
  * them: each option is half the viewport, the prompt sits on the seam between
- * them, and a tap both answers and advances. The first version listed four
- * options under a card title with a Next button, which is a form; fifty of
- * those is a chore, fifty of these is a rhythm. The last question is the one
- * exception — a tap there selects and reveals the submit button, so nobody
- * submits by accident on the final swipe of thumb.
+ * them, and a tap answers, shows the verdict, and advances. The first version
+ * listed four options under a card title with a Next button, which is a
+ * form; fifty of those is a chore, fifty of these is a rhythm.
+ *
+ * ## The reveal
+ *
+ * A tap locks the question and asks `POST /api/quiz/[code]/check` for that
+ * question's answer — the key still never arrives unasked, it is handed over
+ * one question at a time against a pick for it, which is why the halves are
+ * disabled the moment one is chosen and why Back shows an answered question
+ * rather than reopening it. The chosen half fills white while the server is
+ * asked, then green or red; the seam says which; and the next question
+ * slides in after `REVEAL_MS`, long enough to read. A check that does not
+ * come back — offline, throttled, slow past `CHECK_TIMEOUT_MS` — costs the
+ * verdict and nothing else: the question advances after the plain fill and
+ * the sheet is still graded at the end, so a quiz never stalls on a round
+ * trip. The last question advances the same way, straight into grading; the
+ * score is the end, and the verdicts along the way replaced the answer list
+ * the result screen used to fold away.
+ *
+ * A question revisited — Back, or a reload mid-dwell — is shown locked with
+ * its verdict and a Next button, since nothing will advance it by itself.
  *
  * ## Hints
  *
@@ -44,8 +61,8 @@
  *
  * A quiz link is opened on a phone in a group chat, and there a reload, a
  * swipe back, or a tab evicted in the background is the ordinary case. So
- * the state a question needs — name, answers, index, hints left, which
- * questions were charged, the `submissionId` — is written to
+ * the state a question needs — name, answers, the verdicts shown so far,
+ * index, hints left, which questions were charged, the `submissionId` — is written to
  * `lib/quiz-progress.ts` on every change and put back on mount, at the same
  * question. Finishing swaps that for the finished row (name, id, answers),
  * which is what lets "See my result again" re-POST and have the server
@@ -105,6 +122,8 @@ import {
   QUIZ_NAME_MAX,
   type AnswerQuizRequest,
   type AnswerQuizResponse,
+  type CheckQuizRequest,
+  type CheckQuizResponse,
   type QuizScore,
   type QuizView,
 } from "@/types/quiz";
@@ -124,11 +143,26 @@ type HintState = "idle" | "loading" | "playing" | "none" | "blocked";
 const BOARD_ROWS = 10;
 
 /**
- * How long the chosen half stays filled before the next question slides in.
- * Long enough to register as "that one", short enough that fifty of them is
- * a rhythm and not a wait. Matches the CSS transition below.
+ * How long the chosen half stays filled before the next question slides in
+ * when there is no verdict to show — the check did not come back. Long
+ * enough to register as "that one", short enough that fifty of them is a
+ * rhythm and not a wait. Matches the CSS transition below.
  */
 const FILL_MS = 240;
+
+/**
+ * How long the verdict stays on screen before the next question slides in.
+ * Long enough to read "nope — it's the other one" and see which; short
+ * enough that fifty of them is still a rhythm.
+ */
+const REVEAL_MS = 1100;
+
+/**
+ * How long a check may take before the question advances without a verdict.
+ * A phone on a bad radio must not sit on a filled half; the sheet is graded
+ * at the end either way.
+ */
+const CHECK_TIMEOUT_MS = 5000;
 
 /**
  * The verdict card's duotone, keyed by verdict so the five results are five
@@ -178,7 +212,11 @@ const DUEL_CSS = `
   }
   .q-segments { display: flex; gap: 2px; flex: 1; height: 4px; }
   .q-seg { flex: 1; min-width: 1px; background: #2a2a2a; border-radius: 2px; transition: background 240ms ease-out; }
-  .q-seg.is-done { background: #1DB954; }
+  /* Right and wrong differ in value, not only hue: a greyscale or a
+     red-green-blind eye still reads the tally. */
+  .q-seg.is-right { background: #1DB954; }
+  .q-seg.is-wrong { background: #7a2e2e; }
+  .q-seg.is-done { background: #555; }
   .q-seg.is-now { background: #f0f0f0; }
   .q-progress-text { font-size: 11px; color: #777; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
@@ -209,11 +247,19 @@ const DUEL_CSS = `
   }
   .q-half:focus-visible { outline: 2px solid #1DB954; outline-offset: 3px; }
   .q-half:disabled { cursor: default; }
-  .q-half.is-on { background: #1DB954; color: #000; border-color: #1DB954; }
+  /* Chosen, verdict on its way: a mid tone with a white edge — no colour
+     that says right or wrong yet, and not the brightest thing in a dark
+     room fifty times a quiz. The verdict is the first strong fill. */
+  .q-half.is-on { background: #2a2a2a; color: #f0f0f0; border-color: #f0f0f0; }
+  /* Answered, verdict never came, seen again after Back or a reload. */
+  .q-half.is-locked { background: #1e1e1e; color: #f0f0f0; border-color: #555; }
+  .q-half.is-right { background: #1DB954; color: #000; border-color: #1DB954; }
+  .q-half.is-wrong { background: #2a1414; color: #f0f0f0; border-color: #ff6b6b; }
   .q-half.is-off { opacity: 0.4; }
   .q-half-title { font-size: clamp(34px, 9vw, 64px); text-wrap: balance; overflow-wrap: anywhere; }
   .q-half-artist { font-size: 14px; color: #8a8a8a; font-weight: 400; }
-  .q-half.is-on .q-half-artist { color: rgba(0,0,0,0.62); }
+  .q-half.is-right .q-half-artist { color: rgba(0,0,0,0.7); }
+  .q-half.is-wrong .q-half-artist { color: rgba(255,107,107,0.85); }
   .q-check {
     position: absolute; top: 14px; right: 16px;
     width: 26px; height: 26px; border-radius: 50%;
@@ -221,7 +267,10 @@ const DUEL_CSS = `
     display: flex; align-items: center; justify-content: center;
     font-size: 14px; font-weight: 700; opacity: 0.3;
   }
-  .q-half.is-on .q-check { opacity: 1; background: #000; color: #1DB954; border-color: #000; }
+  .q-half.is-on .q-check { opacity: 1; background: #f0f0f0; color: #000; border-color: #f0f0f0; }
+  .q-half.is-locked .q-check { opacity: 1; background: #555; color: #000; border-color: #555; }
+  .q-half.is-right .q-check { opacity: 1; background: #000; color: #1DB954; border-color: #000; }
+  .q-half.is-wrong .q-check { opacity: 1; background: #ff6b6b; color: #000; border-color: #ff6b6b; }
 
   .q-seam {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -230,6 +279,7 @@ const DUEL_CSS = `
   .q-prompt { font-size: 13px; color: #aaa; line-height: 1.35; flex: 1; }
   .q-prompt.is-live { color: #1DB954; }
   .q-prompt.is-warn { color: #f5b942; }
+  .q-prompt.is-wrong { color: #ff6b6b; }
   .q-hint {
     position: relative; flex: none;
     width: 44px; height: 44px; border-radius: 50%;
@@ -295,12 +345,6 @@ const DUEL_CSS = `
   .q-home { color: #1DB954; font-size: 16px; font-weight: 600; text-align: center; padding: 12px 0; }
   .q-home:focus-visible { outline: 2px solid #1DB954; outline-offset: 2px; border-radius: 4px; }
 
-  .q-review { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding: 0; list-style: none; }
-  .q-review li { display: flex; gap: 10px; align-items: baseline; padding: 8px 10px; border-radius: 10px; background: #161616; font-size: 14px; }
-  .q-review .q-mark { flex: none; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; width: 56px; }
-  .q-review .is-right .q-mark { color: #1DB954; }
-  .q-review .is-missed .q-mark { color: #ff6b6b; }
-
   @keyframes q-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
   @keyframes q-in-next { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
   @keyframes q-in-back { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
@@ -318,6 +362,16 @@ export function QuizClient({ code }: { code: string }) {
   const [name, setName] = useState("");
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<number[]>([]);
+  /** The right option per question once the server has said, `-1` until then. */
+  const [revealed, setRevealed] = useState<number[]>([]);
+  /**
+   * A tap has been made on the question on screen and the advance is on its
+   * way — the check in flight, or the verdict dwelling. Off again when the
+   * round is retired. While it is on, nothing else on the question is live,
+   * and a Next button would only be a second way to do what is about to
+   * happen by itself.
+   */
+  const [pending, setPending] = useState(false);
   const [hintsLeft, setHintsLeft] = useState(0);
   const [hint, setHint] = useState<HintState>("idle");
   const [result, setResult] = useState<AnswerQuizResponse | null>(null);
@@ -349,6 +403,15 @@ export function QuizClient({ code }: { code: string }) {
   const heard = useRef<Set<number>>(new Set());
   /** The pending advance after a tap; `back()` and unmount cancel it. */
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The question a tap has locked, read synchronously so a second finger in the same frame is ignored. */
+  const locked = useRef<number | null>(null);
+  /**
+   * `next()` as of the latest render, for the advance timer: it fires a
+   * second after the tap, and the `next` it was scheduled with closed over
+   * answers that did not yet hold that tap — on the last question that sent
+   * a sheet with a `-1` in it. Re-pointed after every render like `onPop`.
+   */
+  const advance = useRef<() => Promise<void>>(async () => {});
   /**
    * Minted once per attempt, and carried across a reload by the stored
    * progress. A resend after a lost response carries the same id, and the
@@ -379,6 +442,11 @@ export function QuizClient({ code }: { code: string }) {
         // asks the server, whose cache answers, and `charged` makes it free.
         setName(progress.name);
         setAnswers(progress.answers);
+        setRevealed(
+          progress.revealed.length === quiz.questionCount
+            ? progress.revealed
+            : new Array<number>(quiz.questionCount).fill(-1)
+        );
         setIndex(progress.index);
         setHintsLeft(progress.hintsLeft);
         charged.current = new Set(progress.charged);
@@ -388,6 +456,7 @@ export function QuizClient({ code }: { code: string }) {
         setPhase("question");
       } else {
         setAnswers(new Array(quiz.questionCount).fill(-1));
+        setRevealed(new Array(quiz.questionCount).fill(-1));
         setHintsLeft(quiz.hintAllowance);
         if (done[0]) setName(done[0].name);
         setPhase("intro");
@@ -410,9 +479,13 @@ export function QuizClient({ code }: { code: string }) {
     void load();
   }, [load]);
 
+  // Unmount is a round ending too: a check still in flight must not come
+  // back and schedule an advance — or, on the last question, a submit — for
+  // a page that is gone.
   useEffect(
     () => () => {
       if (advanceTimer.current) clearTimeout(advanceTimer.current);
+      round.current.bump();
     },
     []
   );
@@ -438,6 +511,7 @@ export function QuizClient({ code }: { code: string }) {
       code: view.code,
       name,
       answers,
+      revealed,
       index,
       hintsLeft,
       charged: [...charged.current],
@@ -445,7 +519,7 @@ export function QuizClient({ code }: { code: string }) {
       expiresAt: view.expiresAt,
       at: Date.now(),
     });
-  }, [view, phase, name, answers, index, hintsLeft]);
+  }, [view, phase, name, answers, revealed, index, hintsLeft]);
 
   useEffect(() => {
     onPop.current = (state) => {
@@ -467,6 +541,10 @@ export function QuizClient({ code }: { code: string }) {
       if (target.step >= view.questionCount) return;
       enterQuestion(target.step, target.step < index ? "back" : "next");
     };
+  });
+
+  useEffect(() => {
+    advance.current = next;
   });
 
   /**
@@ -591,7 +669,10 @@ export function QuizClient({ code }: { code: string }) {
       needsRefresh.current.delete(question);
       // The URL is that question's whatever the screen shows now; keep it.
       hintUrls.current.set(question, data.previewUrl);
-      if (!isCurrent()) return;
+      // Moved on — or answered while the clip was on its way: the verdict is
+      // on screen, and a hint under it is a charge for nothing. The URL is
+      // kept for a revisit either way.
+      if (!isCurrent() || locked.current === question) return;
       if (!paid) {
         charged.current.add(question);
         setHintsLeft((n) => n - 1);
@@ -625,6 +706,8 @@ export function QuizClient({ code }: { code: string }) {
       advanceTimer.current = null;
     }
     round.current.bump();
+    locked.current = null;
+    setPending(false);
     stopClip();
     setHint("idle");
   }
@@ -642,19 +725,55 @@ export function QuizClient({ code }: { code: string }) {
   }
 
   /**
-   * A tap on a half. Records the answer and, unless this is the last
-   * question, advances after the fill has had its moment. The last question
-   * only selects: the submit button under the duel is the deliberate step.
+   * A tap on a half. Locks the question, records the answer, and goes to ask
+   * for the verdict; one tap per question, so a question already answered
+   * — revisited, or a second finger — is not re-picked. See "The reveal".
    */
   function pick(option: number) {
-    if (!view || phase === "submitting") return;
+    if (!view || phase === "submitting" || answers[index] >= 0 || locked.current === index) return;
+    locked.current = index;
+    setPending(true);
     choose(option);
-    if (index + 1 >= view.questionCount) return;
+    void reveal(index, option, round.current.begin());
+  }
+
+  /**
+   * The verdict, then the advance. Whatever comes back is kept for the
+   * question it was asked about — it is that question's key, and a reload
+   * or Back must be able to show it again — but only the question still on
+   * screen schedules anything: `isCurrent` is the round token taken at the
+   * tap, and a check landing after Back retires the round is a verdict that
+   * shows when the question is next revisited, not an advance off whichever
+   * question replaced it. No verdict at all still advances, after the plain
+   * fill: the sheet is graded at the end either way.
+   */
+  async function reveal(question: number, option: number, isCurrent: () => boolean) {
+    let answer: number | null = null;
+    try {
+      answer = (await fetchCheck(code, question, option)).answer;
+    } catch (e: unknown) {
+      // Offline, throttled, timed out, or the quiz is gone. The next question
+      // — or grading — will say which of those matters to the taker; the
+      // event is for us, since the server only ever sees the refusals.
+      trackEvent("quiz_check_lost", { reason: lostCheckReason(e) });
+    }
+    if (answer !== null) {
+      const known = answer;
+      setRevealed((prev) => {
+        const next = [...prev];
+        next[question] = known;
+        return next;
+      });
+    }
+    if (!isCurrent()) return;
     if (advanceTimer.current) clearTimeout(advanceTimer.current);
-    advanceTimer.current = setTimeout(() => {
-      advanceTimer.current = null;
-      void next();
-    }, FILL_MS);
+    advanceTimer.current = setTimeout(
+      () => {
+        advanceTimer.current = null;
+        void advance.current();
+      },
+      answer !== null ? REVEAL_MS : FILL_MS
+    );
   }
 
   async function next() {
@@ -733,7 +852,7 @@ export function QuizClient({ code }: { code: string }) {
    * filled-in answers.
    */
   async function submit(body: AnswerQuizRequest, options: { replay?: boolean } = {}) {
-    if (!view) return;
+    if (!view || phase === "submitting") return;
     setPhase("submitting");
     setError(null);
     try {
@@ -931,11 +1050,16 @@ export function QuizClient({ code }: { code: string }) {
   if (phase === "question" || phase === "submitting") {
     const question = view.questions[index];
     const chosen = answers[index];
+    /** The right option, once the server has said; `-1` while it has not. */
+    const verdict = revealed[index] ?? -1;
     const last = index + 1 === view.questionCount;
     const busy = phase === "submitting";
+    /** Answered, and nothing is about to move it: Back, a reload, a refused submit. */
+    const parked = chosen >= 0 && !pending && !busy;
     const hasCachedHint = hintUrls.current.has(index);
     // Paid for already (this session or, restored, an earlier one): free to hear.
-    const canHear = hasCachedHint || charged.current.has(index) || hintsLeft > 0;
+    // Not once answered: the clip is a hint, and the verdict is on screen.
+    const canHear = chosen < 0 && (hasCachedHint || charged.current.has(index) || hintsLeft > 0);
     const hintLabel =
       hint === "loading"
         ? copy.hintLoading
@@ -948,24 +1072,33 @@ export function QuizClient({ code }: { code: string }) {
     const prompt = view.ownerName
       ? fillCopy(copy.promptOwner, { owner: view.ownerName })
       : copy.promptPlaylist;
-    const seamText =
-      hint === "loading"
-        ? copy.hintLoading
-        : hint === "playing"
-          ? copy.hintPlaying
-          : hint === "none"
-            ? copy.hintNone
-            : hint === "blocked"
-              ? copy.hintBlocked
-              : prompt;
+    // One ladder for the seam's words and its colour, so they cannot drift
+    // apart: grading outranks the verdict, the verdict outranks "answered,
+    // no verdict" (a parked question the check never came back for), which
+    // outranks the hint's state (the clip that was playing is the answer now
+    // on screen), which outranks the prompt.
+    const seam: { text: string; tone: string } = busy
+      ? { text: copy.submitting, tone: "" }
+      : verdict >= 0
+        ? chosen === verdict
+          ? { text: copy.revealRight, tone: " is-live" }
+          : { text: copy.revealWrong, tone: " is-wrong" }
+        : parked
+          ? { text: copy.revealPending, tone: "" }
+          : hint === "loading"
+          ? { text: copy.hintLoading, tone: "" }
+          : hint === "playing"
+            ? { text: copy.hintPlaying, tone: " is-live" }
+            : hint === "none"
+              ? { text: copy.hintNone, tone: "" }
+              : hint === "blocked"
+                ? { text: copy.hintBlocked, tone: " is-warn" }
+                : { text: prompt, tone: "" };
 
-    const seam = (
+    const seamRow = (
       <div className="q-seam" key="seam">
-        <p
-          className={`q-prompt${hint === "playing" ? " is-live" : ""}${hint === "blocked" ? " is-warn" : ""}`}
-          aria-live="polite"
-        >
-          {seamText}
+        <p className={`q-prompt${seam.tone}`} aria-live="polite">
+          {seam.text}
         </p>
         <button
           type="button"
@@ -1011,10 +1144,7 @@ export function QuizClient({ code }: { code: string }) {
         <div className="q-progress">
           <div className="q-segments" aria-hidden="true">
             {answers.map((a, i) => (
-              <span
-                key={i}
-                className={`q-seg${i === index ? " is-now" : a >= 0 ? " is-done" : ""}`}
-              />
+              <span key={i} className={`q-seg${i === index ? " is-now" : segmentTone(a, revealed[i] ?? -1)}`} />
             ))}
           </div>
           <p className="q-progress-text">
@@ -1035,40 +1165,50 @@ export function QuizClient({ code }: { code: string }) {
         >
           {question.options.map((option, i) => {
             const selected = chosen === i;
-            const dimmed = chosen >= 0 && !selected;
+            const right = verdict >= 0 && i === verdict;
+            const wrong = verdict >= 0 && selected && !right;
+            // The real song stays lit when the pick was wrong: that is the reveal.
+            const dimmed = chosen >= 0 && !selected && !right;
+            // Selected reads as "on its way" while the check is out and as
+            // "locked" once it is plainly not coming — a parked question.
+            const tone = right ? " is-right" : wrong ? " is-wrong" : selected ? (parked ? " is-locked" : " is-on") : "";
             return [
               /* Plain toggle buttons, not ARIA radios: a radio group promises
                  arrow-key movement and a roving tabindex, and Tab between the
-                 halves is the honest description of what this is. */
+                 halves is the honest description of what this is. Disabled
+                 once answered: one tap per question, see "The reveal". */
               <button
                 key={`${index}-${i}`}
                 type="button"
                 aria-pressed={selected}
-                disabled={busy}
+                disabled={busy || chosen >= 0}
                 onClick={() => pick(i)}
-                className={`q-half${selected ? " is-on" : ""}${dimmed ? " is-off" : ""}`}
+                className={`q-half${tone}${dimmed ? " is-off" : ""}`}
               >
-                {/* The selected state is not colour alone. */}
+                {/* Neither the selected state nor the verdict is colour alone. */}
                 <span className="q-check" aria-hidden="true">
-                  {selected ? "✓" : ""}
+                  {right ? "✓" : wrong ? "✗" : ""}
                 </span>
                 <span className="q-display q-half-title">{option.title}</span>
                 {option.artist && <span className="q-half-artist">{option.artist}</span>}
               </button>,
-              i === 0 ? seam : null,
+              i === 0 ? seamRow : null,
             ];
           })}
         </div>
 
         <div className="q-foot">
-          {last && chosen >= 0 && (
-            <Button className="q-primary" onClick={() => void next()} disabled={busy}>
-              {busy ? copy.submitting : copy.submitButton}
+          {/* Only a parked question needs a button: the ordinary advance
+              happens by itself. On the last one it is the resend after a
+              refused submit. */}
+          {parked && (
+            <Button className="q-primary" onClick={() => void next()}>
+              {last ? copy.submitButton : copy.nextButton}
             </Button>
           )}
           {error && <p className="q-error">{error}</p>}
           {index > 0 && (
-            <button type="button" className="q-back" onClick={back} disabled={busy}>
+            <button type="button" className="q-back" onClick={back} disabled={busy || pending}>
               ← {copy.backButton}
             </button>
           )}
@@ -1160,31 +1300,23 @@ export function QuizClient({ code }: { code: string }) {
         {boardError && <p className="q-error">{boardError}</p>}
         {!result.recorded && <p className="q-muted">{copy.boardFull}</p>}
 
-        <details className="text-sm">
-          <summary className="q-kicker cursor-pointer rounded-md py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954]">
-            {copy.reviewTitle}
-          </summary>
-          <ol className="q-review">
-            {view.questions.map((q, i) => {
-              const right = q.options[result.key[i]];
-              const ok = answers[i] === result.key[i];
-              return (
-                <li key={i} className={ok ? "is-right" : "is-missed"}>
-                  <span className="q-mark">{ok ? copy.reviewRight : copy.reviewMissed}</span>
-                  <span className="min-w-0">
-                    <span className="block font-medium">{right?.title}</span>
-                    {right?.artist && <span className="block text-xs text-[#8a8a8a]">{right.artist}</span>}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        </details>
-
+        {/* No answer list here: every question said right or wrong as it
+            was answered, and the score is the end. */}
         <p className="q-muted">{expires}</p>
       </section>
     </Shell>
   );
+}
+
+/**
+ * A progress segment's colour for a question behind the taker: nothing until
+ * answered, `is-done` while the verdict never arrived, then right or wrong
+ * by the same comparison the halves make.
+ */
+function segmentTone(answer: number, verdict: number): string {
+  if (answer < 0) return "";
+  if (verdict < 0) return " is-done";
+  return verdict === answer ? " is-right" : " is-wrong";
 }
 
 /**
@@ -1206,6 +1338,55 @@ async function fetchView(code: string): Promise<QuizView> {
   const data = await res.json();
   if (!res.ok) throw apiError(data, "quiz_load_failed");
   return data as QuizView;
+}
+
+/**
+ * One `POST /api/quiz/[code]/check`: the verdict on a question, against a
+ * pick for it. Times out on its own so a phone on a bad radio is not left
+ * on a filled half; every failure is the caller's "no verdict".
+ */
+async function fetchCheck(code: string, q: number, pick: number): Promise<CheckQuizResponse> {
+  const body: CheckQuizRequest = { q, pick };
+  const res = await fetch(`/api/quiz/${encodeURIComponent(code)}/check`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: checkTimeout(),
+  });
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch (e: unknown) {
+    // The timeout can land here too — headers in, body stalled — and it must
+    // stay a timeout. Otherwise: a bare 500 with an empty body is the server;
+    // a 200 that is not JSON is the wire. Named so `lostCheckReason` can file them.
+    if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) throw e;
+    throw new Error(res.ok ? "check: malformed" : "check: server");
+  }
+  if (!res.ok) throw apiError(data, "quiz_answer_failed");
+  const check = data as Partial<CheckQuizResponse>;
+  if (!Number.isInteger(check.answer)) throw new Error("check: malformed");
+  return { answer: check.answer as number };
+}
+
+/**
+ * Which bucket a failed check lands in, for `quiz_check_lost`. `apiError`
+ * carries the server's code; an abort is the timeout above; anything else
+ * that threw before a response is the network.
+ */
+function lostCheckReason(e: unknown): "timeout" | "offline" | "rate_limited" | "server" | "malformed" {
+  if (e instanceof AppError) return e.code === "rate_limited" ? "rate_limited" : "server";
+  if (e instanceof Error && e.name === "TimeoutError") return "timeout";
+  if (e instanceof Error && e.message === "check: malformed") return "malformed";
+  if (e instanceof Error && e.message === "check: server") return "server";
+  return "offline";
+}
+
+/** `AbortSignal.timeout` where the browser has it; a browser without it just waits. */
+function checkTimeout(): AbortSignal | undefined {
+  return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+    ? AbortSignal.timeout(CHECK_TIMEOUT_MS)
+    : undefined;
 }
 
 function mintSubmissionId(): string {

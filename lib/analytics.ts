@@ -388,6 +388,21 @@ export type AnalyticsEvent =
     }
   | {
       /**
+       * A tap's verdict never reached the screen: the question advanced on
+       * the plain fill and the sheet is still graded at the end, so nothing
+       * on the page and nothing in KV says it happened — the server counts
+       * only the limiter's refusals (`quiz_throttled:check`). `reason` is
+       * bucketed: a 429 is `rate_limited`, any other coded refusal or a 5xx
+       * is `server`, a 200 without an integer answer is `malformed`, an
+       * abort past `CHECK_TIMEOUT_MS` is `timeout`, and a fetch that threw
+       * with no response is `offline`. A quiz where this climbs is a quiz
+       * being played through a slow KV, which no other counter can see.
+       */
+      name: "quiz_check_lost";
+      params: { reason: "timeout" | "offline" | "rate_limited" | "server" | "malformed" };
+    }
+  | {
+      /**
        * The host's share button on the setup page, or the taker's on the
        * result screen. `outcome` follows `result_shared`: only "shared" left
        * the device through the share sheet, and "copied" is the clipboard

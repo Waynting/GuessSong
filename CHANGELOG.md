@@ -5,6 +5,162 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-09-14
+
+Two changes from the first owner who shared a quiz, the same evening 1.10.0
+went out. The card their link drew in the chat was the home page's — the
+party-game title over the party-game picture, their name nowhere — and, once
+in, they wanted each tap to say right or wrong rather than a list at the end.
+`docs/decisions.md` D9 carries both amendments.
+
+### Fixed
+
+- **The quiz link unfurled as the home page** (`app/q/[code]/page.tsx`).
+  A nested `generateMetadata` inherits every top-level key it does not set,
+  and `alternates` was one of them: the page shipped with the root layout's
+  `<link rel="canonical" href="https://www.guessong.app">` and its hreflang
+  set, and Facebook resolves a canonical before it reads a card. Confirmed
+  on production with `curl`: right `og:title`, wrong `rel=canonical`. The
+  found branch now sets a self-canonical and `openGraph.url` from the peek's
+  canonical code (`peekQuiz` returns `code`); the fallback branch sets
+  `alternates: { canonical: null }` and a quiz-shaped card (`ogFallbackTitle`
+  / `ogFallbackDescription` in `lib/quiz-copy.ts`) rather than the party's.
+  `app/q/layout.tsx` drops the inherited canonical for the board too.
+- **`/q` was disallowed in `app/robots.ts`**, which kept the unfurlers that
+  honour robots.txt — Facebook, X — from reading the card at all. Removed;
+  `app/q/layout.tsx` applies `noindex` to every `/q/*` page instead, which is
+  the control that says "do not list this" while letting an unfurler read
+  it. `tests/site-policy.test.ts` now asserts `/q` is *not* in the list and
+  that the layout carries the noindex.
+
+### Added
+
+- **A per-quiz card image** (`app/q/[code]/opengraph-image.tsx`): wordmark,
+  "Music taste quiz" / 「音樂品味測驗」, the question naming the owner in the
+  owner's language, the count under it at a size a chat thumbnail keeps
+  (with the playlist's name in front when there is no owner), the rule as a
+  pill. Bounded three ways the edge header cannot be — a malformed code and
+  a refused render (`quiz:card`, 60 per 10 min, counted as
+  `quiz_throttled:card`) are sent to the static site card, a non-canonical
+  spelling to the canonical URL (the page does the same) — and the CJK font
+  is fetched by the route itself so its outcome can choose the header:
+  `next/og`'s own loader fails soft into boxes under the day-long header. This reverses 1.10.0's "the card reuses the static
+  image" and the test that pinned it: that decision was about a `ƒ` render
+  paid once per unfurler per share, and the route now sets its own
+  lower-case `cache-control: public, max-age=0, s-maxage=86400` (60 for a
+  quiz that could not be read) so Vercel's edge renders a quiz's card once
+  per region per day. `ImageResponse`'s default `immutable, max-age`
+  cached it only in a browser, which an unfurler is not; the key is
+  lower-case because `Headers` would *append* a capitalised twin to the
+  default rather than replace it. Han glyphs are Noto Sans TC, fetched by
+  the route itself, subset to the card's text (first written as `next/og`'s
+  own fallback; moved into the route in review so the fetch's outcome can
+  choose the header), ~140ms a warm render locally; no emoji, each is a
+  fetch. Words come from `quizCardCopy` in
+  `lib/quiz-copy.ts`, where the suite can reach them. Route table: `ƒ`,
+  deliberately; the five build-time images are still `○` / `●`.
+  `tests/quiz-unfurl.test.ts` rewritten to pin the self-canonical, the
+  `canonical: null` fallback, the absence of `images` in the page's
+  metadata (the file convention supplies it and outranks config), the
+  header's key and the order of its two lengths, and the no-emoji rule.
+- **The verdict on every tap** (`app/q/[code]/quiz-client.tsx`,
+  `POST /api/quiz/[code]/check`, `checkQuizAnswer` in `lib/quiz-store.ts`).
+  A tap locks the question (`locked` ref for a second finger in the same
+  frame, `disabled` after the render), fills the half white, and `reveal()`
+  asks the server for that question's answer against the pick; the real
+  song goes green with ✓, a wrong pick red with ✗, the seam says
+  `revealRight` / `revealWrong`, the progress bar's segment takes the
+  colour, and the next question slides in after `REVEAL_MS` (1100). The key
+  still never arrives unasked: it is handed over one question at a time,
+  for a pick, and the route records nothing — the board is one `hsetnx`
+  from the sheet, as before. A check that fails (offline, 429, past
+  `CHECK_TIMEOUT_MS` via `AbortSignal.timeout` where present) costs the
+  verdict only: the question advances after `FILL_MS` and the sheet is
+  graded at the end, so nothing stalls on a round trip. The last question
+  advances the same way, straight into grading. The advance timer calls
+  `next()` through an `advance` ref re-pointed every render, because the
+  closure it was scheduled with predates the tap it is advancing past — on
+  the last question that sent a sheet with a `-1` in it (422).
+  `tests/quiz-store.test.ts` covers the store; `tests/quiz-routes.test.ts`
+  drives the route, its counters and its limiter.
+- **`revealed` in `lib/quiz-progress.ts`.** The verdicts shown so far, `-1`
+  where none, saved with the rest of the progress so a reload mid-dwell or
+  Back shows an answered question locked with its verdict and a Next
+  button (`parked` in the client — answered, nothing pending, not
+  grading). `parseQuizProgress` tolerates its absence (older entries);
+  `fitsQuizProgress` refuses a verdict on an unanswered question, since
+  this page never writes one. Hints are disabled once a question is
+  answered.
+- **`quiz:started`** (`recordQuizStage("started")` on the check for
+  question zero) and **`quiz_throttled:check`**. `started` splits
+  `opened → completed` into the intro's drop and the quiz's — one number
+  before; `npm run stats` prints it with `of opens` and adds `of starts`
+  to the completed row, and `docs/viral-loop.md` §5 and §7 say how to read
+  both. `QUIZ_CHECK_LIMIT` is 600 per 10 minutes — per question, sized to
+  twelve takers through fifty or thirty through twenty behind one address —
+  and a refusal is silent on the phone by design, which is why it is
+  counted.
+
+### Changed
+
+- **The result screen no longer folds an answer list under the board.**
+  Every question said right or wrong as it was answered; the score is the
+  end. `reviewTitle` / `reviewRight` / `reviewMissed` are gone from
+  `lib/quiz-copy.ts`; `nextButton` is used for the first time (on a parked
+  question). `AnswerQuizResponse.key` stays on the wire for older pages.
+- **`.q-half.is-on` is white, not green.** Green now means "this is the
+  song"; a chosen half waiting on its verdict must not look like one.
+
+### Review, before push
+
+Seven specialists, a red team and a coverage audit ran under `/ship`. What
+changed because of them: the check route's out-of-range 400 became the
+sheet's 422 `quiz_invalid_answers`; `CheckQuizResponse.correct` was dropped
+(the page compares `pick === answer` itself, as it must for a restored
+question); the seam's words and tone come from one ladder, and a question
+answered whose verdict never came reads "answered — it counts at the end"
+(`revealPending`) in a locked tone rather than the pending one; the pending
+fill is a mid grey, not white; a wrong segment is a dark red, so the tally
+does not depend on hue; a hint still in flight when the half is tapped is
+no longer charged or played under the verdict; a lost verdict is
+`quiz_check_lost` in GA4, bucketed by reason, since the server only ever
+sees the refusals; `of starts` is documented as the ceiling it is
+(`completed` counts replays); and 18 tests were added, including
+`tests/quiz-reveal.test.ts`, which pins the client's guards by reading the
+source.
+
+### Known gaps
+
+- **`quiz:started` began at this deploy.** A stats window straddling it
+  reads `started` low against `opened`; wait a week before reading
+  `of starts` against the length table.
+- **`QUIZ_CHECK_LIMIT` is the largest single-address KV budget on the site**
+  (600 × 2 commands per 10 min ≈ 173k a day). Kept knowingly; `refused:
+  check` is the instrument, and lowering it is a product call about who
+  gets no verdicts.
+- **A devtools user can learn an answer from `check` and change theirs
+  before submitting.** Same class as the throwaway-name cheat the store's
+  header already concedes; the party-toy rule stands. If the board ever
+  needs to be honest against that, the check would have to *record* the
+  first pick — a hash per taker, its own TTL — which is what was rejected
+  here.
+- **The card image's non-Latin glyphs depend on Google Fonts at render
+  time.** Han is fetched by the route itself, under a timeout; kana, Hangul,
+  Thai, Cyrillic and emoji are left to `next/og`'s own untimed loader. A
+  card that needed either and did not get it is held a minute at the edge
+  rather than a day, and the `og:title` beside the picture still carries
+  the name — but under a Google Fonts outage each such render runs to the
+  function's own timeout, once a minute per region per quiz, bounded only
+  by `quiz:card`. Bundling a subset font is the fix if `s-maxage=60` cards
+  show up often in the logs.
+- **`checkQuizAnswer` reads the whole hash per tap.** A per-instance memo of
+  `{questions, expiresAt}` keyed by code (the token-cache pattern) would
+  make a warm tap cost the limiter's `incr` alone; deferred until
+  `refused: check` or the Upstash command count says it matters.
+- **`/j` still unfurls as the home page**, for the same canonical reason.
+  A room link is a QR nine times in ten, so it was left; the fix is the
+  same three lines.
+
 ## [1.10.0] - 2026-09-14
 
 The Taste Quiz was QA'd end to end on the day it merged — production build,

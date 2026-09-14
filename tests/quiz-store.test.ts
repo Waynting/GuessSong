@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as previewCache from "@/lib/preview-cache";
 import { getKvStore } from "@/lib/kv";
 import {
+  checkQuizAnswer,
   createQuiz,
   getQuizBoard,
   getQuizHint,
@@ -212,11 +213,15 @@ describe("getQuizView", () => {
     expect(await peekQuiz("../x")).toBeNull();
     const created = await make();
     expect(await peekQuiz(created.code)).toEqual({
+      code: created.code,
       ownerName: "Wayn",
       playlistName: "Late nights",
       questionCount: 10,
       locale: "zh",
     });
+    // The code it hands back is the stored one, whatever the segment said:
+    // the page's self-canonical and the card image's URL are built from it.
+    expect((await peekQuiz(created.code.toLowerCase()))?.code).toBe(created.code);
   });
 
   it("peekQuiz swallows a KV failure, since generateMetadata runs on every unfurl", async () => {
@@ -406,6 +411,105 @@ describe("submitQuizAnswers", () => {
     await store.hsetnx(`quiz:v1:${created.code}`, "s:old", { name: "Old", correct: 2 });
     const view = await getQuizView(created.code);
     expect(view.scoreboard).toEqual([{ name: "Old", correct: 2, total: 10, hintsUsed: 0, at: 0 }]);
+  });
+});
+
+describe("checkQuizAnswer", () => {
+  it("hands over one question's answer against a pick for it, whichever the pick was", async () => {
+    const created = await make();
+    const key = await keyFor(created.code);
+    // The answer alone: whether the pick was right is the page's comparison,
+    // which it makes anyway for a question restored from storage.
+    for (let q = 0; q < key.length; q += 1) {
+      expect(await checkQuizAnswer(created.code, q, key[q])).toEqual({ answer: key[q] });
+      expect(await checkQuizAnswer(created.code, q, (key[q] + 1) % QUIZ_OPTION_COUNT)).toEqual({ answer: key[q] });
+    }
+  });
+
+  it("records nothing: the board is still written once, by the sheet", async () => {
+    // A verdict is not a submission. Twenty checks under no name leave the
+    // board empty, and the sheet that follows is graded as it always was.
+    const created = await make();
+    const key = await keyFor(created.code);
+    for (let q = 0; q < key.length; q += 1) await checkQuizAnswer(created.code, q, 0);
+    expect((await getQuizView(created.code)).scoreboard).toEqual([]);
+    const graded = await submitQuizAnswers(created.code, "Alice", key, 0);
+    expect(graded).toMatchObject({ correct: 10, recorded: true, rank: 1 });
+  });
+
+  it("refuses a question or a pick out of range before reading the hash, and a dead quiz after", async () => {
+    const created = await make();
+    const store = await getKvStore();
+    const hgetall = vi.spyOn(store, "hgetall");
+    for (const [q, pick] of [
+      [-1, 0],
+      [1.5, 0],
+      [QUIZ_MAX_QUESTIONS, 0],
+      [0, -1],
+      [0, 0.5],
+    ] as const) {
+      await expect(checkQuizAnswer(created.code, q, pick)).rejects.toMatchObject({ code: "quiz_invalid_answers", status: 422 });
+    }
+    expect(hgetall).not.toHaveBeenCalled();
+    hgetall.mockRestore();
+    // In range for the schema, past the end of this quiz's ten, or past its two options.
+    await expect(checkQuizAnswer(created.code, 10, 0)).rejects.toMatchObject({ code: "quiz_invalid_answers" });
+    await expect(checkQuizAnswer(created.code, 0, QUIZ_OPTION_COUNT)).rejects.toMatchObject({ code: "quiz_invalid_answers" });
+    await expect(checkQuizAnswer("ZZZZZZ", 0, 0)).rejects.toMatchObject({ code: "quiz_not_found", status: 404 });
+    // Case-insensitive on the code, like every other read.
+    expect(await checkQuizAnswer(created.code.toLowerCase(), 0, 0)).toMatchObject({ answer: expect.any(Number) });
+  });
+
+  it("costs one read, and nothing else", async () => {
+    // The cost argument in its doc comment is "one hgetall". A second read
+    // creeping into `loadQuiz` — a `get` for meta, a TTL probe — would
+    // double the hottest quiz path with nothing else in the suite moving.
+    const created = await make();
+    const store = await getKvStore();
+    const hgetall = vi.spyOn(store, "hgetall");
+    try {
+      await checkQuizAnswer(created.code, 4, 1);
+      expect(hgetall).toHaveBeenCalledTimes(1);
+    } finally {
+      hgetall.mockRestore();
+    }
+  });
+
+  it("refuses a quiz past its expiry, and the unfurl's peek goes generic at the same moment", async () => {
+    // `requireQuiz` is the one gate, the way it is for answers and hints: the
+    // record's own `expiresAt` decides, not the key's eviction. A verdict
+    // handed out after the printed expiry would be the key for a quiz the
+    // page says is over. `peekQuiz` reads the same record, so the card that
+    // an unfurler fetches for a dead link is the fallback, never a stale name.
+    const created = await make();
+    const now = vi.spyOn(Date, "now").mockReturnValue(created.expiresAt);
+    try {
+      await expect(checkQuizAnswer(created.code, 0, 0)).rejects.toMatchObject({ code: "quiz_not_found", status: 404 });
+      expect(await peekQuiz(created.code)).toBeNull();
+    } finally {
+      now.mockRestore();
+    }
+    expect(await checkQuizAnswer(created.code, 0, 0)).toMatchObject({ answer: expect.any(Number) });
+  });
+
+  it("writes nothing: no claim, no field, and never the TTL", async () => {
+    // Stateless on purpose — a pick claimed per question would be a hash per
+    // taker with its own expiry. The rule `submitQuizAnswers` keeps about the
+    // TTL holds here trivially, and this is what keeps it trivial: a check
+    // that started re-setting `expire` would push the quiz past the
+    // `expiresAt` its page printed, one tap at a time.
+    const created = await make();
+    const store = await getKvStore();
+    const writes = ["hsetnx", "set", "expire", "del", "incr"] as const;
+    const spies = writes.map((name) => vi.spyOn(store, name));
+    try {
+      await checkQuizAnswer(created.code, 0, 1);
+      await checkQuizAnswer(created.code.toLowerCase(), 9, 0);
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+    expect((await getQuizView(created.code)).expiresAt).toBe(created.expiresAt);
   });
 });
 
