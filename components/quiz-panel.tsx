@@ -5,6 +5,12 @@
  * it. Inline styles, because it sits on `app/page.tsx`, which is styled that
  * way throughout.
  *
+ * The one part of the setup page that is not English by convention: what
+ * leaves this panel — the share sentence, the sheet title — lands in the
+ * host's group chat, in whatever language that chat is in, next to a friend's
+ * page that already renders in it. So the panel reads from the same
+ * `QUIZ_COPY[locale]` table the friend's page does, and the two cannot drift.
+ *
  * The share button prefers the share sheet — that is where a link goes into a
  * group chat from a phone — and falls back to the clipboard on a laptop. The
  * QR is for the room the host is sitting in, which is not the case this
@@ -15,7 +21,8 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { trackEvent } from "@/lib/analytics";
-import { QUIZ_COPY, ownerShareText } from "@/lib/quiz-copy";
+import type { ErrorLocale } from "@/lib/error-messages";
+import { QUIZ_COPY, fillCopy, formatQuizDate, ownerShareText } from "@/lib/quiz-copy";
 import { quizUrl } from "@/lib/quiz-session";
 import { COPIED_FLASH_MS, copyLink, shareLink } from "@/lib/quiz-share";
 
@@ -25,13 +32,16 @@ export function QuizPanel({
   playlistName,
   questionCount,
   expiresAt,
+  locale,
 }: {
   code: string;
   ownerName: string | null;
   playlistName: string;
   questionCount: number;
   expiresAt: number;
+  locale: ErrorLocale;
 }) {
+  const copy = QUIZ_COPY[locale];
   const [qr, setQr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const url = quizUrl(code);
@@ -48,10 +58,8 @@ export function QuizPanel({
   }
 
   async function handleShare() {
-    // The setup page is English by convention; the sentence itself comes from
-    // the same table the friend's page renders, so the two cannot drift.
-    const text = ownerShareText(QUIZ_COPY.en, { ownerName, playlistName, questionCount });
-    const outcome = await shareLink({ url, text, title: "GuessSong taste quiz" });
+    const text = ownerShareText(copy, { ownerName, playlistName, questionCount });
+    const outcome = await shareLink({ url, text, title: copy.panelShareTitle });
     if (outcome === "copied") flashCopied();
     trackEvent("quiz_share_tapped", { by: "owner", outcome });
   }
@@ -62,16 +70,10 @@ export function QuizPanel({
     trackEvent("quiz_share_tapped", { by: "owner", outcome });
   }
 
-  const expires = new Date(expiresAt).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-
   return (
     <div className="card" style={{ padding: "24px", textAlign: "center" }}>
       <p style={{ fontSize: "12px", color: "#666", marginBottom: "6px" }}>
-        {questionCount} questions from
+        {fillCopy(copy.panelQuestionsFrom, { count: questionCount })}
       </p>
       <p style={{ fontSize: "15px", fontWeight: 500, marginBottom: "16px", color: "#f0f0f0" }}>
         {playlistName}
@@ -80,7 +82,7 @@ export function QuizPanel({
         // eslint-disable-next-line @next/next/no-img-element -- client-generated data: URI
         <img
           src={qr}
-          alt={`QR code for quiz ${code}`}
+          alt={fillCopy(copy.panelQrAlt, { code })}
           style={{ width: "160px", height: "160px", margin: "0 auto 12px", borderRadius: "8px" }}
         />
       )}
@@ -101,21 +103,21 @@ export function QuizPanel({
       </a>
       <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap" }}>
         <button className="start-btn" style={{ width: "auto", padding: "12px 24px" }} onClick={handleShare}>
-          Send to friends →
+          {copy.panelSend}
         </button>
         <button className="add-player-btn" onClick={handleCopy}>
-          {copied ? "✓ Copied" : "Copy link"}
+          {copied ? copy.panelCopied : copy.panelCopyLink}
         </button>
       </div>
       <a href={`/q/${code.toUpperCase()}/board`} className="link-btn" style={{ marginTop: "14px" }}>
-        See results — who knows you best →
+        {copy.panelBoardLink}
       </a>
       {/* A constraint, not a caption: one notch up from the 12px #666 captions. */}
       <p style={{ fontSize: "13px", color: "#999", marginTop: "8px", lineHeight: 1.5 }}>
-        Results are only visible on this device.
+        {copy.panelDeviceOnly}
       </p>
       <p style={{ fontSize: "12px", color: "#666", marginTop: "4px", lineHeight: 1.5 }}>
-        The link stops working on {expires}.
+        {fillCopy(copy.panelExpires, { date: formatQuizDate(expiresAt, locale) })}
       </p>
     </div>
   );

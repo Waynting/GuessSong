@@ -32,12 +32,14 @@ import {
   type LastQuiz,
 } from "@/lib/quiz-session";
 import {
-  QUIZ_DEFAULT_QUESTION_COUNT,
+  QUIZ_MAX_QUESTIONS,
+  QUIZ_MIN_QUESTIONS,
   QUIZ_NAME_MAX,
   QUIZ_QUESTION_COUNTS,
   type CreateQuizRequest,
   type CreateQuizResponse,
 } from "@/types/quiz";
+import { DEFAULT_QUIZ_COUNT_STATE, QUIZ_COUNT_CONTROL, quizCountOf } from "@/lib/quiz";
 import { SiteFooter } from "@/components/site-footer";
 import { getGuide } from "@/lib/guides";
 import { InstallBanner } from "@/components/install-banner";
@@ -228,7 +230,10 @@ export default function SetupPage() {
   // Taste quiz: what the host typed, what came back, and what this device
   // made last time (offered back as the way to the board — see lib/quiz-session.ts).
   const [quizOwnerName, setQuizOwnerName] = useState("");
-  const [quizQuestionCount, setQuizQuestionCount] = useState<number>(QUIZ_DEFAULT_QUESTION_COUNT);
+  // The question count is `lib/song-count.ts`'s control with the quiz's bounds
+  // (`QUIZ_COUNT_CONTROL`): the same two rules as "Number of Songs" below, so a
+  // half-typed "4" on the way to "45" never becomes the count.
+  const [quizCount, setQuizCount] = useState(DEFAULT_QUIZ_COUNT_STATE);
   const [createdQuiz, setCreatedQuiz] = useState<CreateQuizResponse | null>(null);
   const [lastQuiz, setLastQuiz] = useState<LastQuiz | null>(null);
   const locale = useErrorLocale();
@@ -502,7 +507,8 @@ export default function SetupPage() {
       setError(errorMessage("playlist_url_required", locale));
       return;
     }
-    const submissionKey = `quiz:${playlistUrl}:${quizQuestionCount}`;
+    const questionCount = quizCountOf(quizCount);
+    const submissionKey = `quiz:${playlistUrl}:${questionCount}`;
     const rejected = lastRejectedRef.current;
     if (rejected && rejected.key === submissionKey) {
       setError(rejected.message);
@@ -512,7 +518,7 @@ export default function SetupPage() {
     const body: CreateQuizRequest = {
       url: playlistUrl,
       ownerName: quizOwnerName.trim() || undefined,
-      questionCount: quizQuestionCount,
+      questionCount,
       locale,
     };
     try {
@@ -1224,23 +1230,65 @@ export default function SetupPage() {
 
                     <div>
                       <p className="section-label">Questions</p>
-                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      {/* The number is the answer; the pills and the field are two ways to set it. */}
+                      <p
+                        aria-live="polite"
+                        style={{
+                          display: "flex",
+                          alignItems: "baseline",
+                          gap: "10px",
+                          margin: "0 0 10px",
+                          lineHeight: 1,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: "'Bebas Neue', sans-serif",
+                            fontSize: "56px",
+                            color: "#1DB954",
+                            letterSpacing: "0.02em",
+                          }}
+                        >
+                          {quizCountOf(quizCount)}
+                        </span>
+                        <span style={{ fontSize: "13px", color: "#999", fontWeight: 500 }}>questions</span>
+                      </p>
+                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                         {QUIZ_QUESTION_COUNTS.map((c) => (
                           <button
                             key={c}
-                            className={`pill${quizQuestionCount === c ? " active" : ""}`}
+                            className={`pill${quizCount.count === c && !isCustomSelected(quizCount, QUIZ_COUNT_CONTROL) ? " active" : ""}`}
                             onClick={() => {
-                              setQuizQuestionCount(c);
+                              setQuizCount(selectPreset(c));
                               setCreatedQuiz(null);
                             }}
                           >
                             {c}
                           </button>
                         ))}
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={QUIZ_MIN_QUESTIONS}
+                          max={QUIZ_MAX_QUESTIONS}
+                          className={`pill count-input${isCustomSelected(quizCount, QUIZ_COUNT_CONTROL) ? " active" : ""}`}
+                          placeholder={`${QUIZ_MIN_QUESTIONS}–${QUIZ_MAX_QUESTIONS}`}
+                          aria-label={`Custom number of questions, ${QUIZ_MIN_QUESTIONS} to ${QUIZ_MAX_QUESTIONS}`}
+                          value={quizCount.field}
+                          onChange={(e) => {
+                            // Same reason as the song count below: read the
+                            // value before the updater React runs later.
+                            const raw = e.target.value;
+                            setQuizCount((s) => typeCustom(s, raw, QUIZ_COUNT_CONTROL));
+                            setCreatedQuiz(null);
+                          }}
+                          onBlur={() => setQuizCount((s) => commitCustom(s, QUIZ_COUNT_CONTROL))}
+                        />
                       </div>
                       <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                        Each question shows four songs — one from your playlist, three that aren&apos;t.
+                        Each question is two songs — one from your playlist, one that isn&apos;t.
                         Friends guess first and get a few audio hints for when they&apos;re stuck.
+                        Any number from {QUIZ_MIN_QUESTIONS} to {QUIZ_MAX_QUESTIONS}.
                       </p>
                     </div>
                   </>
@@ -1469,6 +1517,7 @@ export default function SetupPage() {
                 playlistName={createdQuiz.playlistName}
                 questionCount={createdQuiz.questionCount}
                 expiresAt={createdQuiz.expiresAt}
+                locale={locale}
               />
             )}
             {setupMode === "quiz" && !createdQuiz && lastQuiz && (
