@@ -25,6 +25,14 @@ export interface QuizCopy {
   introBody: string;
   /** The link unfurl in the chat. No hint talk — that is for the page. */
   ogDescription: string;
+  /** The card when the quiz cannot be read: gone, malformed, or KV blinked. */
+  ogFallbackTitle: string;
+  ogFallbackDescription: string;
+  /* The card image (app/q/[code]/opengraph-image.tsx) */
+  /** The pill naming what this is, beside the wordmark. */
+  ogQuizLabel: string;
+  /** The rule of the game, in one pill. */
+  ogRule: string;
   nameLabel: string;
   namePlaceholder: string;
   startButton: string;
@@ -41,13 +49,13 @@ export interface QuizCopy {
   /** The clip was found but the browser refused to start it; a second tap plays it. */
   hintBlocked: string;
   hintsGone: string;
+  /** On a question already answered — after Back, or a reload — the way forward. */
   nextButton: string;
   submitButton: string;
   submitting: string;
   resultScore: string;
   hintsUsedLine: string;
   verdicts: Record<QuizVerdict, string>;
-  reviewTitle: string;
   boardTitleOwner: string;
   boardTitlePlaylist: string;
   boardFull: string;
@@ -103,8 +111,9 @@ export interface QuizCopy {
   resultSubjectOwner: string;
   resultSubjectPlaylist: string;
   rankLine: string;
-  reviewRight: string;
-  reviewMissed: string;
+  /** On the seam the moment a question is answered: the verdict for that one. */
+  revealRight: string;
+  revealWrong: string;
   /* The host's panel on the setup page, once the link exists */
   panelQuestionsFrom: string;
   panelSend: string;
@@ -127,6 +136,11 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
       "{count} questions. Each is two songs and only one is really in the playlist — guess first. You get {hints} {hintWord} to hear the song if you're stuck.",
     ogDescription:
       "{count} questions. Two songs each, only one is really in the playlist. Can you tell which?",
+    ogFallbackTitle: "How well do you know your friend's music taste?",
+    ogFallbackDescription:
+      "Two songs a question, only one is really in the playlist. Can you tell which?",
+    ogQuizLabel: "Music taste quiz",
+    ogRule: "Two songs a question — only one is in the playlist",
     nameLabel: "Your name",
     namePlaceholder: "So they know who beat them",
     startButton: "Start →",
@@ -153,7 +167,6 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
       guessing: "Coin flip",
       stranger: "Total stranger",
     },
-    reviewTitle: "The answers",
     boardTitleOwner: "Who knows {owner} best",
     boardTitlePlaylist: "Leaderboard",
     boardFull: "The board is full, so your score wasn't saved — it still counts.",
@@ -197,8 +210,8 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     resultSubjectOwner: "on {owner}'s taste",
     resultSubjectPlaylist: "on \"{playlist}\"",
     rankLine: "#{rank} of {count}",
-    reviewRight: "Right",
-    reviewMissed: "Missed",
+    revealRight: "Right — that's the one",
+    revealWrong: "Nope — it's the other one",
     panelQuestionsFrom: "{count} questions from",
     panelSend: "Send to friends →",
     panelCopyLink: "Copy link",
@@ -216,6 +229,10 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     introBody:
       "共 {count} 題。每題兩首歌，只有一首真的在歌單裡 — 先用猜的。卡住的話有 {hints} {hintWord}可以聽片段。",
     ogDescription: "共 {count} 題。每題兩首歌，只有一首真的在歌單裡，你分得出來嗎？",
+    ogFallbackTitle: "你有多懂朋友的音樂品味？",
+    ogFallbackDescription: "每題兩首歌，只有一首真的在歌單裡，你分得出來嗎？",
+    ogQuizLabel: "音樂品味測驗",
+    ogRule: "每題兩首歌，只有一首在歌單裡",
     nameLabel: "你的名字",
     namePlaceholder: "讓對方知道是誰贏了",
     startButton: "開始 →",
@@ -242,7 +259,6 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
       guessing: "用猜的",
       stranger: "完全不熟",
     },
-    reviewTitle: "解答",
     boardTitleOwner: "誰最懂 {owner}",
     boardTitlePlaylist: "排行榜",
     boardFull: "排行榜已經滿了，分數沒有存下來 — 但還是算數。",
@@ -286,8 +302,8 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     resultSubjectOwner: "對 {owner} 的品味",
     resultSubjectPlaylist: "對「{playlist}」",
     rankLine: "第 {rank} 名，共 {count} 人",
-    reviewRight: "答對",
-    reviewMissed: "答錯",
+    revealRight: "答對了，就是這首",
+    revealWrong: "答錯了，是另一首",
     panelQuestionsFrom: "共 {count} 題，來自",
     panelSend: "傳給朋友 →",
     panelCopyLink: "複製連結",
@@ -307,6 +323,39 @@ export function fillCopy(template: string, params: Record<string, string | numbe
     const value = params[key];
     return value === undefined ? whole : String(value);
   });
+}
+
+/** What the card image says. Every string comes from the table above. */
+export interface QuizCardCopy {
+  /** The pill beside the wordmark: what this is. */
+  label: string;
+  title: string;
+  /** The playlist's name when no owner was given, since the title then asks about "this playlist". */
+  subtitle: string | null;
+  /** The count and the rule; the rule alone when the quiz could not be read. */
+  pills: string[];
+}
+
+/**
+ * The words on the quiz link's card image (app/q/[code]/opengraph-image.tsx),
+ * in the owner's language — the friend it reaches is in the owner's chat.
+ * `null` is the card for a quiz that could not be read: gone, malformed, or
+ * a KV blink; it stays quiz-shaped and says nothing about a party. Kept out
+ * of the image file because the suite cannot import a `.tsx` module here.
+ */
+export function quizCardCopy(
+  peek: { locale: ErrorLocale; ownerName: string | null; playlistName: string; questionCount: number } | null
+): QuizCardCopy {
+  const copy = QUIZ_COPY[peek?.locale ?? "en"];
+  if (!peek) {
+    return { label: copy.ogQuizLabel, title: copy.ogFallbackTitle, subtitle: null, pills: [copy.ogRule] };
+  }
+  return {
+    label: copy.ogQuizLabel,
+    title: quizTitle(copy, peek.ownerName),
+    subtitle: peek.ownerName ? null : peek.playlistName,
+    pills: [fillCopy(copy.boardQuestionCount, { count: peek.questionCount }), copy.ogRule],
+  };
 }
 
 /** The card title: whose taste, or which playlist when no owner was named. */

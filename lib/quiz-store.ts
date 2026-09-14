@@ -77,6 +77,7 @@ import {
   QUIZ_MIN_QUESTIONS,
   QUIZ_TTL_SECONDS,
   type AnswerQuizResponse,
+  type CheckQuizResponse,
   type QuizBoardResponse,
   type QuizScore,
   type QuizView,
@@ -312,18 +313,28 @@ export async function getQuizView(code: string): Promise<QuizView> {
   return toView(await requireQuiz(code));
 }
 
+/** What the unfurl needs: the card's words, and the canonical code for its URL. */
+export interface QuizPeek {
+  code: string;
+  ownerName: string | null;
+  playlistName: string;
+  questionCount: number;
+  locale: ErrorLocale;
+}
+
 /**
- * The bare facts for an unfurl title, fail-soft: `generateMetadata` runs on
- * every fetch of the page, including by the chat app's link preview, and a
- * KV hiccup there must degrade to a static title rather than a 500.
+ * The bare facts for an unfurl, fail-soft: `generateMetadata` and the card
+ * image both run on every fetch of the page, including by the chat app's
+ * link preview, and a KV hiccup there must degrade to a generic quiz card
+ * rather than a 500. `code` is the stored, canonical one — the page's
+ * self-canonical and the image URL are built from it, never from the segment.
  */
-export async function peekQuiz(
-  code: string
-): Promise<{ ownerName: string | null; playlistName: string; questionCount: number; locale: ErrorLocale } | null> {
+export async function peekQuiz(code: string): Promise<QuizPeek | null> {
   try {
     const quiz = await loadQuiz(code);
     if (!quiz) return null;
     return {
+      code: quiz.meta.code,
       ownerName: quiz.meta.ownerName ?? null,
       playlistName: quiz.meta.playlistName,
       questionCount: quiz.questions.length,
@@ -425,6 +436,40 @@ export async function submitQuizAnswers(
     rank: recorded ? rankOf(scoreboard, trimmedName) : null,
     scoreboard: scoreboard.map(publicScore),
   };
+}
+
+/**
+ * The verdict on one question, in exchange for a pick for it.
+ *
+ * The taker page shows right or wrong the moment a half is tapped, and the
+ * key stays where it was: this hands over the answer to question N only
+ * against a pick for question N, and the page locks the question before it
+ * asks. What it does not do is *record* the pick — the row on the board is
+ * still written once, by `submitQuizAnswers`, from the answers the page
+ * kept. So a taker with the network tab open can learn a question's answer
+ * and change theirs before the sheet goes in; the same taker could already
+ * learn the whole key with one throwaway name, and the store's header
+ * concedes that. Stateless on purpose: a pick claimed per question would be
+ * a hash per taker with its own TTL, for a party toy.
+ *
+ * Two KV commands per tap — the route's limiter and one `hgetall` — where a
+ * quiz used to cost two per taker. Bounded by the code space (a valid code
+ * is the price of admission) and by `QUIZ_CHECK_LIMIT` per address.
+ */
+export async function checkQuizAnswer(
+  code: string,
+  questionIndex: number,
+  pick: number
+): Promise<CheckQuizResponse> {
+  // Shape first, before the hash is read, like `getQuizHint`.
+  if (!Number.isInteger(questionIndex) || questionIndex < 0 || questionIndex >= QUIZ_MAX_QUESTIONS) {
+    throw new QuizError("quiz_invalid_answers", 422);
+  }
+  if (!Number.isInteger(pick) || pick < 0) throw new QuizError("quiz_invalid_answers", 422);
+  const quiz = await requireQuiz(code);
+  const question = quiz.questions[questionIndex];
+  if (!question || pick >= question.options.length) throw new QuizError("quiz_invalid_answers", 422);
+  return { answer: question.answer, correct: pick === question.answer };
 }
 
 /**

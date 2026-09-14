@@ -162,13 +162,23 @@ describe("robots", () => {
   });
 
   it("keeps the ephemeral codes and the counting redirect out of the index", () => {
-    // The mirror image: a room code or a quiz link that stops resolving after
-    // its TTL is crawl budget spent on a 404, and /r counts every fetch as a
-    // click. /q is the quiz's code space, added alongside /j when it shipped.
+    // The mirror image: a room code that stops resolving after its TTL is
+    // crawl budget spent on a 404, and /r counts every fetch as a click.
     const disallowed = robots.slice(robots.indexOf("disallow:"), robots.indexOf("]", robots.indexOf("disallow:")));
-    for (const path of ["/buzz", "/j", "/q", "/r", "/api/"]) {
+    for (const path of ["/buzz", "/j", "/r", "/api/"]) {
       expect(disallowed, `robots.ts does not disallow ${path}`).toContain(`"${path}"`);
     }
+  });
+
+  it("lets the unfurlers read the quiz link: /q is noindex, never disallowed", () => {
+    // Facebook and X honour robots.txt when they unfurl, so a disallowed
+    // quiz link drew no card on either — and the card is the feature's
+    // whole distribution. The layout's noindex is what keeps /q out of the
+    // index instead; the disallow list must not grow it back.
+    const disallowed = robots.slice(robots.indexOf("disallow:"), robots.indexOf("]", robots.indexOf("disallow:")));
+    expect(disallowed).not.toContain('"/q"');
+    const layout = read("app/q/layout.tsx");
+    expect(layout).toMatch(/robots:\s*\{\s*index:\s*false/);
   });
 });
 
