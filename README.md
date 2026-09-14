@@ -52,7 +52,7 @@ Buzzer Mode and Mixed Playlist Mode share a single room code and QR: the host cl
 
 ### Taste Quiz — the third option on the setup page, and not a game
 
-Paste a playlist, type your name, pick 5 / 10 / 15 / 20 questions, and you get a **link** to send to a group chat instead of a game to host. A friend opens it on their own phone and answers "which of these four songs is really in the playlist?" — no audio in the question. A 30s clip is a *hint*, rationed at one per five questions, and using fewer only breaks ties. They get a score, a verdict (`soulmate` / `close` / `acquaintance` / `stranger`) and the public ranking. The results page (`/q/<code>/board`), which names the answers and shows who got each question, opens only on the device that made the quiz. A quiz lives seven days.
+Paste a playlist, type your name, pick 10–50 questions, and you get a **link** to send to a group chat instead of a game to host. A friend opens it on their own phone and answers "which of these two songs is really in the playlist?" — one real, one decoy, no audio in the question. A 30s clip is a *hint*, rationed at one per ten questions, and using fewer only breaks ties. They get a score, a verdict (`soulmate` / `close` / `acquaintance` / `stranger`) and the public ranking. The results page (`/q/<code>/board`), which names the answers and shows who got each question, opens only on the device that made the quiz. A quiz lives seven days.
 
 It is built as the first **link-shaped loop surface** rather than as a game mode — why, and what was rejected, is [decisions.md D9](docs/decisions.md#d9--the-quiz-is-a-loop-surface-not-a-game-mode).
 
@@ -210,7 +210,7 @@ Every route is IP rate limited (`lib/rate-limit.ts`) with a fixed window; limits
 | `/api/room/[code]/status` | GET | Who has submitted so far (host polls every 4s). | 200 / 10 min |
 | `/api/room/[code]/pool` | GET | `?sampledPerPlayer=N` + `x-host-token` header → the sampled, deduped pool. One-shot consume. | 20 / 10 min |
 | `/api/quiz` | POST | `{url, ownerName?, questionCount, locale?}` → `{code, hostToken, expiresAt, questionCount, playlistName}`. Turns a playlist into a Taste Quiz; the feature's only Spotify call, through the same cache as `/api/playlist`. | 10 / 10 min |
-| `/api/quiz/[code]` | GET | The quiz as a taker sees it — four titles per question, no answer key — plus the public ranking. Counts the open. | 60 / 10 min |
+| `/api/quiz/[code]` | GET | The quiz as a taker sees it — two titles per question, no answer key — plus the public ranking. Counts the open. | 60 / 10 min |
 | `/api/quiz/[code]/answer` | POST | `{name, answers, hintsUsed?, submissionId?}` → score, verdict and ranking. Graded server-side; a name is held once per quiz. | 60 / 10 min |
 | `/api/quiz/[code]/hint` | GET | `?q=N` (zero-based) → a clip of question N's real track, so the phone never names the answer in a request. `&refresh=1` repairs a dead URL. | 60 / 10 min (refresh: 10) |
 | `/api/quiz/[code]/board` | GET | `x-host-token` header → ranking, mean, and per-question correct counts naming each real song. 403 `quiz_not_host` otherwise. | 60 / 10 min |

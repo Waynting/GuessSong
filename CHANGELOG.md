@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.9.0] - 2026-09-14
 
 **Taste Quiz** — a playlist turned into a link. A friend opens it on their own
-phone, answers 5–20 "which of these four songs is really in the playlist"
+phone, answers 10–50 "which of these two songs is really in the playlist"
 questions, gets a score and a verdict, and lands on a board of who knows the
 owner best.
 
@@ -27,13 +27,23 @@ send one.
 ### Added
 
 - **`lib/quiz.ts` — the rules, pure.** `buildQuiz` picks the tracks, chooses
-  three decoys per question and shuffles them under an injected RNG
-  (`seededRng`, mulberry32), so every taker gets the same quiz and a test can
-  pin one. `gradeAnswers` is tolerant — a short, long or out-of-range list
-  grades as wrong rather than throwing. `verdictFor` buckets the ratio into
-  four labels; `hintAllowance` is one hint per five questions;
-  `sortScoreboard` ranks by score, then fewer hints, then arrival.
-  `tests/quiz.test.ts` pins all of it, including the decoy tier order.
+  one decoy per question (`QUIZ_OPTION_COUNT - 1`) and shuffles the pair under
+  an injected RNG (`seededRng`, mulberry32), so every taker gets the same quiz
+  and a test can pin one. `gradeAnswers` is tolerant — a short, long or
+  out-of-range list grades as wrong rather than throwing. `verdictFor` buckets
+  the ratio into four labels at 90 / 75 / 60%; `hintAllowance` is one hint per
+  ten questions; `sortScoreboard` ranks by score, then fewer hints, then
+  arrival. `tests/quiz.test.ts` pins all of it, including the decoy tier order
+  — asked for at three so the fall-through is visible, since at production's
+  one only the first tier that has anything ever shows.
+- **The question count is any integer from 10 to 50**, with 10 / 20 / 30 / 50
+  as one-tap picks and a typed field beside them. The field runs on
+  `lib/song-count.ts`'s state machine: every function there now takes a
+  `CountControl` (`{presets, min, max}`, defaulting to the game's own), and
+  `QUIZ_COUNT_CONTROL` in `lib/quiz.ts` hands it the quiz's bounds, so
+  "reject a half-typed number per keystroke, clamp on blur" is written once
+  and bounded twice. `tests/song-count.test.ts` pins that the bounds travel
+  with the control and that the game's control is untouched.
 - **`lib/quiz-decoys.ts` — the decoy pool, ~630 real songs across ~150
   artists** in four script buckets, the Traditional Chinese half first because
   that is where the hosts are. The bucket is *derived* from the strings by
@@ -131,6 +141,24 @@ send one.
 
 ### Decided (see `docs/decisions.md` D9)
 
+- **Two options, not four, and the three numbers that follow from it.** The
+  first build showed four titles in a bordered list and read as a form. At two
+  the screen *is* the two answers — one tap, the chosen half fills green, the
+  next pair slides in — which is the interaction a cold visitor in a group
+  chat will actually finish fifty of. Two options put chance at 50%, so:
+  `QUIZ_MIN_QUESTIONS` is ten (a coin lands 7/10 17% of the time, 15/20 2%,
+  35/50 0.3%); the lowest passing verdict is 60%, above chance, where 40% had
+  been below it; and a hint is a whole point rather than a nudge, so the
+  allowance is one per ten questions instead of one per five. The decoy tiers
+  are unchanged and bite harder — with one decoy the first tier with anything
+  decides the question, so most questions are "another song by the same
+  artist".
+- **The host side is bilingual where its output leaves the page.** The
+  setup form stays English by the site's convention, but the panel that
+  appears once the link exists, the sentence sent with it and the share-sheet
+  title follow the device language — a Taiwanese host's share text was going
+  into their LINE group in English while the page their friends opened
+  rendered in Chinese.
 - **No audio in the questions; a clip is a rationed hint.** Previews are the
   hottest path in the app and a quiz that played one per question would
   multiply that by the number of friends, with a throttled minute landing as a

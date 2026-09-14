@@ -58,13 +58,13 @@ export const CHANGELOG: ChangelogEntry[] = [
     changes: [
       {
         kind: "new",
-        text: "A third mode on the setup page. Paste a playlist, pick 5 to 20 questions, add your name if you like, and you get a link and a QR code. Nothing to install, nobody has to be in the room.",
-        textZh: "首頁多了第三個模式。貼上歌單、選 5 到 20 題、想的話加上名字，就會拿到一條連結和 QR code。不用安裝、也不用大家在同一個地方。",
+        text: "A third mode on the setup page. Paste a playlist, pick anywhere from 10 to 50 questions, add your name if you like, and you get a link and a QR code. Nothing to install, nobody has to be in the room.",
+        textZh: "首頁多了第三個模式。貼上歌單、題數 10 到 50 隨你選、想的話加上名字，就會拿到一條連結和 QR code。不用安裝、也不用大家在同一個地方。",
       },
       {
         kind: "new",
-        text: "Each question shows four songs and only one is in the playlist. You guess from the titles first; if you're stuck, a rationed hint plays the song that's really in there. Hints count against you in a tie, so guessing stays the game.",
-        textZh: "每題四首歌，只有一首真的在歌單裡。先看歌名猜；卡住的話有限量的提示可以聽一段。同分時用過提示的排後面，所以還是要先猜。",
+        text: "Every question is a duel: two songs fill the screen, one is really in the playlist, tap the one you believe. If you're stuck, a rationed hint plays the song that's really in there. Hints count against you in a tie, so guessing stays the game.",
+        textZh: "每一題都是二選一：兩首歌佔滿整個畫面，只有一首真的在歌單裡，點你相信的那一首。卡住的話有限量的提示可以聽一段。同分時用過提示的排後面，所以還是要先猜。",
       },
       {
         kind: "new",

@@ -233,9 +233,12 @@ off-site one whose impression happens on a page of ours. Its number is
 `click:quiz_result` against `impression:quiz_result`; the quiz is the reason
 someone sends the link.
 
-**Mechanic:** four titles, one really in the playlist, no audio in the question.
-A clip is a *hint*, fetched on tap, rationed at one per five questions, a
-tiebreak rather than a penalty. Previews are the hottest path in the app; a quiz
+**Mechanic:** two titles, one really in the playlist, no audio in the question.
+A clip is a *hint*, fetched on tap, rationed at one per ten questions, a
+tiebreak rather than a penalty. Started as four titles and one hint per five;
+cut to two before release so the screen is the two answers and nothing else,
+which moved the floor to ten questions (a coin lands 7/10 17% of the time,
+15/20 2%) and the lowest passing verdict to 60%, above chance. Previews are the hottest path in the app; a quiz
 that played one per question would multiply it by the number of friends, and a
 throttled minute would land as a silent quiz on a cold visitor.
 
