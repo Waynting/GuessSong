@@ -40,6 +40,7 @@ import {
   type CreateQuizResponse,
 } from "@/types/quiz";
 import { DEFAULT_QUIZ_COUNT_STATE, QUIZ_COUNT_CONTROL, quizCountOf } from "@/lib/quiz";
+import { requestedSetupMode } from "@/lib/setup-arrival";
 import { SiteFooter } from "@/components/site-footer";
 import { getGuide } from "@/lib/guides";
 import { InstallBanner } from "@/components/install-banner";
@@ -157,6 +158,17 @@ const FAQS: { q: string; a: string }[] = [
  */
 type SetupMode = "single" | "mixed" | "quiz";
 
+/**
+ * A quiz this page made, as the panel shows it.
+ *
+ * The owner name rides along because the response does not carry it and the
+ * panel outlives the form: the share sentence names whoever the quiz was
+ * *made* for, and the host editing the name box afterwards — on the way to a
+ * second quiz, or by accident — must not rewrite the text under a link that
+ * has already been sent.
+ */
+type CreatedQuiz = CreateQuizResponse & { ownerName: string | null };
+
 // `MixedSubMode` is imported rather than redeclared here. It was a local copy
 // with the same two members until the KV counters started keying off it, and a
 // second copy of a union whose members become part of a key is the shape that
@@ -234,10 +246,13 @@ export default function SetupPage() {
   // (`QUIZ_COUNT_CONTROL`): the same two rules as "Number of Songs" below, so a
   // half-typed "4" on the way to "45" never becomes the count.
   const [quizCount, setQuizCount] = useState(DEFAULT_QUIZ_COUNT_STATE);
-  const [createdQuiz, setCreatedQuiz] = useState<CreateQuizResponse | null>(null);
+  const [createdQuiz, setCreatedQuiz] = useState<CreatedQuiz | null>(null);
   const [lastQuiz, setLastQuiz] = useState<LastQuiz | null>(null);
   const locale = useErrorLocale();
   const firstInputRef = useRef<HTMLInputElement>(null);
+  // The setup form itself, for an arrival that asked for a mode: the hero and
+  // the install pitch sit above it, and on a phone that is three screens.
+  const setupCardRef = useRef<HTMLDivElement>(null);
 
   /**
    * The last submission that failed in a way the submission itself determines,
@@ -281,6 +296,18 @@ export default function SetupPage() {
     setRoomSubmissions([]);
     setBuzzerPlayerCount(0);
     setRoomError(null);
+  }
+
+  /**
+   * The one way the mode pills change the mode. Leaving the quiz is the only
+   * thing besides making another quiz that takes the host's link off screen:
+   * editing the form does not, because a tap on a count pill is not a
+   * decision to throw away a link that may already be in a group chat.
+   */
+  function chooseMode(mode: SetupMode) {
+    setSetupMode(mode);
+    resetRoom();
+    if (mode !== "quiz") setCreatedQuiz(null);
   }
 
   async function handleRoomStart() {
@@ -359,6 +386,29 @@ export default function SetupPage() {
     // about to host one tonight, so the game this credits is weeks away.
     const ref = query.get("ref");
     if (ref) rememberLoopRef(ref);
+
+    // An arrival that asked for a mode gets it, and gets the form on screen.
+    // `?ref=quiz_result` is a friend who just took a quiz and tapped "make one
+    // for your friends"; `?mode=quiz` is the same intent from a content page.
+    // Landing either of them on Single Playlist under the hero — the quiz pill
+    // three screens down and unmarked — is what this fixes. The rule is in
+    // lib/setup-arrival.ts, and it is null for every other arrival.
+    //
+    // Scrolled on the next frame rather than here: the card is already in the
+    // DOM, but the mode has not been committed yet and the fade-in is about
+    // to start. The card's own `scroll-margin-top` absorbs the 16px the
+    // animation translates it by, so it settles just under the top edge.
+    const requested = requestedSetupMode(query);
+    if (requested) {
+      setSetupMode(requested);
+      requestAnimationFrame(() => {
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        setupCardRef.current?.scrollIntoView({
+          block: "start",
+          behavior: reduceMotion ? "auto" : "smooth",
+        });
+      });
+    }
 
     setLastQuiz(recallLastQuiz());
   }, []);
@@ -530,10 +580,11 @@ export default function SetupPage() {
       const data = await res.json();
       if (!res.ok) throw apiError(data, "quiz_create_failed");
       const created = data as CreateQuizResponse;
-      setCreatedQuiz(created);
+      const ownerName = quizOwnerName.trim() || null;
+      setCreatedQuiz({ ...created, ownerName });
       const remembered: LastQuiz = {
         code: created.code,
-        ownerName: quizOwnerName.trim() || null,
+        ownerName,
         playlistName: created.playlistName,
         createdAt: Date.now(),
         expiresAt: created.expiresAt,
@@ -816,6 +867,19 @@ export default function SetupPage() {
            up green, so the row looks like nothing is chosen. */
         .count-input.active { color: #000; }
         .count-input.active::placeholder { color: rgba(0,0,0,0.45); }
+        /* A phone. The card's inner width is the viewport less 98px of
+           padding and border — 277px at 375, 262px at 360 — and the quiz's
+           count row (four pills, the typed field, four 8px gaps) is ~294px at
+           the sizes above, so the field wrapped to a row of its own. Three
+           pixels off each pill side and a narrower field bring the row to
+           ~257px: it fits at 360 with a few pixels to spare, and "Custom",
+           the widest placeholder, still clears the field's padding. The
+           Number of Songs row has one more pill and wraps either way; it is
+           unchanged in shape. */
+        @media (max-width: 420px) {
+          .pill { padding: 8px 9px; }
+          .count-input { width: 76px; padding-left: 8px; padding-right: 8px; }
+        }
 
         .link-btn {
           display: inline-flex;
@@ -1109,7 +1173,11 @@ export default function SetupPage() {
           </div>
 
           {/* Card */}
-          <div className={`card ${mounted ? "fade-in fade-in-2" : ""}`} style={{ padding: "28px", display: "flex", flexDirection: "column", gap: "24px" }}>
+          <div
+            ref={setupCardRef}
+            className={`card ${mounted ? "fade-in fade-in-2" : ""}`}
+            style={{ padding: "28px", display: "flex", flexDirection: "column", gap: "24px", scrollMarginTop: "32px" }}
+          >
 
             {/* Game Mode */}
             <div>
@@ -1117,28 +1185,19 @@ export default function SetupPage() {
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 <button
                   className={`pill${setupMode === "single" ? " active" : ""}`}
-                  onClick={() => {
-                    setSetupMode("single");
-                    resetRoom();
-                  }}
+                  onClick={() => chooseMode("single")}
                 >
                   Single Playlist
                 </button>
                 <button
                   className={`pill${setupMode === "mixed" ? " active" : ""}`}
-                  onClick={() => {
-                    setSetupMode("mixed");
-                    resetRoom();
-                  }}
+                  onClick={() => chooseMode("mixed")}
                 >
                   Mixed Playlist 🔀
                 </button>
                 <button
                   className={`pill${setupMode === "quiz" ? " active" : ""}`}
-                  onClick={() => {
-                    setSetupMode("quiz");
-                    resetRoom();
-                  }}
+                  onClick={() => chooseMode("quiz")}
                 >
                   Taste Quiz 🎧
                 </button>
@@ -1168,10 +1227,7 @@ export default function SetupPage() {
                       className={`url-input${isValidSpotifyUrl ? " valid" : ""}`}
                       placeholder="https://open.spotify.com/playlist/..."
                       value={playlistUrl}
-                      onChange={(e) => {
-                        setPlaylistUrl(e.target.value);
-                        setCreatedQuiz(null);
-                      }}
+                      onChange={(e) => setPlaylistUrl(e.target.value)}
                       spellCheck={false}
                     />
                     {isValidSpotifyUrl && (
@@ -1218,10 +1274,7 @@ export default function SetupPage() {
                         value={quizOwnerName}
                         maxLength={QUIZ_NAME_MAX}
                         style={{ width: "100%" }}
-                        onChange={(e) => {
-                          setQuizOwnerName(e.target.value);
-                          setCreatedQuiz(null);
-                        }}
+                        onChange={(e) => setQuizOwnerName(e.target.value)}
                       />
                       <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
                         Goes in the title: &ldquo;How well do you know {quizOwnerName.trim() || "…"}&rsquo;s music taste?&rdquo;
@@ -1258,10 +1311,7 @@ export default function SetupPage() {
                           <button
                             key={c}
                             className={`pill${quizCount.count === c && !isCustomSelected(quizCount, QUIZ_COUNT_CONTROL) ? " active" : ""}`}
-                            onClick={() => {
-                              setQuizCount(selectPreset(c));
-                              setCreatedQuiz(null);
-                            }}
+                            onClick={() => setQuizCount(selectPreset(c))}
                           >
                             {c}
                           </button>
@@ -1280,7 +1330,6 @@ export default function SetupPage() {
                             // value before the updater React runs later.
                             const raw = e.target.value;
                             setQuizCount((s) => typeCustom(s, raw, QUIZ_COUNT_CONTROL));
-                            setCreatedQuiz(null);
                           }}
                           onBlur={() => setQuizCount((s) => commitCustom(s, QUIZ_COUNT_CONTROL))}
                         />
@@ -1500,20 +1549,24 @@ export default function SetupPage() {
                   onSubmissionsChange={setRoomSubmissions}
                 />
                 {roomError && (
-                  <p style={{ marginTop: "10px", fontSize: "12px", color: "#fca5a5" }}>
+                  <p role="alert" style={{ marginTop: "10px", fontSize: "12px", color: "#fca5a5" }}>
                     {roomError}
                   </p>
                 )}
               </div>
             )}
 
-            {/* The quiz's own ending: the link, or the button that makes it.
-                Kept apart from the Start button below because nothing about
-                a quiz is a game start. */}
+            {/* The quiz's own ending: the link, with the button that makes
+                another one below it. Kept apart from the Start button because
+                nothing about a quiz is a game start. The panel stays up while
+                the host edits the form — it used to vanish on the first tap
+                of a count pill, leaving a link in someone's chat that this
+                screen no longer showed — and is replaced only by the next
+                quiz, or by leaving the mode (`chooseMode`). */}
             {setupMode === "quiz" && createdQuiz && (
               <QuizPanel
                 code={createdQuiz.code}
-                ownerName={quizOwnerName.trim() || null}
+                ownerName={createdQuiz.ownerName}
                 playlistName={createdQuiz.playlistName}
                 questionCount={createdQuiz.questionCount}
                 expiresAt={createdQuiz.expiresAt}
@@ -1541,10 +1594,12 @@ export default function SetupPage() {
                   </>
                 );
                 if (setupMode === "quiz") {
-                  if (createdQuiz) return null;
+                  // Under the panel once a link exists, and worded as a second
+                  // link rather than a repeat: pressing it makes a new code,
+                  // it does not change the one already sent.
                   return (
                     <button className="start-btn" onClick={handleCreateQuiz} disabled={loading}>
-                      {loading ? loadingLabel : "Create quiz link →"}
+                      {loading ? loadingLabel : createdQuiz ? "Create a new link →" : "Create quiz link →"}
                     </button>
                   );
                 }
@@ -1598,8 +1653,12 @@ export default function SetupPage() {
                 );
               })()}
 
+              {/* `role="alert"`: a failed submit is announced, not just
+                  painted. Without it a screen reader hears the button go
+                  quiet and nothing else. */}
               {error && (
                 <div
+                  role="alert"
                   style={{
                     marginTop: "12px",
                     padding: "12px 16px",
