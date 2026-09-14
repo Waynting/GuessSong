@@ -19,7 +19,7 @@ Use `127.0.0.1:8000` (not `localhost`) — the Spotify app is configured for thi
 
 **Run `npm run stats` at the start of any session about growth, the loop, retention, reliability, or "what should we build next", and lead with what it says.** It prints the playlist and preview cache hit rates alongside the loop counters — that is the number that says whether the app can afford its own traffic, and it sat at 26% for days before Spotify cut the whole app off in August 2026 because nothing read it. Not a nicety. The product's own telemetry went unread for eight weeks across four separate attempts to go and open GA4, and every feature decision in that period was made on an n of 1. The counters exist so that question has an answer; a command nobody runs is the same failure with a shorter path. If the Upstash variables are missing, say so and ask for them rather than reasoning from guesses.
 
-**Read `docs/viral-loop.md` before interpreting the output.** Every number it prints is a floor, and the failure mode is reading a low one as "the CTA does not work" rather than "we could not see that it did".
+**Read `docs/viral-loop.md` before interpreting the output.** Every number it prints is a floor — bar one: the quiz's `opened` is bumped on every `GET`, so it is a ceiling and `completed ÷ opened` reads low — and the failure mode is reading a low one as "the CTA does not work" rather than "we could not see that it did".
 
 ## What This Is
 
@@ -95,7 +95,7 @@ Three rules that follow from this, and are easy to undo by accident:
 - **`fetchPlaylistTracks` reads at most `MAX_PLAYLIST_TRACKS` (500), sampling random pages when a playlist is bigger.** Following `next` unbounded made one big playlist cost 40+ requests for a game that plays at most 50 songs. A miss logs `[playlist-cache] miss id=… source=… misses=…`; the cumulative rate is `getCacheStats()`, on demand.
 
 Two things about reading that line, both of which have already cost a debugging detour:
-- **Trust `source=`, not the log row's method.** Only `POST /api/playlist` and `POST /api/room/[code]/submit` can produce it, but Vercel attributes a line to whichever request the instance was serving, so it often appears against an unrelated `GET`. New callers of `loadPlaylist` should pass a `PlaylistLoadSource`; the default logs `source=unknown`.
+- **Trust `source=`, not the log row's method.** Only `POST /api/playlist`, `POST /api/room/[code]/submit` and `POST /api/quiz` can produce it, but Vercel attributes a line to whichever request the instance was serving, so it often appears against an unrelated `GET`. New callers of `loadPlaylist` should pass a `PlaylistLoadSource`; the default logs `source=unknown`.
 - **`getCacheStats()` counts a replayed 404 as a hit** — correctly, since it answered without touching Spotify — so a host retrying a dead link pushes the rate *up*. `negativeHits` is that subset, and `hits - negativeHits` is the part that describes real playlists. The bucket is a **UTC** day, so a rate read soon after 00:00 UTC is measuring almost nothing.
 - **A log line must not read a counter back to compose itself.** Both cache modules used to spend two extra KV reads per miss printing a cumulative rate, on the exact path that is already the expensive one. Cumulative numbers belong in `npm run stats` and the `*CacheStats()` accessors, which are asked once by someone who wants them; a log line reports the request it belongs to.
 
