@@ -305,19 +305,25 @@ describe("the taker's routes", () => {
 
     // Not JSON at all: the same 400 a missing field gets, before any read.
     const hgetall = vi.spyOn(store, "hgetall");
-    const junk = await post(quiz.code, "{not json");
-    expect(junk.status).toBe(400);
-    expect(((await junk.json()) as { code: string }).code).toBe("quiz_missing_fields");
-    expect(hgetall).not.toHaveBeenCalled();
-    hgetall.mockRestore();
+    try {
+      const junk = await post(quiz.code, "{not json");
+      expect(junk.status).toBe(400);
+      expect(((await junk.json()) as { code: string }).code).toBe("quiz_missing_fields");
+      expect(hgetall).not.toHaveBeenCalled();
+    } finally {
+      hgetall.mockRestore();
+    }
 
     // KV down under the read: a coded 500, and the limiter's own `incr`
     // has already said yes so the refusal counter does not move either.
     const down = vi.spyOn(store, "hgetall").mockRejectedValueOnce(new Error("kv down"));
-    const failed = await post(quiz.code, JSON.stringify({ q: 0, pick: 0 }));
-    expect(failed.status).toBe(500);
-    expect(((await failed.json()) as { code: string }).code).toBe("server_error");
-    down.mockRestore();
+    try {
+      const failed = await post(quiz.code, JSON.stringify({ q: 0, pick: 0 }));
+      expect(failed.status).toBe(500);
+      expect(((await failed.json()) as { code: string }).code).toBe("server_error");
+    } finally {
+      down.mockRestore();
+    }
 
     expect(await count(keys.quiz.started)).toBe(before);
 

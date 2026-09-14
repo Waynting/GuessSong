@@ -479,9 +479,13 @@ export function QuizClient({ code }: { code: string }) {
     void load();
   }, [load]);
 
+  // Unmount is a round ending too: a check still in flight must not come
+  // back and schedule an advance — or, on the last question, a submit — for
+  // a page that is gone.
   useEffect(
     () => () => {
       if (advanceTimer.current) clearTimeout(advanceTimer.current);
+      round.current.bump();
     },
     []
   );
@@ -1352,9 +1356,11 @@ async function fetchCheck(code: string, q: number, pick: number): Promise<CheckQ
   let data: unknown;
   try {
     data = await res.json();
-  } catch {
-    // A bare 500 with an empty body is the server; a 200 that is not JSON is
-    // the wire. Both are named so `lostCheckReason` can file them.
+  } catch (e: unknown) {
+    // The timeout can land here too — headers in, body stalled — and it must
+    // stay a timeout. Otherwise: a bare 500 with an empty body is the server;
+    // a 200 that is not JSON is the wire. Named so `lostCheckReason` can file them.
+    if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) throw e;
     throw new Error(res.ok ? "check: malformed" : "check: server");
   }
   if (!res.ok) throw apiError(data, "quiz_answer_failed");

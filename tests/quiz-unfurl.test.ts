@@ -156,8 +156,17 @@ describe("the per-quiz card image", () => {
     // next/og's own loader fails soft into boxes under whatever header was
     // already chosen, so the route fetches the font itself and lets the
     // outcome decide. A tofu card is a minute at the edge, not a day.
-    expect(image).toMatch(/peek && \(!wantsHan \|\| hanFont\) \? FOUND_CACHE_CONTROL : MISSING_CACHE_CONTROL/);
+    expect(image).toMatch(/peek && fontsInHand \? FOUND_CACHE_CONTROL : MISSING_CACHE_CONTROL/);
+    expect(image).toMatch(/const fontsInHand = !FOREIGN\.test\(text\) && \(!wantsHan \|\| hanFont !== null\);/);
     expect(image).toMatch(/const hanFont = wantsHan \? await loadHanFont\(text\) : null;/);
+    // And what the route holds no font for — kana, Hangul, an emoji in a
+    // name — is never given the long header either: next/og fetches those
+    // itself, untimed and fail-soft, under whatever header was chosen.
+    const foreign = new RegExp(image.match(/const FOREIGN = \/(.+)\/u;/)?.[1] ?? "(?!)", "u");
+    for (const name of ["さくら", "지민", "Wayn 🎵", "Алекс", "สมชาย"]) expect(foreign.test(name), name).toBe(true);
+    for (const text of ["你有多懂 小明 的音樂品味？", "How well do you know Wayn's music taste?", "Late nights · 10 questions", "Two songs a question — only one is in the playlist"]) {
+      expect(foreign.test(text), text).toBe(false);
+    }
     expect(image).toMatch(/AbortSignal\.timeout\(FONT_TIMEOUT_MS\)/);
     expect(image).toMatch(/format\\\('\(\?:opentype\|truetype\)'\\\)/);
   });

@@ -35,8 +35,11 @@
  * header — tofu pinned at the edge with nothing to say so. So this route
  * fetches Noto Sans TC itself, subset to the card's text, under a timeout,
  * and lets the outcome choose the header: fonts in hand, a day; not, a
- * minute, and next/og's own loader gets its try. Supplying `fonts` replaces
- * the bundled Latin face, so the subset covers every string on the card.
+ * minute, and next/og's own loader gets its try. The same rule covers what
+ * this route does not fetch at all — kana, Hangul, an emoji in a name go to
+ * that loader too, so a card carrying any of them is held a minute however
+ * it came out. Supplying `fonts` replaces the bundled Latin face, so the
+ * subset covers every string on the card.
  * `lang` still goes on the text: without it satori resolves Han to the first
  * family in its list, Noto Sans JP. No emoji: each one is a fetch too.
  *
@@ -82,6 +85,15 @@ const LONG_TITLE = 36;
 
 /** Han glyphs sit taller in their em box than Latin; 1.18 leaves three lines of them touching. */
 const HAN = /\p{Script=Han}/u;
+/**
+ * Anything the route holds no font for: a script that is neither Latin nor
+ * Han (kana, Hangul, Thai, Cyrillic, …) or an emoji. `next/og` will fetch
+ * those itself, untimed and fail-soft, so a card that needs one is never
+ * given the day-long header — a render it drew with boxes is held a minute.
+ * Common and Inherited cover punctuation, digits, spaces and the marks the
+ * card's own copy uses (·, —, full-width ？).
+ */
+const FOREIGN = /[^\p{Script=Latin}\p{Script=Han}\p{Script=Common}\p{Script=Inherited}]|\p{Extended_Pictographic}/u;
 
 /** The family satori would otherwise reach for last; asked for by name, subset to the text. */
 const HAN_FONT_FAMILY = "Noto+Sans+TC";
@@ -110,11 +122,15 @@ export default async function QuizCard({ params }: Params) {
   const text = cardText(copy);
   const wantsHan = HAN.test(text);
   const hanFont = wantsHan ? await loadHanFont(text) : null;
+  // The long header only for a card whose every glyph came from a font this
+  // route holds: the quiz was read, nothing on it is a script or emoji left
+  // to next/og's own loader, and the Han subset, if wanted, arrived.
+  const fontsInHand = !FOREIGN.test(text) && (!wantsHan || hanFont !== null);
   return new ImageResponse(<Card peek={peek} copy={copy} />, {
     ...size,
     ...(hanFont ? { fonts: [{ name: "Noto Sans TC", data: hanFont, weight: 400 as const, style: "normal" as const }] } : {}),
     headers: {
-      "cache-control": peek && (!wantsHan || hanFont) ? FOUND_CACHE_CONTROL : MISSING_CACHE_CONTROL,
+      "cache-control": peek && fontsInHand ? FOUND_CACHE_CONTROL : MISSING_CACHE_CONTROL,
     },
   });
 }

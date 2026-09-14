@@ -52,9 +52,11 @@ in, they wanted each tap to say right or wrong rather than a list at the end.
   per region per day. `ImageResponse`'s default `immutable, max-age`
   cached it only in a browser, which an unfurler is not; the key is
   lower-case because `Headers` would *append* a capitalised twin to the
-  default rather than replace it. CJK glyphs come from `next/og`'s own
-  Google Fonts fallback (Noto Sans TC, subset to the text), ~140ms a render
-  locally; no emoji, each is a fetch. Words come from `quizCardCopy` in
+  default rather than replace it. Han glyphs are Noto Sans TC, fetched by
+  the route itself, subset to the card's text (first written as `next/og`'s
+  own fallback; moved into the route in review so the fetch's outcome can
+  choose the header), ~140ms a warm render locally; no emoji, each is a
+  fetch. Words come from `quizCardCopy` in
   `lib/quiz-copy.ts`, where the suite can reach them. Route table: `ƒ`,
   deliberately; the five build-time images are still `○` / `●`.
   `tests/quiz-unfurl.test.ts` rewritten to pin the self-canonical, the
@@ -142,10 +144,19 @@ source.
   needs to be honest against that, the check would have to *record* the
   first pick — a hash per taker, its own TTL — which is what was rejected
   here.
-- **The card image's CJK glyphs depend on Google Fonts at render time.**
-  A failed fetch now costs a minute at the edge rather than a day, and the
-  `og:title` beside the picture still carries the name; bundling a subset
-  font is the fix if `s-maxage=60` cards show up often in the logs.
+- **The card image's non-Latin glyphs depend on Google Fonts at render
+  time.** Han is fetched by the route itself, under a timeout; kana, Hangul,
+  Thai, Cyrillic and emoji are left to `next/og`'s own untimed loader. A
+  card that needed either and did not get it is held a minute at the edge
+  rather than a day, and the `og:title` beside the picture still carries
+  the name — but under a Google Fonts outage each such render runs to the
+  function's own timeout, once a minute per region per quiz, bounded only
+  by `quiz:card`. Bundling a subset font is the fix if `s-maxage=60` cards
+  show up often in the logs.
+- **`checkQuizAnswer` reads the whole hash per tap.** A per-instance memo of
+  `{questions, expiresAt}` keyed by code (the token-cache pattern) would
+  make a warm tap cost the limiter's `incr` alone; deferred until
+  `refused: check` or the Upstash command count says it matters.
 - **`/j` still unfurls as the home page**, for the same canonical reason.
   A room link is a QR nine times in ten, so it was left; the fix is the
   same three lines.
