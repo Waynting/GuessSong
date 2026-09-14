@@ -10,6 +10,17 @@
  * script calls, is where opens are counted.
  *
  * Ephemeral, so `noindex` and in robots.ts's disallow list, like `/j`.
+ *
+ * The card carries the site's one static image, not a per-quiz one. Next
+ * replaces a parent's `openGraph` wholesale when a segment sets its own, so
+ * without `images` here the quiz link unfurled as text in every chat app —
+ * LINE, WhatsApp and iMessage all draw a text-only card for a page with no
+ * `og:image`, and the link in a group chat is this feature's whole
+ * distribution. A satori render per quiz would be `ƒ`, paid once per
+ * unfurler per share, on the most expensive render in the app
+ * (CLAUDE.md, "SEO / Metadata"); `/opengraph-image` is built once and costs
+ * every unfurler nothing. Relative URLs resolve against the root layout's
+ * `metadataBase`, which a nested `generateMetadata` inherits.
  */
 
 import type { Metadata } from "next";
@@ -18,6 +29,9 @@ import { QUIZ_COPY, fillCopy } from "@/lib/quiz-copy";
 import { QuizClient } from "./quiz-client";
 
 type Params = { params: Promise<{ code: string }> };
+
+/** The site's build-time card, as app/layout.tsx declares it. */
+const OG_IMAGE = { url: "/opengraph-image", width: 1200, height: 630 };
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { code } = await params;
@@ -31,12 +45,13 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
     ? fillCopy(copy.introTitleOwner, { owner: peek.ownerName })
     : copy.introTitlePlaylist;
   const description = fillCopy(copy.ogDescription, { count: peek.questionCount });
+  const images = [{ ...OG_IMAGE, alt: title }];
   return {
     title,
     description,
     robots: noindex,
-    openGraph: { title, description, type: "website", siteName: "GuessSong" },
-    twitter: { card: "summary", title, description },
+    openGraph: { title, description, type: "website", siteName: "GuessSong", images },
+    twitter: { card: "summary_large_image", title, description, images },
   };
 }
 

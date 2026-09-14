@@ -4,12 +4,14 @@ import {
   bucketPool,
   clampHintsUsed,
   clampQuestionCount,
+  creditedArtists,
   displayArtist,
   displayTitle,
   foldQuizName,
   gradeAnswers,
   hintAllowance,
   isAnswerList,
+  pickBoardTiles,
   pickDecoys,
   rankOf,
   scriptBucket,
@@ -21,6 +23,7 @@ import {
   usableQuizTracks,
   verdictFor,
   isQuizVerdict,
+  BOARD_TILE_MIN_ANSWERED,
   DECOY_POPULARITY_WINDOW,
   QUIZ_VERDICTS,
   type DecoyEntry,
@@ -127,8 +130,7 @@ describe("songKey and foldQuizName", () => {
 describe("pickDecoys", () => {
   function ctxFor(tracks: Track[]) {
     const playlistTitles = new Set(tracks.map((t) => displayTitle(t.name).toLowerCase()));
-    const playlistArtists = new Set(tracks.flatMap((t) => t.artists.map((a) => a.toLowerCase())));
-    return { playlistTitles, playlistArtists, pool: bucketPool(POOL), used: new Set<string>() };
+    return { playlistTitles, playlistArtists: creditedArtists(tracks), pool: bucketPool(POOL), used: new Set<string>() };
   }
 
   // Production asks for QUIZ_OPTION_COUNT - 1, which is one, and at one only
@@ -213,7 +215,7 @@ describe("pickDecoys", () => {
     ];
     const ctx = () => ({
       playlistTitles: new Set<string>(),
-      playlistArtists: new Set<string>(),
+      playlistArtists: new Map<string, string>(),
       pool: bucketPool(pool),
       used: new Set<string>(),
     });
@@ -248,7 +250,7 @@ describe("pickDecoys", () => {
       { name: "A", artist: "X", popularity: 50 },
       { name: "B", artist: "X", popularity: 50 },
     ];
-    const ctx = { playlistTitles: new Set<string>(), playlistArtists: new Set<string>(), pool: bucketPool(tiny), used: new Set<string>() };
+    const ctx = { playlistTitles: new Set<string>(), playlistArtists: new Map<string, string>(), pool: bucketPool(tiny), used: new Set<string>() };
     const decoys = pickDecoys({ name: "C", artist: "X" }, ctx, seededRng(6), THREE);
     expect(decoys).toHaveLength(2);
     expect(new Set(decoys.map((d) => d.title)).size).toBe(2);
@@ -263,7 +265,7 @@ describe("pickDecoys", () => {
       { name: "B", artist: "X", popularity: 50 },
       { name: "C", artist: "X", popularity: 50 },
     ];
-    const ctx = { playlistTitles: new Set<string>(), playlistArtists: new Set<string>(), pool: bucketPool(three), used: new Set<string>() };
+    const ctx = { playlistTitles: new Set<string>(), playlistArtists: new Map<string, string>(), pool: bucketPool(three), used: new Set<string>() };
     expect(pickDecoys({ name: "Q1", artist: "X" }, ctx, seededRng(1), THREE)).toHaveLength(3);
     expect(ctx.used.size).toBe(3);
     expect(pickDecoys({ name: "Q2", artist: "X" }, ctx, seededRng(2), THREE)).toHaveLength(3);
@@ -285,7 +287,7 @@ describe("pickDecoys with Spotify's romanised artists", () => {
   function ctxFor(tracks: Track[]) {
     return {
       playlistTitles: new Set(tracks.map((t) => displayTitle(t.name).toLowerCase())),
-      playlistArtists: new Set(tracks.flatMap((t) => t.artists.map((a) => a.toLowerCase()))),
+      playlistArtists: creditedArtists(tracks),
       pool: bucketPool(POOL_ALIASED),
       used: new Set<string>(),
     };
@@ -322,6 +324,93 @@ describe("pickDecoys with Spotify's romanised artists", () => {
     expect(displayArtist({ name: "Hello", artist: "Adele", popularity: 78 }, "周杰倫")).toBe("Adele");
     expect(displayArtist({ name: "晴天", artist: "Jay Chou", aliases: ["周杰倫"], popularity: 80 }, "Mayday")).toBe("Jay Chou");
     expect(displayArtist({ name: "晴天", artist: "Jay Chou", aliases: ["周杰倫"], popularity: 80 }, "五月天")).toBe("周杰倫");
+  });
+});
+
+describe("displayArtist follows the playlist's own credits", () => {
+  // Observed live on a Mandopop playlist: Spotify credits most acts romanised
+  // ("Ronghao Li", "JJ Lin") and a few natively (那英). Matching the real
+  // option's script per question showed 李白 · 李榮浩 on the 那英 question and
+  // 對等關係 · Ronghao Li on his own, so a taker who had seen "Ronghao Li"
+  // once knew 李榮浩 was never the playlist's spelling.
+  const RONGHAO: DecoyEntry = { name: "李白", artist: "Ronghao Li", aliases: ["李榮浩"], popularity: 68 };
+  const JAY: DecoyEntry = { name: "晴天", artist: "Jay Chou", aliases: ["周杰倫"], popularity: 80 };
+  const pool: DecoyEntry[] = [
+    RONGHAO,
+    { name: "模特", artist: "Ronghao Li", aliases: ["李榮浩"], popularity: 66 },
+    JAY,
+    { name: "Hello", artist: "Adele", popularity: 78 },
+  ];
+  const playlist = [track("1", "年少有為", ["Ronghao Li"], 72), track("2", "默", ["那英"], 70)];
+  function ctxFor(tracks: Track[]) {
+    return {
+      playlistTitles: new Set(tracks.map((t) => displayTitle(t.name).toLowerCase())),
+      playlistArtists: creditedArtists(tracks),
+      pool: bucketPool(pool),
+      used: new Set<string>(),
+    };
+  }
+
+  it("creditedArtists keys every credit folded and keeps the first spelling seen", () => {
+    const credited = creditedArtists([
+      track("1", "A", ["Ronghao Li", "那英"]),
+      track("2", "B", ["RONGHAO LI"]),
+      { id: "3", name: "C", artists: ["", "  ", 42] } as unknown as Track,
+      { id: "4", name: "D", artists: "not a list" } as unknown as Track,
+    ]);
+    expect([...credited]).toEqual([
+      ["ronghao li", "Ronghao Li"],
+      ["那英", "那英"],
+    ]);
+  });
+
+  it("shows an act the playlist credits exactly as the playlist credits it, whatever the real option's script", () => {
+    // The real option is 那英's, natively credited; the decoy is Ronghao Li's,
+    // whom the playlist credits romanised. Second tier, so this is the shape
+    // most questions on a mixed-script playlist take.
+    for (let seed = 0; seed < 10; seed += 1) {
+      const decoys = pickDecoys({ name: "默", artist: "那英", popularity: 70 }, ctxFor(playlist), seededRng(seed));
+      expect(decoys).toHaveLength(1);
+      expect(decoys[0].artist).toBe("Ronghao Li");
+    }
+    expect(displayArtist(RONGHAO, "那英", creditedArtists(playlist))).toBe("Ronghao Li");
+    // Through the alias: a playlist that credits him natively gets that.
+    expect(displayArtist(RONGHAO, "那英", creditedArtists([track("1", "年少有為", ["李榮浩"])]))).toBe("李榮浩");
+    expect(displayArtist(RONGHAO, "Jay Chou", creditedArtists([track("1", "年少有為", ["李榮浩"])]))).toBe("李榮浩");
+  });
+
+  it("still follows the real option's script for an act the playlist never credits", () => {
+    const credited = creditedArtists(playlist);
+    expect(displayArtist(JAY, "那英", credited)).toBe("周杰倫");
+    expect(displayArtist(JAY, "Ronghao Li", credited)).toBe("Jay Chou");
+    expect(displayArtist({ name: "Hello", artist: "Adele", popularity: 78 }, "那英", credited)).toBe("Adele");
+  });
+
+  it("leaves the same-artist tier as it was: the real track's own credit, every time", () => {
+    for (let seed = 0; seed < 10; seed += 1) {
+      const decoys = pickDecoys(
+        { name: "年少有為", artist: "Ronghao Li", popularity: 72 },
+        ctxFor(playlist),
+        seededRng(seed)
+      );
+      expect(decoys).toHaveLength(1);
+      expect(decoys[0].artist).toBe("Ronghao Li");
+      expect(["李白", "模特"]).toContain(decoys[0].title);
+    }
+  });
+
+  it("buildQuiz never shows two spellings of one act across a quiz", () => {
+    const tracks = [
+      ...playlist,
+      ...["李白 - Live", "麻雀", "不將就", "耳朵", "戒煙", "成長之重量", "王牌冤家", "作曲家"].map((name, i) =>
+        track(String(i + 3), name, ["Ronghao Li"], 60)
+      ),
+    ];
+    const quiz = buildQuiz({ tracks, questionCount: 10, pool, rng: seededRng(3) });
+    expect(quiz).toHaveLength(10);
+    const spellings = new Set(quiz.flatMap((q) => q.options.map((o) => o.artist)));
+    expect(spellings.has("李榮浩")).toBe(false);
+    expect(spellings.has("Ronghao Li")).toBe(true);
   });
 });
 
@@ -620,6 +709,41 @@ describe("the board", () => {
     expect(rankOf(sorted, "al")).toBe(3);
     expect(rankOf(sorted, "DI")).toBe(1);
     expect(rankOf(sorted, "nobody")).toBeNull();
+  });
+
+  describe("pickBoardTiles", () => {
+    const q = (answered: number, correct: number) => ({ answered, correct });
+
+    it("crowns only a unanimous question: 100% for everyone knew, 0% for nobody could place", () => {
+      expect(pickBoardTiles([q(3, 2), q(3, 3), q(3, 0), q(3, 1)])).toEqual({ easiest: 1, hardest: 2 });
+      // Each is independent: a board with no zero has one tile, not a
+      // "nobody could place" awarded to whichever question scored lowest.
+      expect(pickBoardTiles([q(3, 2), q(3, 3), q(3, 1)])).toEqual({ easiest: 1 });
+      expect(pickBoardTiles([q(3, 2), q(3, 0), q(3, 1)])).toEqual({ hardest: 1 });
+    });
+
+    it("gives a 50/50 board no tile at all", () => {
+      // Two takers on opposite sheets: every question is 1 of 2. The page
+      // used to label the first of them "Everyone knew · 1 of 2 got it".
+      expect(pickBoardTiles([q(2, 1), q(2, 1), q(2, 1)])).toEqual({});
+    });
+
+    it("needs at least two takers before either label means anything", () => {
+      expect(BOARD_TILE_MIN_ANSWERED).toBe(2);
+      // One taker: every question is 100% or 0%, and both labels are true of
+      // half the board. Neither is a finding.
+      expect(pickBoardTiles([q(1, 1), q(1, 0), q(1, 1)])).toEqual({});
+      // Nobody has recorded per-question results yet (legacy rows only).
+      expect(pickBoardTiles([q(0, 0), q(0, 0)])).toEqual({});
+      expect(pickBoardTiles([])).toEqual({});
+      // A second taker makes it real, and a question only one of them answered
+      // — none can, today, but the rule is per question — stays out.
+      expect(pickBoardTiles([q(1, 1), q(2, 2), q(2, 0)])).toEqual({ easiest: 1, hardest: 2 });
+    });
+
+    it("keeps the first question on a tie, so the tile is stable between reads", () => {
+      expect(pickBoardTiles([q(4, 4), q(4, 4), q(4, 0), q(4, 0)])).toEqual({ easiest: 0, hardest: 2 });
+    });
   });
 });
 
