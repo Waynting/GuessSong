@@ -24,6 +24,20 @@ import { saveGame } from "@/lib/game-storage";
 import { isBuzzerConfigured } from "@/lib/buzzer-client";
 import type { OpenRoom } from "@/lib/room-client";
 import { RoomPanel } from "@/components/room-panel";
+import { QuizPanel } from "@/components/quiz-panel";
+import {
+  recallLastQuiz,
+  rememberLastQuiz,
+  rememberQuizToken,
+  type LastQuiz,
+} from "@/lib/quiz-session";
+import {
+  QUIZ_DEFAULT_QUESTION_COUNT,
+  QUIZ_NAME_MAX,
+  QUIZ_QUESTION_COUNTS,
+  type CreateQuizRequest,
+  type CreateQuizResponse,
+} from "@/types/quiz";
 import { SiteFooter } from "@/components/site-footer";
 import { getGuide } from "@/lib/guides";
 import { InstallBanner } from "@/components/install-banner";
@@ -132,7 +146,14 @@ const FAQS: { q: string; a: string }[] = [
   },
 ];
 
-type SetupMode = "single" | "mixed";
+/**
+ * `quiz` is not a game. It makes a link for friends to open on their own
+ * phones, and it is on this page because it starts from the same pasted
+ * playlist — but it must never reach `recordHostedStart`: a quiz is one person
+ * making something, not a room being hosted, and counting it would inflate
+ * the one number the whole loop is judged on.
+ */
+type SetupMode = "single" | "mixed" | "quiz";
 
 // `MixedSubMode` is imported rather than redeclared here. It was a local copy
 // with the same two members until the KV counters started keying off it, and a
@@ -204,6 +225,12 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  // Taste quiz: what the host typed, what came back, and what this device
+  // made last time (offered back as the way to the board — see lib/quiz-session.ts).
+  const [quizOwnerName, setQuizOwnerName] = useState("");
+  const [quizQuestionCount, setQuizQuestionCount] = useState<number>(QUIZ_DEFAULT_QUESTION_COUNT);
+  const [createdQuiz, setCreatedQuiz] = useState<CreateQuizResponse | null>(null);
+  const [lastQuiz, setLastQuiz] = useState<LastQuiz | null>(null);
   const locale = useErrorLocale();
   const firstInputRef = useRef<HTMLInputElement>(null);
 
@@ -227,7 +254,7 @@ export default function SetupPage() {
   // What the one room has to do, given the modes picked above. Pass-the-phone
   // with the buzzer off needs no room at all, and never opens one.
   const collectsPlaylists = setupMode === "mixed" && mixedSubMode === "room";
-  const needsRoom = collectsPlaylists || buzzerEnabled;
+  const needsRoom = (collectsPlaylists || buzzerEnabled) && setupMode !== "quiz";
 
   function addMixedContribution(c: MixedContribution) {
     setMixedContributions((prev) => [...prev, c]);
@@ -327,6 +354,8 @@ export default function SetupPage() {
     // about to host one tonight, so the game this credits is weeks away.
     const ref = query.get("ref");
     if (ref) rememberLoopRef(ref);
+
+    setLastQuiz(recallLastQuiz());
   }, []);
 
   /**
@@ -452,6 +481,63 @@ export default function SetupPage() {
       // Only failures the URL itself determines are remembered. A throttled or
       // unknown one has to stay retryable — the host's link may be perfect and
       // the next attempt may well be the one that works.
+      lastRejectedRef.current = shouldRememberRejection(e)
+        ? { key: submissionKey, message }
+        : null;
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /**
+   * The quiz path. Same URL box, same `/api/*` conventions, and the same
+   * rejection memo as a game start — keyed with its own prefix so a refused
+   * quiz does not shadow a game start for the same link. Deliberately not a
+   * hosted start (see `SetupMode`).
+   */
+  async function handleCreateQuiz() {
+    setError(null);
+    if (!playlistUrl.trim()) {
+      setError(errorMessage("playlist_url_required", locale));
+      return;
+    }
+    const submissionKey = `quiz:${playlistUrl}:${quizQuestionCount}`;
+    const rejected = lastRejectedRef.current;
+    if (rejected && rejected.key === submissionKey) {
+      setError(rejected.message);
+      return;
+    }
+    setLoading(true);
+    const body: CreateQuizRequest = {
+      url: playlistUrl,
+      ownerName: quizOwnerName.trim() || undefined,
+      questionCount: quizQuestionCount,
+      locale,
+    };
+    try {
+      const res = await fetch("/api/quiz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw apiError(data, "quiz_create_failed");
+      const created = data as CreateQuizResponse;
+      setCreatedQuiz(created);
+      const remembered: LastQuiz = {
+        code: created.code,
+        ownerName: quizOwnerName.trim() || null,
+        playlistName: created.playlistName,
+        createdAt: Date.now(),
+        expiresAt: created.expiresAt,
+      };
+      rememberLastQuiz(remembered);
+      rememberQuizToken(created.code, created.hostToken);
+      setLastQuiz(remembered);
+      trackEvent("quiz_created", { question_count: created.questionCount });
+    } catch (e: unknown) {
+      const message = describeError(e, locale, "quiz_create_failed");
       lastRejectedRef.current = shouldRememberRejection(e)
         ? { key: submissionKey, message }
         : null;
@@ -1041,17 +1127,32 @@ export default function SetupPage() {
                 >
                   Mixed Playlist 🔀
                 </button>
+                <button
+                  className={`pill${setupMode === "quiz" ? " active" : ""}`}
+                  onClick={() => {
+                    setSetupMode("quiz");
+                    resetRoom();
+                  }}
+                >
+                  Taste Quiz 🎧
+                </button>
               </div>
               {setupMode === "mixed" && (
                 <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
                   Pass this phone around — everyone adds their own playlist, then we mix them together.
                 </p>
               )}
+              {setupMode === "quiz" && (
+                <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                  Not a party — a link. Friends open it on their own phone, guess which songs are
+                  really in your playlist, and land on a leaderboard of who knows you best.
+                </p>
+              )}
             </div>
 
-            {setupMode === "single" ? (
+            {setupMode !== "mixed" ? (
               <>
-                {/* Playlist URL */}
+                {/* Playlist URL — shared by the single game and the quiz */}
                 <div>
                   <p className="section-label">Spotify Playlist</p>
                   <div style={{ position: "relative" }}>
@@ -1061,7 +1162,10 @@ export default function SetupPage() {
                       className={`url-input${isValidSpotifyUrl ? " valid" : ""}`}
                       placeholder="https://open.spotify.com/playlist/..."
                       value={playlistUrl}
-                      onChange={(e) => setPlaylistUrl(e.target.value)}
+                      onChange={(e) => {
+                        setPlaylistUrl(e.target.value);
+                        setCreatedQuiz(null);
+                      }}
                       spellCheck={false}
                     />
                     {isValidSpotifyUrl && (
@@ -1094,6 +1198,53 @@ export default function SetupPage() {
                   )}
                 </div>
 
+                {setupMode === "quiz" && (
+                  <>
+                    <div>
+                      <label className="section-label" htmlFor="quiz-owner-name" style={{ display: "block" }}>
+                        Your Name
+                      </label>
+                      <input
+                        id="quiz-owner-name"
+                        type="text"
+                        className="player-input"
+                        placeholder="Whose taste is this? (optional)"
+                        value={quizOwnerName}
+                        maxLength={QUIZ_NAME_MAX}
+                        style={{ width: "100%" }}
+                        onChange={(e) => {
+                          setQuizOwnerName(e.target.value);
+                          setCreatedQuiz(null);
+                        }}
+                      />
+                      <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                        Goes in the title: &ldquo;How well do you know {quizOwnerName.trim() || "…"}&rsquo;s music taste?&rdquo;
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="section-label">Questions</p>
+                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                        {QUIZ_QUESTION_COUNTS.map((c) => (
+                          <button
+                            key={c}
+                            className={`pill${quizQuestionCount === c ? " active" : ""}`}
+                            onClick={() => {
+                              setQuizQuestionCount(c);
+                              setCreatedQuiz(null);
+                            }}
+                          >
+                            {c}
+                          </button>
+                        ))}
+                      </div>
+                      <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                        Each question shows four songs — one from your playlist, three that aren&apos;t.
+                        Friends guess first and get a few audio hints for when they&apos;re stuck.
+                      </p>
+                    </div>
+                  </>
+                )}
               </>
             ) : (
               <>
@@ -1160,7 +1311,7 @@ export default function SetupPage() {
             {/* Buzzer Mode — the reason the host gets to play too. Hidden
                 entirely when NEXT_PUBLIC_BUZZER_WS_URL is unset, because
                 without a Worker there is no room to open. */}
-            {isBuzzerConfigured() && (
+            {isBuzzerConfigured() && setupMode !== "quiz" && (
               <div>
                 <p className="section-label">Buzzer Mode</p>
                 {/* Label says what the tap does, colour says what the state is.
@@ -1185,7 +1336,8 @@ export default function SetupPage() {
               </div>
             )}
 
-            {/* Clip Duration */}
+            {/* Clip Duration — not for the quiz, which plays clips only as hints */}
+            {setupMode !== "quiz" && (
             <div>
               <p className="section-label">Clip Duration</p>
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
@@ -1200,6 +1352,7 @@ export default function SetupPage() {
                 ))}
               </div>
             </div>
+            )}
 
             {/* Number of Songs — single-playlist mode only; mixed mode uses per-player sampling instead */}
             {setupMode === "single" && (
@@ -1306,9 +1459,46 @@ export default function SetupPage() {
               </div>
             )}
 
+            {/* The quiz's own ending: the link, or the button that makes it.
+                Kept apart from the Start button below because nothing about
+                a quiz is a game start. */}
+            {setupMode === "quiz" && createdQuiz && (
+              <QuizPanel
+                code={createdQuiz.code}
+                ownerName={quizOwnerName.trim() || null}
+                playlistName={createdQuiz.playlistName}
+                questionCount={createdQuiz.questionCount}
+                expiresAt={createdQuiz.expiresAt}
+              />
+            )}
+            {setupMode === "quiz" && !createdQuiz && lastQuiz && (
+              <p style={{ fontSize: "12px", color: "#666", textAlign: "center" }}>
+                Your last quiz{lastQuiz.playlistName ? ` (${lastQuiz.playlistName})` : ""} is still
+                open —{" "}
+                <a href={`/q/${lastQuiz.code.toUpperCase()}/board`} className="link-btn">
+                  see who knows you best →
+                </a>
+              </p>
+            )}
+
             {/* Start Button */}
             <div>
               {(() => {
+                const loadingLabel = (
+                  <>
+                    <span className="spinner" />
+                    Loading playlist
+                    <span className="dot-pulse" />
+                  </>
+                );
+                if (setupMode === "quiz") {
+                  if (createdQuiz) return null;
+                  return (
+                    <button className="start-btn" onClick={handleCreateQuiz} disabled={loading}>
+                      {loading ? loadingLabel : "Create quiz link →"}
+                    </button>
+                  );
+                }
                 const isMixedPhone = setupMode === "mixed" && mixedSubMode === "phone";
                 const isMixedRoom = collectsPlaylists;
                 const phoneShort = MIXED_MIN_CONTRIBUTORS - mixedContributions.length;
@@ -1334,13 +1524,7 @@ export default function SetupPage() {
 
                 let label: ReactNode = "Start Game →";
                 if (busy) {
-                  label = (
-                    <>
-                      <span className="spinner" />
-                      Loading playlist
-                      <span className="dot-pulse" />
-                    </>
-                  );
+                  label = loadingLabel;
                 } else if (isMixedPhone && phoneShort > 0) {
                   label = `Add ${phoneShort} more player${phoneShort === 1 ? "" : "s"} to start`;
                 } else if (roomNotReady) {
