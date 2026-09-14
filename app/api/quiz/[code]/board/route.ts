@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getQuizBoard, QuizError } from "@/lib/quiz-store";
+import { recordQuizStage, recordQuizThrottled } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
 import type { QuizBoardResponse } from "@/types/quiz";
@@ -31,10 +32,16 @@ export async function GET(
     QUIZ_BOARD_WINDOW_SECONDS,
     "rate_limited"
   );
-  if (limited) return limited;
+  if (limited) {
+    await recordQuizThrottled("board");
+    return limited;
+  }
 
   try {
     const board = await getQuizBoard(code, token);
+    // After the token check, so a friend guessing the URL is not an owner
+    // coming back. Per fetch, like `opened`: a ceiling.
+    await recordQuizStage("board");
     return NextResponse.json<QuizBoardResponse>(board, {
       headers: { "Cache-Control": "no-store" },
     });

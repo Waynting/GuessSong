@@ -22,6 +22,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getQuizHint, QuizError } from "@/lib/quiz-store";
+import { recordQuizHint, recordQuizThrottled } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
 import type { PreviewResult } from "@/types/preview";
@@ -47,10 +48,17 @@ export async function GET(
     refresh ? QUIZ_HINT_REFRESH_WINDOW_SECONDS : QUIZ_HINT_WINDOW_SECONDS,
     "rate_limited_preview"
   );
-  if (limited) return limited;
+  if (limited) {
+    await recordQuizThrottled("hint");
+    return limited;
+  }
 
   try {
     const result = await getQuizHint(code, index, { refresh });
+    // The one per-question upstream path the quiz has. `found ÷ completed`
+    // against the allowance is how the "no audio in a question" rule is
+    // checked; `unavailable` is the quiz spending a throttled minute.
+    await recordQuizHint(result.status, refresh);
     return NextResponse.json<PreviewResult>(result);
   } catch (err: unknown) {
     if (err instanceof QuizError) {

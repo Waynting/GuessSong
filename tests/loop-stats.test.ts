@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ERROR_LOCALES } from "@/lib/error-messages";
 import { LOOP_SURFACES } from "@/lib/loop-links";
 import { QUIZ_VERDICTS } from "@/lib/quiz";
+import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
 
 const kv = vi.hoisted(() => ({
   incrs: [] as Array<{ key: string; ttl: number; by?: number }>,
@@ -23,10 +25,18 @@ const {
   LOOP_STATS_TTL_SECONDS,
   MIXED_SUB_MODES,
   QUIZ_STAGES,
+  QUIZ_LENGTH_STAGES,
+  QUIZ_HINT_OUTCOMES,
+  QUIZ_THROTTLED_ROUTES,
   loopStatsKeys,
   recordGameStart,
   recordQuizStage,
   recordQuizVerdict,
+  recordQuizLength,
+  recordQuizCreated,
+  recordQuizCompleted,
+  recordQuizHint,
+  recordQuizThrottled,
   recordLoopClick,
   recordLoopImpression,
   recordLoopThrottled,
@@ -82,6 +92,37 @@ describe("the key format is the contract between writer and reader", () => {
       await recordQuizVerdict(verdict);
       expect(keysWritten()).toContain(expected.quizVerdict[verdict]);
     }
+
+    for (const stage of QUIZ_LENGTH_STAGES) {
+      for (const n of [QUIZ_MIN_QUESTIONS, 23, QUIZ_MAX_QUESTIONS]) {
+        kv.incrs = [];
+        await recordQuizLength(stage, n);
+        expect(keysWritten()).toContain(expected.quizLength[stage][n]);
+      }
+    }
+
+    for (const locale of ERROR_LOCALES) {
+      kv.incrs = [];
+      await recordQuizCreated({ questionCount: 20, requestedCount: 20, locale });
+      expect(keysWritten()).toContain(expected.quizLocale[locale]);
+    }
+
+    kv.incrs = [];
+    await recordQuizCreated({ questionCount: 30, requestedCount: 50, locale: "en" });
+    expect(keysWritten()).toContain(expected.quizClamped);
+
+    for (const outcome of QUIZ_HINT_OUTCOMES) {
+      kv.incrs = [];
+      if (outcome === "refresh") await recordQuizHint("found", true);
+      else await recordQuizHint(outcome, false);
+      expect(keysWritten()).toContain(expected.quizHint[outcome]);
+    }
+
+    for (const route of QUIZ_THROTTLED_ROUTES) {
+      kv.incrs = [];
+      await recordQuizThrottled(route);
+      expect(keysWritten()).toContain(expected.quizThrottled[route]);
+    }
   });
 
   it("refuses to key a verdict that is not one of the declared buckets", async () => {
@@ -118,10 +159,119 @@ describe("the key format is the contract between writer and reader", () => {
     for (const stage of QUIZ_STAGES) {
       expect(keys.quiz[stage]).toBe(`loop:stats:2026-08-09:quiz:${stage}`);
     }
+    expect(Object.keys(keys.quiz)).toHaveLength(QUIZ_STAGES.length);
     for (const verdict of QUIZ_VERDICTS) {
       expect(keys.quizVerdict[verdict]).toBe(`loop:stats:2026-08-09:quiz_verdict:${verdict}`);
     }
     expect(Object.keys(keys.quizVerdict)).toHaveLength(QUIZ_VERDICTS.length);
+  });
+
+  it("names a key for every quiz length, locale, hint outcome and throttled route", () => {
+    // Each of these becomes a key tail from a closed set; the map and the set
+    // are two places one list has to agree, and a member added to one without
+    // the other fails nothing at runtime — the counter just never appears.
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    for (const stage of QUIZ_LENGTH_STAGES) {
+      const span = QUIZ_MAX_QUESTIONS - QUIZ_MIN_QUESTIONS + 1;
+      expect(Object.keys(keys.quizLength[stage])).toHaveLength(span);
+      expect(keys.quizLength[stage][QUIZ_MIN_QUESTIONS]).toBe(
+        `loop:stats:2026-08-09:quiz_len:${stage}:${QUIZ_MIN_QUESTIONS}`
+      );
+      expect(keys.quizLength[stage][QUIZ_MAX_QUESTIONS]).toBe(
+        `loop:stats:2026-08-09:quiz_len:${stage}:${QUIZ_MAX_QUESTIONS}`
+      );
+    }
+    expect(keys.quizClamped).toBe("loop:stats:2026-08-09:quiz_clamped");
+    for (const locale of ERROR_LOCALES) {
+      expect(keys.quizLocale[locale]).toBe(`loop:stats:2026-08-09:quiz_locale:${locale}`);
+    }
+    expect(Object.keys(keys.quizLocale)).toHaveLength(ERROR_LOCALES.length);
+    for (const outcome of QUIZ_HINT_OUTCOMES) {
+      expect(keys.quizHint[outcome]).toBe(`loop:stats:2026-08-09:quiz_hint:${outcome}`);
+    }
+    expect(Object.keys(keys.quizHint)).toHaveLength(QUIZ_HINT_OUTCOMES.length);
+    for (const route of QUIZ_THROTTLED_ROUTES) {
+      expect(keys.quizThrottled[route]).toBe(`loop:stats:2026-08-09:quiz_throttled:${route}`);
+    }
+    expect(Object.keys(keys.quizThrottled)).toHaveLength(QUIZ_THROTTLED_ROUTES.length);
+  });
+});
+
+describe("the quiz's length, hint and refusal counters", () => {
+  const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+
+  it("refuses a length outside the schema's bounds rather than clamping it", async () => {
+    // The count is the tail of the key. A clamp would file the quiz under a
+    // length nobody chose; refusing keeps the key space exactly the schema's.
+    for (const bad of [QUIZ_MIN_QUESTIONS - 1, QUIZ_MAX_QUESTIONS + 1, 0, -1, 20.5, Number.NaN]) {
+      kv.incrs = [];
+      await recordQuizLength("created", bad);
+      expect(kv.incrs).toEqual([]);
+    }
+  });
+
+  it("records a creation as its stage, its length and its locale", async () => {
+    await recordQuizCreated({ questionCount: 20, requestedCount: 20, locale: "zh" });
+    const written = keysWritten();
+    expect(written).toContain(keys.quiz.created);
+    expect(written).toContain(keys.quizLength.created[20]);
+    expect(written).toContain(keys.quizLocale.zh);
+    expect(written).not.toContain(keys.quizClamped);
+  });
+
+  it("counts a quiz built shorter than asked for, and only then", async () => {
+    // `buildQuiz` shortens silently and the panel shows the count it got;
+    // this is the only record that the host wanted more.
+    await recordQuizCreated({ questionCount: 30, requestedCount: 50, locale: "en" });
+    expect(keysWritten()).toContain(keys.quizClamped);
+    expect(keysWritten()).toContain(keys.quizLength.created[30]);
+
+    kv.incrs = [];
+    await recordQuizCreated({ questionCount: 50, requestedCount: 50, locale: "en" });
+    expect(keysWritten()).not.toContain(keys.quizClamped);
+  });
+
+  it("refuses a locale that is not one of the declared ones", async () => {
+    await recordQuizCreated({ questionCount: 20, requestedCount: 20, locale: "fr" as never });
+    expect(keysWritten()).toContain(keys.quiz.created);
+    expect(keysWritten().some((k) => k.includes("quiz_locale:"))).toBe(false);
+  });
+
+  it("records a completion as its stage, its verdict and its length, in one round trip", async () => {
+    await recordQuizCompleted({ questionCount: 10, verdict: "close" });
+    const written = keysWritten();
+    expect(written).toContain(keys.quiz.completed);
+    expect(written).toContain(keys.quizVerdict.close);
+    expect(written).toContain(keys.quizLength.completed[10]);
+    // Three metrics plus the marker once — not once per metric, which is what
+    // a `Promise.all` over the old memo did on the first event of the day.
+    expect(kv.incrs).toHaveLength(4);
+    expect(kv.incrs.filter((i) => i.key === keys.live)).toHaveLength(1);
+  });
+
+  it("keys a hint by its preview status, and a repair as well as its status", async () => {
+    await recordQuizHint("found", false);
+    expect(keysWritten()).toEqual(expect.arrayContaining([keys.quizHint.found]));
+    expect(keysWritten()).not.toContain(keys.quizHint.refresh);
+
+    kv.incrs = [];
+    await recordQuizHint("found", true);
+    expect(keysWritten()).toContain(keys.quizHint.found);
+    expect(keysWritten()).toContain(keys.quizHint.refresh);
+
+    kv.incrs = [];
+    await recordQuizHint("unavailable", false);
+    expect(keysWritten()).toContain(keys.quizHint.unavailable);
+  });
+
+  it("refuses a hint status that is not a preview status", async () => {
+    await recordQuizHint("throttled" as never, false);
+    expect(kv.incrs).toEqual([]);
+  });
+
+  it("refuses a throttled route it does not know", async () => {
+    await recordQuizThrottled("pool" as never);
+    expect(kv.incrs).toEqual([]);
   });
 });
 
@@ -232,6 +382,14 @@ describe("fail-soft", () => {
     await expect(recordLoopClick("share")).resolves.toBeUndefined();
     await expect(recordGameStart(2)).resolves.toBeUndefined();
     await expect(recordLoopThrottled()).resolves.toBeUndefined();
+    await expect(
+      recordQuizCreated({ questionCount: 20, requestedCount: 50, locale: "en" })
+    ).resolves.toBeUndefined();
+    await expect(
+      recordQuizCompleted({ questionCount: 20, verdict: "stranger" })
+    ).resolves.toBeUndefined();
+    await expect(recordQuizHint("found", true)).resolves.toBeUndefined();
+    await expect(recordQuizThrottled("answer")).resolves.toBeUndefined();
   });
 });
 

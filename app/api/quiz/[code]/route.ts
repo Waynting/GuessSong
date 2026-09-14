@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getQuizView, QuizError } from "@/lib/quiz-store";
-import { recordQuizStage } from "@/lib/loop-stats";
+import { recordQuizStage, recordQuizThrottled } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
 import type { QuizView } from "@/types/quiz";
@@ -32,7 +32,10 @@ export async function GET(
     QUIZ_READ_WINDOW_SECONDS,
     "rate_limited"
   );
-  if (limited) return limited;
+  if (limited) {
+    await recordQuizThrottled("read");
+    return limited;
+  }
 
   try {
     const view = await getQuizView(code);

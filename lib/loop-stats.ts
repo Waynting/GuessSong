@@ -31,8 +31,11 @@
  */
 
 import { dayBucket, getKvStore } from "@/lib/kv";
+import { ERROR_LOCALES, type ErrorLocale } from "@/lib/error-messages";
 import type { LoopSurface } from "@/lib/loop-links";
 import { QUIZ_VERDICTS, isQuizVerdict, type QuizVerdict } from "@/lib/quiz";
+import type { PreviewStatus } from "@/types/preview";
+import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
 
 /**
  * 30 days, not the 7 that `lib/playlist-cache.ts` uses for its own stats.
@@ -86,20 +89,110 @@ export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
  *   created    a host turned a playlist into a link       POST /api/quiz
  *   opened     a friend's phone fetched the quiz          GET /api/quiz/[code]
  *   completed  that phone sent answers                    POST /api/quiz/[code]/answer
+ *   board      the owner came back for the results        GET /api/quiz/[code]/board
  *
- * Written by the three routes rather than beaconed from the page, because each
+ * Written by the four routes rather than beaconed from the page, because each
  * is a request that has already reached the server — there is nothing to lose
  * to a page tearing down. `opened` is counted by the API the page's own script
  * calls and *not* by `generateMetadata`, which every chat app's link unfurler
  * also fetches; counting there would invent opens nobody made.
  *
+ * `board` is the owner's half of the loop: a quiz whose board is never opened
+ * is a link that was sent and forgotten, and `board ÷ created` is the only
+ * number that says whether the results page — the one with the owner's share
+ * button on it — is worth the token gate it sits behind. The route only counts
+ * a successful, token-bearing read, so a friend who guesses the URL and lands
+ * on `quiz_not_host` is not in it. Like `opened`, it is bumped per fetch and
+ * the page fetches on every mount, so it is a ceiling.
+ *
  * `quiz_result`'s impression and click ride the ordinary surface counters, so
  * `completed` ≈ `impression:quiz_result` is a plumbing check: a gap means the
  * result screen stopped rendering the call to action.
  */
-export type QuizStage = "created" | "opened" | "completed";
+export type QuizStage = "created" | "opened" | "completed" | "board";
 
-export const QUIZ_STAGES: readonly QuizStage[] = ["created", "opened", "completed"];
+export const QUIZ_STAGES: readonly QuizStage[] = ["created", "opened", "completed", "board"];
+
+/**
+ * The two ends of a quiz's length: how many questions it was built with, and
+ * how many it had when someone finished it. Both are keyed by the exact count
+ * (`quiz_len:<stage>:<n>`), which is bounded because the count is — zod pins
+ * `questionCount` to `QUIZ_MIN_QUESTIONS..QUIZ_MAX_QUESTIONS` at the route and
+ * `buildQuiz` only ever shortens it — so the key space is 41 per stage per day
+ * at the very most, and `recordQuizLength` refuses anything outside it.
+ *
+ * Exact rather than bucketed because the control the count comes from has
+ * four one-tap presets and a typed field, and "does anyone use the typed
+ * field" is a question about the values *between* the presets. Bucketing
+ * would erase precisely the thing being asked.
+ *
+ * `completed` is keyed by length too so that finishers can be read *per quiz
+ * made at that length*. `completed ÷ opened` cannot be split this way without
+ * also splitting `opened`, and `opened` is a ceiling; `quiz_len:completed:n ÷
+ * quiz_len:created:n` is two floors over each other, and is what says whether
+ * a fifty-question quiz gets fewer friends through it than a ten.
+ */
+export type QuizLengthStage = "created" | "completed";
+
+export const QUIZ_LENGTH_STAGES: readonly QuizLengthStage[] = ["created", "completed"];
+
+/**
+ * How a hint request came out. The first three are `PreviewStatus` verbatim
+ * — the same fact `lib/preview-cache.ts` records for the game — and mean the
+ * same things: `found` is a clip the taker heard, `absent` is a recording
+ * nothing has a clip for, `unavailable` is us (throttled, out of budget) and
+ * costs the taker nothing because the page refunds the hint.
+ *
+ * `refresh` is orthogonal to the other three and counted alongside them: a
+ * `refresh=1` request is the page repairing a URL the CDN rotated, and it is
+ * the one hint parameter that bypasses the cache. Its share of `found` is how
+ * much of the year-long positive cache has rotted under the quiz.
+ *
+ * This is the only per-question upstream path the quiz has, and it exists in
+ * a feature whose design rule is *no audio in a question* precisely so the
+ * hottest path in the app is not multiplied by the number of friends. These
+ * counters are how that rule is checked: `found ÷ completed` against the
+ * allowance (`hintAllowance`, one per ten questions) says whether the ration
+ * holds, and `unavailable` says whether the quiz is what is spending it.
+ */
+export type QuizHintOutcome = PreviewStatus | "refresh";
+
+export const QUIZ_HINT_OUTCOMES: readonly QuizHintOutcome[] = [
+  "found",
+  "absent",
+  "unavailable",
+  "refresh",
+];
+
+const HINT_STATUS_SET: ReadonlySet<string> = new Set<PreviewStatus>([
+  "found",
+  "absent",
+  "unavailable",
+]);
+
+/**
+ * The quiz routes whose limiter can turn someone away, named for the counter.
+ *
+ * A refused request is a stage the funnel above cannot see: a 429 on `answer`
+ * is a friend who finished every question and was bounced back to the name
+ * card, a 429 on `read` is an open that never became one, a 429 on `hint` is
+ * a clip the page reports as "no clip" for a reason that was ours. The answer
+ * limit was raised from 20 to 60 because the 21st finisher in an office was
+ * being refused, and that was found from a report — nothing counted it.
+ *
+ * A limiter refusal means KV is up (the `incr` that said no succeeded), so
+ * unlike most of this file's counters this one is written in exactly the
+ * situation it describes.
+ */
+export type QuizThrottledRoute = "create" | "read" | "answer" | "hint" | "board";
+
+export const QUIZ_THROTTLED_ROUTES: readonly QuizThrottledRoute[] = [
+  "create",
+  "read",
+  "answer",
+  "hint",
+  "board",
+];
 
 function key(day: string, metric: string): string {
   return `loop:stats:${day}:${metric}`;
@@ -131,6 +224,11 @@ export function loopStatsKeys(
   mixedPool: Record<MixedSubMode, string>;
   quiz: Record<QuizStage, string>;
   quizVerdict: Record<QuizVerdict, string>;
+  quizLength: Record<QuizLengthStage, Record<number, string>>;
+  quizClamped: string;
+  quizLocale: Record<ErrorLocale, string>;
+  quizHint: Record<QuizHintOutcome, string>;
+  quizThrottled: Record<QuizThrottledRoute, string>;
 } {
   const impressions: Record<string, string> = {};
   const clicks: Record<string, string> = {};
@@ -158,10 +256,30 @@ export function loopStatsKeys(
       created: key(day, "quiz:created"),
       opened: key(day, "quiz:opened"),
       completed: key(day, "quiz:completed"),
+      board: key(day, "quiz:board"),
     },
     quizVerdict: Object.fromEntries(
       QUIZ_VERDICTS.map((v) => [v, key(day, `quiz_verdict:${v}`)])
     ) as Record<QuizVerdict, string>,
+    quizLength: Object.fromEntries(
+      QUIZ_LENGTH_STAGES.map((stage) => {
+        const byCount: Record<number, string> = {};
+        for (let n = QUIZ_MIN_QUESTIONS; n <= QUIZ_MAX_QUESTIONS; n += 1) {
+          byCount[n] = key(day, `quiz_len:${stage}:${n}`);
+        }
+        return [stage, byCount];
+      })
+    ) as Record<QuizLengthStage, Record<number, string>>,
+    quizClamped: key(day, "quiz_clamped"),
+    quizLocale: Object.fromEntries(
+      ERROR_LOCALES.map((l) => [l, key(day, `quiz_locale:${l}`)])
+    ) as Record<ErrorLocale, string>,
+    quizHint: Object.fromEntries(
+      QUIZ_HINT_OUTCOMES.map((o) => [o, key(day, `quiz_hint:${o}`)])
+    ) as Record<QuizHintOutcome, string>,
+    quizThrottled: Object.fromEntries(
+      QUIZ_THROTTLED_ROUTES.map((r) => [r, key(day, `quiz_throttled:${r}`)])
+    ) as Record<QuizThrottledRoute, string>,
   };
 }
 
@@ -203,8 +321,18 @@ async function bump(metric: string, by = 1): Promise<void> {
     const day = dayBucket();
     await store.incr(key(day, metric), LOOP_STATS_TTL_SECONDS, by);
     if (livenessWrittenForDay === day) return;
-    await store.incr(key(day, "live"), LOOP_STATS_TTL_SECONDS);
+    // Claimed before the write, not after it: the quiz recorders below bump
+    // several counters under one `Promise.all`, and with the memo set only on
+    // return every one of them saw it empty at the same tick and wrote the
+    // marker — the exact duplicate this memo exists to stop, on the first
+    // event of the day. Released on failure so the next event tries again.
     livenessWrittenForDay = day;
+    try {
+      await store.incr(key(day, "live"), LOOP_STATS_TTL_SECONDS);
+    } catch (err) {
+      livenessWrittenForDay = null;
+      throw err;
+    }
   } catch {
     // Instrumentation must never be able to fail a request.
   }
@@ -267,6 +395,126 @@ export async function recordGameStart(
 /** One quiz moved a stage down its funnel. */
 export function recordQuizStage(stage: QuizStage): Promise<void> {
   return bump(`quiz:${stage}`);
+}
+
+/**
+ * One quiz of `questionCount` questions was built, or finished.
+ *
+ * The count is the tail of the key, so it is checked against the same bounds
+ * the route's schema enforces rather than trusted: this module owns the
+ * `loop:stats:` key space, and the rule for anything that becomes part of a
+ * key is a guard over a closed set, whatever it was already checked against
+ * upstream. An out-of-range count records nothing rather than a clamped
+ * value — a clamp would file it under a length nobody chose.
+ */
+export function recordQuizLength(stage: QuizLengthStage, questionCount: number): Promise<void> {
+  if (
+    !Number.isInteger(questionCount) ||
+    questionCount < QUIZ_MIN_QUESTIONS ||
+    questionCount > QUIZ_MAX_QUESTIONS
+  ) {
+    return Promise.resolve();
+  }
+  return bump(`quiz_len:${stage}:${questionCount}`);
+}
+
+/**
+ * A host turned a playlist into a quiz. `POST /api/quiz`, on success.
+ *
+ * Three facts about the quiz that was made, plus one about the one that was
+ * asked for:
+ *
+ *   quiz:created          the funnel's first stage
+ *   quiz_len:created:<n>  how long it is — the built count, which is the quiz
+ *   quiz_locale:<l>       the language the host made it in
+ *   quiz_clamped          the playlist had fewer usable tracks than the host
+ *                         asked for, so it was built shorter than requested
+ *
+ * `quiz_clamped` is the one the setup page cannot see. `buildQuiz` shortens
+ * silently and the panel shows the count it got, so a host who typed 50 over
+ * a 30-track playlist is handed a 30-question quiz with nothing on screen
+ * saying why. This counter is how often that happens; if it is a large share
+ * of `created`, the panel should say so before the host shares the link.
+ *
+ * One `Promise.all` rather than four awaits in series: the host has already
+ * waited on Spotify for this response, and the marker memo is claimed before
+ * its write precisely so that concurrent bumps do not each pay for it.
+ */
+export async function recordQuizCreated(details: {
+  questionCount: number;
+  requestedCount: number;
+  locale: ErrorLocale;
+}): Promise<void> {
+  const writes = [
+    recordQuizStage("created"),
+    recordQuizLength("created", details.questionCount),
+  ];
+  // Guarded like the verdict: the value becomes the tail of a key, and the
+  // locale reached the route from a request body.
+  if ((ERROR_LOCALES as readonly string[]).includes(details.locale)) {
+    writes.push(bump(`quiz_locale:${details.locale}`));
+  }
+  if (
+    Number.isFinite(details.requestedCount) &&
+    details.requestedCount > details.questionCount
+  ) {
+    writes.push(bump("quiz_clamped"));
+  }
+  await Promise.all(writes);
+}
+
+/**
+ * A taker's answers were graded. `POST /api/quiz/[code]/answer`, on success.
+ *
+ *   quiz:completed            the funnel's last taker-side stage
+ *   quiz_verdict:<bucket>     how it came out — the difficulty gauge
+ *   quiz_len:completed:<n>    how long the quiz they finished was
+ *
+ * Counted on a replay too (a resend with the same `submissionId`), and when
+ * the board was full and the row was not written: both are answer sheets that
+ * were graded and shown, which is what "completed" means here. The board's
+ * own row count is the number of *recorded* takers, and lives in the hash.
+ */
+export async function recordQuizCompleted(result: {
+  questionCount: number;
+  verdict: QuizVerdict;
+}): Promise<void> {
+  await Promise.all([
+    recordQuizStage("completed"),
+    recordQuizVerdict(result.verdict),
+    recordQuizLength("completed", result.questionCount),
+  ]);
+}
+
+/**
+ * A hint was served, or could not be. `GET /api/quiz/[code]/hint`, on any
+ * reply that was not a refusal — a refusal is `recordQuizThrottled("hint")`.
+ *
+ * Keyed by the preview's own status, guarded because it is a key tail; the
+ * status came from `getPreview` and not from the request, but the rule does
+ * not care where a string came from. `refresh` is counted *as well as* the
+ * status when the request carried `refresh=1`, so a repaired clip is one
+ * `found` and one `refresh`.
+ */
+export async function recordQuizHint(status: PreviewStatus, refresh: boolean): Promise<void> {
+  const writes: Promise<void>[] = [];
+  if (HINT_STATUS_SET.has(status)) writes.push(bump(`quiz_hint:${status}`));
+  if (refresh) writes.push(bump("quiz_hint:refresh"));
+  await Promise.all(writes);
+}
+
+/**
+ * A quiz route turned a request away at the limiter.
+ *
+ * The funnel counts what got through; this is what did not, per route, so a
+ * `completed ÷ opened` that reads low can be told apart from a limit set too
+ * tight for a room full of phones behind one address. Written only where the
+ * route's own `enforceRateLimit` returned a response, so the number is exact
+ * for the routes that carry it — there is no client half to lose.
+ */
+export function recordQuizThrottled(route: QuizThrottledRoute): Promise<void> {
+  if (!QUIZ_THROTTLED_ROUTES.includes(route)) return Promise.resolve();
+  return bump(`quiz_throttled:${route}`);
 }
 
 /**

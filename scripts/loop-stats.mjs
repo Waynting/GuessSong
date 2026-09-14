@@ -295,32 +295,75 @@ if (indices.length > 0) {
 }
 
 /**
- * The playlist quiz funnel: created → opened → completed, then the share
- * surface's own row above. Each stage is a server-side count (the route that
- * did the thing bumps it), so unlike the surface table nothing here is lost to
- * a page tearing down; only a spent rate-limit window can drop one.
+ * The playlist quiz funnel: created → opened → completed → board, then the
+ * share surface's own row above. Each stage is a server-side count (the route
+ * that did the thing bumps it), so unlike the surface table nothing here is
+ * lost to a page tearing down; only a spent rate-limit window can drop one —
+ * and those are counted too, per route, in the "refused" line.
  *
  * Reading it: opens per quiz below 1 means owners are not sending the link —
  * a share-step problem, not a quiz problem. completed ÷ opened is the quiz
- * itself; below about 40% the default is too long. The verdict spread is the
- * difficulty gauge: a pile at "soulmate" means the decoys are too easy to
- * spot, and that is the trigger for spending an upstream call on better ones.
+ * itself; below about 40% the default is too long, and the length table is
+ * what says *which* lengths. board ÷ created is the owner coming back for
+ * the results. The verdict spread is the difficulty gauge: a pile at
+ * "soulmate" means the decoys are too easy to spot, and that is the trigger
+ * for spending an upstream call on better ones.
+ *
+ * The hint line is the quiz's only per-question upstream path. `heard per
+ * completed` next to the allowance says whether the ration holds;
+ * `unavailable` is the quiz spending a throttled minute; `repaired` is the
+ * year-long positive cache rotting under it.
  */
 const quizCreated = get("quiz:created");
 const quizOpened = get("quiz:opened");
 const quizCompleted = get("quiz:completed");
+const quizBoard = get("quiz:board");
 const verdicts = [...totals.keys()]
   .filter((m) => m.startsWith("quiz_verdict:"))
   .map((m) => m.slice("quiz_verdict:".length))
   .sort();
 
-if (quizCreated + quizOpened + quizCompleted > 0) {
+/**
+ * Mirrors `QUIZ_QUESTION_COUNTS` / `QUIZ_DEFAULT_QUESTION_COUNT` in
+ * types/quiz.ts, for the same reason the cache kinds below mirror theirs:
+ * this is an .mjs with no path to a TypeScript constant, and the set is small
+ * and closed. It only annotates — a wrong mirror mislabels a row as "typed",
+ * it never changes a number.
+ */
+const QUIZ_PRESETS = new Set([10, 20, 30, 50]);
+const QUIZ_DEFAULT = 20;
+
+/** `quiz_len:<stage>:<n>` → { n: count } for one stage. */
+function lengthsFor(stage) {
+  const out = new Map();
+  for (const [metric, count] of totals) {
+    const prefix = `quiz_len:${stage}:`;
+    if (!metric.startsWith(prefix)) continue;
+    const n = Number(metric.slice(prefix.length));
+    if (Number.isInteger(n)) out.set(n, count);
+  }
+  return out;
+}
+
+if (quizCreated + quizOpened + quizCompleted + quizBoard > 0) {
   console.log("\nPlaylist quiz — the link-shaped surface");
-  console.log(`  created     ${String(quizCreated).padStart(6)}`);
+
+  const locales = [...totals.keys()]
+    .filter((m) => m.startsWith("quiz_locale:"))
+    .map((m) => m.slice("quiz_locale:".length))
+    .sort()
+    .map((l) => `${l} ${get(`quiz_locale:${l}`)}`)
+    .join(" · ");
+  console.log(
+    `  created     ${String(quizCreated).padStart(6)}${locales ? `   ${locales}` : ""}`
+  );
   console.log(
     `  opened      ${String(quizOpened).padStart(6)}   ${(quizCreated ? quizOpened / quizCreated : 0).toFixed(1)} per quiz`
   );
   console.log(`  completed   ${String(quizCompleted).padStart(6)}   ${pct(quizCompleted, quizOpened)} of opens`);
+  console.log(
+    `  board       ${String(quizBoard).padStart(6)}   ${pct(quizBoard, quizCreated)} of quizzes had the owner back for results`
+  );
   if (verdicts.length > 0) {
     const most = Math.max(...verdicts.map((v) => get(`quiz_verdict:${v}`)));
     for (const v of verdicts) {
@@ -329,6 +372,69 @@ if (quizCreated + quizOpened + quizCompleted > 0) {
       console.log(`    ${v.padEnd(13)}${String(count).padStart(5)}  ${bar}`);
     }
   }
+
+  // Length: what hosts chose, and how many friends finished a quiz of each
+  // length. `finishers ÷ quizzes` is two floors over each other and needs no
+  // `opened`, which is a ceiling. A row that exists only on the `completed`
+  // side is a quiz made before this window and finished inside it.
+  const made = lengthsFor("created");
+  const done = lengthsFor("completed");
+  const lengths = [...new Set([...made.keys(), ...done.keys()])].sort((a, b) => a - b);
+  if (lengths.length > 0) {
+    console.log("\n  questions   quizzes  finishers  per quiz");
+    for (const n of lengths) {
+      const q = made.get(n) ?? 0;
+      const f = done.get(n) ?? 0;
+      const tag = n === QUIZ_DEFAULT ? "default" : QUIZ_PRESETS.has(n) ? "preset" : "typed";
+      console.log(
+        `  ${String(n).padStart(4)} ${tag.padEnd(8)}${String(q).padStart(6)}${String(f).padStart(11)}` +
+          `${q ? (f / q).toFixed(1).padStart(10) : "         —"}`
+      );
+    }
+    const clamped = get("quiz_clamped");
+    if (clamped > 0) {
+      console.log(
+        `  ${clamped} of ${quizCreated} quizzes were built shorter than the host asked for — ` +
+          "the playlist had fewer usable tracks, and the panel does not say so"
+      );
+    }
+  }
+
+  // Hints. `absent` costs nothing upstream (a cached fact about the
+  // recording); `unavailable` is the quiz paying for a throttled minute.
+  const hintFound = get("quiz_hint:found");
+  const hintAbsent = get("quiz_hint:absent");
+  const hintUnavailable = get("quiz_hint:unavailable");
+  const hintRefresh = get("quiz_hint:refresh");
+  if (hintFound + hintAbsent + hintUnavailable + hintRefresh > 0) {
+    // The allowance is one per ten questions, so the comparison needs the
+    // lengths of the quizzes that were finished, not a flat number.
+    let allowance = 0;
+    for (const [n, count] of done) allowance += Math.max(1, Math.round(n / 10)) * count;
+    console.log(
+      `\n  hints       heard ${hintFound} · no clip ${hintAbsent} · unavailable ${hintUnavailable} · repaired ${hintRefresh}`
+    );
+    if (quizCompleted > 0) {
+      console.log(
+        `              ${(hintFound / quizCompleted).toFixed(1)} heard per completed quiz, ` +
+          `against an allowance of ${(allowance / quizCompleted).toFixed(1)}`
+      );
+    }
+  }
+
+  const refused = [...totals.keys()]
+    .filter((m) => m.startsWith("quiz_throttled:"))
+    .map((m) => m.slice("quiz_throttled:".length))
+    .sort();
+  if (refused.length > 0) {
+    const parts = refused.map((r) => `${r} ${get(`quiz_throttled:${r}`)}`).join(", ");
+    console.log(
+      `\n  ⚠  refused by the limiter: ${parts}. Each is a request the funnel above\n` +
+        "     never saw — an answer refused is a friend who finished and was\n" +
+        "     turned away, which reads as a low completion rate."
+    );
+  }
+
   console.log("  the CTA on the result screen is the quiz_result row above");
 }
 
@@ -347,8 +453,18 @@ if (quizCreated + quizOpened + quizCompleted > 0) {
  * A metric that deserves better framing than a raw count gets its own block
  * above and drops out of this one by being consumed.
  */
-const RENDERED_EXACT = new Set(["live", "games", "repeat_host", "throttled"]);
-const RENDERED_PREFIXES = ["impression:", "click:", "host_index:", "quiz:", "quiz_verdict:"];
+const RENDERED_EXACT = new Set(["live", "games", "repeat_host", "throttled", "quiz_clamped"]);
+const RENDERED_PREFIXES = [
+  "impression:",
+  "click:",
+  "host_index:",
+  "quiz:",
+  "quiz_verdict:",
+  "quiz_len:",
+  "quiz_locale:",
+  "quiz_hint:",
+  "quiz_throttled:",
+];
 
 const leftovers = [...totals.keys()]
   .filter(

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SiteFooter } from "@/components/site-footer";
 import { ServiceNotice } from "@/components/service-notice";
+import { QUIZ_SETUP_HREF } from "@/lib/setup-arrival";
 
 export const metadata: Metadata = {
   // Unlike the English pages, the H1 here IS the keyword — /zh is not the brand
@@ -86,6 +87,10 @@ const FAQS: { q: string; a: string }[] = [
   {
     q: "可以每個人都用自己的歌單嗎？",
     a: "可以，那就是混合歌單模式。每個人交出自己的歌單，GuessSong 會合併成一池並去掉重複的歌，猜中「這首是誰放的」還能加分。",
+  },
+  {
+    q: "不在同一個地方也能玩嗎？",
+    a: "可以，用品味鑒定。把你的歌單做成一條連結傳進群組，朋友各自用手機打開：每題兩首歌，猜哪一首真的在你的歌單裡，最後看排行榜誰最懂你。不用登入、不用約時間，連結會保留一個星期。",
   },
   {
     q: "為什麼有些歌沒有聲音？",
@@ -363,6 +368,19 @@ export default function ZhPage() {
               去掉重複的歌，然後變成一場品味大戰：你分得出這首是誰放的嗎？
               遊戲結束還能下載一張「品味卡」，看看大家的共同愛歌，以及誰的品味最冷門、誰最主流。
             </p>
+          </section>
+
+          {/* 品味鑒定：唯一不是派對的模式。連結帶 ?mode=quiz，設定頁會直接開在這個
+              模式；只給 "/" 會落在單一歌單、品味鑒定的按鈕在三個螢幕以下。 */}
+          <section>
+            <p className="zh-eyebrow" style={{ marginBottom: "10px" }}>新功能 · 傳連結</p>
+            <h2 className="zh-section-title" style={{ marginBottom: "14px" }}>品味鑒定 🎧</h2>
+            <p className="step-desc" style={{ maxWidth: "560px", marginBottom: "20px" }}>
+              不用聚在一起，一條連結就好。把你的歌單變成一份小測驗傳進群組，朋友用自己的手機打開：
+              每題兩首歌，只有一首真的在你的歌單裡，猜完看排行榜誰最懂你。
+              卡住的時候有幾次機會聽片段。不用登入、不用約時間，連結會保留一個星期。
+            </p>
+            <Link href={QUIZ_SETUP_HREF} className="link-btn">做一份品味鑒定 →</Link>
           </section>
 
           <section>

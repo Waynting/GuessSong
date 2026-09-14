@@ -24,7 +24,7 @@ import { trackEvent } from "@/lib/analytics";
 import type { ErrorLocale } from "@/lib/error-messages";
 import { QUIZ_COPY, fillCopy, formatQuizDate, ownerShareText } from "@/lib/quiz-copy";
 import { quizUrl } from "@/lib/quiz-session";
-import { COPIED_FLASH_MS, copyLink, shareLink } from "@/lib/quiz-share";
+import { COPIED_FLASH_MS, copyLink, shareLink, type ShareLinkOutcome } from "@/lib/quiz-share";
 
 export function QuizPanel({
   code,
@@ -43,7 +43,11 @@ export function QuizPanel({
 }) {
   const copy = QUIZ_COPY[locale];
   const [qr, setQr] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  // One slot, not two flags: "copied" flashes and clears, "failed" stays up
+  // until the next attempt settles it. They cannot both be true, and the
+  // failed line lasting past the flash is the point — the host reads it and
+  // long-presses the link, which is the thing that still works.
+  const [feedback, setFeedback] = useState<"copied" | "failed" | null>(null);
   const url = quizUrl(code);
 
   useEffect(() => {
@@ -53,21 +57,30 @@ export function QuizPanel({
   }, [url]);
 
   function flashCopied() {
-    setCopied(true);
-    setTimeout(() => setCopied(false), COPIED_FLASH_MS);
+    setFeedback("copied");
+    setTimeout(() => setFeedback((f) => (f === "copied" ? null : f)), COPIED_FLASH_MS);
+  }
+
+  /**
+   * What the host sees for each outcome. `shared` and `dismissed` show
+   * nothing: the sheet was on screen, so they already know. `failed` used to
+   * show nothing too — a tap that did nothing, on the one button the whole
+   * feature turns on — so it now names the fallback that always works.
+   */
+  function settle(outcome: ShareLinkOutcome) {
+    if (outcome === "copied") flashCopied();
+    else if (outcome === "failed") setFeedback("failed");
+    else if (outcome === "shared") setFeedback(null);
+    trackEvent("quiz_share_tapped", { by: "owner", outcome });
   }
 
   async function handleShare() {
     const text = ownerShareText(copy, { ownerName, playlistName, questionCount });
-    const outcome = await shareLink({ url, text, title: copy.panelShareTitle });
-    if (outcome === "copied") flashCopied();
-    trackEvent("quiz_share_tapped", { by: "owner", outcome });
+    settle(await shareLink({ url, text, title: copy.panelShareTitle }));
   }
 
   async function handleCopy() {
-    const outcome = await copyLink(url);
-    if (outcome === "copied") flashCopied();
-    trackEvent("quiz_share_tapped", { by: "owner", outcome });
+    settle(await copyLink(url));
   }
 
   return (
@@ -101,12 +114,23 @@ export function QuizPanel({
       >
         {url.replace(/^https?:\/\//, "")}
       </a>
+      {/* Under the link it points at, and announced: a screen reader hears
+          why the button went quiet. Amber rather than red — nothing is broken,
+          this browser just does not offer the shortcut. */}
+      {feedback === "failed" && (
+        <p
+          role="status"
+          style={{ fontSize: "12px", color: "#f59e0b", margin: "-6px 0 14px", lineHeight: 1.5 }}
+        >
+          {copy.panelShareFailed}
+        </p>
+      )}
       <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap" }}>
         <button className="start-btn" style={{ width: "auto", padding: "12px 24px" }} onClick={handleShare}>
           {copy.panelSend}
         </button>
         <button className="add-player-btn" onClick={handleCopy}>
-          {copied ? copy.panelCopied : copy.panelCopyLink}
+          {feedback === "copied" ? copy.panelCopied : copy.panelCopyLink}
         </button>
       </div>
       <a href={`/q/${code.toUpperCase()}/board`} className="link-btn" style={{ marginTop: "14px" }}>

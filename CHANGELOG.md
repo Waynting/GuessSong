@@ -5,6 +5,128 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-09-14
+
+The Taste Quiz was QA'd end to end on the day it merged — production build,
+in-process KV, a real playlist, five takers, three viewports — and the report
+(`.gstack/qa-reports/qa-report-taste-quiz-2026-09-14.md`, health 87/100)
+found fifteen things, two of them high. Every one is fixed here, and the
+feature's second set of counters ships alongside so the next fortnight of
+real traffic is readable.
+
+### Added
+
+- **The quiz's length, hints, board opens and refusals reach KV**
+  (`lib/loop-stats.ts`). The funnel had `created / opened / completed` and
+  the verdict spread; nothing the 10–50 count, the rationed hint, the owner's
+  board or the five limiters did was visible to `npm run stats`. Six
+  counters, every key tail from a closed set and guarded at the writer:
+  `quiz:board` (after the token check; a ceiling like `opened`),
+  `quiz_len:<created|completed>:<n>` (finishers per quiz *per length* needs
+  no `opened`), `quiz_clamped`, `quiz_locale:<en|zh>`, `quiz_hint:<found|
+  absent|unavailable|refresh>`, `quiz_throttled:<route>`. `bump` now claims
+  the liveness memo *before* the marker write so the new `Promise.all`
+  recorders do not each pay for it. `scripts/loop-stats.mjs` renders all of
+  it; `docs/viral-loop.md` §5–§7 say how to read it and §9 names the one
+  drift the "Other counters" block cannot catch (a new key under a prefix a
+  renderer already claims). `tests/quiz-routes.test.ts` drives the five
+  routes against the in-process KV and reads the counters back — and pins
+  its env to the Map, because it is the one test that would *pass* against
+  production and inflate the numbers decisions are made from. GA4 gets
+  `quiz_board_opened` as the cohort twin.
+- **A fifth verdict, `guessing`** (`verdictFor`, 50–59%; en "Coin flip", zh
+  「用猜的」). With two options chance is 50%, so "Total stranger" had
+  covered the band a friend who half-knows the playlist most often lands
+  in. `stranger` now means below chance. `QUIZ_VERDICTS` drives the KV keys
+  and the reader, so the new bucket appears in `npm run stats` unasked.
+- **`lib/quiz-progress.ts`** — a taker's in-progress state and finished
+  submissions, per code, in localStorage, pruned by the quiz's own
+  `expiresAt`, every access wrapped (the `storage_blocked` rule).
+  `tests/quiz-progress.test.ts` covers round-trip, pruning, corrupt JSON
+  and a throwing store.
+- **`lib/setup-arrival.ts`** — `requestedSetupMode(query)`: `?mode=quiz`,
+  and `?ref=quiz_result` (typed against `LoopSurface`, so a rename is a
+  compile error), preselect the Taste Quiz tab and scroll the form into
+  view; every other arrival is a no-op. `QUIZ_SETUP_HREF` is what `/zh` and
+  `/about` link to.
+- **`pickBoardTiles`** in `lib/quiz.ts` — "everyone knew" is 100%, "nobody
+  could place" is 0%, each needs at least two takers who answered, first
+  wins ties. The board page had rendered the *highest* rate as "everyone
+  knew" and showed `1 of 2 got it` under that heading.
+
+### Fixed
+
+- **The loop's own call to action landed on the wrong mode** (QA #001,
+  high). "Make one for your friends →" → `/r/quiz_result` → `/?ref=
+  quiz_result` rendered Single Playlist, scrolled to the hero, the quiz tab
+  three screens down and unmarked — on the one link the feature exists to
+  measure. Now `lib/setup-arrival.ts`, above.
+- **A taken name was refused after twenty questions** (#002, high). The
+  intro already rendered every taker's name; `start()` now folds the typed
+  name against the board and says so before Start. A taker who reloads
+  after finishing gets their name pre-filled and "See my result again",
+  which re-POSTs with the stored `submissionId` so the server *replays*
+  the row — no second entry on the board. Typing your own stored name does
+  the same.
+- **Reload or the browser's Back button lost everything** (#005). Progress
+  is saved on every change and restored to the same question; one history
+  entry is pushed per question, so a phone's swipe-back is the previous
+  question (through the same path as the in-page Back — round token bumped,
+  clip stopped) and from question one returns to the intro with the answers
+  kept. Back from the result screen leaves, as before.
+- **Decoy artist spelling gave the answer away** (#003). Spotify credits
+  most Mandopop acts romanised (`Ronghao Li`, `JJ Lin`) and a few natively
+  (`那英`); `displayArtist` matched the *real option's* script per
+  question, so `李榮浩` and `Ronghao Li` appeared in the same quiz and the
+  native spelling was never the playlist's. A decoy by an act the playlist
+  credits — under any spelling or alias — is now shown with the playlist's
+  exact spelling (`creditedArtists`, a folded→first-seen map on
+  `DecoyContext`); only an act absent from the playlist falls to the
+  target-script rule. Verified on the QA playlist: one spelling per act
+  across all twenty questions.
+- **The quiz link unfurled without an image** (#004). A nested
+  `generateMetadata`'s `openGraph` replaces the root's wholesale, which is
+  how `/q/[code]` lost the 1200×630 card `/` ships. It reuses the static
+  `/opengraph-image` (zero per-request cost; a per-quiz satori image would
+  run per unfurler) with `twitter:card = summary_large_image`.
+  `tests/quiz-unfurl.test.ts` pins the image and that nothing under `app/q`
+  declares `runtime = "edge"`.
+- **A hint whose clip could not start failed silently** (#007). `play()`
+  rejecting refunds the hint and now says "The clip couldn't start — tap
+  the hint again" in the seam; the element is also `load()`ed synchronously
+  inside the tap, before the awaited fetch, so iOS has an unlocked element
+  when the URL arrives.
+- **Share and copy gave no feedback on failure** (#008) on the panel, the
+  result screen and the board. `failed` now says so and points at the URL
+  already rendered as text.
+- **Touching the form after creating discarded the share panel** (#012).
+  The panel stays until the next quiz is made or the mode is left; the
+  button under it reads "Create a new link →". The owner name is
+  snapshotted at creation so editing the field cannot rewrite the share
+  sentence under a link already sent.
+- **Neither leaderboard refreshed** (#009): a Refresh control on the board
+  and on the result screen's ranking, one fetch per tap, disabled in
+  flight, no polling. `quiz_board_opened` / `quiz_opened` fire once.
+- **Smaller**: the five count pills fit one row at 375px (#011); the create
+  error is `role="alert"` (#015); `/zh` has a native 品味鑒定 section and
+  FAQ entry, `/about` a Taste Quiz section (#010); an unknown or expired
+  code offers "Make one of your own →" instead of "Try again" (#014a); the
+  board sets the tab title (#014b).
+
+### Known gaps
+
+- **The iOS first-tap hint is still unverified on a device.** The
+  synchronous `load()` is the documented unlock; the message is the
+  fallback if it is not enough.
+- **`foldQuizName` is trim + lowercase.** Full-width and half-width
+  spellings of the same name are two rows; the early check inherits that.
+- **The verdict thresholds moved for the second time in a day.** `guessing`
+  is a copy decision as much as a rule; `quiz_verdict:*` will say whether
+  the bucket gets used.
+- **Version 1.9.0's counters started at deploy and the 1.10.0 ones start
+  now**; nothing here is readable before about 2026-10-01
+  (`docs/viral-loop.md` §7).
+
 ## [1.9.0] - 2026-09-14
 
 **Taste Quiz** — a playlist turned into a link. A friend opens it on their own

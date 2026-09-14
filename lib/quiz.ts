@@ -155,9 +155,10 @@ export interface DecoyEntry {
   artist: string;
   /**
    * Other spellings of the same act, native script first. Matched by the
-   * tiers like `artist`, and the spelling shown when the playlist's own
-   * artist is in that script — both options must read in one script, or the
-   * one that differs is the answer.
+   * tiers like `artist`, and by `displayArtist` against the playlist's own
+   * credits — an act the playlist names is shown as the playlist names it,
+   * and one it does not is shown in the real track's script, because the
+   * option whose spelling nothing else on the quiz uses is the answer.
    */
   aliases?: readonly string[];
   /** Spotify's 0–100, approximately. Only compared, never shown. */
@@ -183,22 +184,65 @@ export function bucketPool(pool: readonly DecoyEntry[]): BucketedDecoy[] {
 }
 
 /**
- * Which spelling of a decoy's artist to show next to a real track credited
- * in `targetArtist`'s script. A Jay Chou playlist credits "Jay Chou", so its
- * decoys read "Mayday" and "JJ Lin", not 五月天 and 林俊傑; a 告五人 playlist
- * gets the native spellings. Falls back to Spotify's name when no alias is
- * in the right script.
+ * Which spelling of a decoy's artist to show next to a real track.
+ *
+ * Two rules, and the order is the point. **An act the playlist credits is
+ * shown exactly as the playlist credits it**, whatever script the real option
+ * on this question is in. Matching the real option's script per question
+ * kept each question internally consistent and leaked across them: a Mandopop
+ * playlist credits most acts romanised ("Ronghao Li", "JJ Lin") and a few
+ * natively (那英, 黃小琥), so Q2 showed 李白 · 李榮浩 (real option by 那英)
+ * while Q4 showed 對等關係 · Ronghao Li (real) — and a taker who had seen
+ * "Ronghao Li" once knew 李榮浩 was never the playlist's spelling. The first
+ * tier's decoys are by the real track's own artist and the second tier's by
+ * another playlist artist, so this is most decoys, not a corner.
+ *
+ * Only an act the playlist never credits falls to the script rule: a Jay Chou
+ * playlist gets "Mayday", not 五月天, and a 告五人 playlist gets 周杰倫, not
+ * "Jay Chou". Falls back to Spotify's name when no alias is in that script.
+ * The second argument is optional so the rule reads the same with no
+ * playlist in hand.
  */
-export function displayArtist(decoy: DecoyEntry, targetArtist: string): string {
-  const wanted = scriptBucket(targetArtist);
+export function displayArtist(
+  decoy: DecoyEntry,
+  targetArtist: string,
+  playlistArtists?: ReadonlyMap<string, string>
+): string {
   const candidates = [decoy.artist, ...(decoy.aliases ?? [])];
+  if (playlistArtists) {
+    for (const candidate of candidates) {
+      const credited = playlistArtists.get(foldText(candidate));
+      if (credited !== undefined) return credited;
+    }
+  }
+  const wanted = scriptBucket(targetArtist);
   return candidates.find((a) => scriptBucket(a) === wanted) ?? decoy.artist;
+}
+
+/**
+ * Every act the playlist credits, folded, mapped to the spelling it credits
+ * them under. The first spelling seen wins; Spotify has one name per artist
+ * id, so a second spelling of one act is two artist ids and two keys here.
+ * This is what `displayArtist` reads, and it is the only place a playlist
+ * credit becomes a key — the same reason `lib/room.ts` has one `fold()`.
+ */
+export function creditedArtists(tracks: readonly Track[]): Map<string, string> {
+  const credited = new Map<string, string>();
+  for (const t of tracks) {
+    if (!Array.isArray(t.artists)) continue;
+    for (const a of t.artists) {
+      if (typeof a !== "string" || !a.trim()) continue;
+      const folded = foldText(a);
+      if (!credited.has(folded)) credited.set(folded, a);
+    }
+  }
+  return credited;
 }
 
 /** How far apart two popularity scores may be and still count as "similar". */
 export const DECOY_POPULARITY_WINDOW = 20;
 
-interface DecoyContext {
+export interface DecoyContext {
   /**
    * Every title in the playlist, folded, so no decoy is also a right answer.
    * Title alone, not title-and-artist: the pool and the playlist spell an
@@ -206,8 +250,12 @@ interface DecoyContext {
    * both let 晴天 by 周杰倫 be offered next to 晴天 by Jay Chou.
    */
   playlistTitles: ReadonlySet<string>;
-  /** Every credited artist in the playlist, folded. */
-  playlistArtists: ReadonlySet<string>;
+  /**
+   * Every credited artist in the playlist, folded, to the spelling the
+   * playlist uses (`creditedArtists`). The keys decide the second tier; the
+   * values are what `displayArtist` shows for an act the playlist knows.
+   */
+  playlistArtists: ReadonlyMap<string, string>;
   pool: readonly BucketedDecoy[];
   /** Decoys already spent on earlier questions of this quiz. */
   used: Set<string>;
@@ -249,8 +297,9 @@ function shuffle<T>(items: T[], rng: () => number): T[] {
  *      worse than one whose decoys repeat.
  *
  * Never a song whose title is in the playlist, at any tier: that would put
- * the right answer on both sides of the question. The artist is shown in the
- * script the playlist credits the real track in (`displayArtist`).
+ * the right answer on both sides of the question. The artist is shown as the
+ * playlist credits them, or failing that in the real track's script
+ * (`displayArtist`).
  */
 export function pickDecoys(
   target: DecoyTarget,
@@ -301,7 +350,7 @@ export function pickDecoys(
   if (chosen.length < count) take(eligible);
 
   for (const d of chosen) ctx.used.add(identity(d));
-  return chosen.map((d) => ({ title: d.name, artist: displayArtist(d, target.artist) }));
+  return chosen.map((d) => ({ title: d.name, artist: displayArtist(d, target.artist, ctx.playlistArtists) }));
 }
 
 /* ------------------------------------------------------------------ */
@@ -398,17 +447,11 @@ export function buildQuiz(input: BuildQuizInput): QuizQuestion[] {
   const count = clampQuestionCount(input.questionCount, usable.length);
 
   const playlistTitles = new Set<string>();
-  const playlistArtists = new Set<string>();
-  for (const t of usable) {
-    playlistTitles.add(foldText(displayTitle(t.name)));
-    if (Array.isArray(t.artists)) {
-      for (const a of t.artists) if (typeof a === "string" && a.trim()) playlistArtists.add(foldText(a));
-    }
-  }
+  for (const t of usable) playlistTitles.add(foldText(displayTitle(t.name)));
 
   const ctx: DecoyContext = {
     playlistTitles,
-    playlistArtists,
+    playlistArtists: creditedArtists(usable),
     pool: bucketPool(input.pool),
     used: new Set(),
   };
@@ -525,7 +568,7 @@ export function clampHintsUsed(value: unknown, questionCount: number): number {
 /* ------------------------------------------------------------------ */
 
 /**
- * Four buckets, so the result is a sentence rather than a decimal. "83.7%" is
+ * Five buckets, so the result is a sentence rather than a decimal. "83.7%" is
  * a promise ten questions cannot keep; "close friend" is what the number
  * actually supports. The thresholds are on the ratio so every question count
  * reads the same way.
@@ -535,8 +578,14 @@ export function clampHintsUsed(value: unknown, questionCount: number): number {
  * handed "getting there" to a coin. 60% is where a friend starts to show over
  * the noise at twenty questions; the two above it are unchanged in spirit and
  * moved up to keep the gaps even.
+ *
+ * `guessing` is the band a coin lands in, 50–59%, and it exists because the
+ * harshest label used to start there: a friend who half-knows the playlist
+ * lands at 55% more often than anywhere else, and "total stranger" for that
+ * is a verdict nobody screenshots into the chat. `stranger` now means below
+ * chance — worse than guessing, which is its own kind of knowing.
  */
-export const QUIZ_VERDICTS = ["soulmate", "close", "acquaintance", "stranger"] as const;
+export const QUIZ_VERDICTS = ["soulmate", "close", "acquaintance", "guessing", "stranger"] as const;
 export type QuizVerdict = (typeof QUIZ_VERDICTS)[number];
 
 export function verdictFor(correct: number, total: number): QuizVerdict {
@@ -545,6 +594,7 @@ export function verdictFor(correct: number, total: number): QuizVerdict {
   if (ratio >= 0.9) return "soulmate";
   if (ratio >= 0.75) return "close";
   if (ratio >= 0.6) return "acquaintance";
+  if (ratio >= 0.5) return "guessing";
   return "stranger";
 }
 
@@ -600,6 +650,40 @@ export function summarizeBoard(
     averageCorrect: scores.length ? sum / scores.length : null,
     perQuestion,
   };
+}
+
+/**
+ * Takers a question needs before "everyone" or "nobody" means anything. With
+ * one, every question is 100% or 0% and both labels are true of half the
+ * board.
+ */
+export const BOARD_TILE_MIN_ANSWERED = 2;
+
+export interface BoardTiles {
+  /** Index of the first question every answering taker got right. */
+  easiest?: number;
+  /** Index of the first question no answering taker got right. */
+  hardest?: number;
+}
+
+/**
+ * The two hero tiles on the owner's board — "everyone knew" and "nobody could
+ * place" — or fewer. Each is literal: a unanimous question, judged by at least
+ * `BOARD_TILE_MIN_ANSWERED` takers, the first such one on a tie. The page
+ * used to pick the highest and lowest rate and label the higher "everyone
+ * knew" from 50% up, which with two takers on opposite sheets put every
+ * question at 50% and still crowned one "Everyone knew · 1 of 2 got it".
+ * Neither tile applying is a real answer — the board splits — and the page
+ * renders nothing rather than a tile whose label is false.
+ */
+export function pickBoardTiles(questions: readonly { answered: number; correct: number }[]): BoardTiles {
+  const tiles: BoardTiles = {};
+  for (const [i, q] of questions.entries()) {
+    if (q.answered < BOARD_TILE_MIN_ANSWERED) continue;
+    if (tiles.easiest === undefined && q.correct === q.answered) tiles.easiest = i;
+    if (tiles.hardest === undefined && q.correct === 0) tiles.hardest = i;
+  }
+  return tiles;
 }
 
 /** 1-based position of `name` on a sorted board, or null if absent. */

@@ -13,7 +13,7 @@ import { loadPlaylist } from "@/lib/playlist-cache";
 import { SpotifyApiError } from "@/lib/spotify";
 import { createQuiz, QuizError } from "@/lib/quiz-store";
 import { QUIZ_DECOY_POOL } from "@/lib/quiz-decoys";
-import { recordQuizStage } from "@/lib/loop-stats";
+import { recordQuizCreated, recordQuizThrottled } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
 import { ERROR_LOCALES } from "@/lib/error-messages";
@@ -43,7 +43,10 @@ export async function POST(req: NextRequest) {
     QUIZ_CREATE_WINDOW_SECONDS,
     "rate_limited_quiz_create"
   );
-  if (limited) return limited;
+  if (limited) {
+    await recordQuizThrottled("create");
+    return limited;
+  }
 
   let body: z.infer<typeof CreateQuizSchema>;
   try {
@@ -62,7 +65,14 @@ export async function POST(req: NextRequest) {
       locale: body.locale ?? "en",
       pool: QUIZ_DECOY_POOL,
     });
-    await recordQuizStage("created");
+    // The built count, not the requested one: `createQuiz` shortens a quiz to
+    // the playlist's usable tracks, and the quiz that exists is the one to
+    // count. The gap between the two is `quiz_clamped`.
+    await recordQuizCreated({
+      questionCount: created.questionCount,
+      requestedCount: body.questionCount,
+      locale: body.locale ?? "en",
+    });
     return NextResponse.json<CreateQuizResponse>({
       code: created.code,
       expiresAt: created.expiresAt,
