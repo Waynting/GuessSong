@@ -295,6 +295,44 @@ if (indices.length > 0) {
 }
 
 /**
+ * The playlist quiz funnel: created → opened → completed, then the share
+ * surface's own row above. Each stage is a server-side count (the route that
+ * did the thing bumps it), so unlike the surface table nothing here is lost to
+ * a page tearing down; only a spent rate-limit window can drop one.
+ *
+ * Reading it: opens per quiz below 1 means owners are not sending the link —
+ * a share-step problem, not a quiz problem. completed ÷ opened is the quiz
+ * itself; below about 40% the default is too long. The verdict spread is the
+ * difficulty gauge: a pile at "soulmate" means the decoys are too easy to
+ * spot, and that is the trigger for spending an upstream call on better ones.
+ */
+const quizCreated = get("quiz:created");
+const quizOpened = get("quiz:opened");
+const quizCompleted = get("quiz:completed");
+const verdicts = [...totals.keys()]
+  .filter((m) => m.startsWith("quiz_verdict:"))
+  .map((m) => m.slice("quiz_verdict:".length))
+  .sort();
+
+if (quizCreated + quizOpened + quizCompleted > 0) {
+  console.log("\nPlaylist quiz — the link-shaped surface");
+  console.log(`  created     ${String(quizCreated).padStart(6)}`);
+  console.log(
+    `  opened      ${String(quizOpened).padStart(6)}   ${(quizCreated ? quizOpened / quizCreated : 0).toFixed(1)} per quiz`
+  );
+  console.log(`  completed   ${String(quizCompleted).padStart(6)}   ${pct(quizCompleted, quizOpened)} of opens`);
+  if (verdicts.length > 0) {
+    const most = Math.max(...verdicts.map((v) => get(`quiz_verdict:${v}`)));
+    for (const v of verdicts) {
+      const count = get(`quiz_verdict:${v}`);
+      const bar = "█".repeat(Math.min(30, Math.round((count / most) * 30)));
+      console.log(`    ${v.padEnd(13)}${String(count).padStart(5)}  ${bar}`);
+    }
+  }
+  console.log("  the CTA on the result screen is the quiz_result row above");
+}
+
+/**
  * Anything discovered under `loop:stats:` that no block above consumed.
  *
  * `KEYS` finds every metric, but every renderer above is written against one
@@ -310,7 +348,7 @@ if (indices.length > 0) {
  * above and drops out of this one by being consumed.
  */
 const RENDERED_EXACT = new Set(["live", "games", "repeat_host", "throttled"]);
-const RENDERED_PREFIXES = ["impression:", "click:", "host_index:"];
+const RENDERED_PREFIXES = ["impression:", "click:", "host_index:", "quiz:", "quiz_verdict:"];
 
 const leftovers = [...totals.keys()]
   .filter(

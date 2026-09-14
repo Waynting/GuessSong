@@ -196,10 +196,14 @@ page is gated on "a round has resolved" rather than "the game ended" — see
 |---|---|---|
 | React state | the running game — phase, scores, current track | until reload |
 | `sessionStorage` | the game payload handed from `/` to `/game` | the tab |
-| `localStorage` | player id, host name, host game count, last loop ref | the device, until ITP clears it |
+| `localStorage` | player id, host name, host game count, last loop ref, last quiz code + host tokens | the device, until ITP clears it |
 | Upstash KV | rooms, rate limits, playlist + preview caches, loop counters | 30s – 1 year, always a TTL |
+| Upstash KV | a quiz: its questions (answer key included) and its board, one hash | 7 days |
 | Durable Object | one live buzzer room | 3h idle timeout, sliding |
 | GA4 | the funnel | Google's retention setting |
 
 Nothing in that table is keyed to a person, and nothing survives being cleared
-except the caches, which are keyed to content rather than to anyone.
+except the caches, which are keyed to content rather than to anyone. The quiz
+board is the closest thing: names typed by takers, claimed once per quiz with
+`hsetnx`, on the same footing as a room roster — and the key stays on the
+server, which is what makes the board worth reading (`lib/quiz-store.ts`).

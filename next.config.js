@@ -20,6 +20,12 @@ const devOrigins = [
 const nextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: devOrigins,
+  // Pin the workspace root to this directory. Next otherwise walks up looking
+  // for lockfiles and, on a machine with a stray ~/package-lock.json, picks
+  // the home directory as the root — a warning on every build and a wrong
+  // file-tracing base for the standalone output. Vercel builds are unaffected
+  // either way; this just makes local builds say the same thing.
+  outputFileTracingRoot: __dirname,
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "i.scdn.co" },

@@ -12,6 +12,8 @@ import {
   isCustomSelected,
   type SongCountState,
 } from "@/lib/song-count";
+import { DEFAULT_QUIZ_COUNT_STATE, QUIZ_COUNT_CONTROL, quizCountOf } from "@/lib/quiz";
+import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
 
 /** Replay a host typing into the field one character at a time. */
 function type(state: SongCountState, text: string): SongCountState {
@@ -216,5 +218,56 @@ describe("the presets themselves", () => {
         expect(c).toBeLessThanOrEqual(MAX_SONG_COUNT);
       }
     }
+  });
+});
+
+describe("a second control on the same two rules", () => {
+  // The quiz's question count is the same control with different bounds and
+  // no "all". It borrows the state machine rather than copying it, so the two
+  // rules `typeCustom` / `commitCustom` pin above hold for it by construction —
+  // these pin that the bounds actually travel with the control.
+  const control = QUIZ_COUNT_CONTROL;
+
+  it("defaults to a preset the quiz can build, inside its own range", () => {
+    expect(DEFAULT_QUIZ_COUNT_STATE.field).toBe("");
+    expect(control.presets).toContain(DEFAULT_QUIZ_COUNT_STATE.count);
+    expect(control.min).toBe(QUIZ_MIN_QUESTIONS);
+    expect(control.max).toBe(QUIZ_MAX_QUESTIONS);
+    expect(quizCountOf(DEFAULT_QUIZ_COUNT_STATE)).toBe(DEFAULT_QUIZ_COUNT_STATE.count);
+  });
+
+  it("rejects per keystroke against the quiz's floor, not the game's", () => {
+    // "4" on the way to "45": below ten, so not yet a count. The game's
+    // control would have committed 4.
+    const s = typeCustom(DEFAULT_QUIZ_COUNT_STATE, "4", control);
+    expect(s.count).toBe(DEFAULT_QUIZ_COUNT_STATE.count);
+    expect(typeCustom(DEFAULT_QUIZ_COUNT_STATE, "4").count).toBe(4);
+    expect(typeCustom(s, "45", control).count).toBe(45);
+    // Above fifty is "not yet" too, even though the game would take it.
+    expect(typeCustom(s, "120", control).count).toBe(DEFAULT_QUIZ_COUNT_STATE.count);
+  });
+
+  it("clamps on commit to the quiz's own ends", () => {
+    expect(commitCustom({ count: 20, field: "999" }, control)).toEqual({ count: 50, field: "50" });
+    expect(commitCustom({ count: 20, field: "3" }, control)).toEqual({ count: 10, field: "10" });
+    expect(commitCustom({ count: 20, field: "37.9" }, control)).toEqual({ count: 37, field: "37" });
+    // An emptied field falls back to the selected count; a preset reads as a pill.
+    expect(commitCustom({ count: 20, field: "" }, control)).toEqual({ count: 20, field: "" });
+    expect(commitCustom({ count: 37, field: "" }, control)).toEqual({ count: 37, field: "37" });
+  });
+
+  it("marks the field selected only when it holds the count under these bounds", () => {
+    expect(isCustomSelected({ count: 37, field: "37" }, control)).toBe(true);
+    expect(isCustomSelected({ count: 20, field: "4" }, control)).toBe(false);
+    expect(isSongCountPreset(30, control)).toBe(true);
+    expect(isSongCountPreset(37, control)).toBe(false);
+    // "all" is the game's word; the quiz never sees it and reads it as the default.
+    expect(quizCountOf({ count: "all", field: "" })).toBe(DEFAULT_QUIZ_COUNT_STATE.count);
+  });
+
+  it("leaves the game's control exactly as it was", () => {
+    expect(parseSongCount("4")).toBe(4);
+    expect(clampSongCount("999")).toBe(MAX_SONG_COUNT);
+    expect(commitCustom({ count: 20, field: "999" })).toEqual({ count: MAX_SONG_COUNT, field: String(MAX_SONG_COUNT) });
   });
 });

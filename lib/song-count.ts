@@ -23,9 +23,32 @@ export const SONG_COUNTS: (number | "all")[] = [10, 20, 30, 50, "all"];
  */
 export const MAX_SONG_COUNT = 500;
 
+/**
+ * What a count control is bounded by: its pills, and the range the typed
+ * field accepts. The game's is below; the quiz's is `QUIZ_COUNT_CONTROL` in
+ * `lib/quiz.ts` (ten to fifty, no "all"). Every function here takes one and
+ * defaults to the game's, so the two rules the module exists for — reject per
+ * keystroke, clamp on blur — are written once and bounded twice, rather than
+ * copied into a second module where one of them would quietly drift.
+ */
+export interface CountControl {
+  presets: readonly (number | "all")[];
+  min: number;
+  max: number;
+}
+
+export const SONG_COUNT_CONTROL: CountControl = Object.freeze({
+  presets: SONG_COUNTS,
+  min: 1,
+  max: MAX_SONG_COUNT,
+});
+
 /** True for a count that has its own pill, so no custom field describes it. */
-export function isSongCountPreset(count: number | "all"): boolean {
-  return SONG_COUNTS.includes(count);
+export function isSongCountPreset(
+  count: number | "all",
+  control: CountControl = SONG_COUNT_CONTROL
+): boolean {
+  return control.presets.includes(count);
 }
 
 /**
@@ -35,9 +58,12 @@ export function isSongCountPreset(count: number | "all"): boolean {
  * "150" passes through "1" and "15", and committing those would leave the
  * count wherever they paused. Out of range means "not yet", not "no".
  */
-export function parseSongCount(raw: string): number | null {
+export function parseSongCount(
+  raw: string,
+  control: CountControl = SONG_COUNT_CONTROL
+): number | null {
   const n = Number(raw.trim());
-  if (!Number.isInteger(n) || n < 1 || n > MAX_SONG_COUNT) return null;
+  if (!Number.isInteger(n) || n < control.min || n > control.max) return null;
   return n;
 }
 
@@ -54,12 +80,15 @@ export function parseSongCount(raw: string): number | null {
  * the caller's cue to fall back to whatever is already selected rather than to
  * invent a count.
  */
-export function clampSongCount(raw: string): number | null {
+export function clampSongCount(
+  raw: string,
+  control: CountControl = SONG_COUNT_CONTROL
+): number | null {
   const trimmed = raw.trim();
   if (trimmed === "") return null;
   const n = Math.floor(Number(trimmed));
   if (!Number.isFinite(n)) return null;
-  return Math.min(MAX_SONG_COUNT, Math.max(1, n));
+  return Math.min(control.max, Math.max(control.min, n));
 }
 
 /**
@@ -96,8 +125,12 @@ export function selectPreset(preset: number | "all"): SongCountState {
  * through a half-typed number; the previous count stands until the new one is
  * real.
  */
-export function typeCustom(state: SongCountState, raw: string): SongCountState {
-  return { count: parseSongCount(raw) ?? state.count, field: raw };
+export function typeCustom(
+  state: SongCountState,
+  raw: string,
+  control: CountControl = SONG_COUNT_CONTROL
+): SongCountState {
+  return { count: parseSongCount(raw, control) ?? state.count, field: raw };
 }
 
 /**
@@ -106,16 +139,22 @@ export function typeCustom(state: SongCountState, raw: string): SongCountState {
  * selected. Leaving a value on screen that never became the count is the bug
  * this closes: it promises a game length that is not going to happen.
  */
-export function commitCustom(state: SongCountState): SongCountState {
-  const n = clampSongCount(state.field);
+export function commitCustom(
+  state: SongCountState,
+  control: CountControl = SONG_COUNT_CONTROL
+): SongCountState {
+  const n = clampSongCount(state.field, control);
   if (n !== null) return { count: n, field: String(n) };
   return {
     count: state.count,
-    field: isSongCountPreset(state.count) ? "" : String(state.count),
+    field: isSongCountPreset(state.count, control) ? "" : String(state.count),
   };
 }
 
 /** True when the field holds the selected count, so it should read as chosen. */
-export function isCustomSelected(state: SongCountState): boolean {
-  return state.field !== "" && parseSongCount(state.field) === state.count;
+export function isCustomSelected(
+  state: SongCountState,
+  control: CountControl = SONG_COUNT_CONTROL
+): boolean {
+  return state.field !== "" && parseSongCount(state.field, control) === state.count;
 }

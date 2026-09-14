@@ -36,7 +36,8 @@
 
 import type { BuzzerErrorCode } from "@/lib/buzzer-protocol";
 
-export type ErrorLocale = "en" | "zh";
+export const ERROR_LOCALES = ["en", "zh"] as const;
+export type ErrorLocale = (typeof ERROR_LOCALES)[number];
 
 export type AppErrorCode =
   // Generic
@@ -88,6 +89,21 @@ export type AppErrorCode =
   | "room_host_submit_failed"
   | "room_status_failed"
   | "room_start_failed"
+  // Playlist quiz
+  | "quiz_not_found"
+  | "quiz_name_required"
+  | "quiz_name_taken"
+  | "quiz_too_few_tracks"
+  | "quiz_missing_fields"
+  | "quiz_create_invalid"
+  | "quiz_invalid_answers"
+  | "quiz_code_unavailable"
+  | "quiz_create_failed"
+  | "quiz_load_failed"
+  | "quiz_answer_failed"
+  | "quiz_not_host"
+  | "quiz_board_failed"
+  | "rate_limited_quiz_create"
   // Setup screen validation
   | "players_required"
   | "mixed_min_contributors"
@@ -354,6 +370,78 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
     zh: "沒辦法開始遊戲。",
   },
 
+  /*
+   * The quiz is read by two people who never share a screen: the host who made
+   * it and, days later, a friend in a group chat. Both read in their own
+   * language, which is the room argument one more time.
+   */
+  quiz_not_found: {
+    en: "This quiz doesn't exist any more — it may have expired. Ask whoever sent it to make a new one.",
+    zh: "找不到這個測驗，它可能已經過期了。請出題的人重新做一個。",
+  },
+  quiz_name_required: {
+    en: "Please enter your name.",
+    zh: "請輸入你的名字。",
+  },
+  quiz_name_taken: {
+    en: "Someone has already taken this quiz under that name. Pick another.",
+    zh: "已經有人用這個名字作答過了，換一個吧。",
+  },
+  /**
+   * Carries `{count}` because the number is the whole message: a host who is
+   * told "too few tracks" without it cannot tell whether to add one song or
+   * forty.
+   */
+  quiz_too_few_tracks: {
+    en: "That playlist is too short for a quiz — it needs at least {count} different songs.",
+    zh: "這個歌單太短了，出題至少要 {count} 首不同的歌。",
+  },
+  quiz_missing_fields: {
+    en: "Please enter your name and answer every question.",
+    zh: "請填寫名字並回答每一題。",
+  },
+  quiz_create_invalid: {
+    en: "Check the playlist link and the number of questions, then try again.",
+    zh: "請確認歌單連結和題數，然後再試一次。",
+  },
+  quiz_invalid_answers: {
+    en: "Those answers don't match this quiz. Reload the page and try again.",
+    zh: "這些答案跟題目對不起來，請重新整理頁面再試一次。",
+  },
+  quiz_code_unavailable: {
+    en: "Couldn't get a free quiz link, please try again.",
+    zh: "找不到可用的測驗連結，請再試一次。",
+  },
+  quiz_create_failed: {
+    en: "Couldn't create the quiz.",
+    zh: "沒辦法建立測驗。",
+  },
+  quiz_load_failed: {
+    en: "Couldn't load the quiz.",
+    zh: "讀不到這個測驗。",
+  },
+  quiz_answer_failed: {
+    en: "Couldn't submit your answers.",
+    zh: "沒辦法送出你的答案。",
+  },
+  /**
+   * The results page names the answers, so it is for the person who already
+   * knows them. The token lives on the device that made the quiz, which is
+   * the only place "you" can be established without an account.
+   */
+  quiz_not_host: {
+    en: "Only whoever made this quiz can see its results page — open it on the device you made it with. The quiz link itself still works.",
+    zh: "只有出題的人可以看結果頁，請用建立測驗的那台裝置打開。測驗連結本身還是可以用的。",
+  },
+  quiz_board_failed: {
+    en: "Couldn't load the results.",
+    zh: "讀不到結果。",
+  },
+  rate_limited_quiz_create: {
+    en: "Too many quizzes created, please slow down.",
+    zh: "建立了太多測驗，請慢一點。",
+  },
+
   players_required: {
     en: "Add at least one player.",
     zh: "至少要有一位玩家。",
@@ -561,6 +649,15 @@ export interface ApiErrorBody {
   code: AppErrorCode;
   /** Seconds to wait, on the throttling codes that carry one. */
   retryAfter?: number;
+  /**
+   * The values a code's placeholders were filled with, so the client can fill
+   * them again in its own language. `quiz_too_few_tracks` was the first
+   * server-originated code with a placeholder other than `{seconds}`, and
+   * without this the phone rendered the literal `{count}`: the server had
+   * filled its English `error`, the client re-rendered the template from the
+   * code alone. Numbers and strings only — nothing here is user input.
+   */
+  params?: Record<string, string | number>;
 }
 
 /**
@@ -575,11 +672,22 @@ export interface ApiErrorBody {
 export function apiError(body: unknown, fallback: AppErrorCode): AppError {
   const data = (body ?? {}) as Partial<ApiErrorBody>;
   const code = isAppErrorCode(data.code) ? data.code : fallback;
-  const params =
-    typeof data.retryAfter === "number" && Number.isFinite(data.retryAfter)
-      ? { seconds: Math.ceil(data.retryAfter) }
-      : undefined;
-  return new AppError(code, params, typeof data.error === "string" ? data.error : undefined);
+  const params: Record<string, string | number> = {};
+  if (data.params && typeof data.params === "object") {
+    for (const [key, value] of Object.entries(data.params)) {
+      if (typeof value === "string" || (typeof value === "number" && Number.isFinite(value))) {
+        params[key] = value;
+      }
+    }
+  }
+  if (typeof data.retryAfter === "number" && Number.isFinite(data.retryAfter)) {
+    params.seconds = Math.ceil(data.retryAfter);
+  }
+  return new AppError(
+    code,
+    Object.keys(params).length ? params : undefined,
+    typeof data.error === "string" ? data.error : undefined
+  );
 }
 
 /**

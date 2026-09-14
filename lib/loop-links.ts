@@ -61,6 +61,17 @@ export const LOOP_SURFACES = [
    * later.
    */
   "share",
+  /**
+   * The result screen of a playlist quiz (`/q/[code]`): a friend has just
+   * answered ten questions about someone's taste and is looking at a score.
+   *
+   * The first surface whose carrier is a URL tapped in a group chat rather
+   * than a QR scanned off a screen or out of an image. Kept apart from `share`
+   * even though both leave the party, because `share` has never converted
+   * (0 of 50) and the question this one exists to answer is whether that was
+   * the audience or the carrier — merging them would bury the answer.
+   */
+  "quiz_result",
 ] as const;
 
 export type LoopSurface = (typeof LOOP_SURFACES)[number];

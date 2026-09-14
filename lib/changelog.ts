@@ -49,6 +49,41 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.9.0",
+    date: "2026-09-14",
+    headline:
+      "Taste Quiz — turn your playlist into a link. Friends open it on their own phone, guess which songs are really yours, and land on a board of who knows you best.",
+    headlineZh:
+      "新功能「品味鑒定」：把你的歌單變成一條連結。朋友用自己的手機打開，猜哪些歌真的在你的歌單裡，最後看誰最懂你。",
+    changes: [
+      {
+        kind: "new",
+        text: "A third mode on the setup page. Paste a playlist, pick anywhere from 10 to 50 questions, add your name if you like, and you get a link and a QR code. Nothing to install, nobody has to be in the room.",
+        textZh: "首頁多了第三個模式。貼上歌單、題數 10 到 50 隨你選、想的話加上名字，就會拿到一條連結和 QR code。不用安裝、也不用大家在同一個地方。",
+      },
+      {
+        kind: "new",
+        text: "Every question is a duel: two songs fill the screen, one is really in the playlist, tap the one you believe. If you're stuck, a rationed hint plays the song that's really in there. Hints count against you in a tie, so guessing stays the game.",
+        textZh: "每一題都是二選一：兩首歌佔滿整個畫面，只有一首真的在歌單裡，點你相信的那一首。卡住的話有限量的提示可以聽一段。同分時用過提示的排後面，所以還是要先猜。",
+      },
+      {
+        kind: "new",
+        text: "A leaderboard on the link itself. The first fifty to finish go on the board under the name they typed, once each. The link lasts a week.",
+        textZh: "連結本身就有排行榜。最先作答完的五十個人用打的名字上榜，一人一次。連結保留一週。",
+      },
+      {
+        kind: "new",
+        text: "A results page for whoever made the quiz: how many took it, the full ranking, and for each question how many people got it. Only visible on the device that made the quiz, since it shows the answers.",
+        textZh: "出題的人有自己的結果頁：幾個人作答、完整排行榜、每一題有多少人答對。因為會顯示答案，只有建立測驗的那台裝置看得到。",
+      },
+      {
+        kind: "better",
+        text: "The quiz page reads in the language your phone is set to, and the link's preview in a group chat carries the owner's name in their language.",
+        textZh: "測驗頁面會用你手機的語言顯示，貼到群組時的連結預覽也會用出題者的語言顯示他的名字。",
+      },
+    ],
+  },
+  {
     version: "1.8.0",
     date: "2026-08-30",
     headline:

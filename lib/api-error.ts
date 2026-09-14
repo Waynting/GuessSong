@@ -39,6 +39,9 @@ export function errorResponse(
       error: errorMessage(code, "en", { params }),
       code,
       ...(retryAfter !== undefined ? { retryAfter } : {}),
+      // The client re-renders from `code` in its own language, so it needs
+      // the same values this English sentence was filled with.
+      ...(options.params && Object.keys(options.params).length ? { params: options.params } : {}),
     },
     {
       status,

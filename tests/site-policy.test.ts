@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { join, resolve } from "node:path";
 
 /**
  * The policy pages and the footer that links to them.
@@ -158,5 +159,28 @@ describe("robots", () => {
     for (const path of ["/guides", "/privacy", "/terms", "/contact"]) {
       expect(disallowed, `robots.ts disallows ${path}`).not.toContain(`"${path}"`);
     }
+  });
+
+  it("keeps the ephemeral codes and the counting redirect out of the index", () => {
+    // The mirror image: a room code or a quiz link that stops resolving after
+    // its TTL is crawl budget spent on a 404, and /r counts every fetch as a
+    // click. /q is the quiz's code space, added alongside /j when it shipped.
+    const disallowed = robots.slice(robots.indexOf("disallow:"), robots.indexOf("]", robots.indexOf("disallow:")));
+    for (const path of ["/buzz", "/j", "/q", "/r", "/api/"]) {
+      expect(disallowed, `robots.ts does not disallow ${path}`).toContain(`"${path}"`);
+    }
+  });
+});
+
+describe("next.config.js", () => {
+  it("pins the file-tracing root to this repository, not whatever lockfile is above it", () => {
+    // Without this, a stray ~/package-lock.json makes Next pick the home
+    // directory as the workspace root: a warning on every local build and the
+    // wrong base for standalone output tracing. Nothing on screen says so.
+    const config = createRequire(import.meta.url)(join(process.cwd(), "next.config.js")) as {
+      outputFileTracingRoot?: string;
+    };
+    expect(config.outputFileTracingRoot).toBeTypeOf("string");
+    expect(resolve(config.outputFileTracingRoot as string)).toBe(resolve(process.cwd()));
   });
 });

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { LOOP_SURFACES } from "@/lib/loop-links";
+import { QUIZ_VERDICTS } from "@/lib/quiz";
 
 const kv = vi.hoisted(() => ({
   incrs: [] as Array<{ key: string; ttl: number; by?: number }>,
@@ -21,8 +22,11 @@ const {
   HOST_INDEX_CEILING,
   LOOP_STATS_TTL_SECONDS,
   MIXED_SUB_MODES,
+  QUIZ_STAGES,
   loopStatsKeys,
   recordGameStart,
+  recordQuizStage,
+  recordQuizVerdict,
   recordLoopClick,
   recordLoopImpression,
   recordLoopThrottled,
@@ -66,6 +70,25 @@ describe("the key format is the contract between writer and reader", () => {
       await recordGameStart(1, mixed);
       expect(keysWritten()).toContain(expected.mixedPool[mixed]);
     }
+
+    for (const stage of QUIZ_STAGES) {
+      kv.incrs = [];
+      await recordQuizStage(stage);
+      expect(keysWritten()).toContain(expected.quiz[stage]);
+    }
+
+    for (const verdict of QUIZ_VERDICTS) {
+      kv.incrs = [];
+      await recordQuizVerdict(verdict);
+      expect(keysWritten()).toContain(expected.quizVerdict[verdict]);
+    }
+  });
+
+  it("refuses to key a verdict that is not one of the declared buckets", async () => {
+    // The value becomes the tail of a key, so an unguarded string from a
+    // request body would be an unbounded key space.
+    await recordQuizVerdict("83.7%" as never);
+    expect(keysWritten()).toEqual([]);
   });
 
   it("covers every surface on both sides", () => {
@@ -88,6 +111,17 @@ describe("the key format is the contract between writer and reader", () => {
       expect(keys.mixedPool[mode]).toBe(`loop:stats:2026-08-09:mixed_pool:${mode}`);
     }
     expect(Object.keys(keys.mixedPool)).toHaveLength(MIXED_SUB_MODES.length);
+  });
+
+  it("names a key for every quiz stage and every verdict bucket", () => {
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    for (const stage of QUIZ_STAGES) {
+      expect(keys.quiz[stage]).toBe(`loop:stats:2026-08-09:quiz:${stage}`);
+    }
+    for (const verdict of QUIZ_VERDICTS) {
+      expect(keys.quizVerdict[verdict]).toBe(`loop:stats:2026-08-09:quiz_verdict:${verdict}`);
+    }
+    expect(Object.keys(keys.quizVerdict)).toHaveLength(QUIZ_VERDICTS.length);
   });
 });
 

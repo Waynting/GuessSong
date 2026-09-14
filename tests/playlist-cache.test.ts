@@ -513,6 +513,18 @@ describe("miss log", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("source=unknown"));
     log.mockRestore();
   });
+
+  it("names the quiz's create route, the third caller that can spend a cold load", async () => {
+    // POST /api/quiz goes through loadPlaylist like every other caller. A
+    // quiz's cold loads must be tellable apart from a party's in the miss log,
+    // or a spike in one reads as the other.
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await loadPlaylist(URL_A, "quiz-create");
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("source=quiz-create"));
+    log.mockRestore();
+  });
 });
 
 describe("sampled playlists", () => {

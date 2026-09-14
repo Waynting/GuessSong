@@ -1,0 +1,908 @@
+"use client";
+
+/**
+ * The quiz as a friend takes it: intro → name → one duel per screen →
+ * verdict card, board, and the way out.
+ *
+ * Modelled on `app/j/[code]/page.tsx`: the person holding this phone never
+ * chose a language on this site, so their device decides; every failure is an
+ * error code rendered through `describeError`; and the last screen is the one
+ * moment they have finished, have nothing left to do, and are still looking —
+ * which is where `quiz_result` goes.
+ *
+ * ## The duel
+ *
+ * A question is two songs, one real, and the screen is nothing but the two of
+ * them: each option is half the viewport, the prompt sits on the seam between
+ * them, and a tap both answers and advances. The first version listed four
+ * options under a card title with a Next button, which is a form; fifty of
+ * those is a chore, fifty of these is a rhythm. The last question is the one
+ * exception — a tap there selects and reveals the submit button, so nobody
+ * submits by accident on the final swipe of thumb.
+ *
+ * ## Hints
+ *
+ * "Guess first, then hear it." The two titles are the question; the clip is a
+ * rationed hint. It is fetched from `/api/quiz/[code]/hint`, never from
+ * `/api/preview` — the phone must not have to name the right answer to ask —
+ * and only when tapped, so a quiz opened by twenty friends costs the hottest
+ * path in the app nothing until someone is stuck. A clip that cannot be found
+ * (`absent` or `unavailable`, and the page does not need to know which) is
+ * reported as "no clip" and the hint is *not* spent. Replaying a hint already
+ * fetched for this question is free.
+ *
+ * A hint is a round's async work, and CLAUDE.md's rule applies: it must not
+ * land on the next question. `handleHint` takes a `lib/round-token.ts` token
+ * before its await and drops the play (keeping the URL, which is still that
+ * question's) when the taker moved on in the meantime — otherwise a cold
+ * hint, up to five upstream calls long, started under the following question
+ * with the caption "that's the song that's in the playlist". Advancing is the
+ * round teardown: bump the token, stop the clip, hand the element's `src`
+ * back.
+ */
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { trackEvent } from "@/lib/analytics";
+import { apiError, describeError } from "@/lib/error-messages";
+import { useErrorLocale } from "@/lib/use-error-locale";
+import { foldQuizName, rankOf, type QuizVerdict } from "@/lib/quiz";
+import {
+  QUIZ_COPY,
+  fillCopy,
+  formatQuizDate,
+  hintWord,
+  quizTitle,
+  takerShareText,
+  type QuizCopy,
+} from "@/lib/quiz-copy";
+import { createRoundToken } from "@/lib/round-token";
+import { COPIED_FLASH_MS, shareLink } from "@/lib/quiz-share";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { LoopCtaButton } from "@/components/loop-cta";
+import {
+  QUIZ_NAME_MAX,
+  type AnswerQuizRequest,
+  type AnswerQuizResponse,
+  type QuizView,
+} from "@/types/quiz";
+import type { PreviewResult } from "@/types/preview";
+import { Shell } from "./shell";
+
+type Phase = "loading" | "error" | "intro" | "question" | "submitting" | "result";
+type HintState = "idle" | "loading" | "playing" | "none";
+
+/** How many rows of the board to show before collapsing to "…and you". */
+const BOARD_ROWS = 10;
+
+/**
+ * How long the chosen half stays filled before the next question slides in.
+ * Long enough to register as "that one", short enough that fifty of them is
+ * a rhythm and not a wait. Matches the CSS transition below.
+ */
+const FILL_MS = 240;
+
+/**
+ * The verdict card's duotone, keyed by verdict so the four results are four
+ * different pictures in the group chat. Never purple on white.
+ */
+const VERDICT_MESH: Record<QuizVerdict, [string, string]> = {
+  soulmate: ["#1DB954", "#0b3d2e"],
+  close: ["#f5b942", "#3d2a0b"],
+  acquaintance: ["#4f7cff", "#0b1a3d"],
+  stranger: ["#8a8a8a", "#1c1c1c"],
+};
+
+/** A tile of fractal noise for the card's grain. Inline so nothing is fetched. */
+const NOISE =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E";
+
+/**
+ * Everything the duel and the verdict card look like. One block, rendered
+ * once per screen, in a `<style>` because the Tailwind config has no tokens
+ * for the display face and the halves want real transitions, not utilities.
+ */
+const DUEL_CSS = `
+  .q-col {
+    width: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .q-kicker { font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: #777; }
+  .q-title { font-size: clamp(40px, 11vw, 64px); text-wrap: balance; }
+  .q-playlist { color: #1DB954; font-weight: 500; font-size: 16px; }
+  .q-body { color: #aaa; font-size: 15px; line-height: 1.5; }
+  .q-muted { color: #666; font-size: 12px; text-align: center; }
+  .q-field { background: #1a1a1a; border: 1px solid #333; height: 48px; font-size: 16px; }
+  .q-field:focus-visible { border-color: #1DB954; box-shadow: 0 0 0 3px rgba(29,185,84,0.18); }
+  .q-primary { height: 48px; font-size: 16px; font-weight: 600; }
+  .q-error { color: #ff6b6b; font-size: 14px; }
+
+  .q-progress {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; max-width: 480px; margin: 0 auto;
+  }
+  .q-segments { display: flex; gap: 2px; flex: 1; height: 4px; }
+  .q-seg { flex: 1; min-width: 1px; background: #2a2a2a; border-radius: 2px; transition: background 240ms ease-out; }
+  .q-seg.is-done { background: #1DB954; }
+  .q-seg.is-now { background: #f0f0f0; }
+  .q-progress-text { font-size: 11px; color: #777; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .q-duel {
+    flex: 1; min-height: 0;
+    display: grid; gap: 8px;
+    width: 100%; max-width: 480px; margin: 0 auto;
+    animation: q-in-next ${FILL_MS}ms ease-out both;
+  }
+  .q-duel.from-back { animation-name: q-in-back; }
+  .q-half {
+    position: relative;
+    display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
+    text-align: left; gap: 6px;
+    padding: 20px 56px 20px 22px;
+    min-height: 30vh; min-height: 30dvh;
+    border-radius: 20px;
+    border: 1px solid #262626;
+    background: #161616;
+    color: #f0f0f0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      background ${FILL_MS}ms ease-out,
+      color ${FILL_MS}ms ease-out,
+      opacity ${FILL_MS}ms ease-out,
+      border-color ${FILL_MS}ms ease-out;
+  }
+  .q-half:focus-visible { outline: 2px solid #1DB954; outline-offset: 3px; }
+  .q-half:disabled { cursor: default; }
+  .q-half.is-on { background: #1DB954; color: #000; border-color: #1DB954; }
+  .q-half.is-off { opacity: 0.4; }
+  .q-half-title { font-size: clamp(34px, 9vw, 64px); text-wrap: balance; overflow-wrap: anywhere; }
+  .q-half-artist { font-size: 14px; color: #8a8a8a; font-weight: 400; }
+  .q-half.is-on .q-half-artist { color: rgba(0,0,0,0.62); }
+  .q-check {
+    position: absolute; top: 14px; right: 16px;
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 1.5px solid currentColor;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; opacity: 0.3;
+  }
+  .q-half.is-on .q-check { opacity: 1; background: #000; color: #1DB954; border-color: #000; }
+
+  .q-seam {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 4px 4px; min-height: 48px;
+  }
+  .q-prompt { font-size: 13px; color: #aaa; line-height: 1.35; flex: 1; }
+  .q-prompt.is-live { color: #1DB954; }
+  .q-hint {
+    position: relative; flex: none;
+    width: 44px; height: 44px; border-radius: 50%;
+    border: 1px solid #333; background: #1a1a1a; color: #f0f0f0;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 160ms ease-out, color 160ms ease-out, opacity 160ms ease-out;
+  }
+  .q-hint:focus-visible { outline: 2px solid #1DB954; outline-offset: 2px; }
+  .q-hint:disabled { opacity: 0.35; }
+  .q-hint[aria-pressed="true"] { background: #1DB954; color: #000; border-color: #1DB954; }
+  .q-hint-count {
+    position: absolute; top: -5px; right: -5px;
+    min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+    background: #1DB954; color: #000;
+    font-size: 11px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .q-hint[aria-pressed="true"] .q-hint-count { background: #000; color: #1DB954; }
+
+  .q-foot {
+    display: flex; flex-direction: column; gap: 8px;
+    width: 100%; max-width: 480px; margin: 0 auto;
+  }
+  .q-back {
+    align-self: flex-start;
+    background: none; border: 0; color: #777; font-size: 14px; padding: 10px 4px;
+  }
+  .q-back:focus-visible { outline: 2px solid #1DB954; outline-offset: 2px; border-radius: 4px; }
+
+  .q-verdict {
+    position: relative; overflow: hidden;
+    width: 100%; max-width: 100%;
+    aspect-ratio: 9 / 16;
+    max-height: 80vh; max-height: 80dvh;
+    border-radius: 24px;
+    padding: 28px 24px;
+    display: flex; flex-direction: column; justify-content: flex-end; gap: 6px;
+    color: #fff;
+  }
+  .q-verdict::after {
+    content: ""; position: absolute; inset: 0;
+    background-image: url("${NOISE}");
+    opacity: 0.14; mix-blend-mode: overlay; pointer-events: none;
+  }
+  .q-verdict > * { position: relative; z-index: 1; }
+  .q-verdict-kicker { font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; opacity: 0.75; }
+  .q-verdict-label { font-size: clamp(56px, 16vw, 96px); text-wrap: balance; }
+  .q-verdict-score { font-size: clamp(28px, 8vw, 40px); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .q-verdict-sub { font-size: 15px; opacity: 0.85; }
+  .q-verdict-meta { font-size: 13px; opacity: 0.7; }
+  .q-brand { position: absolute; top: 22px; left: 24px; font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; opacity: 0.7; }
+  .q-rise { animation: q-rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+  .q-review { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding: 0; list-style: none; }
+  .q-review li { display: flex; gap: 10px; align-items: baseline; padding: 8px 10px; border-radius: 10px; background: #161616; font-size: 14px; }
+  .q-review .q-mark { flex: none; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; width: 56px; }
+  .q-review .is-right .q-mark { color: #1DB954; }
+  .q-review .is-missed .q-mark { color: #ff6b6b; }
+
+  @keyframes q-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  @keyframes q-in-next { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+  @keyframes q-in-back { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
+`;
+
+export function QuizClient({ code }: { code: string }) {
+  const locale = useErrorLocale();
+  const copy = QUIZ_COPY[locale];
+
+  const [phase, setPhase] = useState<Phase>("loading");
+  const [view, setView] = useState<QuizView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [index, setIndex] = useState(0);
+  const [answers, setAnswers] = useState<number[]>([]);
+  const [hintsLeft, setHintsLeft] = useState(0);
+  const [hint, setHint] = useState<HintState>("idle");
+  const [result, setResult] = useState<AnswerQuizResponse | null>(null);
+  const [copied, setCopied] = useState(false);
+  /** Which way the incoming question slides. Set by `next()` and `back()`. */
+  const [enterFrom, setEnterFrom] = useState<"next" | "back">("next");
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  /** Clip URLs already fetched, by question — replaying one is free. */
+  const hintUrls = useRef<Map<number, string>>(new Map());
+  /** Questions whose hint was charged, so a clip that then fails to play can refund it. */
+  const charged = useRef<Set<number>>(new Set());
+  /** Questions whose cached URL stopped playing; the next tap asks for a fresh one. */
+  const needsRefresh = useRef<Set<number>>(new Set());
+  /** One per question on screen; `next()` and `back()` retire it. See the header. */
+  const round = useRef(createRoundToken());
+  /** Questions whose clip actually started, so a mid-stream error is not refunded. */
+  const heard = useRef<Set<number>>(new Set());
+  /** The pending advance after a tap; `back()` and unmount cancel it. */
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Minted once per attempt. A resend after a lost response carries the same
+   * id, and the server replays the row instead of refusing the taker's own
+   * name. See `submitQuizAnswers`.
+   */
+  const submissionId = useRef<string>(
+    typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
+  );
+  const openedRef = useRef(false);
+
+  const load = useCallback(async () => {
+    setPhase("loading");
+    setError(null);
+    try {
+      const res = await fetch(`/api/quiz/${encodeURIComponent(code)}`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) throw apiError(data, "quiz_load_failed");
+      const quiz = data as QuizView;
+      setView(quiz);
+      setAnswers(new Array(quiz.questionCount).fill(-1));
+      setHintsLeft(quiz.hintAllowance);
+      setPhase("intro");
+      if (!openedRef.current) {
+        openedRef.current = true;
+        trackEvent("quiz_opened", { question_count: quiz.questionCount });
+      }
+    } catch (e: unknown) {
+      setError(describeError(e, locale, "quiz_load_failed"));
+      setPhase("error");
+    }
+    // `locale` is read for the error sentence only; a reload on language
+    // change would count a second open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(
+    () => () => {
+      if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    },
+    []
+  );
+
+  function stopClip() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+  }
+
+  /**
+   * A hint the taker could not hear was not a hint: give it back.
+   *
+   * Two different failures land here and they want different follow-ups. A
+   * `play()` refused by the browser (`NotAllowedError` — on iOS the `await
+   * fetch` before it is the classic place a tap's gesture gets lost) means the
+   * URL is fine: refund, keep the URL, and the next tap plays it. A media
+   * failure — the element's `error` event, or `NotSupportedError` — means the
+   * CDN rotated the clip: refund, forget the URL, and mark the question so the
+   * next tap sends `refresh=1` (lib/preview-cache.ts on why the year-long
+   * entries need that). Marking the first case for refresh spent a
+   * cache-bypassing, five-call re-resolution on a working URL, and ten of
+   * those hit the refresh limiter.
+   *
+   * A clip that already started is not refunded: the hint was heard.
+   */
+  function refundHint(question: number, cause: "blocked" | "media") {
+    if (heard.current.has(question)) {
+      setHint("idle");
+      return;
+    }
+    if (charged.current.delete(question)) {
+      setHintsLeft((n) => n + 1);
+    }
+    if (cause === "media") {
+      hintUrls.current.delete(question);
+      needsRefresh.current.add(question);
+    }
+    // A blocked play is not "no clip": the URL is fine and the button on the
+    // seam still offers it, so say nothing rather than the wrong thing.
+    setHint(cause === "media" ? "none" : "idle");
+  }
+
+  /**
+   * `isCurrent` is the round token from the caller; `play()` is one more
+   * await the question can move on during. The teardown's `stopClip()`
+   * rejects a still-buffering `play()` with an AbortError, which is neither a
+   * media failure nor a blocked gesture: give the hint back and touch nothing
+   * on the screen, which by then belongs to the next question.
+   */
+  async function playUrl(url: string, question: number, isCurrent: () => boolean): Promise<boolean> {
+    const audio = audioRef.current;
+    if (!audio) return false;
+    audio.src = url;
+    audio.currentTime = 0;
+    try {
+      await audio.play();
+      if (!isCurrent()) return false;
+      setHint("playing");
+      return true;
+    } catch (e: unknown) {
+      const aborted = e instanceof Error && e.name === "AbortError";
+      if (aborted || !isCurrent()) {
+        if (charged.current.delete(question)) setHintsLeft((n) => n + 1);
+        return false;
+      }
+      const blocked = e instanceof Error && e.name === "NotAllowedError";
+      refundHint(question, blocked ? "blocked" : "media");
+      return false;
+    }
+  }
+
+  async function handleHint() {
+    if (!view || hint === "loading") return;
+    if (hint === "playing") {
+      stopClip();
+      setHint("idle");
+      return;
+    }
+    const question = index;
+    const isCurrent = round.current.begin();
+    const cached = hintUrls.current.get(question);
+    if (cached) {
+      await playUrl(cached, question, isCurrent);
+      return;
+    }
+    if (hintsLeft <= 0) return;
+    setHint("loading");
+    const refresh = needsRefresh.current.has(question);
+    try {
+      const res = await fetch(
+        `/api/quiz/${encodeURIComponent(code)}/hint?q=${question}${refresh ? "&refresh=1" : ""}`
+      );
+      const data = (await res.json()) as PreviewResult;
+      if (!res.ok || data.status !== "found" || !data.previewUrl) {
+        if (isCurrent()) setHint("none");
+        return;
+      }
+      needsRefresh.current.delete(question);
+      // The URL is that question's whatever the screen shows now; keep it.
+      hintUrls.current.set(question, data.previewUrl);
+      if (!isCurrent()) return;
+      charged.current.add(question);
+      setHintsLeft((n) => n - 1);
+      await playUrl(data.previewUrl, question, isCurrent);
+    } catch {
+      if (isCurrent()) setHint("none");
+    }
+  }
+
+  function handleClipError() {
+    refundHint(index, "media");
+  }
+
+  function choose(option: number) {
+    setAnswers((prev) => {
+      const next = [...prev];
+      next[index] = option;
+      return next;
+    });
+  }
+
+  /**
+   * The round teardown, shared by every way off a question: cancel a pending
+   * advance, bump the token so a hint still resolving lands nowhere, stop the
+   * clip and hand the element's `src` back.
+   */
+  function retireRound() {
+    if (advanceTimer.current) {
+      clearTimeout(advanceTimer.current);
+      advanceTimer.current = null;
+    }
+    round.current.bump();
+    stopClip();
+    setHint("idle");
+  }
+
+  /**
+   * A tap on a half. Records the answer and, unless this is the last
+   * question, advances after the fill has had its moment. The last question
+   * only selects: the submit button under the duel is the deliberate step.
+   */
+  function pick(option: number) {
+    if (!view || phase === "submitting") return;
+    choose(option);
+    if (index + 1 >= view.questionCount) return;
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    advanceTimer.current = setTimeout(() => {
+      advanceTimer.current = null;
+      void next();
+    }, FILL_MS);
+  }
+
+  async function next() {
+    if (!view) return;
+    retireRound();
+    if (index + 1 < view.questionCount) {
+      setEnterFrom("next");
+      setIndex(index + 1);
+      return;
+    }
+    await submit();
+  }
+
+  function back() {
+    if (!view || index === 0 || phase === "submitting") return;
+    retireRound();
+    setEnterFrom("back");
+    setIndex(index - 1);
+  }
+
+  async function submit() {
+    if (!view) return;
+    setPhase("submitting");
+    setError(null);
+    const body: AnswerQuizRequest = {
+      name,
+      answers,
+      hintsUsed: view.hintAllowance - hintsLeft,
+      submissionId: submissionId.current,
+    };
+    try {
+      const res = await fetch(`/api/quiz/${encodeURIComponent(code)}/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw apiError(data, "quiz_answer_failed");
+      const graded = data as AnswerQuizResponse;
+      setResult(graded);
+      setPhase("result");
+      trackEvent("quiz_completed", {
+        question_count: graded.total,
+        correct: graded.correct,
+        hints_used: graded.hintsUsed,
+        verdict: graded.verdict,
+      });
+    } catch (e: unknown) {
+      setError(describeError(e, locale, "quiz_answer_failed"));
+      // Back to the name screen, answers kept: the usual refusal is a taken
+      // name, and that is where the name is. Start returns to the last
+      // question, whose submit button resends.
+      setPhase("intro");
+    }
+  }
+
+  async function handleShare() {
+    if (!view || !result) return;
+    const url = window.location.href;
+    const text = takerShareText(copy, view, result);
+    const outcome = await shareLink({ url, text }, `${text} ${url}`);
+    if (outcome === "copied") {
+      setCopied(true);
+      setTimeout(() => setCopied(false), COPIED_FLASH_MS);
+    }
+    trackEvent("quiz_share_tapped", { by: "taker", outcome });
+  }
+
+  const title = quizTitle(copy, view?.ownerName);
+  const expires = view ? fillCopy(copy.expires, { date: formatQuizDate(view.expiresAt, locale) }) : "";
+  const styles = <style>{DUEL_CSS}</style>;
+
+  // One element for the whole quiz, like the game page's single <audio>.
+  const audio = (
+    <audio
+      ref={audioRef}
+      preload="none"
+      onPlaying={() => heard.current.add(index)}
+      onEnded={() => setHint("idle")}
+      onError={handleClipError}
+    />
+  );
+
+  if (phase === "loading") {
+    return (
+      <Shell>
+        {styles}
+        <div className="q-col" style={{ flex: 1, justifyContent: "center" }}>
+          <p className="q-muted">{copy.loading}</p>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (phase === "error" || !view) {
+    return (
+      <Shell>
+        {styles}
+        <div className="q-col" style={{ flex: 1, justifyContent: "center" }}>
+          <p className="q-kicker">GuessSong</p>
+          <p className="q-body">{error}</p>
+          <Button variant="outline" className="q-primary" onClick={() => void load()}>
+            {copy.retry}
+          </Button>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (phase === "intro") {
+    const canStart = name.trim().length > 0;
+    return (
+      <Shell>
+        {styles}
+        <section className="q-col" style={{ flex: 1, justifyContent: "center" }}>
+          <p className="q-kicker">GuessSong</p>
+          <h1 className="q-display q-title">{title}</h1>
+          {!view.ownerName && <p className="q-playlist">{view.playlistName}</p>}
+          <p className="q-body">
+            {fillCopy(copy.introBody, {
+              count: view.questionCount,
+              hints: view.hintAllowance,
+              hintWord: hintWord(locale, view.hintAllowance),
+            })}
+          </p>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="quiz-name">{copy.nameLabel}</Label>
+            <Input
+              id="quiz-name"
+              className="q-field"
+              placeholder={copy.namePlaceholder}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={QUIZ_NAME_MAX}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && canStart) setPhase("question");
+              }}
+            />
+          </div>
+          <Button className="q-primary" onClick={() => setPhase("question")} disabled={!canStart}>
+            {copy.startButton}
+          </Button>
+          {error && <p className="q-error">{error}</p>}
+          {view.scoreboard.length > 0 && <Board view={view} copy={copy} youName={null} />}
+          <p className="q-muted">{expires}</p>
+        </section>
+      </Shell>
+    );
+  }
+
+  if (phase === "question" || phase === "submitting") {
+    const question = view.questions[index];
+    const chosen = answers[index];
+    const last = index + 1 === view.questionCount;
+    const busy = phase === "submitting";
+    const hasCachedHint = hintUrls.current.has(index);
+    const hintLabel =
+      hint === "loading"
+        ? copy.hintLoading
+        : hint === "playing"
+          ? copy.hintStop
+          : hasCachedHint || hintsLeft > 0
+            ? fillCopy(copy.hintButton, { remaining: hintsLeft })
+            : copy.hintsGone;
+    const hintDisabled =
+      busy || hint === "loading" || (hint !== "playing" && !hasCachedHint && hintsLeft <= 0);
+    const prompt = view.ownerName
+      ? fillCopy(copy.promptOwner, { owner: view.ownerName })
+      : copy.promptPlaylist;
+    const seamText =
+      hint === "loading"
+        ? copy.hintLoading
+        : hint === "playing"
+          ? copy.hintPlaying
+          : hint === "none"
+            ? copy.hintNone
+            : prompt;
+
+    const seam = (
+      <div className="q-seam" key="seam">
+        <p className={`q-prompt${hint === "playing" ? " is-live" : ""}`} aria-live="polite">
+          {seamText}
+        </p>
+        <button
+          type="button"
+          className="q-hint"
+          aria-label={hintLabel}
+          aria-pressed={hint === "playing"}
+          disabled={hintDisabled}
+          onClick={() => void handleHint()}
+        >
+          {hint === "playing" ? (
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+              <rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor" />
+            </svg>
+          ) : hint === "loading" ? (
+            <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+              <circle cx="9" cy="9" r="6.5" stroke="currentColor" strokeWidth="1.5" fill="none" opacity="0.3" />
+              <path d="M9 2.5a6.5 6.5 0 0 1 6.5 6.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round">
+                <animateTransform attributeName="transform" type="rotate" from="0 9 9" to="360 9 9" dur="0.9s" repeatCount="indefinite" />
+              </path>
+            </svg>
+          ) : (
+            <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true" fill="currentColor">
+              <rect x="1" y="6" width="2" height="4" rx="1" />
+              <rect x="5" y="3" width="2" height="10" rx="1" />
+              <rect x="9" y="0" width="2" height="16" rx="1" />
+              <rect x="13" y="4" width="2" height="8" rx="1" />
+              <rect x="17" y="6" width="2" height="4" rx="1" />
+            </svg>
+          )}
+          {hint !== "playing" && hint !== "loading" && (hasCachedHint || hintsLeft > 0) && (
+            <span className="q-hint-count" aria-hidden="true">
+              {hintsLeft}
+            </span>
+          )}
+        </button>
+      </div>
+    );
+
+    return (
+      <Shell>
+        {styles}
+        {audio}
+        <div className="q-progress">
+          <div className="q-segments" aria-hidden="true">
+            {answers.map((a, i) => (
+              <span
+                key={i}
+                className={`q-seg${i === index ? " is-now" : a >= 0 ? " is-done" : ""}`}
+              />
+            ))}
+          </div>
+          <p className="q-progress-text">
+            {fillCopy(copy.progress, { n: index + 1, total: view.questionCount })}
+          </p>
+        </div>
+
+        {/* Keyed on the question so each one mounts fresh and slides in. The
+            halves share the height; the seam takes only its own. Written as
+            a template so a record built with more than two options (one from
+            before this shape, inside its week) still lays out. */}
+        <div
+          key={index}
+          className={`q-duel${enterFrom === "back" ? " from-back" : ""}`}
+          style={{
+            gridTemplateRows: question.options.map((_, i) => (i === 0 ? "1fr auto" : "1fr")).join(" "),
+          }}
+        >
+          {question.options.map((option, i) => {
+            const selected = chosen === i;
+            const dimmed = chosen >= 0 && !selected;
+            return [
+              /* Plain toggle buttons, not ARIA radios: a radio group promises
+                 arrow-key movement and a roving tabindex, and Tab between the
+                 halves is the honest description of what this is. */
+              <button
+                key={`${index}-${i}`}
+                type="button"
+                aria-pressed={selected}
+                disabled={busy}
+                onClick={() => pick(i)}
+                className={`q-half${selected ? " is-on" : ""}${dimmed ? " is-off" : ""}`}
+              >
+                {/* The selected state is not colour alone. */}
+                <span className="q-check" aria-hidden="true">
+                  {selected ? "✓" : ""}
+                </span>
+                <span className="q-display q-half-title">{option.title}</span>
+                {option.artist && <span className="q-half-artist">{option.artist}</span>}
+              </button>,
+              i === 0 ? seam : null,
+            ];
+          })}
+        </div>
+
+        <div className="q-foot">
+          {last && chosen >= 0 && (
+            <Button className="q-primary" onClick={() => void next()} disabled={busy}>
+              {busy ? copy.submitting : copy.submitButton}
+            </Button>
+          )}
+          {error && <p className="q-error">{error}</p>}
+          {index > 0 && (
+            <button type="button" className="q-back" onClick={back} disabled={busy}>
+              ← {copy.backButton}
+            </button>
+          )}
+        </div>
+      </Shell>
+    );
+  }
+
+  // result
+  if (!result) return null;
+  const hints = result.hintsUsed;
+  const [meshA, meshB] = VERDICT_MESH[result.verdict];
+  const subject = view.ownerName
+    ? fillCopy(copy.resultSubjectOwner, { owner: view.ownerName })
+    : fillCopy(copy.resultSubjectPlaylist, { playlist: view.playlistName });
+  return (
+    <Shell>
+      {styles}
+      <section className="q-col">
+        {/* The card is the deliverable: it is shaped to be screenshotted
+            straight into the chat the link came from. */}
+        <div
+          className="q-verdict"
+          style={{
+            background: `radial-gradient(120% 90% at 18% 12%, ${meshA} 0%, ${meshB} 62%, #0a0a0a 100%)`,
+          }}
+        >
+          <span className="q-brand q-rise" style={{ animationDelay: "0ms" }}>
+            GuessSong
+          </span>
+          <p className="q-verdict-kicker q-rise" style={{ animationDelay: "80ms" }}>
+            {copy.resultKicker}
+          </p>
+          <p className="q-display q-verdict-label q-rise" style={{ animationDelay: "200ms" }}>
+            {copy.verdicts[result.verdict]}
+          </p>
+          <p className="q-verdict-score q-rise" style={{ animationDelay: "340ms" }}>
+            {fillCopy(copy.resultScore, { correct: result.correct, total: result.total })}
+          </p>
+          <p className="q-verdict-sub q-rise" style={{ animationDelay: "440ms" }}>
+            {subject}
+          </p>
+          {result.rank !== null && (
+            <p className="q-verdict-meta q-rise" style={{ animationDelay: "540ms" }}>
+              {fillCopy(copy.rankLine, { rank: result.rank, count: result.scoreboard.length })}
+            </p>
+          )}
+          {hints > 0 && (
+            <p className="q-verdict-meta q-rise" style={{ animationDelay: "600ms" }}>
+              {fillCopy(copy.hintsUsedLine, { hints, hintWord: hintWord(locale, hints) })}
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Button variant="secondary" className="q-primary" onClick={() => void handleShare()}>
+            {copied ? copy.copied : copy.shareButton}
+          </Button>
+          {/* This is the surface. See lib/loop-links.ts, `quiz_result`. */}
+          <LoopCtaButton surface="quiz_result">{copy.ctaButton}</LoopCtaButton>
+        </div>
+
+        {/* The board next — it is what the taker came to see and what the
+            owner opens the link for. */}
+        <Board view={{ ...view, scoreboard: result.scoreboard }} copy={copy} youName={name} />
+        {!result.recorded && <p className="q-muted">{copy.boardFull}</p>}
+
+        <details className="text-sm">
+          <summary className="q-kicker cursor-pointer rounded-md py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1DB954]">
+            {copy.reviewTitle}
+          </summary>
+          <ol className="q-review">
+            {view.questions.map((q, i) => {
+              const right = q.options[result.key[i]];
+              const ok = answers[i] === result.key[i];
+              return (
+                <li key={i} className={ok ? "is-right" : "is-missed"}>
+                  <span className="q-mark">{ok ? copy.reviewRight : copy.reviewMissed}</span>
+                  <span className="min-w-0">
+                    <span className="block font-medium">{right?.title}</span>
+                    {right?.artist && <span className="block text-xs text-[#8a8a8a]">{right.artist}</span>}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </details>
+
+        <p className="q-muted">{expires}</p>
+      </section>
+    </Shell>
+  );
+}
+
+function Board({
+  view,
+  copy,
+  youName,
+}: {
+  view: QuizView;
+  copy: QuizCopy;
+  youName: string | null;
+}) {
+  const rows = view.scoreboard;
+  if (rows.length === 0) return null;
+  const youRank = youName ? rankOf(rows, youName) : null;
+  const youIndex = youRank === null ? -1 : youRank - 1;
+  const you = youName ? foldQuizName(youName) : null;
+  const shown = rows.slice(0, BOARD_ROWS);
+  const extra = youIndex >= BOARD_ROWS ? rows[youIndex] : null;
+  const heading = view.ownerName
+    ? fillCopy(copy.boardTitleOwner, { owner: view.ownerName })
+    : copy.boardTitlePlaylist;
+
+  const row = (r: QuizView["scoreboard"][number], rank: number) => {
+    const isYou = you !== null && foldQuizName(r.name) === you;
+    return (
+      <li
+        key={`${rank}-${r.name}`}
+        className={`flex items-center justify-between rounded-md px-3 py-1.5 text-sm ${
+          isYou ? "bg-[#1DB954]/15 font-semibold" : ""
+        }`}
+      >
+        <span className="flex items-center gap-2 truncate">
+          <span className="w-5 text-[#777]">{rank}</span>
+          <span className="truncate">{r.name}</span>
+          {isYou && <span className="text-xs text-[#1DB954]">({copy.youMarker})</span>}
+        </span>
+        <span className="tabular-nums">
+          {r.correct}/{r.total}
+          {r.hintsUsed > 0 && <span className="ml-1 text-xs text-[#777]">🎧{r.hintsUsed}</span>}
+        </span>
+      </li>
+    );
+  };
+
+  return (
+    <div>
+      <p className="q-kicker mb-1">{heading}</p>
+      <ol className="flex flex-col">
+        {shown.map((r, i) => row(r, i + 1))}
+        {extra && (
+          <>
+            <li aria-hidden="true" role="presentation" className="px-3 text-xs text-[#777]">
+              …
+            </li>
+            {row(extra, youIndex + 1)}
+          </>
+        )}
+      </ol>
+    </div>
+  );
+}

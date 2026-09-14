@@ -35,7 +35,7 @@ No `.github/workflows`. Nothing runs the suite before a merge. Before opening a
 pull request:
 
 ```bash
-npm test              # 32 files, 591 tests, ~1.5s
+npm test              # 35 files, 715 tests, ~2s
 npx tsc --noEmit
 npx eslint app lib components
 npm run build         # see the warning below
@@ -72,7 +72,8 @@ npm run stats
 ```
 
 Full guide: [viral-loop.md](viral-loop.md#5-running-npm-run-stats). Every number
-it prints is a floor — §6 there explains why that matters more than it sounds.
+it prints is a floor, bar one — the quiz's `opened` is a ceiling — and §6 there
+explains why that matters more than it sounds.
 
 ### The caches
 
@@ -102,9 +103,10 @@ running day total, because it is what `incr` returns and so costs nothing.
 
 Two traps in reading those lines, both of which have cost a debugging detour:
 
-- **Trust `source=`, not the log row's method.** Only `POST /api/playlist` and
-  `POST /api/room/[code]/submit` can emit the line, but Vercel attributes it to
-  whichever request the instance happened to be serving, so it frequently
+- **Trust `source=`, not the log row's method.** Only `POST /api/playlist`,
+  `POST /api/room/[code]/submit` and `POST /api/quiz` can emit the line
+  (`source=playlist-api`, `room-submit`, `quiz-create`), but Vercel attributes
+  it to whichever request the instance happened to be serving, so it frequently
   appears against an unrelated `GET`.
 - **A replayed 404 counts as a hit** in `getCacheStats()`. Correctly — it
   answered without touching Spotify — so a host retrying a dead link pushes the
@@ -140,7 +142,7 @@ playlist is usually fine, and they will re-copy the link and retry instead of
 reporting an outage.
 
 This used to be a total outage rather than a degradation, because
-`enforceRateLimit` runs at the top of all seven API routes *before* their own
+`enforceRateLimit` runs at the top of every API route *before* its own
 `try`/`catch`, and `lib/rate-limit.ts` was the one KV consumer that did not
 fail open. It does now, so an exhausted quota costs the per-IP ceiling and the
 KV-backed features instead of the site. What still degrades while the quota is
@@ -148,6 +150,11 @@ spent:
 
 - **Rooms and Mixed Playlist Mode stop**, cleanly — `room_open_failed` rather
   than a bare 500. They *are* the KV, so there is nothing to fall back to.
+- **Taste Quiz stops too**, for the same reason: creating a link, opening one,
+  answering and the board all read the one hash in KV, and each answers its
+  own code (`quiz_create_failed`, `quiz_load_failed`, …) rather than a bare
+  500. A link sent before the outage shows "Couldn't load the quiz." until
+  Upstash is back, and its seven-day TTL keeps counting down meanwhile.
 - **Every cache misses**, so each playlist load reaches Spotify and each track
   reaches iTunes/Deezer. The site works and is slower.
 - **The global budgets and the 429 cooldown are gone too**, since they are KV
@@ -268,6 +275,24 @@ Mixed Playlist rooms use `ROOM_TTL_SECONDS = 30 * 60`, counted from **creation**
 and deliberately not extended by activity (`types/room.ts`, `lib/room.ts`). That
 is correct for a one-shot playlist mailbox and wrong for anything that must
 outlive a full game. Buzzer rooms are a different system with a sliding timeout.
+
+### "The quiz link says it doesn't exist any more"
+
+A quiz is one Redis hash, `quiz:v1:<CODE>`, with `QUIZ_TTL_SECONDS` = 7 days
+counted from **creation** and never extended (`types/quiz.ts`,
+`lib/quiz-store.ts`) — the same shape as a Mixed Playlist room, one size up.
+After that the link 404s with `quiz_not_found` and the only fix is a new quiz.
+If the code is nowhere near that old, check the Upstash quota (above): a KV
+that is refusing commands answers `quiz_load_failed` instead, which the phone
+renders as "Couldn't load the quiz." rather than "doesn't exist any more".
+
+### "Only whoever made this quiz can see its results page"
+
+Expected on every device except the one the quiz was made on. The host token
+lives in that device's `localStorage` (`guesssong_quiz_tokens`, the ten most
+recent, `lib/quiz-session.ts`) and nowhere else — there is no account to sync
+it to. The public ranking on `/q/<code>` is the fallback; the board is gated
+because its per-question rows are the answer key, so do not make it public.
 
 ### "A clip plays but the answer card disagrees"
 

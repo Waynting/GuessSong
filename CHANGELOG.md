@@ -5,6 +5,252 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-09-14
+
+**Taste Quiz** — a playlist turned into a link. A friend opens it on their own
+phone, answers 10–50 "which of these two songs is really in the playlist"
+questions, gets a score and a verdict, and lands on a board of who knows the
+owner best.
+
+It is on the setup page as a third mode, but it is not a game mode. It is a
+**loop surface**, and it was built because of what `npm run stats` said on
+2026-09-14: 4,648 games and 58.2% repeat hosts, so retention is not the
+problem; and of six loop surfaces the only one whose carrier leaves the party —
+`share`, the QR printed into the result card — had converted **0 of 50**, ever.
+Every other arm is a footer or a QR on a television. Nothing link-shaped had
+been tried. The quiz is the first surface a friend reaches by *tapping a URL in
+a group chat*, and the first off-site arm whose impression happens on a page of
+ours — i.e. the first with an honest denominator. Whether a link converts where
+a QR did not is the question it exists to answer; the quiz is the reason to
+send one.
+
+### Added
+
+- **`lib/quiz.ts` — the rules, pure.** `buildQuiz` picks the tracks, chooses
+  one decoy per question (`QUIZ_OPTION_COUNT - 1`) and shuffles the pair under
+  an injected RNG (`seededRng`, mulberry32), so every taker gets the same quiz
+  and a test can pin one. `gradeAnswers` is tolerant — a short, long or
+  out-of-range list grades as wrong rather than throwing. `verdictFor` buckets
+  the ratio into four labels at 90 / 75 / 60%; `hintAllowance` is one hint per
+  ten questions; `sortScoreboard` ranks by score, then fewer hints, then
+  arrival. `tests/quiz.test.ts` pins all of it, including the decoy tier order
+  — asked for at three so the fall-through is visible, since at production's
+  one only the first tier that has anything ever shows.
+- **The question count is any integer from 10 to 50**, with 10 / 20 / 30 / 50
+  as one-tap picks and a typed field beside them. The field runs on
+  `lib/song-count.ts`'s state machine: every function there now takes a
+  `CountControl` (`{presets, min, max}`, defaulting to the game's own), and
+  `QUIZ_COUNT_CONTROL` in `lib/quiz.ts` hands it the quiz's bounds, so
+  "reject a half-typed number per keystroke, clamp on blur" is written once
+  and bounded twice. `tests/song-count.test.ts` pins that the bounds travel
+  with the control and that the game's control is untouched.
+- **`lib/quiz-decoys.ts` — the decoy pool, ~630 real songs across ~150
+  artists** in four script buckets, the Traditional Chinese half first because
+  that is where the hosts are. The bucket is *derived* from the strings by
+  `scriptBucket`, not hand-tagged, so pool and playlist are bucketed by one
+  rule. Decoys are chosen by tier: another song by the same artist, then by any
+  artist in the playlist, then same script and similar popularity, then same
+  script, then anything — and never a song that is in the playlist, matched on
+  a qualifier-stripped title so "Hello - Live" excludes the pool's "Hello".
+  `displayTitle` strips the same qualifiers from the real answer so " -
+  Remastered 2011" is not a tell.
+- **`lib/quiz-store.ts` — one Redis hash per quiz**, `quiz:v1:<CODE>`, six
+  characters from the room alphabet (now exported from `types/room.ts`),
+  7-day TTL (started at thirty; cut the same day, on the reasoning that a
+  group-chat link is answered within days and a week keeps the live set
+  small). `meta` and `q` are claimed with `hsetnx` on creation and the
+  key is deleted if `expire` fails; each taker's row `s:<folded name>` is one
+  `hsetnx` claim — a name is held once per quiz, and that claim never touches
+  the TTL. The cap of 50 rows is advisory: a taker past it is graded and shown
+  their score but not written. The answer key never leaves the server:
+  `getQuizView` strips it, `submitQuizAnswers` grades against the stored copy.
+  Which *option* a taker picked is not stored; which questions they got
+  (`right`) rides on their row, for the owner's per-question rates.
+- **`/q/[code]/board` — the owner's results page**, the shape of rikaido.me's
+  results dashboard: how many took it, the mean, the full ranking, and per
+  question the real song with how many got it. **Host-token gated**
+  (`GET /api/quiz/[code]/board`, `x-host-token` header, 403 `quiz_not_host`
+  otherwise)
+  because the per-question rows name the answers, and a friend who reads them
+  before playing has not played. The token is kept per code in
+  `localStorage` by `lib/quiz-session.ts` (`rememberQuizToken`, capped at
+  ten), so the page works only on the device that made the quiz — which,
+  with no accounts, is the only "you" there is. Reached from the setup
+  page's quiz panel ("See results"), and from "your last quiz".
+- **Five routes**, each `enforceRateLimit` → handler → `errorResponse`:
+  `POST /api/quiz` (through `loadPlaylist(url, "quiz-create")`, the feature's
+  only Spotify-bearing step; a `SpotifyApiError` keeps 429 and is otherwise
+  normalised to 422, as `lib/room.ts` does), `GET /api/quiz/[code]`, `POST
+  /api/quiz/[code]/answer` (limit 60/10min, sized to the read limit — a class
+  or office is one egress address), `GET /api/quiz/[code]/hint?q=N[&refresh=1]`
+  and `GET /api/quiz/[code]/board` (`x-host-token` header, like the pool
+  route). The hint route exists so the phone never names the right answer in a
+  request — it resolves the stored track through `getPreview`, clamped through
+  `clampPreviewField` so it lands on the same cache key the game page would
+  write; `refresh=1`, on its own tighter limit, is the repair path the
+  year-long positive cache needs, fired by the page after an `<audio>` error.
+  `PlaylistLoadSource` gains `"quiz-create"`.
+- **`/q/[code]`** — `page.tsx` is a server component whose `generateMetadata`
+  reads `peekQuiz` (fail-soft, shape-checked before KV) so the unfurl in the
+  chat says whose taste it is, in the owner's language; `quiz-client.tsx` is
+  the taker's flow, Tailwind like `/j`, every string from
+  `lib/quiz-copy.ts`'s bilingual table. Hints are fetched only on tap, refunded
+  if the clip cannot be found or fails to play, free to replay. The result
+  screen carries `<LoopCtaButton surface="quiz_result">`. `/q` joins
+  `app/robots.ts`'s disallow list and the page is `noindex`.
+- **Setup page: a third `SetupMode`, `"quiz"`.** Shares the playlist box,
+  adds an owner name and a 5/10/15/20 pill row (not `lib/song-count.ts` — a
+  pill row has none of the states that machine exists for), and ends in
+  `components/quiz-panel.tsx`: link, Copy, Send (share sheet, clipboard
+  fallback), QR. `lib/quiz-session.ts` remembers the last quiz in
+  `localStorage` so "see who knows you best" survives closing the tab. **It
+  never calls `recordHostedStart`** — a quiz is not a hosted party, and
+  counting it would inflate the one number the loop is judged on.
+- **Counters and events.** `quiz_result` in `LOOP_SURFACES`;
+  `recordQuizStage("created" | "opened" | "completed")` and
+  `recordQuizVerdict(bucket)` in `lib/loop-stats.ts`, written server-side by
+  the routes (`opened` by the API, deliberately not by `generateMetadata`,
+  which every unfurler fetches). `scripts/loop-stats.mjs` renders the funnel
+  and the verdict spread. GA4: `quiz_created`, `quiz_opened`,
+  `quiz_completed`, `quiz_share_tapped`, all bucketed.
+- **Fourteen `AppErrorCode`s**, `quiz_too_few_tracks` with `{count}` (added to
+  the placeholder allow-list in `tests/error-messages.test.ts`), none of them
+  in `isDeterministicPlaylistFailure`.
+- **`ApiErrorBody.params`.** `quiz_too_few_tracks` was the first
+  server-originated code with a placeholder other than `{seconds}`, and the
+  wire had nowhere to carry the value: the server filled its English `error`,
+  the phone re-rendered the template from the code and printed the literal
+  `{count}`. `errorResponse` now sends the params it filled with and
+  `apiError` reads them back (numbers and strings only); `retryAfter` still
+  owns `{seconds}`.
+- **`lib/quiz-share.ts`** — share sheet then clipboard, one outcome
+  vocabulary, for the three places a link or a score leaves the phone. Three
+  hand-written copies had already drifted (one Copy button reported nothing
+  when the clipboard was blocked).
+
+### Changed
+
+- **`next.config.js` pins `outputFileTracingRoot` to the project directory.**
+  Next walks up looking for lockfiles and, on a machine with a stray
+  `~/package-lock.json`, picked the home directory as the workspace root — a
+  warning on every local build and the wrong tracing base for standalone
+  output. Vercel was unaffected either way; local builds now say the same thing.
+- **`ROOM_CODE_ALPHABET` moved from `lib/room.ts` to `types/room.ts`** so the
+  quiz's six-character codes share the one alphabet, and `lib/room.ts`'s
+  `timingSafeEqualStrings` is exported for the board's token check.
+
+### Decided (see `docs/decisions.md` D9)
+
+- **Two options, not four, and the three numbers that follow from it.** The
+  first build showed four titles in a bordered list and read as a form. At two
+  the screen *is* the two answers — one tap, the chosen half fills green, the
+  next pair slides in — which is the interaction a cold visitor in a group
+  chat will actually finish fifty of. Two options put chance at 50%, so:
+  `QUIZ_MIN_QUESTIONS` is ten (a coin lands 7/10 17% of the time, 15/20 2%,
+  35/50 0.3%); the lowest passing verdict is 60%, above chance, where 40% had
+  been below it; and a hint is a whole point rather than a nudge, so the
+  allowance is one per ten questions instead of one per five. The decoy tiers
+  are unchanged and bite harder — with one decoy the first tier with anything
+  decides the question, so most questions are "another song by the same
+  artist".
+- **The host side is bilingual where its output leaves the page.** The
+  setup form stays English by the site's convention, but the panel that
+  appears once the link exists, the sentence sent with it and the share-sheet
+  title follow the device language — a Taiwanese host's share text was going
+  into their LINE group in English while the page their friends opened
+  rendered in Chinese.
+- **No audio in the questions; a clip is a rationed hint.** Previews are the
+  hottest path in the app and a quiz that played one per question would
+  multiply that by the number of friends, with a throttled minute landing as a
+  silent quiz on a cold visitor.
+- **Decoys from a built-in pool, not a second Spotify call.** The trigger for
+  upgrading them is the verdict distribution: a pile at `soulmate` means they
+  are too easy to spot.
+- **A KV record, not a stateless link.** `/q/<playlistId>?seed=` looked
+  storage-free and was not: the playlist cache is 24h, so every active day of
+  a quiz would be a cold Spotify load per quiz, the owner editing the playlist
+  would change question three under a board comparing scores on different
+  quizzes, and the board needs KV anyway.
+- **Hints are rationed, not priced.** Half a point for a hinted answer makes
+  "8.5 / 10" and invites a hint on every question; an allowance keeps guessing
+  the default, which is what "guess first, then hear it" asked for.
+
+### Fixed in review, before the first push
+
+- **A padded code wrote a score into a phantom key.** `loadQuiz` trims and
+  upper-cases the route segment; the answer write only upper-cased it, so
+  `/api/quiz/%20ABCDEF/answer` read the real quiz and then `hsetnx`'d a row
+  into `quiz:v1: ABCDEF` — a fresh hash no `expire` ever touches, i.e. an
+  immortal orphan per whitespace variant, while the taker was told their score
+  was recorded. Every write now keys off `quiz.meta.code`, and `quizKey` takes
+  the canonical code only. Confirmed against the store before the fix;
+  `tests/quiz-store.test.ts` pins it.
+- **A hint resolving after "Next" played under the next question** — the same
+  hazard `lib/round-token.ts` exists for. The quiz page now takes a token
+  before the await and keeps the URL but drops the play when the question has
+  moved on. A `play()` that rejects (iOS after an `await`) refunds the hint
+  like an element `error` does.
+- **All-digit codes were pruned first from the host's device.** Tokens were a
+  code-keyed object and JavaScript enumerates integer-like keys first, so
+  `"234567"` was always "the oldest". Now an array with a timestamp.
+- **`right[]` was broadcast to every taker.** The public view and the answer
+  response now carry `publicScore` rows; only the token-gated board has it.
+- **A lost answer response locked the taker out behind their own name.** The
+  row had landed, the reply had not, the page resent — and was told "someone
+  has that name". The page now mints a `submissionId` per attempt and the
+  store replays the row on a collision whose stored `sid` matches, including
+  the case where the first `hsetnx` won a race it never heard about.
+- **A hint refund forced a cache-bypassing refresh on a working URL.** The
+  `play()` rejection from a lost tap gesture (iOS after an `await`) now refunds
+  without marking the question for `refresh=1`; only a media failure does. A
+  clip that already started is not refunded, and a `play()` aborted by Next
+  gives the hint back without painting anything on the next question's card.
+- **The decoy pool was keyed on native artist names Spotify never sends.**
+  See the `lib/quiz-decoys.ts` bullet above; found by the red-team pass with
+  one artist search per act.
+
+### Known gaps
+
+- **The answer key is inferable for many questions from the pool alone.** Every
+  decoy comes from a fixed, open-source pool, so whenever the real track is
+  not itself in `QUIZ_DECOY_POOL` the right option is the one title not in the
+  pool. "The key never leaves the server" is a property of the wire, not of
+  the game. The same upgrade trigger as below (a Spotify-backed decoy source)
+  closes it.
+- **The decoy pool is hand-written and its coverage is the quality ceiling.**
+  A niche playlist gets popularity-matched decoys from the same script at best,
+  and an obscure real track next to three well-known decoys is the odd one out.
+  `quiz_verdict:*` is how that is measured; the fix, if the median sits at
+  `soulmate`, is `artists/{id}/top-tracks` as a second budgeted entry point.
+- **The results page is per-device.** A host who made the quiz on a laptop
+  cannot open its board on their phone; the token is not synced anywhere,
+  because there is nowhere to sync it to without an account. The public
+  ranking on the quiz page is the fallback.
+- **The hint count is the client's word.** There is no identity to attribute a
+  hint fetch to, so `hintsUsed` is sent by the page and clamped to the
+  allowance. It only breaks ties.
+- **A taker who sees the answers can retake under another name.** Impossible
+  to prevent without identity, and not pretended to.
+- **Nothing measures the 60-day conversion in KV.** `game_started.arrived_from
+  = "quiz_result"` is GA4 only; `recordGameStart` does not yet take a surface.
+- **Four new GA4 params need registering on deploy day**: `question_count`,
+  `correct`, `hints_used` and `by` exist on no earlier event, and registration
+  as event-scoped custom dimensions is not retroactive. `verdict` is now shared
+  between `buzz_round_resolved` and `quiz_completed` with disjoint value sets.
+- **`quiz:opened` is a ceiling, not a floor.** It is bumped on every successful
+  `GET /api/quiz/[code]`, and the page re-fetches on every mount, reload and
+  Retry — so `completed ÷ opened` reads low. The other direction from every
+  other counter in `docs/viral-loop.md`; read it as such.
+- **`generateMetadata` spends one `hgetall` per page hit, unthrottled**, for a
+  title from four scalar fields. Unfurlers pay it too. A `hget` on `meta`
+  alone, or rendering the view server-side and handing it to the client, would
+  halve the per-open command count; deferred until the counters say anyone is
+  opening these.
+- **The stats block has not rendered real numbers yet** — the counters start
+  at deploy. Collect two weeks before reading them (`docs/viral-loop.md` §7).
+- **Mixed-pool quizzes ("our group's taste") and a Game Over entry point** are
+  deferred until the single-owner numbers arrive.
+
 ## [1.8.0] - 2026-08-30
 
 AdSense refused the site a second time under **缺乏價值的內容** (Low value
