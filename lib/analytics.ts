@@ -12,6 +12,7 @@ import type { ShareOutcome } from "@/lib/result-image";
 // and never becomes a runtime import cycle.
 import type { GameMode } from "@/lib/game-session";
 import type { ArrivedFrom, LoopSurface } from "@/lib/loop-links";
+import type { QuizVerdict } from "@/lib/quiz";
 
 export type PlaylistSource = "own" | "mixed";
 export type ShareType = "track" | "album" | "artist" | "unknown";
@@ -347,6 +348,44 @@ export type AnalyticsEvent =
        */
       name: "client_error";
       params: { boundary: "route" | "root" };
+    }
+  /*
+   * The playlist quiz. The KV copy of this funnel is in lib/loop-stats.ts
+   * (`recordQuizStage`), and that is the copy decisions are made from; these
+   * are here for cohorting — in particular `game_started.arrived_from =
+   * "quiz_result"`, the 60-day conversion no server counter can see.
+   */
+  | {
+      name: "quiz_created";
+      params: { question_count: number };
+    }
+  | {
+      /** A friend's phone loaded a quiz. The denominator for `quiz_completed`. */
+      name: "quiz_opened";
+      params: { question_count: number };
+    }
+  | {
+      name: "quiz_completed";
+      params: {
+        question_count: number;
+        correct: number;
+        hints_used: number;
+        /** Bucketed by lib/quiz.ts, never a raw score string. */
+        verdict: QuizVerdict;
+      };
+    }
+  | {
+      /**
+       * The host's share button on the setup page, or the taker's on the
+       * result screen. `outcome` follows `result_shared`: only "shared" left
+       * the device through the share sheet, and "copied" is the clipboard
+       * fallback whose reach is unknowable.
+       */
+      name: "quiz_share_tapped";
+      params: {
+        by: "owner" | "taker";
+        outcome: "shared" | "copied" | "dismissed" | "failed";
+      };
     };
 
 export type AnalyticsEventName = AnalyticsEvent["name"];

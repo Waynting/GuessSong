@@ -32,6 +32,7 @@
 
 import { dayBucket, getKvStore } from "@/lib/kv";
 import type { LoopSurface } from "@/lib/loop-links";
+import { QUIZ_VERDICTS, isQuizVerdict, type QuizVerdict } from "@/lib/quiz";
 
 /**
  * 30 days, not the 7 that `lib/playlist-cache.ts` uses for its own stats.
@@ -79,6 +80,27 @@ export type MixedSubMode = "room" | "phone";
 
 export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
 
+/**
+ * The playlist quiz's funnel, one counter per stage.
+ *
+ *   created    a host turned a playlist into a link       POST /api/quiz
+ *   opened     a friend's phone fetched the quiz          GET /api/quiz/[code]
+ *   completed  that phone sent answers                    POST /api/quiz/[code]/answer
+ *
+ * Written by the three routes rather than beaconed from the page, because each
+ * is a request that has already reached the server — there is nothing to lose
+ * to a page tearing down. `opened` is counted by the API the page's own script
+ * calls and *not* by `generateMetadata`, which every chat app's link unfurler
+ * also fetches; counting there would invent opens nobody made.
+ *
+ * `quiz_result`'s impression and click ride the ordinary surface counters, so
+ * `completed` ≈ `impression:quiz_result` is a plumbing check: a gap means the
+ * result screen stopped rendering the call to action.
+ */
+export type QuizStage = "created" | "opened" | "completed";
+
+export const QUIZ_STAGES: readonly QuizStage[] = ["created", "opened", "completed"];
+
 function key(day: string, metric: string): string {
   return `loop:stats:${day}:${metric}`;
 }
@@ -107,6 +129,8 @@ export function loopStatsKeys(
   clicks: Record<string, string>;
   hostIndex: string[];
   mixedPool: Record<MixedSubMode, string>;
+  quiz: Record<QuizStage, string>;
+  quizVerdict: Record<QuizVerdict, string>;
 } {
   const impressions: Record<string, string> = {};
   const clicks: Record<string, string> = {};
@@ -130,6 +154,14 @@ export function loopStatsKeys(
       room: key(day, "mixed_pool:room"),
       phone: key(day, "mixed_pool:phone"),
     },
+    quiz: {
+      created: key(day, "quiz:created"),
+      opened: key(day, "quiz:opened"),
+      completed: key(day, "quiz:completed"),
+    },
+    quizVerdict: Object.fromEntries(
+      QUIZ_VERDICTS.map((v) => [v, key(day, `quiz_verdict:${v}`)])
+    ) as Record<QuizVerdict, string>,
   };
 }
 
@@ -230,4 +262,22 @@ export async function recordGameStart(
   // considered was a second pulse event, which would have carried its own
   // liveness marker and cost a mixed game eight commands where this costs five.
   if (mixed) await bump(`mixed_pool:${mixed}`);
+}
+
+/** One quiz moved a stage down its funnel. */
+export function recordQuizStage(stage: QuizStage): Promise<void> {
+  return bump(`quiz:${stage}`);
+}
+
+/**
+ * How a completed quiz came out, bucketed.
+ *
+ * The distribution is the difficulty gauge: a median at or above `soulmate`
+ * means the decoys are too easy to spot, and that is the trigger for spending
+ * an upstream call on better ones. Guarded by `isQuizVerdict` for the reason
+ * `MIXED_SUB_MODES` is: the value becomes the tail of a key.
+ */
+export function recordQuizVerdict(verdict: QuizVerdict): Promise<void> {
+  if (!isQuizVerdict(verdict)) return Promise.resolve();
+  return bump(`quiz_verdict:${verdict}`);
 }

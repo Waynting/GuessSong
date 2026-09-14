@@ -263,7 +263,7 @@ export interface LoadedPlaylist {
  * logs is a clearer report of that omission than a compile error nobody sees
  * in production.
  */
-export type PlaylistLoadSource = "playlist-api" | "room-submit" | "unknown";
+export type PlaylistLoadSource = "playlist-api" | "room-submit" | "quiz-create" | "unknown";
 
 type CacheEntry =
   | { kind: "hit"; name: string; tracks: Track[]; truncated: boolean }
