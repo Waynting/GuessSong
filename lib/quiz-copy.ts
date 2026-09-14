@@ -93,6 +93,8 @@ export interface QuizCopy {
   panelSend: string;
   panelCopyLink: string;
   panelCopied: string;
+  /** Neither the share sheet nor the clipboard worked. The link is on screen as text; say so. */
+  panelShareFailed: string;
   panelBoardLink: string;
   panelDeviceOnly: string;
   panelExpires: string;
@@ -173,6 +175,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     panelSend: "Send to friends →",
     panelCopyLink: "Copy link",
     panelCopied: "✓ Copied",
+    panelShareFailed: "Couldn't share or copy from here — press and hold the link above to copy it.",
     panelBoardLink: "See results — who knows you best →",
     panelDeviceOnly: "Results are only visible on this device.",
     panelExpires: "The link stops working on {date}.",
@@ -250,6 +253,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     panelSend: "傳給朋友 →",
     panelCopyLink: "複製連結",
     panelCopied: "✓ 已複製",
+    panelShareFailed: "這裡沒辦法分享或複製 — 長按上面的連結來複製。",
     panelBoardLink: "看結果：誰最懂你 →",
     panelDeviceOnly: "結果只有這台裝置看得到。",
     panelExpires: "連結會在 {date} 失效。",
