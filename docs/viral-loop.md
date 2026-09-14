@@ -38,7 +38,7 @@ codes, and last the one surface whose carrier is a URL rather than a QR.
 | `join_submitted` | Mixed Playlist confirmation screen (`app/j/[code]/page.tsx:103`) | after a playlist is submitted |
 | `game_over` | QR on the host's Game Over screen (`app/game/page.tsx`, `<LoopQr />`) | party mode, end of game |
 | `share` | QR drawn into the result card image (`lib/result-image.ts`'s `drawCardFooter`) | wherever the picture ends up |
-| `quiz_result` | the result screen of a Taste Quiz (`app/q/[code]/quiz-client.tsx:530`, `<LoopCtaButton surface="quiz_result">`) | after a taker has submitted their answers |
+| `quiz_result` | the result screen of a Taste Quiz (`app/q/[code]/quiz-client.tsx:1275`, `<LoopCtaButton surface="quiz_result">`) | after a taker has submitted their answers |
 
 `quiz_result` (1.9.0) is the first surface reached by tapping a URL in a group
 chat rather than by scanning a QR off a screen or out of an image. It is kept
@@ -274,9 +274,13 @@ did".**
   denominator of `of opens`, so that rate reads *low*; `board` inflates the
   numerator of its own rate, so that one reads *high* — either way the
   opposite direction from every other number on this page. `created` and
-  `completed` are floors like the rest:
-  one write per quiz made, one per answer sheet graded, and the length table
-  is built from those two, which is why its `per quiz` needs no correction.
+  `started` are floors like the rest: one write per quiz made, one per
+  attempt's first check. `completed` is one write per sheet the server
+  answered, replays included — "See my result again" re-POSTs the stored row
+  and the route counts it again — so it is exact on sheets and a ceiling on
+  finishers, which is why `of starts` in §5 can read above 100%. The length
+  table is built from `created` and `completed`, so its `per quiz` carries
+  that replay inflation and nothing else: no ceiling in its denominator.
   (The link unfurler in the chat app is not in `opened`: it is bumped by the
   API the page's own script calls, deliberately not by `generateMetadata`,
   which every unfurler fetches.)

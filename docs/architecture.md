@@ -196,7 +196,7 @@ page is gated on "a round has resolved" rather than "the game ended" — see
 |---|---|---|
 | React state | the running game — phase, scores, current track | until reload |
 | `sessionStorage` | the game payload handed from `/` to `/game` | the tab |
-| `localStorage` | player id, host name, host game count, last loop ref, last quiz code + host tokens | the device, until ITP clears it |
+| `localStorage` | player id, host name, host game count, last loop ref, last quiz code + host tokens, a taker's quiz in progress (answers, the verdicts already shown, hints charged) and the submission id a resend replays | the device, until ITP clears it |
 | Upstash KV | rooms, rate limits, playlist + preview caches, loop counters | 30s – 1 year, always a TTL |
 | Upstash KV | a quiz: its questions (answer key included) and its board, one hash | 7 days |
 | Durable Object | one live buzzer room | 3h idle timeout, sliding |
