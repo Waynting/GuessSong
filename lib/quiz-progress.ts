@@ -49,6 +49,14 @@ export interface QuizProgress {
   name: string;
   /** Option index per question, `-1` where not yet answered. */
   answers: number[];
+  /**
+   * The right option per question, `-1` where the phone has not been told:
+   * unanswered, or answered while the check could not get through. Kept so
+   * a question revisited after a reload still shows its verdict — the key
+   * for an answered question has already been handed over, and only ever
+   * for answered ones. Empty on entries saved before the reveal shipped.
+   */
+  revealed: number[];
   index: number;
   hintsLeft: number;
   /** Questions whose hint was paid for, so a re-tap after a reload is free. */
@@ -149,6 +157,7 @@ export function parseQuizProgress(raw: string | null, now = Date.now()): QuizPro
       code: v.code.toUpperCase(),
       name: v.name,
       answers: v.answers,
+      revealed: isIntList(v.revealed) ? v.revealed : [],
       index: v.index as number,
       hintsLeft: v.hintsLeft as number,
       charged: isIntList(v.charged) ? v.charged : [],
@@ -199,7 +208,15 @@ export function fitsQuizProgress(progress: QuizProgress, quiz: QuizShape): boole
   if (progress.index >= quiz.questionCount) return false;
   if (progress.hintsLeft > quiz.hintAllowance) return false;
   if (!progress.charged.every((q) => q >= 0 && q < quiz.questionCount)) return false;
-  return progress.answers.every((a, i) => a >= -1 && a < (quiz.questions[i]?.options.length ?? 0));
+  const fitsOption = (a: number, i: number) => a >= -1 && a < (quiz.questions[i]?.options.length ?? 0);
+  // Absent on older entries; present, it is one verdict per question, and
+  // only for questions that have an answer to have been checked against.
+  if (progress.revealed.length > 0) {
+    if (progress.revealed.length !== quiz.questionCount) return false;
+    if (!progress.revealed.every(fitsOption)) return false;
+    if (progress.revealed.some((r, i) => r >= 0 && progress.answers[i] < 0)) return false;
+  }
+  return progress.answers.every(fitsOption);
 }
 
 /* ------------------------------------------------------------------ */

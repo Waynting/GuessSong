@@ -20,9 +20,10 @@ import { loopStatsKeys } from "@/lib/loop-stats";
 import { POST as createQuiz } from "@/app/api/quiz/route";
 import { GET as readQuiz } from "@/app/api/quiz/[code]/route";
 import { POST as answerQuiz } from "@/app/api/quiz/[code]/answer/route";
+import { POST as checkQuiz } from "@/app/api/quiz/[code]/check/route";
 import { GET as hintQuiz } from "@/app/api/quiz/[code]/hint/route";
 import { GET as boardQuiz } from "@/app/api/quiz/[code]/board/route";
-import type { AnswerQuizResponse, CreateQuizResponse, QuizView } from "@/types/quiz";
+import type { AnswerQuizResponse, CheckQuizResponse, CreateQuizResponse, QuizView } from "@/types/quiz";
 import type { Track } from "@/types";
 
 vi.mock("@/lib/playlist-cache", () => ({ loadPlaylist: vi.fn() }));
@@ -231,6 +232,72 @@ describe("the taker's routes", () => {
     );
     expect(owner.status).toBe(200);
     expect(await count(keys.quiz.board)).toBe(before.board + 1);
+  });
+
+  it("counts a start on the first question's check, once, and no other question's", async () => {
+    const quiz = await make(10);
+    const before = await count(keys.quiz.started);
+    const store = await getKvStore();
+    const raw = await store.hgetall<unknown>(`quiz:v1:${quiz.code}`);
+    const answers = (raw.q as Array<{ answer: number }>).map((q) => q.answer);
+
+    const check = (q: number, pick: number, ip?: string) =>
+      checkQuiz(
+        request(`/api/quiz/${quiz.code}/check`, { method: "POST", ip, body: JSON.stringify({ q, pick }) }),
+        params(quiz.code)
+      );
+
+    // Question zero: the start. The verdict names the answer, against the pick.
+    const first = await check(0, answers[0]);
+    expect(first.status).toBe(200);
+    expect((await first.json()) as CheckQuizResponse).toEqual({ answer: answers[0], correct: true });
+    expect(await count(keys.quiz.started)).toBe(before + 1);
+
+    // Every other question: a verdict, not a start.
+    for (let q = 1; q < answers.length; q += 1) {
+      const res = await check(q, (answers[q] + 1) % 2);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as CheckQuizResponse).correct).toBe(false);
+    }
+    expect(await count(keys.quiz.started)).toBe(before + 1);
+
+    // Refused shapes are refused before anything is counted.
+    expect((await check(0, 2)).status).toBe(400);
+    expect((await check(50, 0)).status).toBe(400);
+    const bare = await checkQuiz(
+      request(`/api/quiz/${quiz.code}/check`, { method: "POST", body: JSON.stringify({ q: 0 }) }),
+      params(quiz.code)
+    );
+    expect(bare.status).toBe(400);
+    expect(await count(keys.quiz.started)).toBe(before + 1);
+    // And a quiz that is not there is a 404 with the code the page reads.
+    const gone = await checkQuiz(
+      request(`/api/quiz/ZZZZZZ/check`, { method: "POST", body: JSON.stringify({ q: 0, pick: 0 }) }),
+      params("ZZZZZZ")
+    );
+    expect(gone.status).toBe(404);
+    expect(((await gone.json()) as { code: string }).code).toBe("quiz_not_found");
+  });
+
+  it("counts a refused check as a refusal, on its own generous limit", async () => {
+    const quiz = await make(10);
+    const before = await count(keys.quizThrottled.check);
+    const ip = "10.7.7.7";
+    // Six hundred per window from one address: a room of phones through a
+    // long quiz. The 601st is the refusal, and it is counted as one.
+    for (let i = 0; i < 600; i += 1) {
+      const res = await checkQuiz(
+        request(`/api/quiz/${quiz.code}/check`, { method: "POST", ip, body: JSON.stringify({ q: i % 10, pick: 0 }) }),
+        params(quiz.code)
+      );
+      expect(res.status).toBe(200);
+    }
+    const refused = await checkQuiz(
+      request(`/api/quiz/${quiz.code}/check`, { method: "POST", ip, body: JSON.stringify({ q: 0, pick: 0 }) }),
+      params(quiz.code)
+    );
+    expect(refused.status).toBe(429);
+    expect(await count(keys.quizThrottled.check)).toBe(before + 1);
   });
 
   it("counts a refused answer as a refusal, not a completion", async () => {
