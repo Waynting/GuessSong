@@ -79,6 +79,11 @@ export interface QuizCopy {
   /** The two songs the whole board turned on. */
   boardEasiest: string;
   boardHardest: string;
+  /** Fetches the board again on tap; no polling, the route is tightly limited. */
+  boardRefresh: string;
+  boardRefreshing: string;
+  /** Share sheet and clipboard both refused: point at the URL printed above. */
+  boardShareFailed: string;
   /* The duel page: what sits around the two answers */
   backButton: string;
   resultKicker: string;
@@ -162,6 +167,9 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     boardRankingTitle: "Ranking",
     boardEasiest: "Everyone knew",
     boardHardest: "Nobody could place",
+    boardRefresh: "Refresh",
+    boardRefreshing: "Refreshing…",
+    boardShareFailed: "Couldn't open the share sheet or the clipboard — select the link above and copy it by hand.",
     backButton: "Back",
     resultKicker: "Your verdict",
     resultSubjectOwner: "on {owner}'s taste",
@@ -239,6 +247,9 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     boardRankingTitle: "排行榜",
     boardEasiest: "最多人答對",
     boardHardest: "最少人答對",
+    boardRefresh: "重新整理",
+    boardRefreshing: "更新中…",
+    boardShareFailed: "打不開分享面板，也寫不進剪貼簿 — 請選取上面的連結，手動複製。",
     backButton: "上一題",
     resultKicker: "你的判決",
     resultSubjectOwner: "對 {owner} 的品味",

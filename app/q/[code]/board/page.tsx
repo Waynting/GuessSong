@@ -13,20 +13,27 @@
  * The two tiles at the top — the song everyone knew, the song nobody could
  * place — are the part the owner screenshots back into the chat, so they get
  * the display type and the tint; the fifty rows under them are for reading,
- * not for sharing, and stay a list with a hairline bar each.
+ * not for sharing, and stay a list with a hairline bar each. Which question
+ * earns a tile is `pickBoardTiles` in lib/quiz.ts, where the suite can reach
+ * it: the rule was inline here first and crowned a 1-of-2 question "Everyone
+ * knew".
  *
  * A client page rather than a server one: there is no unfurl to serve here
  * (nobody shares their own results URL), and the token is in the browser.
+ * The tab title is set by hand once the board is in, since a client page has
+ * no `generateMetadata`; it is the quiz's own title, the string the taker's
+ * tab shows, so the two tabs read as one thing.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { trackEvent } from "@/lib/analytics";
 import { apiError, describeError, errorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
+import { pickBoardTiles } from "@/lib/quiz";
 import { QUIZ_COPY, fillCopy, formatQuizDate, ownerShareText, quizTitle } from "@/lib/quiz-copy";
 import { quizUrl, recallQuizToken } from "@/lib/quiz-session";
-import { COPIED_FLASH_MS, copyLink, shareLink } from "@/lib/quiz-share";
+import { COPIED_FLASH_MS, copyLink, shareLink, type ShareLinkOutcome } from "@/lib/quiz-share";
 import { Button } from "@/components/ui/button";
 import type { QuizBoardQuestion, QuizBoardResponse } from "@/types/quiz";
 import { Shell } from "../shell";
@@ -41,12 +48,12 @@ type Phase = "loading" | "not_host" | "error" | "ready";
  */
 const display = { fontFamily: "'Bebas Neue', sans-serif", fontWeight: 700, fontSynthesis: "none" } as const;
 
-/** A question with its index and a rate, kept only when someone answered it. */
-interface RatedQuestion {
-  q: QuizBoardQuestion;
-  i: number;
-  rate: number;
-}
+/**
+ * The first fetch replaces the page with "Loading…"; a refresh keeps the
+ * board up and only disables the button, because the owner tapped it to see
+ * a number change, not to watch the page blank.
+ */
+type LoadMode = "initial" | "refresh";
 
 export default function QuizBoardPage() {
   const params = useParams<{ code: string }>();
@@ -57,48 +64,82 @@ export default function QuizBoardPage() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [board, setBoard] = useState<QuizBoardResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [shareFailed, setShareFailed] = useState(false);
+  // `quiz_board_opened` is one open, however many times the board is fetched.
+  // The KV twin (`quiz:board`) counts per fetch and is documented as a ceiling
+  // for that reason; the GA4 copy is the cohort, and a refresh is not a cohort.
+  const opened = useRef(false);
 
-  const load = useCallback(async () => {
-    setPhase("loading");
-    setError(null);
-    const token = recallQuizToken(code);
-    if (!token) {
-      setPhase("not_host");
-      return;
-    }
-    try {
-      // The token rides in a header, as the room's does — never the query
-      // string, which access logs keep.
-      const res = await fetch(`/api/quiz/${encodeURIComponent(code)}/board`, {
-        cache: "no-store",
-        headers: { "x-host-token": token },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        if (res.status === 403) {
+  const load = useCallback(
+    async (mode: LoadMode = "initial") => {
+      if (mode === "initial") {
+        setPhase("loading");
+        setError(null);
+      } else {
+        setRefreshing(true);
+        setRefreshError(null);
+      }
+      try {
+        const token = recallQuizToken(code);
+        if (!token) {
           setPhase("not_host");
           return;
         }
-        throw apiError(data, "quiz_board_failed");
+        // The token rides in a header, as the room's does — never the query
+        // string, which access logs keep.
+        const res = await fetch(`/api/quiz/${encodeURIComponent(code)}/board`, {
+          cache: "no-store",
+          headers: { "x-host-token": token },
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 403) {
+            setPhase("not_host");
+            return;
+          }
+          throw apiError(data, "quiz_board_failed");
+        }
+        const loaded = data as QuizBoardResponse;
+        setBoard(loaded);
+        setPhase("ready");
+        if (!opened.current) {
+          opened.current = true;
+          trackEvent("quiz_board_opened", {
+            question_count: loaded.questionCount,
+            takers: loaded.takers,
+          });
+        }
+      } catch (e: unknown) {
+        const message = describeError(e, locale, "quiz_board_failed");
+        if (mode === "refresh") {
+          // The board on screen is still the last good one; say the refresh
+          // failed under the button rather than replace it with the error page.
+          setRefreshError(message);
+        } else {
+          setError(message);
+          setPhase("error");
+        }
+      } finally {
+        if (mode === "refresh") setRefreshing(false);
       }
-      const loaded = data as QuizBoardResponse;
-      setBoard(loaded);
-      setPhase("ready");
-      trackEvent("quiz_board_opened", {
-        question_count: loaded.questionCount,
-        takers: loaded.takers,
-      });
-    } catch (e: unknown) {
-      setError(describeError(e, locale, "quiz_board_failed"));
-      setPhase("error");
-    }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- locale only colours the sentence
-  }, [code]);
+    [code]
+  );
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A client page has no `generateMetadata`, so without this the tab reads
+  // the site default. Nothing to restore on unmount: the whole tab is the board.
+  useEffect(() => {
+    if (!board) return;
+    document.title = `${quizTitle(copy, board.ownerName)} | GuessSong`;
+  }, [board, copy]);
 
   const url = quizUrl(code);
 
@@ -107,17 +148,25 @@ export default function QuizBoardPage() {
     setTimeout(() => setCopied(false), COPIED_FLASH_MS);
   }
 
-  async function handleShare() {
-    if (!board) return;
-    const outcome = await shareLink({ url, text: ownerShareText(copy, board) });
+  /**
+   * `copied` flashes the button. `failed` — no share sheet and a clipboard
+   * that refused, which is what a locked-down webview does — says so under
+   * the buttons and points at the URL printed above them, which is selectable.
+   * `shared` and `dismissed` need no line: the owner watched the sheet open.
+   */
+  function reportOutcome(outcome: ShareLinkOutcome) {
+    setShareFailed(outcome === "failed");
     if (outcome === "copied") flashCopied();
     trackEvent("quiz_share_tapped", { by: "owner", outcome });
   }
 
+  async function handleShare() {
+    if (!board) return;
+    reportOutcome(await shareLink({ url, text: ownerShareText(copy, board) }));
+  }
+
   async function handleCopy() {
-    const outcome = await copyLink(url);
-    if (outcome === "copied") flashCopied();
-    trackEvent("quiz_share_tapped", { by: "owner", outcome });
+    reportOutcome(await copyLink(url));
   }
 
   if (phase === "loading") {
@@ -154,25 +203,13 @@ export default function QuizBoardPage() {
 
   const title = quizTitle(copy, board.ownerName);
 
-  // Easiest = highest rate, hardest = lowest; a tie keeps the earlier question,
-  // which is why both comparisons are strict. Only answered questions count —
-  // a row written before `right` existed answers nothing per question.
-  let easiest: RatedQuestion | null = null;
-  let hardest: RatedQuestion | null = null;
-  for (const [i, q] of board.questions.entries()) {
-    if (q.answered === 0) continue;
-    const rated = { q, i, rate: q.correct / q.answered };
-    if (!easiest || rated.rate > easiest.rate) easiest = rated;
-    if (!hardest || rated.rate < hardest.rate) hardest = rated;
-  }
-  // One answered question, or every rate identical: one tile, not the same
-  // song under two opposite labels. Above half it is the song they knew.
-  const sameTile = easiest !== null && hardest !== null && easiest.i === hardest.i;
-  const tiles: Array<{ kind: "easiest" | "hardest"; rated: RatedQuestion }> = [];
-  if (easiest && hardest) {
-    if (sameTile) tiles.push({ kind: easiest.rate >= 0.5 ? "easiest" : "hardest", rated: easiest });
-    else tiles.push({ kind: "easiest", rated: easiest }, { kind: "hardest", rated: hardest });
-  }
+  // Unanimous questions only, judged by at least two takers — the rule and
+  // its reasons are on `pickBoardTiles`. Each tile is literal or absent.
+  const picked = pickBoardTiles(board.questions);
+  const tiles = (["easiest", "hardest"] as const).flatMap((kind) => {
+    const i = picked[kind];
+    return i === undefined ? [] : [{ kind, q: board.questions[i] }];
+  });
 
   return (
     <Shell>
@@ -202,27 +239,37 @@ export default function QuizBoardPage() {
               </>
             )}
           </p>
+          {/* One fetch per tap and never a poll: the route allows 60 per 10 minutes per IP */}
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button variant="outline" size="sm" disabled={refreshing} onClick={() => void load("refresh")}>
+              {refreshing ? copy.boardRefreshing : copy.boardRefresh}
+            </Button>
+            {refreshError && (
+              <p role="alert" className="text-xs text-[#f5b942]">
+                {refreshError}
+              </p>
+            )}
+          </div>
         </header>
 
-        {/* The two songs the whole board turned on — what the owner screenshots */}
-        {tiles.length === 0 ? (
+        {/* The two songs the whole board turned on — what the owner screenshots.
+            With takers but no unanimous question there is nothing true to say
+            here; the per-question list below says the rest. */}
+        {board.takers === 0 ? (
           <p className="text-sm leading-relaxed text-[#999]">{copy.boardEmpty}</p>
-        ) : (
+        ) : tiles.length > 0 ? (
           <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {tiles.map(({ kind, rated }) => (
+            {tiles.map(({ kind, q }) => (
               <Tile
                 key={kind}
                 label={kind === "easiest" ? copy.boardEasiest : copy.boardHardest}
                 tint={kind === "easiest" ? "29, 185, 84" : "245, 185, 66"}
-                question={rated.q}
-                rateLine={fillCopy(copy.boardCorrectRate, {
-                  correct: rated.q.correct,
-                  answered: rated.q.answered,
-                })}
+                question={q}
+                rateLine={fillCopy(copy.boardCorrectRate, { correct: q.correct, answered: q.answered })}
               />
             ))}
           </section>
-        )}
+        ) : null}
 
         {/* Per question — the part that makes this page host-only */}
         <section>
@@ -304,6 +351,11 @@ export default function QuizBoardPage() {
               {copied ? copy.copied : copy.boardCopyLink}
             </Button>
           </div>
+          {shareFailed && (
+            <p role="alert" className="text-center text-xs leading-relaxed text-[#f5b942]">
+              {copy.boardShareFailed}
+            </p>
+          )}
           <Button asChild variant="outline">
             <a href={`/q/${code}`}>{copy.boardOpenQuiz} →</a>
           </Button>
