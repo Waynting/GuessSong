@@ -82,8 +82,13 @@ export default function QuizBoardPage() {
         }
         throw apiError(data, "quiz_board_failed");
       }
-      setBoard(data as QuizBoardResponse);
+      const loaded = data as QuizBoardResponse;
+      setBoard(loaded);
       setPhase("ready");
+      trackEvent("quiz_board_opened", {
+        question_count: loaded.questionCount,
+        takers: loaded.takers,
+      });
     } catch (e: unknown) {
       setError(describeError(e, locale, "quiz_board_failed"));
       setPhase("error");

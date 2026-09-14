@@ -376,6 +376,18 @@ export type AnalyticsEvent =
     }
   | {
       /**
+       * The owner opened their results page, with the token. The KV twin is
+       * `quiz:board` (`recordQuizStage("board")`), bumped by the route on the
+       * same successful read. `takers` is how many rows were on it — bounded
+       * by `QUIZ_MAX_ENTRIES`, so it is a number and not a cardinality risk —
+       * and separates "came back to an empty board" from "came back to
+       * results", which the count alone cannot.
+       */
+      name: "quiz_board_opened";
+      params: { question_count: number; takers: number };
+    }
+  | {
+      /**
        * The host's share button on the setup page, or the taker's on the
        * result screen. `outcome` follows `result_shared`: only "shared" left
        * the device through the share sheet, and "copied" is the clipboard

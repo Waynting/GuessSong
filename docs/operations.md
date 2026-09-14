@@ -72,8 +72,8 @@ npm run stats
 ```
 
 Full guide: [viral-loop.md](viral-loop.md#5-running-npm-run-stats). Every number
-it prints is a floor, bar one — the quiz's `opened` is a ceiling — and §6 there
-explains why that matters more than it sounds.
+it prints is a floor, bar two — the quiz's `opened` and `board` are ceilings —
+and §6 there explains why that matters more than it sounds.
 
 ### The caches
 

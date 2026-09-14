@@ -187,15 +187,33 @@ Games by host's game number
   10+     1  █
 
 Playlist quiz — the link-shaped surface
-  created         12
+  created         12   en 4 · zh 8
   opened          31   2.6 per quiz
   completed       19    61.3% of opens
+  board            7    58.3% of quizzes had the owner back for results
     acquaintance     7  ██████████████████████████████
     close            6  ██████████████████████████
     soulmate         2  █████████
     stranger         4  █████████████████
+
+  questions   quizzes  finishers  per quiz
+    10 preset      3          9       3.0
+    20 default     6          8       1.3
+    35 typed       1          0       0.0
+    50 preset      2          2       1.0
+  2 of 12 quizzes were built shorter than the host asked for — the playlist had fewer usable tracks, and the panel does not say so
+
+  hints       heard 21 · no clip 3 · unavailable 2 · repaired 1
+              1.1 heard per completed quiz, against an allowance of 2.1
+
+  ⚠  refused by the limiter: answer 1. Each is a request the funnel above
+     never saw — an answer refused is a friend who finished and was
+     turned away, which reads as a low completion rate.
   the CTA on the result screen is the quiz_result row above
 ```
+
+(The length, hint and refusal blocks print only once they have something to
+say; a fresh deploy shows the four stages and the verdicts alone.)
 
 | Field | Meaning |
 |---|---|
@@ -205,10 +223,16 @@ Playlist quiz — the link-shaped surface
 | `rate` | `followed ÷ shown` |
 | `Games started` | real hosted parties — only the paths that call `recordHostedStart` |
 | `Repeat hosts` | games at index ≥ 2. **The number this work is waiting on** |
-| `created` / `opened` / `completed` | the Taste Quiz funnel (`recordQuizStage` in `lib/loop-stats.ts`), bumped by the route that did the thing — `POST /api/quiz`, `GET /api/quiz/[code]`, `POST /api/quiz/[code]/answer` — not beaconed from a page, so nothing here is lost to a tab closing. The block is printed only once something has been recorded |
+| `created` / `opened` / `completed` / `board` | the Taste Quiz funnel (`recordQuizStage` in `lib/loop-stats.ts`), bumped by the route that did the thing — `POST /api/quiz`, `GET /api/quiz/[code]`, `POST /api/quiz/[code]/answer`, `GET /api/quiz/[code]/board` — not beaconed from a page, so nothing here is lost to a tab closing. The block is printed only once something has been recorded |
+| `en 4 · zh 8` | the language each quiz was made in (`quiz_locale:<l>`, the `locale` the setup page sends). Which audience the bilingual panel is reaching — the share sentence and the friend's page render in this language |
 | `per quiz` | `opened ÷ created`. Below 1 means quizzes are being made and not sent — a share-step problem, not a quiz problem |
 | `of opens` | `completed ÷ opened`, the quiz itself. **`opened` is a ceiling, not a floor — see §6** |
+| `board` | the owner opened their results page *with the token* — a guessed URL lands on 403 and is not counted. `board ÷ created` is the owner's half of the loop: a quiz whose board is never opened was sent and forgotten. **Also a ceiling** — the page fetches on every mount |
 | the verdict bars | how completed quizzes came out (`quiz_verdict:<bucket>`, from `verdictFor` in `lib/quiz.ts`). The difficulty gauge — see §7 |
+| the `questions` table | one row per length that had a quiz made or finished (`quiz_len:created:<n>` / `quiz_len:completed:<n>`). `quizzes` is what hosts chose, tagged `default` / `preset` / `typed` so the typed field's use is visible; `finishers` is answer sheets graded for quizzes of that length; `per quiz` is `finishers ÷ quizzes` — two floors over each other, so unlike `of opens` it needs no ceiling. A row with finishers and no quizzes is a quiz made before the window and finished inside it |
+| `built shorter than the host asked for` | `quiz_clamped`: the playlist had fewer usable tracks than the requested count, so `createQuiz` shortened it. The panel shows the count it got and says nothing about the one asked for — this is the only record that anyone wanted more |
+| the `hints` line | the quiz's only per-question upstream path (`quiz_hint:<status>`, from `GET /api/quiz/[code]/hint`). `heard` is a clip served; `no clip` is a recording nothing has a clip for (a cached fact, free); `unavailable` is *us* — throttled or out of budget, and the page refunds the hint; `repaired` is a `refresh=1` re-resolve of a rotted URL. The second line is `heard ÷ completed` beside the mean allowance (`hintAllowance`, one per ten questions) of the quizzes that were finished |
+| `refused by the limiter` | `quiz_throttled:<route>`: requests a quiz route's own `enforceRateLimit` turned away, per route. Printed only when non-zero. **Exact**, not a floor — the limiter said no, so KV was up |
 
 ---
 
@@ -239,15 +263,29 @@ did".**
 - **`organic` is a catch-all** for every lost attribution: a PWA launched from
   the home screen, a stripped query string, a retyped bare domain. Organic is
   already nearly all traffic, so the loop's share of starts is a floor.
-- **`opened` is the one figure here that is a ceiling.** It is bumped on every
-  successful `GET /api/quiz/[code]`, and the quiz page fetches on every mount,
-  reload and Retry, so one friend opening the link twice is two opens.
-  `completed ÷ opened` therefore reads *low* — the opposite direction from
-  every other number on this page. `created` and `completed` are floors like
-  the rest: one write per quiz made, one per answer sheet graded. (The link
-  unfurler in the chat app is not in this number: `opened` is bumped by the
+- **`opened` and `board` are the two figures here that are ceilings.** Each
+  is bumped on every successful fetch, and both pages fetch on every mount,
+  reload and Retry, so one friend opening the link twice is two opens and an
+  owner refreshing their board twice is two boards. `opened` inflates the
+  denominator of `of opens`, so that rate reads *low*; `board` inflates the
+  numerator of its own rate, so that one reads *high* — either way the
+  opposite direction from every other number on this page. `created` and
+  `completed` are floors like the rest:
+  one write per quiz made, one per answer sheet graded, and the length table
+  is built from those two, which is why its `per quiz` needs no correction.
+  (The link unfurler in the chat app is not in `opened`: it is bumped by the
   API the page's own script calls, deliberately not by `generateMetadata`,
   which every unfurler fetches.)
+- **`heard` counts hint *requests* that returned a clip, not clips heard.** A
+  clip that then fails to play is refunded on the phone and re-requested on
+  the next tap, so a rotting CDN URL is one `heard`, one `repaired`, and one
+  hint. It also does not know who asked: a taker who reloads and taps again is
+  two. Against the allowance it is a ceiling; against the "no audio in a
+  question" rule it is the honest number, because upstream was asked either
+  way.
+- **`refused by the limiter` is the exception in the other direction — it is
+  exact.** A refusal means the `incr` that said no succeeded, so the counter
+  beside it lands too.
 
 What the table answers reliably is **trend** and **relative difference between
 surfaces**. Not absolute level.
@@ -271,7 +309,15 @@ working call to action deleted. Collect two weeks first. Shapes, not numbers:
 | `Repeat hosts` stays low | **not** "nobody returns" | cross-check against GA4 returning users, which rides a cookie and is unaffected by the ITP eviction above |
 | `quiz_result` reads like `share` after two weeks | this audience does not convert off-site, link or QR alike | the reading D9 in `decisions.md` said it would reopen on — a real answer, worth having |
 | `per quiz` below 1 | quizzes are being made and not sent | the share step on the setup page (`components/quiz-panel.tsx`), not the questions |
-| `of opens` well under 40% | takers open and do not finish; ten questions is too long for this audience | shorten `QUIZ_DEFAULT_QUESTION_COUNT` in `types/quiz.ts` before touching the questions — and remember `opened` is a ceiling (§6), so this reads worse than it is |
+| `of opens` well under 40% | takers open and do not finish | read the `questions` table before touching anything: if `per quiz` falls with length, the default is too long — shorten `QUIZ_DEFAULT_QUESTION_COUNT` in `types/quiz.ts`; if it is flat, length is not the reason. Remember `opened` is a ceiling (§6), so `of opens` reads worse than it is, while `per quiz` does not |
+| `typed` rows are empty after two weeks | nobody uses the typed field | leave it; it costs nothing on screen. Delete it only if the setup form needs the room |
+| `built shorter` is a large share of `created` | hosts want longer quizzes than their playlists give | say so on the panel (`components/quiz-panel.tsx`) before the link is shared, or cap the picker at the playlist's usable count once it is known |
+| `board` well under `created` | owners send the link and do not come back for results | the board is where the owner's share button is, so this is a second share arm going unused — put the results where the owner already is (the setup page's `QuizPanel` already remembers the last quiz) rather than growing the board |
+| `heard per completed` near the allowance | takers spend every hint they have | at two options a hint is a whole point, so the verdict spread is flattering; read `stranger` as the honest bucket, and consider one per twenty |
+| `unavailable` a visible share of hints | the quiz is being served in throttled minutes | same reading as the preview cache's `unavailable` row below it: the shared egress IP is being throttled, and the quiz is one more caller on it. Not a quiz problem |
+| `repaired` climbing | the year-long positive cache is rotting under the quiz | expected at a low rate; a jump means the CDN rotated a batch. Nothing to do unless `heard` falls with it |
+| `refused: answer` above 0 | a room of phones behind one address hit the answer limit | raise `QUIZ_ANSWER_LIMIT` in `app/api/quiz/[code]/answer/route.ts` — it was 20 and refused the 21st finisher in an office, which is why it is 60 |
+| `refused: read` above 0 | the same room hit the read limit — opens that never became opens | `QUIZ_READ_LIMIT` in `app/api/quiz/[code]/route.ts`; the two limits are sized together, keep them so |
 | verdicts pile at `soulmate` | the decoys are too easy to tell from the playlist | the trigger for a Spotify-backed decoy source (`artists/{id}/top-tracks`) — `CHANGELOG.md` 1.9.0, known gaps |
 
 ---
@@ -311,6 +357,17 @@ being read, summed and silently dropped, which is what used to happen.
 
 The only shared knowledge is the `loop:stats:` prefix, and changing that makes
 the script print "no counters found", which is loud rather than wrong.
+
+One shape of drift the "Other counters" block does **not** catch: a new key
+under a prefix a renderer already claims. `RENDERED_PREFIXES` marks `quiz:`,
+`quiz_len:`, `quiz_hint:` and the rest as consumed, so a `quiz:reopened` added
+to `lib/loop-stats.ts` without a line in the quiz block would be read, summed,
+and printed nowhere — the exact silence the leftovers block exists to end,
+back through a side door. A new metric under a claimed prefix needs its own
+line in that block; a new metric under a new prefix can lean on the leftovers
+until it deserves better. `tests/loop-stats.test.ts` pins the writer's key
+set and `tests/quiz-routes.test.ts` pins that the routes still call it, but
+nothing can pin the script's output — read it once after adding a counter.
 
 ### `SCAN`, not `KEYS`, and the difference is not academic
 
