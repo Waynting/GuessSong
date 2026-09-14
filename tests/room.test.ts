@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as playlistCache from "@/lib/playlist-cache";
 import { getKvStore } from "@/lib/kv";
-import { createRoom, submitToRoom, getRoomStatus, consumeRoomPool } from "@/lib/room";
+import { createRoom, submitToRoom, getRoomStatus, consumeRoomPool, timingSafeEqualStrings } from "@/lib/room";
+import { BUZZER_CODE_ALPHABET } from "@/lib/buzzer-protocol";
+import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "@/types/room";
 import type { Track } from "@/types";
 
 vi.mock("@/lib/playlist-cache", () => ({
@@ -45,6 +47,51 @@ function gateLoadPlaylist() {
     },
   };
 }
+
+describe("the code alphabet", () => {
+  // Moved from lib/room.ts to types/room.ts so lib/quiz-store.ts can draw its
+  // six-character codes from the same set. Two consumers means the value has
+  // to be pinned, or one of them can quietly change what a code may contain.
+  it("excludes the visually-confusable characters, per spec §4.2", () => {
+    for (const c of ["0", "O", "1", "I", "L"]) {
+      expect(ROOM_CODE_ALPHABET, `alphabet contains ${c}`).not.toContain(c);
+    }
+    expect(ROOM_CODE_ALPHABET).toHaveLength(31);
+    expect(new Set(ROOM_CODE_ALPHABET).size).toBe(ROOM_CODE_ALPHABET.length);
+    expect(ROOM_CODE_ALPHABET).toMatch(/^[2-9A-Z]+$/);
+  });
+
+  it("is the same alphabet the buzzer Worker shows in the same room", () => {
+    // lib/buzzer-protocol.ts must stay dependency-free, so it carries its own
+    // copy and a comment saying it matches. This is the only thing that checks.
+    expect(BUZZER_CODE_ALPHABET).toBe(ROOM_CODE_ALPHABET);
+  });
+
+  it("is what room codes are actually drawn from", async () => {
+    for (let i = 0; i < 20; i += 1) {
+      const { roomCode } = await createRoom();
+      expect(roomCode).toHaveLength(ROOM_CODE_LENGTH);
+      for (const c of roomCode) expect(ROOM_CODE_ALPHABET).toContain(c);
+    }
+  });
+});
+
+describe("timingSafeEqualStrings", () => {
+  // Exported now that lib/quiz-store.ts gates its board on it. Both callers
+  // pass the stored token first and the caller's guess second.
+  it("answers equality without ever throwing on a length mismatch", () => {
+    expect(timingSafeEqualStrings("abc", "abc")).toBe(true);
+    expect(timingSafeEqualStrings("", "")).toBe(true);
+    expect(timingSafeEqualStrings("abc", "abd")).toBe(false);
+    expect(timingSafeEqualStrings("abc", "ab")).toBe(false);
+    expect(timingSafeEqualStrings("abc", "")).toBe(false);
+    // Node's timingSafeEqual throws on unequal buffers; the wrapper must not.
+    expect(() => timingSafeEqualStrings("a", "a".repeat(64))).not.toThrow();
+    // Multi-byte input: length is compared in bytes, not code units.
+    expect(timingSafeEqualStrings("é", "é")).toBe(true);
+    expect(timingSafeEqualStrings("é", "e")).toBe(false);
+  });
+});
 
 describe("room lifecycle", () => {
   beforeEach(() => {

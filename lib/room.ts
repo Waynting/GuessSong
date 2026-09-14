@@ -39,7 +39,8 @@
  * time sees "room not found" and reopens.
  */
 
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { timingSafeEqualStrings } from "@/lib/timing-safe";
 import { loadPlaylist } from "@/lib/playlist-cache";
 import { poolContributions } from "@/lib/mixed-playlist";
 import { getKvStore } from "@/lib/kv";
@@ -48,15 +49,14 @@ import { errorMessage, type AppErrorCode } from "@/lib/error-messages";
 import { SpotifyApiError } from "@/lib/spotify";
 import type { Track } from "@/types";
 import {
+  CODE_CLAIM_ATTEMPTS,
+  ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
   ROOM_TTL_SECONDS,
   ROOM_MAX_SUBMISSIONS,
   type RoomStatusResponse,
   type RoomPoolResponse,
 } from "@/types/room";
-
-// Excludes visually-confusable characters (0/O, 1/I/L) per spec §4.2.
-const ROOM_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
 /** The one field that must exist for a room to exist at all. */
 const META_FIELD = "meta";
@@ -263,7 +263,7 @@ export async function createRoom(requestedCode?: string): Promise<{
   }
 
   // Small retry loop for the unlikely event of a code collision.
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < CODE_CLAIM_ATTEMPTS; attempt++) {
     const claimed = await claimRoomCode(store, generateRoomCode());
     if (claimed) return claimed;
   }
@@ -456,15 +456,4 @@ export async function consumeRoomPool(
   };
 }
 
-/** Constant-time comparison so wrong host-token guesses can't be timed. */
-function timingSafeEqualStrings(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) {
-    // Compare against a same-length buffer anyway so the failure path takes
-    // roughly the same time as a length-matched mismatch.
-    timingSafeEqual(bufA, Buffer.alloc(bufA.length));
-    return false;
-  }
-  return timingSafeEqual(bufA, bufB);
-}
+export { timingSafeEqualStrings };

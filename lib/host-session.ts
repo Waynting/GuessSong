@@ -43,7 +43,7 @@ export const LOOP_REF_TTL_MS = 60 * 24 * 60 * 60 * 1000;
  * blocked, some embedded webviews), and a party host is not going to debug
  * that, so every path swallows and degrades.
  */
-function withStorage<T>(fn: (storage: Storage) => T, fallback: T): T {
+export function withStorage<T>(fn: (storage: Storage) => T, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
     return fn(window.localStorage);
