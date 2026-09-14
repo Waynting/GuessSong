@@ -114,6 +114,8 @@ export interface QuizCopy {
   /** On the seam the moment a question is answered: the verdict for that one. */
   revealRight: string;
   revealWrong: string;
+  /** On a question answered whose verdict never arrived, seen again after Back or a reload. */
+  revealPending: string;
   /* The host's panel on the setup page, once the link exists */
   panelQuestionsFrom: string;
   panelSend: string;
@@ -212,6 +214,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     rankLine: "#{rank} of {count}",
     revealRight: "Right — that's the one",
     revealWrong: "Nope — it's the other one",
+    revealPending: "Answered — it counts at the end",
     panelQuestionsFrom: "{count} questions from",
     panelSend: "Send to friends →",
     panelCopyLink: "Copy link",
@@ -304,6 +307,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     rankLine: "第 {rank} 名，共 {count} 人",
     revealRight: "答對了，就是這首",
     revealWrong: "答錯了，是另一首",
+    revealPending: "已作答，最後一起計分",
     panelQuestionsFrom: "共 {count} 題，來自",
     panelSend: "傳給朋友 →",
     panelCopyLink: "複製連結",
@@ -330,9 +334,15 @@ export interface QuizCardCopy {
   /** The pill beside the wordmark: what this is. */
   label: string;
   title: string;
-  /** The playlist's name when no owner was given, since the title then asks about "this playlist". */
+  /**
+   * The line under the title, the one other fact the card is for: the
+   * question count — and, when no owner was given, the playlist's name in
+   * front of it, since the title then asks about "this playlist". Null when
+   * the quiz could not be read. A chat thumbnail keeps this size; it does
+   * not keep a pill's.
+   */
   subtitle: string | null;
-  /** The count and the rule; the rule alone when the quiz could not be read. */
+  /** The rule, as furniture. */
   pills: string[];
 }
 
@@ -350,11 +360,12 @@ export function quizCardCopy(
   if (!peek) {
     return { label: copy.ogQuizLabel, title: copy.ogFallbackTitle, subtitle: null, pills: [copy.ogRule] };
   }
+  const count = fillCopy(copy.boardQuestionCount, { count: peek.questionCount });
   return {
     label: copy.ogQuizLabel,
     title: quizTitle(copy, peek.ownerName),
-    subtitle: peek.ownerName ? null : peek.playlistName,
-    pills: [fillCopy(copy.boardQuestionCount, { count: peek.questionCount }), copy.ogRule],
+    subtitle: peek.ownerName ? count : `${peek.playlistName} · ${count}`,
+    pills: [copy.ogRule],
   };
 }
 

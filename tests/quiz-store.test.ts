@@ -415,14 +415,14 @@ describe("submitQuizAnswers", () => {
 });
 
 describe("checkQuizAnswer", () => {
-  it("hands over one question's answer against a pick for it, and says whether the pick was right", async () => {
+  it("hands over one question's answer against a pick for it, whichever the pick was", async () => {
     const created = await make();
     const key = await keyFor(created.code);
+    // The answer alone: whether the pick was right is the page's comparison,
+    // which it makes anyway for a question restored from storage.
     for (let q = 0; q < key.length; q += 1) {
-      const right = await checkQuizAnswer(created.code, q, key[q]);
-      expect(right).toEqual({ answer: key[q], correct: true });
-      const wrong = await checkQuizAnswer(created.code, q, (key[q] + 1) % QUIZ_OPTION_COUNT);
-      expect(wrong).toEqual({ answer: key[q], correct: false });
+      expect(await checkQuizAnswer(created.code, q, key[q])).toEqual({ answer: key[q] });
+      expect(await checkQuizAnswer(created.code, q, (key[q] + 1) % QUIZ_OPTION_COUNT)).toEqual({ answer: key[q] });
     }
   });
 
@@ -458,6 +458,58 @@ describe("checkQuizAnswer", () => {
     await expect(checkQuizAnswer("ZZZZZZ", 0, 0)).rejects.toMatchObject({ code: "quiz_not_found", status: 404 });
     // Case-insensitive on the code, like every other read.
     expect(await checkQuizAnswer(created.code.toLowerCase(), 0, 0)).toMatchObject({ answer: expect.any(Number) });
+  });
+
+  it("costs one read, and nothing else", async () => {
+    // The cost argument in its doc comment is "one hgetall". A second read
+    // creeping into `loadQuiz` — a `get` for meta, a TTL probe — would
+    // double the hottest quiz path with nothing else in the suite moving.
+    const created = await make();
+    const store = await getKvStore();
+    const hgetall = vi.spyOn(store, "hgetall");
+    try {
+      await checkQuizAnswer(created.code, 4, 1);
+      expect(hgetall).toHaveBeenCalledTimes(1);
+    } finally {
+      hgetall.mockRestore();
+    }
+  });
+
+  it("refuses a quiz past its expiry, and the unfurl's peek goes generic at the same moment", async () => {
+    // `requireQuiz` is the one gate, the way it is for answers and hints: the
+    // record's own `expiresAt` decides, not the key's eviction. A verdict
+    // handed out after the printed expiry would be the key for a quiz the
+    // page says is over. `peekQuiz` reads the same record, so the card that
+    // an unfurler fetches for a dead link is the fallback, never a stale name.
+    const created = await make();
+    const now = vi.spyOn(Date, "now").mockReturnValue(created.expiresAt);
+    try {
+      await expect(checkQuizAnswer(created.code, 0, 0)).rejects.toMatchObject({ code: "quiz_not_found", status: 404 });
+      expect(await peekQuiz(created.code)).toBeNull();
+    } finally {
+      now.mockRestore();
+    }
+    expect(await checkQuizAnswer(created.code, 0, 0)).toMatchObject({ answer: expect.any(Number) });
+  });
+
+  it("writes nothing: no claim, no field, and never the TTL", async () => {
+    // Stateless on purpose — a pick claimed per question would be a hash per
+    // taker with its own expiry. The rule `submitQuizAnswers` keeps about the
+    // TTL holds here trivially, and this is what keeps it trivial: a check
+    // that started re-setting `expire` would push the quiz past the
+    // `expiresAt` its page printed, one tap at a time.
+    const created = await make();
+    const store = await getKvStore();
+    const writes = ["hsetnx", "set", "expire", "del", "incr"] as const;
+    const spies = writes.map((name) => vi.spyOn(store, name));
+    try {
+      await checkQuizAnswer(created.code, 0, 1);
+      await checkQuizAnswer(created.code.toLowerCase(), 9, 0);
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+    expect((await getQuizView(created.code)).expiresAt).toBe(created.expiresAt);
   });
 });
 

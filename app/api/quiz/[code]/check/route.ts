@@ -1,10 +1,12 @@
 /**
- * POST /api/quiz/[code]/check — the verdict on one question, the moment it
+ * POST /api/quiz/[code]/check — the answer to one question, the moment it
  * is answered.
  *
  * The page shows right or wrong per tap and the key still never leaves the
  * server unasked: this answers for question N only against a pick for N,
- * and the page locks the question before it asks. Grading and the board are
+ * and the page locks the question before it asks. It hands back the answer
+ * alone; right or wrong is the page's comparison, which it has to make
+ * anyway for a question restored from storage. Grading and the board are
  * unchanged — `POST …/answer` still writes the row from the sheet the page
  * kept; `checkQuizAnswer` in lib/quiz-store.ts says what that does and does
  * not protect.
@@ -26,15 +28,20 @@ import { checkQuizAnswer, QuizError } from "@/lib/quiz-store";
 import { recordQuizStage, recordQuizThrottled } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
-import { QUIZ_MAX_QUESTIONS, QUIZ_OPTION_COUNT, type CheckQuizResponse } from "@/types/quiz";
+import type { CheckQuizResponse } from "@/types/quiz";
 
 const QUIZ_CHECK_LIMIT = 600;
 const QUIZ_CHECK_WINDOW_SECONDS = 10 * 60;
 
-/** The same bounds `isAnswerList` puts on a sheet; the store re-checks against the quiz itself. */
+/**
+ * Shape only — an integer each — like `answer/route.ts`'s sheet. Range is
+ * the store's call (`checkQuizAnswer`), so an out-of-range question or pick
+ * gets the same 422 `quiz_invalid_answers` a sheet with one in it gets;
+ * `quiz_missing_fields` stays what a missing field or a non-JSON body is.
+ */
 const CheckSchema = z.object({
-  q: z.number().int().min(0).max(QUIZ_MAX_QUESTIONS - 1),
-  pick: z.number().int().min(0).max(QUIZ_OPTION_COUNT - 1),
+  q: z.number().int(),
+  pick: z.number().int(),
 });
 
 export async function POST(

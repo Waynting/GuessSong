@@ -147,9 +147,8 @@ export interface CheckQuizRequest {
 }
 
 export interface CheckQuizResponse {
-  /** Index of the song that is really in the playlist. */
+  /** Index of the song that is really in the playlist. Right or wrong is `pick === answer`, the page's to make. */
   answer: number;
-  correct: boolean;
 }
 
 /** One question as the owner's board shows it: the real song, and how many got it. */

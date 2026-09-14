@@ -34,11 +34,14 @@
  * built once, and it carries its own edge cache header so that it is
  * rendered once per quiz, not once per unfurler; the file explains. Next
  * attaches the file-convention image to this page's `openGraph` and
- * `twitter` metadata itself, which is why neither block names an image.
+ * `twitter` metadata itself, which is why neither block names an image —
+ * and builds its URL from the segment as typed, which is why the page
+ * component sends a non-canonical spelling to the canonical one first.
  */
 
 import type { Metadata } from "next";
-import { peekQuiz } from "@/lib/quiz-store";
+import { redirect } from "next/navigation";
+import { normalizeQuizCode, peekQuiz } from "@/lib/quiz-store";
 import { QUIZ_COPY, fillCopy, quizTitle } from "@/lib/quiz-copy";
 import { QuizClient } from "./quiz-client";
 
@@ -79,5 +82,11 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 
 export default async function QuizPage({ params }: Params) {
   const { code } = await params;
+  // One URL per quiz. A link retyped in lower case still opens — through the
+  // canonical spelling, so the card image Next attaches (built from the
+  // segment as typed) has one edge-cache key per quiz, not one per spelling.
+  // A malformed segment falls through to the client, which reports it.
+  const canonical = normalizeQuizCode(code);
+  if (canonical && canonical !== code) redirect(`/q/${canonical}`);
   return <QuizClient code={code} />;
 }

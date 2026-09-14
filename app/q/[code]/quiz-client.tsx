@@ -212,8 +212,10 @@ const DUEL_CSS = `
   }
   .q-segments { display: flex; gap: 2px; flex: 1; height: 4px; }
   .q-seg { flex: 1; min-width: 1px; background: #2a2a2a; border-radius: 2px; transition: background 240ms ease-out; }
+  /* Right and wrong differ in value, not only hue: a greyscale or a
+     red-green-blind eye still reads the tally. */
   .q-seg.is-right { background: #1DB954; }
-  .q-seg.is-wrong { background: #ff6b6b; }
+  .q-seg.is-wrong { background: #7a2e2e; }
   .q-seg.is-done { background: #555; }
   .q-seg.is-now { background: #f0f0f0; }
   .q-progress-text { font-size: 11px; color: #777; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -245,14 +247,18 @@ const DUEL_CSS = `
   }
   .q-half:focus-visible { outline: 2px solid #1DB954; outline-offset: 3px; }
   .q-half:disabled { cursor: default; }
-  /* Chosen, verdict on its way: filled, but in no colour that says right or wrong yet. */
-  .q-half.is-on { background: #f0f0f0; color: #000; border-color: #f0f0f0; }
+  /* Chosen, verdict on its way: a mid tone with a white edge — no colour
+     that says right or wrong yet, and not the brightest thing in a dark
+     room fifty times a quiz. The verdict is the first strong fill. */
+  .q-half.is-on { background: #2a2a2a; color: #f0f0f0; border-color: #f0f0f0; }
+  /* Answered, verdict never came, seen again after Back or a reload. */
+  .q-half.is-locked { background: #1e1e1e; color: #f0f0f0; border-color: #555; }
   .q-half.is-right { background: #1DB954; color: #000; border-color: #1DB954; }
   .q-half.is-wrong { background: #2a1414; color: #f0f0f0; border-color: #ff6b6b; }
   .q-half.is-off { opacity: 0.4; }
   .q-half-title { font-size: clamp(34px, 9vw, 64px); text-wrap: balance; overflow-wrap: anywhere; }
   .q-half-artist { font-size: 14px; color: #8a8a8a; font-weight: 400; }
-  .q-half.is-on .q-half-artist, .q-half.is-right .q-half-artist { color: rgba(0,0,0,0.62); }
+  .q-half.is-right .q-half-artist { color: rgba(0,0,0,0.7); }
   .q-half.is-wrong .q-half-artist { color: rgba(255,107,107,0.85); }
   .q-check {
     position: absolute; top: 14px; right: 16px;
@@ -261,7 +267,8 @@ const DUEL_CSS = `
     display: flex; align-items: center; justify-content: center;
     font-size: 14px; font-weight: 700; opacity: 0.3;
   }
-  .q-half.is-on .q-check { opacity: 1; background: #000; color: #f0f0f0; border-color: #000; }
+  .q-half.is-on .q-check { opacity: 1; background: #f0f0f0; color: #000; border-color: #f0f0f0; }
+  .q-half.is-locked .q-check { opacity: 1; background: #555; color: #000; border-color: #555; }
   .q-half.is-right .q-check { opacity: 1; background: #000; color: #1DB954; border-color: #000; }
   .q-half.is-wrong .q-check { opacity: 1; background: #ff6b6b; color: #000; border-color: #ff6b6b; }
 
@@ -658,7 +665,10 @@ export function QuizClient({ code }: { code: string }) {
       needsRefresh.current.delete(question);
       // The URL is that question's whatever the screen shows now; keep it.
       hintUrls.current.set(question, data.previewUrl);
-      if (!isCurrent()) return;
+      // Moved on — or answered while the clip was on its way: the verdict is
+      // on screen, and a hint under it is a charge for nothing. The URL is
+      // kept for a revisit either way.
+      if (!isCurrent() || locked.current === question) return;
       if (!paid) {
         charged.current.add(question);
         setHintsLeft((n) => n - 1);
@@ -737,9 +747,11 @@ export function QuizClient({ code }: { code: string }) {
     let answer: number | null = null;
     try {
       answer = (await fetchCheck(code, question, option)).answer;
-    } catch {
+    } catch (e: unknown) {
       // Offline, throttled, timed out, or the quiz is gone. The next question
-      // — or grading — will say which of those matters.
+      // — or grading — will say which of those matters to the taker; the
+      // event is for us, since the server only ever sees the refusals.
+      trackEvent("quiz_check_lost", { reason: lostCheckReason(e) });
     }
     if (answer !== null) {
       const known = answer;
@@ -1056,38 +1068,33 @@ export function QuizClient({ code }: { code: string }) {
     const prompt = view.ownerName
       ? fillCopy(copy.promptOwner, { owner: view.ownerName })
       : copy.promptPlaylist;
-    // The verdict outranks the hint's state: the clip that was playing is
-    // the answer now on screen. Grading outranks both.
-    const seamText = busy
-      ? copy.submitting
+    // One ladder for the seam's words and its colour, so they cannot drift
+    // apart: grading outranks the verdict, the verdict outranks "answered,
+    // no verdict" (a parked question the check never came back for), which
+    // outranks the hint's state (the clip that was playing is the answer now
+    // on screen), which outranks the prompt.
+    const seam: { text: string; tone: string } = busy
+      ? { text: copy.submitting, tone: "" }
       : verdict >= 0
         ? chosen === verdict
-          ? copy.revealRight
-          : copy.revealWrong
-        : hint === "loading"
-          ? copy.hintLoading
+          ? { text: copy.revealRight, tone: " is-live" }
+          : { text: copy.revealWrong, tone: " is-wrong" }
+        : parked
+          ? { text: copy.revealPending, tone: "" }
+          : hint === "loading"
+          ? { text: copy.hintLoading, tone: "" }
           : hint === "playing"
-            ? copy.hintPlaying
+            ? { text: copy.hintPlaying, tone: " is-live" }
             : hint === "none"
-              ? copy.hintNone
+              ? { text: copy.hintNone, tone: "" }
               : hint === "blocked"
-                ? copy.hintBlocked
-                : prompt;
-    const seamTone =
-      verdict >= 0 && !busy
-        ? chosen === verdict
-          ? " is-live"
-          : " is-wrong"
-        : hint === "playing"
-          ? " is-live"
-          : hint === "blocked"
-            ? " is-warn"
-            : "";
+                ? { text: copy.hintBlocked, tone: " is-warn" }
+                : { text: prompt, tone: "" };
 
-    const seam = (
+    const seamRow = (
       <div className="q-seam" key="seam">
-        <p className={`q-prompt${seamTone}`} aria-live="polite">
-          {seamText}
+        <p className={`q-prompt${seam.tone}`} aria-live="polite">
+          {seam.text}
         </p>
         <button
           type="button"
@@ -1133,20 +1140,7 @@ export function QuizClient({ code }: { code: string }) {
         <div className="q-progress">
           <div className="q-segments" aria-hidden="true">
             {answers.map((a, i) => (
-              <span
-                key={i}
-                className={`q-seg${
-                  i === index
-                    ? " is-now"
-                    : a < 0
-                      ? ""
-                      : (revealed[i] ?? -1) < 0
-                        ? " is-done"
-                        : revealed[i] === a
-                          ? " is-right"
-                          : " is-wrong"
-                }`}
-              />
+              <span key={i} className={`q-seg${i === index ? " is-now" : segmentTone(a, revealed[i] ?? -1)}`} />
             ))}
           </div>
           <p className="q-progress-text">
@@ -1171,7 +1165,9 @@ export function QuizClient({ code }: { code: string }) {
             const wrong = verdict >= 0 && selected && !right;
             // The real song stays lit when the pick was wrong: that is the reveal.
             const dimmed = chosen >= 0 && !selected && !right;
-            const tone = right ? " is-right" : wrong ? " is-wrong" : selected ? " is-on" : "";
+            // Selected reads as "on its way" while the check is out and as
+            // "locked" once it is plainly not coming — a parked question.
+            const tone = right ? " is-right" : wrong ? " is-wrong" : selected ? (parked ? " is-locked" : " is-on") : "";
             return [
               /* Plain toggle buttons, not ARIA radios: a radio group promises
                  arrow-key movement and a roving tabindex, and Tab between the
@@ -1192,7 +1188,7 @@ export function QuizClient({ code }: { code: string }) {
                 <span className="q-display q-half-title">{option.title}</span>
                 {option.artist && <span className="q-half-artist">{option.artist}</span>}
               </button>,
-              i === 0 ? seam : null,
+              i === 0 ? seamRow : null,
             ];
           })}
         </div>
@@ -1309,6 +1305,17 @@ export function QuizClient({ code }: { code: string }) {
 }
 
 /**
+ * A progress segment's colour for a question behind the taker: nothing until
+ * answered, `is-done` while the verdict never arrived, then right or wrong
+ * by the same comparison the halves make.
+ */
+function segmentTone(answer: number, verdict: number): string {
+  if (answer < 0) return "";
+  if (verdict < 0) return " is-done";
+  return verdict === answer ? " is-right" : " is-wrong";
+}
+
+/**
  * Makes the current history entry stand for `step`, pushing one when it does
  * not already. The check is what keeps Start after a refused name — still on
  * the last question's entry — from stacking a second entry for the same
@@ -1342,11 +1349,31 @@ async function fetchCheck(code: string, q: number, pick: number): Promise<CheckQ
     body: JSON.stringify(body),
     signal: checkTimeout(),
   });
-  const data = await res.json();
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch {
+    // A bare 500 with an empty body is the server; a 200 that is not JSON is
+    // the wire. Both are named so `lostCheckReason` can file them.
+    throw new Error(res.ok ? "check: malformed" : "check: server");
+  }
   if (!res.ok) throw apiError(data, "quiz_answer_failed");
   const check = data as Partial<CheckQuizResponse>;
   if (!Number.isInteger(check.answer)) throw new Error("check: malformed");
-  return { answer: check.answer as number, correct: Boolean(check.correct) };
+  return { answer: check.answer as number };
+}
+
+/**
+ * Which bucket a failed check lands in, for `quiz_check_lost`. `apiError`
+ * carries the server's code; an abort is the timeout above; anything else
+ * that threw before a response is the network.
+ */
+function lostCheckReason(e: unknown): "timeout" | "offline" | "rate_limited" | "server" | "malformed" {
+  if (e instanceof AppError) return e.code === "rate_limited" ? "rate_limited" : "server";
+  if (e instanceof Error && e.name === "TimeoutError") return "timeout";
+  if (e instanceof Error && e.message === "check: malformed") return "malformed";
+  if (e instanceof Error && e.message === "check: server") return "server";
+  return "offline";
 }
 
 /** `AbortSignal.timeout` where the browser has it; a browser without it just waits. */

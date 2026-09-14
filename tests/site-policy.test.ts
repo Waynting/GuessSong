@@ -150,12 +150,13 @@ describe("site footer", () => {
 
 describe("robots", () => {
   const robots = read("app/robots.ts");
+  /** The disallow array's source text, the one thing every test here reads. */
+  const disallowed = robots.slice(robots.indexOf("disallow:"), robots.indexOf("]", robots.indexOf("disallow:")));
 
   it("does not disallow the content pages", () => {
     // The disallow list is for ephemeral rooms and the counting redirect. A
     // guide or a policy page landing in it would be invisible to exactly the
     // crawler it was written for.
-    const disallowed = robots.slice(robots.indexOf("disallow:"), robots.indexOf("]", robots.indexOf("disallow:")));
     for (const path of ["/guides", "/privacy", "/terms", "/contact"]) {
       expect(disallowed, `robots.ts disallows ${path}`).not.toContain(`"${path}"`);
     }
@@ -164,7 +165,6 @@ describe("robots", () => {
   it("keeps the ephemeral codes and the counting redirect out of the index", () => {
     // The mirror image: a room code that stops resolving after its TTL is
     // crawl budget spent on a 404, and /r counts every fetch as a click.
-    const disallowed = robots.slice(robots.indexOf("disallow:"), robots.indexOf("]", robots.indexOf("disallow:")));
     for (const path of ["/buzz", "/j", "/r", "/api/"]) {
       expect(disallowed, `robots.ts does not disallow ${path}`).toContain(`"${path}"`);
     }
@@ -174,11 +174,9 @@ describe("robots", () => {
     // Facebook and X honour robots.txt when they unfurl, so a disallowed
     // quiz link drew no card on either — and the card is the feature's
     // whole distribution. The layout's noindex is what keeps /q out of the
-    // index instead; the disallow list must not grow it back.
-    const disallowed = robots.slice(robots.indexOf("disallow:"), robots.indexOf("]", robots.indexOf("disallow:")));
+    // index instead (pinned in tests/quiz-unfurl.test.ts, with the rest of
+    // the layout); the disallow list must not grow it back.
     expect(disallowed).not.toContain('"/q"');
-    const layout = read("app/q/layout.tsx");
-    expect(layout).toMatch(/robots:\s*\{\s*index:\s*false/);
   });
 });
 

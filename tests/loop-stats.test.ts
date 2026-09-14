@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { ERROR_LOCALES } from "@/lib/error-messages";
 import { LOOP_SURFACES } from "@/lib/loop-links";
 import { QUIZ_VERDICTS } from "@/lib/quiz";
@@ -402,5 +404,44 @@ describe("TTL", () => {
     for (const write of kv.incrs) {
       expect(write.ttl).toBe(LOOP_STATS_TTL_SECONDS);
     }
+  });
+});
+
+describe("the digest prints what the recorders write", () => {
+  // `scripts/loop-stats.mjs` is an .mjs with no path to these constants, so
+  // it names each stage by hand — and `quiz:` is one of the prefixes its
+  // "Other counters" fallback treats as already rendered. A stage added to
+  // `QUIZ_STAGES` and not to the script is therefore consumed and printed
+  // nowhere: the counter moves in KV and no line in `npm run stats` moves
+  // with it, which is the failure CLAUDE.md names and this file cannot see
+  // through the recorders alone. Read the source, the way the .tsx tests do.
+  const script = readFileSync(join(process.cwd(), "scripts/loop-stats.mjs"), "utf8");
+
+  it("reads and prints a row for every quiz stage", () => {
+    for (const stage of QUIZ_STAGES) {
+      expect(script, `stage ${stage} is never read`).toMatch(new RegExp(`get\\("quiz:${stage}"\\)`));
+      // Its row: the stage name at the head of a console.log line, padded.
+      expect(script, `stage ${stage} is never printed`).toMatch(new RegExp(`console\\.log\\(\\s*\`  ${stage}\\s+\\$\\{`));
+    }
+    // And the guard that decides whether the block prints at all sums every
+    // stage, so a day with only starts is not a day with no quiz activity.
+    const guard = script.match(/if \(([^)]*) > 0\) \{\s*console\.log\("\\nPlaylist quiz/)?.[1] ?? "";
+    for (const stage of QUIZ_STAGES) {
+      expect(guard, `guard omits ${stage}`).toMatch(new RegExp(`quiz${stage[0].toUpperCase()}${stage.slice(1)}`));
+    }
+  });
+
+  it("treats every recorder prefix as rendered, so no counter is printed twice", () => {
+    // The mirror image: a prefix the script renders in its own block but
+    // forgot to list here would print again under "Other counters".
+    const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
+    for (const prefix of ["quiz:", "quiz_verdict:", "quiz_len:", "quiz_locale:", "quiz_hint:", "quiz_throttled:"]) {
+      expect(rendered).toContain(`"${prefix}"`);
+    }
+    // Throttled routes are rendered by prefix, so `check` needs no line of its own.
+    for (const route of QUIZ_THROTTLED_ROUTES) {
+      expect(script).not.toMatch(new RegExp(`get\\("quiz_throttled:${route}"\\)`));
+    }
+    expect(script).toMatch(/m\.startsWith\("quiz_throttled:"\)/);
   });
 });

@@ -144,6 +144,28 @@ describe("fitsQuizProgress", () => {
     expect(fitsQuizProgress({ ...progress, revealed: [1, 1, 0, -1] }, quiz)).toBe(false);
   });
 
+  it("holds the verdicts to the same option range as the answers, and to answered questions only", () => {
+    // Below -1 is not "not told", it is corruption — the same rule the
+    // answers keep. And a verdict on the one unanswered slot at the end is
+    // refused just as one in the middle is: the check is per question, not
+    // "any answered question exists".
+    expect(fitsQuizProgress({ ...progress, revealed: [-2, 1, -1, -1] }, quiz)).toBe(false);
+    expect(fitsQuizProgress({ ...progress, answers: [1, 0, 1, -1], revealed: [1, 1, 0, -1] }, quiz)).toBe(true);
+    expect(fitsQuizProgress({ ...progress, answers: [1, 0, 1, -1], revealed: [1, 1, 0, 0] }, quiz)).toBe(false);
+    // Every question answered and every verdict known: the shape a reload on
+    // the last dwell leaves behind, and the one that must resume.
+    expect(fitsQuizProgress({ ...progress, answers: [1, 0, 1, 0], revealed: [1, 1, 0, 0], index: 3 }, quiz)).toBe(true);
+  });
+
+  it("lets a well-formed but wrong-length verdict list through parsing, and refuses it here", () => {
+    // Parsing keeps any list of integers (an entry is worth more than its
+    // optional field); the fit is where its length is held to this quiz's.
+    // The two rules split so that a resume is never lost to the newer field.
+    const [parsed] = parseQuizProgress(JSON.stringify([{ ...progress, revealed: [1, 1, -1] }]), NOW);
+    expect(parsed.revealed).toEqual([1, 1, -1]);
+    expect(fitsQuizProgress(parsed, quiz)).toBe(false);
+  });
+
   it("refuses an entry from a quiz of another shape", () => {
     expect(fitsQuizProgress({ ...progress, answers: [1, 0, -1] }, quiz)).toBe(false);
     expect(fitsQuizProgress({ ...progress, index: 4 }, quiz)).toBe(false);

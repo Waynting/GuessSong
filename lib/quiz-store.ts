@@ -439,7 +439,7 @@ export async function submitQuizAnswers(
 }
 
 /**
- * The verdict on one question, in exchange for a pick for it.
+ * The answer to one question, in exchange for a pick for it.
  *
  * The taker page shows right or wrong the moment a half is tapped, and the
  * key stays where it was: this hands over the answer to question N only
@@ -448,9 +448,10 @@ export async function submitQuizAnswers(
  * still written once, by `submitQuizAnswers`, from the answers the page
  * kept. So a taker with the network tab open can learn a question's answer
  * and change theirs before the sheet goes in; the same taker could already
- * learn the whole key with one throwaway name, and the store's header
- * concedes that. Stateless on purpose: a pick claimed per question would be
- * a hash per taker with its own TTL, for a party toy.
+ * learn the whole key with one throwaway name, which CLAUDE.md's Taste Quiz
+ * section concedes ("a party toy; the wire just refuses to hand the key
+ * over unasked"). Stateless on purpose: a pick claimed per question would
+ * be a hash per taker with its own TTL, for a party toy.
  *
  * Two KV commands per tap — the route's limiter and one `hgetall` — where a
  * quiz used to cost two per taker. Bounded by the code space (a valid code
@@ -469,7 +470,7 @@ export async function checkQuizAnswer(
   const quiz = await requireQuiz(code);
   const question = quiz.questions[questionIndex];
   if (!question || pick >= question.options.length) throw new QuizError("quiz_invalid_answers", 422);
-  return { answer: question.answer, correct: pick === question.answer };
+  return { answer: question.answer };
 }
 
 /**

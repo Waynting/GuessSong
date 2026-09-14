@@ -187,15 +187,17 @@ const HINT_STATUS_SET: ReadonlySet<string> = new Set<PreviewStatus>([
  * card, a 429 on `read` is an open that never became one, a 429 on `hint` is
  * a clip the page reports as "no clip" for a reason that was ours, a 429 on
  * `check` is a question answered with no verdict shown — the page advances
- * without one, so nobody reports it. The answer limit was raised from 20 to
- * 60 because the 21st finisher in an office was being refused, and that was
- * found from a report — nothing counted it.
+ * without one, so nobody reports it — and a refusal on `card` is a chat
+ * card drawn with the site's generic picture instead of the quiz's. The
+ * answer limit was raised from 20 to 60 because the 21st finisher in an
+ * office was being refused, and that was found from a report — nothing
+ * counted it.
  *
  * A limiter refusal means KV is up (the `incr` that said no succeeded), so
  * unlike most of this file's counters this one is written in exactly the
  * situation it describes.
  */
-export type QuizThrottledRoute = "create" | "read" | "check" | "answer" | "hint" | "board";
+export type QuizThrottledRoute = "create" | "read" | "check" | "answer" | "hint" | "board" | "card";
 
 export const QUIZ_THROTTLED_ROUTES: readonly QuizThrottledRoute[] = [
   "create",
@@ -204,6 +206,7 @@ export const QUIZ_THROTTLED_ROUTES: readonly QuizThrottledRoute[] = [
   "answer",
   "hint",
   "board",
+  "card",
 ];
 
 function key(day: string, metric: string): string {

@@ -37,8 +37,14 @@ in, they wanted each tap to say right or wrong rather than a list at the end.
 
 - **A per-quiz card image** (`app/q/[code]/opengraph-image.tsx`): wordmark,
   "Music taste quiz" / 「音樂品味測驗」, the question naming the owner in the
-  owner's language, the count and the rule as pills; the playlist's name
-  when there is no owner. This reverses 1.10.0's "the card reuses the static
+  owner's language, the count under it at a size a chat thumbnail keeps
+  (with the playlist's name in front when there is no owner), the rule as a
+  pill. Bounded three ways the edge header cannot be — a malformed code and
+  a refused render (`quiz:card`, 60 per 10 min, counted as
+  `quiz_throttled:card`) are sent to the static site card, a non-canonical
+  spelling to the canonical URL (the page does the same) — and the CJK font
+  is fetched by the route itself so its outcome can choose the header:
+  `next/og`'s own loader fails soft into boxes under the day-long header. This reverses 1.10.0's "the card reuses the static
   image" and the test that pinned it: that decision was about a `ƒ` render
   paid once per unfurler per share, and the route now sets its own
   lower-case `cache-control: public, max-age=0, s-maxage=86400` (60 for a
@@ -103,11 +109,33 @@ in, they wanted each tap to say right or wrong rather than a list at the end.
 - **`.q-half.is-on` is white, not green.** Green now means "this is the
   song"; a chosen half waiting on its verdict must not look like one.
 
+### Review, before push
+
+Seven specialists, a red team and a coverage audit ran under `/ship`. What
+changed because of them: the check route's out-of-range 400 became the
+sheet's 422 `quiz_invalid_answers`; `CheckQuizResponse.correct` was dropped
+(the page compares `pick === answer` itself, as it must for a restored
+question); the seam's words and tone come from one ladder, and a question
+answered whose verdict never came reads "answered — it counts at the end"
+(`revealPending`) in a locked tone rather than the pending one; the pending
+fill is a mid grey, not white; a wrong segment is a dark red, so the tally
+does not depend on hue; a hint still in flight when the half is tapped is
+no longer charged or played under the verdict; a lost verdict is
+`quiz_check_lost` in GA4, bucketed by reason, since the server only ever
+sees the refusals; `of starts` is documented as the ceiling it is
+(`completed` counts replays); and 18 tests were added, including
+`tests/quiz-reveal.test.ts`, which pins the client's guards by reading the
+source.
+
 ### Known gaps
 
 - **`quiz:started` began at this deploy.** A stats window straddling it
   reads `started` low against `opened`; wait a week before reading
   `of starts` against the length table.
+- **`QUIZ_CHECK_LIMIT` is the largest single-address KV budget on the site**
+  (600 × 2 commands per 10 min ≈ 173k a day). Kept knowingly; `refused:
+  check` is the instrument, and lowering it is a product call about who
+  gets no verdicts.
 - **A devtools user can learn an answer from `check` and change theirs
   before submitting.** Same class as the throwaway-name cheat the store's
   header already concedes; the party-toy rule stands. If the board ever
@@ -115,8 +143,9 @@ in, they wanted each tap to say right or wrong rather than a list at the end.
   first pick — a hash per taker, its own TTL — which is what was rejected
   here.
 - **The card image's CJK glyphs depend on Google Fonts at render time.**
-  A failed fetch renders the title without them; the `og:title` beside it
-  still carries the name. Bundling a subset font is the fix if it shows up.
+  A failed fetch now costs a minute at the edge rather than a day, and the
+  `og:title` beside the picture still carries the name; bundling a subset
+  font is the fix if `s-maxage=60` cards show up often in the logs.
 - **`/j` still unfurls as the home page**, for the same canonical reason.
   A room link is a QR nine times in ten, so it was left; the fix is the
   same three lines.

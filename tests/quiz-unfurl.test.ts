@@ -2,7 +2,8 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { QUIZ_COPY, quizCardCopy } from "@/lib/quiz-copy";
+import { QUIZ_COPY, quizCardCopy, quizTitle } from "@/lib/quiz-copy";
+import { QUIZ_NAME_MAX } from "@/types/quiz";
 
 /**
  * The quiz link's card in a group chat.
@@ -84,6 +85,34 @@ describe("the quiz link's unfurl", () => {
     expect(source).not.toMatch(/\/opengraph-image/);
   });
 
+  it("is noindex on both branches, and the segment layout drops the root canonical for the board too", () => {
+    // The page sets `robots` itself on the found and the fallback branch;
+    // app/q/layout.tsx is what covers /q/[code]/board and anything added
+    // beside it. The layout also nulls `alternates.canonical`, because a
+    // nested segment inherits the root's — and the board, which sets no
+    // metadata of its own, would otherwise declare itself the home page.
+    expect(source.match(/robots:\s*noindex/g) ?? []).toHaveLength(2);
+    const layout = read("app/q/layout.tsx");
+    expect(layout).toMatch(/robots:\s*\{\s*index:\s*false,\s*follow:\s*false\s*\}/);
+    expect(layout).toMatch(/alternates:\s*\{\s*canonical:\s*null\s*\}/);
+    expect(layout).not.toMatch(EDGE_RUNTIME);
+  });
+
+  it("names the owner in the title when there is one, and the playlist otherwise, in both languages", () => {
+    // `quizTitle` is the one place the card's headline is composed — the
+    // page's `<title>`, `og:title` and the image all go through it. A blank
+    // owner is "no owner": `createQuiz` stores one as null, and an empty
+    // string must read the same way here, never as "know 's music taste".
+    for (const locale of ["en", "zh"] as const) {
+      const copy = QUIZ_COPY[locale];
+      expect(quizTitle(copy, "Wayn")).toBe(copy.introTitleOwner.replace("{owner}", "Wayn"));
+      expect(quizTitle(copy, "Wayn")).not.toContain("{owner}");
+      for (const none of [null, undefined, ""]) {
+        expect(quizTitle(copy, none)).toBe(copy.introTitlePlaylist);
+      }
+    }
+  });
+
   it("relies on the root layout's metadataBase to make the image URL absolute", () => {
     // A relative image URL in a nested segment resolves against the base the
     // root layout declares — Next inherits it — and an unfurler is handed
@@ -97,6 +126,7 @@ describe("the quiz link's unfurl", () => {
 
 describe("the per-quiz card image", () => {
   const image = read(QUIZ_IMAGE);
+  const source = read(QUIZ_PAGE);
 
   it("is the segment's opengraph-image, on the Node runtime", () => {
     expect(existsSync(join(process.cwd(), QUIZ_IMAGE))).toBe(true);
@@ -122,7 +152,63 @@ describe("the per-quiz card image", () => {
     expect(found).toBeGreaterThanOrEqual(60 * 60);
     expect(missing).toBeLessThanOrEqual(5 * 60);
     expect(found).toBeGreaterThan(missing);
-    expect(image).toMatch(/peek \? FOUND_CACHE_CONTROL : MISSING_CACHE_CONTROL/);
+    // The long header needs both the quiz *and*, for a Han card, the font:
+    // next/og's own loader fails soft into boxes under whatever header was
+    // already chosen, so the route fetches the font itself and lets the
+    // outcome decide. A tofu card is a minute at the edge, not a day.
+    expect(image).toMatch(/peek && \(!wantsHan \|\| hanFont\) \? FOUND_CACHE_CONTROL : MISSING_CACHE_CONTROL/);
+    expect(image).toMatch(/const hanFont = wantsHan \? await loadHanFont\(text\) : null;/);
+    expect(image).toMatch(/AbortSignal\.timeout\(FONT_TIMEOUT_MS\)/);
+    expect(image).toMatch(/format\\\('\(\?:opentype\|truetype\)'\\\)/);
+  });
+
+  it("is bounded where the edge header cannot bound it: malformed, non-canonical, and per address", () => {
+    // The edge only knows the exact URL. A malformed segment must never
+    // reach KV or satori; a lower-case code must collapse onto the canonical
+    // image URL so a quiz has one cache key; and what remains is counted
+    // per address like every other route — a metadata image is a route.
+    // Every refusal is a redirect to the static site card, which unfurlers
+    // follow, never a 4xx that draws no picture at all.
+    const handler = image.match(/export default async function QuizCard[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(handler).toMatch(/const canonical = normalizeQuizCode\(code\);/);
+    expect(handler).toMatch(/if \(!canonical\) return sendTo\(STATIC_CARD, FOUND_CACHE_CONTROL\);/);
+    expect(handler).toMatch(/if \(canonical !== code\) return sendTo\(`\/q\/\$\{canonical\}\/opengraph-image`/);
+    expect(handler).toMatch(/rateLimit\(`quiz:card:\$\{ip\}`, QUIZ_CARD_LIMIT, QUIZ_CARD_WINDOW_SECONDS\)/);
+    expect(handler).toMatch(/await recordQuizThrottled\("card"\);\s*return sendTo\(STATIC_CARD, "no-store"\);/);
+    // The limiter runs before the read and the render, never after.
+    expect(handler.indexOf("rateLimit(")).toBeLessThan(handler.indexOf("peekQuiz("));
+    expect(handler.indexOf("peekQuiz(")).toBeLessThan(handler.indexOf("new ImageResponse("));
+    expect(image).toMatch(/status: 307/);
+    expect(image).toMatch(/const STATIC_CARD = "\/opengraph-image";/);
+    // And the page sends a non-canonical spelling to the canonical one too,
+    // so the image URL Next attaches is the canonical one.
+    expect(source).toMatch(/if \(canonical && canonical !== code\) redirect\(`\/q\/\$\{canonical\}`\);/);
+  });
+
+  it("drops a size for a long title, and both sizes are reachable from the copy", () => {
+    // Satori does not shrink text to fit: a title over `LONG_TITLE` at the
+    // large size wraps past three lines and off the card. The threshold has
+    // to sit between the shortest headline the copy can produce and the
+    // longest — a name at `QUIZ_NAME_MAX` in the English template — or one
+    // of the two branches is dead code and the other is the whole card.
+    const threshold = Number(image.match(/const LONG_TITLE = (\d+);/)?.[1]);
+    expect(threshold).toBeGreaterThan(0);
+    expect(image).toMatch(/title\.length > LONG_TITLE \? \d+ : \d+/);
+    const [small, large] = (image.match(/title\.length > LONG_TITLE \? (\d+) : (\d+)/) ?? []).slice(1).map(Number);
+    expect(small).toBeLessThan(large);
+
+    const shortest = Math.min(
+      ...(["en", "zh"] as const).map((l) => quizCardCopy({ locale: l, ownerName: null, playlistName: "x", questionCount: 10 }).title.length)
+    );
+    const longest = Math.max(
+      ...(["en", "zh"] as const).map(
+        (l) => quizCardCopy({ locale: l, ownerName: "W".repeat(QUIZ_NAME_MAX), playlistName: "x", questionCount: 10 }).title.length
+      )
+    );
+    expect(shortest).toBeLessThanOrEqual(threshold);
+    expect(longest).toBeGreaterThan(threshold);
+    // The fallback card's headline is the longest fixed string; it must fit the small size's three lines too.
+    expect(quizCardCopy(null).title.length).toBeLessThan(threshold * 2);
   });
 
   it("renders no emoji: each one is a fetch on every uncached render", () => {
@@ -131,17 +217,20 @@ describe("the per-quiz card image", () => {
 
   it("takes its words from lib/quiz-copy.ts, in the owner's language", () => {
     expect(image).toMatch(/quizCardCopy\(/);
+    // The count sits under the title, at a size a chat thumbnail keeps — a
+    // 24px pill is 6–9px on a phone, and the count is the one other fact
+    // the card is for.
     const zh = quizCardCopy({ locale: "zh", ownerName: "小明", playlistName: "深夜", questionCount: 20 });
     expect(zh.title).toBe("你有多懂 小明 的音樂品味？");
-    expect(zh.subtitle).toBeNull();
-    expect(zh.pills).toEqual(["共 20 題", QUIZ_COPY.zh.ogRule]);
+    expect(zh.subtitle).toBe("共 20 題");
+    expect(zh.pills).toEqual([QUIZ_COPY.zh.ogRule]);
     expect(zh.label).toBe(QUIZ_COPY.zh.ogQuizLabel);
 
-    // No owner: the title asks about "this playlist", so the playlist is named.
+    // No owner: the title asks about "this playlist", so the playlist is named, then the count.
     const en = quizCardCopy({ locale: "en", ownerName: null, playlistName: "Late nights", questionCount: 10 });
     expect(en.title).toBe(QUIZ_COPY.en.introTitlePlaylist);
-    expect(en.subtitle).toBe("Late nights");
-    expect(en.pills[0]).toBe("10 questions");
+    expect(en.subtitle).toBe("Late nights · 10 questions");
+    expect(en.pills).toEqual([QUIZ_COPY.en.ogRule]);
 
     // Could not be read: still a quiz, still not the party game, in English.
     const gone = quizCardCopy(null);
