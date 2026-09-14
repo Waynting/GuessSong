@@ -219,6 +219,43 @@ invisible; a wrong `unavailable` costs one retry.**
 
 ---
 
+## D9 — The quiz is a loop surface, not a game mode
+
+**Decided:** 2026-09-14.
+
+`npm run stats` that morning: 4,648 games, 58.2% repeat hosts — retention is
+fine — and the `share` arm, the only surface whose carrier leaves the party, at
+0 of 50 ever. Every other arm is a footer (1–2%) or a QR on a television (1%).
+Nothing that a friend reaches by tapping a URL in a chat had been tried, so
+"off-site does not convert" and "QR out of a PNG does not convert" were
+indistinguishable. Taste Quiz is the first link-shaped surface, and the first
+off-site one whose impression happens on a page of ours. Its number is
+`click:quiz_result` against `impression:quiz_result`; the quiz is the reason
+someone sends the link.
+
+**Mechanic:** four titles, one really in the playlist, no audio in the question.
+A clip is a *hint*, fetched on tap, rationed at one per five questions, a
+tiebreak rather than a penalty. Previews are the hottest path in the app; a quiz
+that played one per question would multiply it by the number of friends, and a
+throttled minute would land as a silent quiz on a cold visitor.
+
+**Decoys:** a built-in pool (`lib/quiz-decoys.ts`), tiered so the decoy is as
+close to the playlist as the pool allows — same artist first.
+
+**Rejected:** a second Spotify call per creation for top-tracks decoys (doubles
+the cold cost of the one thing the playlist path is shaped around; reopen if
+the verdict distribution piles at `soulmate`); decoys from other users' cached
+playlists (a data flow between strangers); a stateless `/q/<playlistId>?seed=`
+link (a cold Spotify load per active day per quiz, unstable under playlist
+edits, and the board needs KV anyway); any per-person view — "my quizzes",
+"claim this quiz" — which is D1 again.
+
+**Would reopen if:** `click:quiz_result` reads like `share` after two weeks.
+That would be the answer that this audience does not convert off-site, and it
+is worth having.
+
+---
+
 ## Rejected and still rejected
 
 Short entries, so they are not re-proposed as new ideas.
@@ -227,6 +264,6 @@ Short entries, so they are not re-proposed as new ideas.
 |---|---|---|
 | Automated answer checking | The host being the judge is what makes it a party game rather than a quiz app; arguing with a string matcher is not fun | never, probably |
 | Full-site Chinese localisation | Real leak — Chinese-keyword SEO lands on an English UI — but it connects no feedback loop, and `useErrorLocale` starts at `"en"` and switches in an effect, which is fine for an empty error slot and a full-page flash for body copy | after the loop numbers arrive, with a server-side `Accept-Language` hint |
-| More game modes | Presume repeat play, the one evidence category that is entirely absent | `host_game_index >= 2` climbs |
+| More game modes | Presume repeat play, the one evidence category that is entirely absent. (The 1.9.0 quiz is not one: it is a loop surface with a toy attached, see D9, and the repeat-host number had reached 58% by then) | `host_game_index >= 2` climbs |
 | A `/admin` stats page | Same failure mode as GA4 with a different URL — you still have to remember to open it | never; extend `npm run stats` instead |
 | Apple Music, Discord bot | Proposed and withdrawn by the author for lack of evidence, twice | a concrete user signal |
