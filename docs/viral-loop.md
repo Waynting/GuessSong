@@ -22,13 +22,13 @@ cards — had already shipped. This is the cheap half nobody had written.
 
 ---
 
-## 2. The six surfaces
+## 2. The seven surfaces
 
 Each is declared **once** in `lib/loop-links.ts` and derived from there by the
 link, the analytics param, and the server-side validator. The order below is the
 order of that declaration, which reads down the funnel: the two passive footers,
 the two moments a player has just finished doing something, then the two QR
-codes.
+codes, and last the one surface whose carrier is a URL rather than a QR.
 
 | Surface | Where | When |
 |---|---|---|
@@ -38,6 +38,14 @@ codes.
 | `join_submitted` | Mixed Playlist confirmation screen (`app/j/[code]/page.tsx:103`) | after a playlist is submitted |
 | `game_over` | QR on the host's Game Over screen (`app/game/page.tsx`, `<LoopQr />`) | party mode, end of game |
 | `share` | QR drawn into the result card image (`lib/result-image.ts`'s `drawCardFooter`) | wherever the picture ends up |
+| `quiz_result` | the result screen of a Taste Quiz (`app/q/[code]/quiz-client.tsx:530`, `<LoopCtaButton surface="quiz_result">`) | after a taker has submitted their answers |
+
+`quiz_result` (1.9.0) is the first surface reached by tapping a URL in a group
+chat rather than by scanning a QR off a screen or out of an image. It is kept
+apart from `share` even though both leave the party: `share` had converted 0 of
+50 when the quiz was built, and the question the quiz exists to answer is
+whether that was the audience or the carrier. Merging the two rows would bury
+the answer — [decisions.md D9](decisions.md#d9--the-quiz-is-a-loop-surface-not-a-game-mode).
 
 ### Why one declaration
 
@@ -168,6 +176,7 @@ game_over            22           9    40.9%
 join_footer          44           2     4.5%
 join_submitted       31           7    22.6%
 share                14           1     7.1%
+quiz_result          19           3    15.8%
 
 Games started       33
 Repeat hosts        4    12.1% of games
@@ -176,6 +185,16 @@ Games by host's game number
    1     21  █████████████████████████
    2      3  ████
   10+     1  █
+
+Playlist quiz — the link-shaped surface
+  created         12
+  opened          31   2.6 per quiz
+  completed       19    61.3% of opens
+    acquaintance     7  ██████████████████████████████
+    close            6  ██████████████████████████
+    soulmate         2  █████████
+    stranger         4  █████████████████
+  the CTA on the result screen is the quiz_result row above
 ```
 
 | Field | Meaning |
@@ -186,6 +205,10 @@ Games by host's game number
 | `rate` | `followed ÷ shown` |
 | `Games started` | real hosted parties — only the paths that call `recordHostedStart` |
 | `Repeat hosts` | games at index ≥ 2. **The number this work is waiting on** |
+| `created` / `opened` / `completed` | the Taste Quiz funnel (`recordQuizStage` in `lib/loop-stats.ts`), bumped by the route that did the thing — `POST /api/quiz`, `GET /api/quiz/[code]`, `POST /api/quiz/[code]/answer` — not beaconed from a page, so nothing here is lost to a tab closing. The block is printed only once something has been recorded |
+| `per quiz` | `opened ÷ created`. Below 1 means quizzes are being made and not sent — a share-step problem, not a quiz problem |
+| `of opens` | `completed ÷ opened`, the quiz itself. **`opened` is a ceiling, not a floor — see §6** |
+| the verdict bars | how completed quizzes came out (`quiz_verdict:<bucket>`, from `verdictFor` in `lib/quiz.ts`). The difficulty gauge — see §7 |
 
 ---
 
@@ -216,6 +239,15 @@ did".**
 - **`organic` is a catch-all** for every lost attribution: a PWA launched from
   the home screen, a stripped query string, a retyped bare domain. Organic is
   already nearly all traffic, so the loop's share of starts is a floor.
+- **`opened` is the one figure here that is a ceiling.** It is bumped on every
+  successful `GET /api/quiz/[code]`, and the quiz page fetches on every mount,
+  reload and Retry, so one friend opening the link twice is two opens.
+  `completed ÷ opened` therefore reads *low* — the opposite direction from
+  every other number on this page. `created` and `completed` are floors like
+  the rest: one write per quiz made, one per answer sheet graded. (The link
+  unfurler in the chat app is not in this number: `opened` is bumped by the
+  API the page's own script calls, deliberately not by `generateMetadata`,
+  which every unfurler fetches.)
 
 What the table answers reliably is **trend** and **relative difference between
 surfaces**. Not absolute level.
@@ -237,6 +269,10 @@ working call to action deleted. Collect two weeks first. Shapes, not numbers:
 | `buzz_cta` well below `join_submitted` | "a round resolved" is the wrong proxy for the right moment | that is the signal that changing the buzzer protocol for a real end-of-game CTA is worth it |
 | `Repeat hosts` share rising | someone actually came back | monetisation moves from next quarter to next month |
 | `Repeat hosts` stays low | **not** "nobody returns" | cross-check against GA4 returning users, which rides a cookie and is unaffected by the ITP eviction above |
+| `quiz_result` reads like `share` after two weeks | this audience does not convert off-site, link or QR alike | the reading D9 in `decisions.md` said it would reopen on — a real answer, worth having |
+| `per quiz` below 1 | quizzes are being made and not sent | the share step on the setup page (`components/quiz-panel.tsx`), not the questions |
+| `of opens` well under 40% | takers open and do not finish; ten questions is too long for this audience | shorten `QUIZ_DEFAULT_QUESTION_COUNT` in `types/quiz.ts` before touching the questions — and remember `opened` is a ceiling (§6), so this reads worse than it is |
+| verdicts pile at `soulmate` | the decoys are too easy to tell from the playlist | the trigger for a Spotify-backed decoy source (`artists/{id}/top-tracks`) — `CHANGELOG.md` 1.9.0, known gaps |
 
 ---
 

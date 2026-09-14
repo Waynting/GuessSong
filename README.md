@@ -4,7 +4,7 @@ A local party music guessing game powered by Spotify playlists. Live at **[guess
 
 No login, no accounts. The host pastes a public Spotify playlist URL, everyone guesses out loud, and the host awards points.
 
-Current version: **1.7.5** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **1.9.0** — see [CHANGELOG.md](./CHANGELOG.md).
 
 ## How It Works
 
@@ -50,10 +50,17 @@ Two orthogonal choices: **how you play** and **where the songs come from**.
 
 Buzzer Mode and Mixed Playlist Mode share a single room code and QR: the host claims the buzzer room first, then opens the playlist mailbox under the same code.
 
+### Taste Quiz — the third option on the setup page, and not a game
+
+Paste a playlist, type your name, pick 5 / 10 / 15 / 20 questions, and you get a **link** to send to a group chat instead of a game to host. A friend opens it on their own phone and answers "which of these four songs is really in the playlist?" — no audio in the question. A 30s clip is a *hint*, rationed at one per five questions, and using fewer only breaks ties. They get a score, a verdict (`soulmate` / `close` / `acquaintance` / `stranger`) and the public ranking. The results page (`/q/<code>/board`), which names the answers and shows who got each question, opens only on the device that made the quiz. A quiz lives seven days.
+
+It is built as the first **link-shaped loop surface** rather than as a game mode — why, and what was rejected, is [decisions.md D9](docs/decisions.md#d9--the-quiz-is-a-loop-surface-not-a-game-mode).
+
 ## Features
 
 - Spotify playlist import via Client Credentials — no user auth, players never see a Spotify sign-in
 - Three game modes and three playlist sources (above)
+- **Taste Quiz** — a playlist turned into a link: friends answer on their own phones, get a verdict, and land on a board of who knows the owner best (above)
 - 30s audio previews resolved from the **iTunes Search API**, falling back to **Deezer** — both keyless, so there is nothing to sign up for
 - Blurred album art hint system, live progress bar + countdown, replay from the guessing phase
 - Export the final scoreboard (and the Mixed-mode taste card) as a PNG
@@ -69,7 +76,7 @@ Buzzer Mode and Mixed Playlist Mode share a single room code and QR: the host cl
 - **Tailwind CSS** + [shadcn/ui](https://ui.shadcn.com/) primitives (the setup and game pages use inline styles instead)
 - **Spotify Web API** (Client Credentials) for playlists
 - **iTunes Search API** → **Deezer** for audio previews — both are public, unauthenticated endpoints: no key, no account, nothing in `.env`
-- **[Upstash Redis](https://upstash.com/)** for rooms, rate limiting, and the playlist/preview caches (falls back to an in-process `Map` locally)
+- **[Upstash Redis](https://upstash.com/)** for rooms, quizzes, rate limiting, and the playlist/preview caches (falls back to an in-process `Map` locally)
 - **[Cloudflare Workers](https://workers.cloudflare.com/) + Durable Objects** for live buzzer rooms (`worker/`)
 - **[Vitest](https://vitest.dev/)** for both suites; `zod` for request validation, `qrcode` for room QR codes
 
@@ -95,7 +102,7 @@ cp .env.example .env.local
 |---|---|---|
 | `SPOTIFY_CLIENT_ID` | Yes | App-level Client Credentials, not user login — no redirect URI. Get them at [developer.spotify.com](https://developer.spotify.com/dashboard). Every playlist comes from Spotify, so nothing loads without these. |
 | `SPOTIFY_CLIENT_SECRET` | ⤴ | |
-| `UPSTASH_REDIS_REST_URL` | Production | Backs rooms, rate limits, and both caches (`lib/kv.ts`). Unset locally → in-process `Map`, which is fine for one `next dev` process but **not** for multi-instance serverless. Free tier at [upstash.com](https://upstash.com). |
+| `UPSTASH_REDIS_REST_URL` | Production | Backs rooms, quizzes, rate limits, and both caches (`lib/kv.ts`). Unset locally → in-process `Map`, which is fine for one `next dev` process but **not** for multi-instance serverless. Free tier at [upstash.com](https://upstash.com). |
 | `UPSTASH_REDIS_REST_TOKEN` | ⤴ | |
 | `NEXT_PUBLIC_BUZZER_WS_URL` | Buzzer Mode only | `ws://127.0.0.1:8787` locally, `wss://guesssong-buzzer.<subdomain>.workers.dev` in production. Unset → the Buzzer Mode toggle is hidden. |
 | `NEXT_PUBLIC_BASE_URL` | Optional | Defaults to `https://www.guessong.app`. |
@@ -173,6 +180,7 @@ app/
   guides/                    Guides index + eight articles (metadata declared in lib/guides.ts)
   privacy/, terms/, contact/ Policy pages; zh/privacy and zh/terms are the Chinese halves
   j/[code]/                  Mixed Playlist Mode join page
+  q/[code]/                  Taste Quiz — the taker's page; board/ is the owner's results page
   buzz/[code]/               Buzzer Mode player page (holds the live WebSocket)
   share/                     Web Share Target handler + /share/unsupported explainer
   icons/[size]/              PWA icons, prerendered at build (never per request)
@@ -180,12 +188,12 @@ app/
   error.tsx, global-error.tsx  Error boundaries — see "When the client throws" below
   icon.tsx, opengraph-image.tsx, robots.ts, sitemap.ts
 components/                  Buzzer button + host panel, room panel, mixed collector,
-                             install banner, changelog modal, service notice,
+                             quiz panel, install banner, changelog modal, service notice,
                              crash screen, ui/ (shadcn primitives)
 lib/                         All shared logic — see "Architecture" below
 worker/                      Cloudflare Worker + BuzzerRoom Durable Object
-tests/                       32 Vitest files, 591 cases
-types/                       Track, room, preview, and service-status wire types
+tests/                       35 Vitest files, 715 cases
+types/                       Track, room, quiz, preview, and service-status wire types
 ```
 
 ## API Routes
@@ -201,6 +209,11 @@ Every route is IP rate limited (`lib/rate-limit.ts`) with a fixed window; limits
 | `/api/room/[code]/submit` | POST | `{playerName, playlistUrl}` → `{ok, trackCount}`. | 20 / 10 min |
 | `/api/room/[code]/status` | GET | Who has submitted so far (host polls every 4s). | 200 / 10 min |
 | `/api/room/[code]/pool` | GET | `?sampledPerPlayer=N` + `x-host-token` header → the sampled, deduped pool. One-shot consume. | 20 / 10 min |
+| `/api/quiz` | POST | `{url, ownerName?, questionCount, locale?}` → `{code, hostToken, expiresAt, questionCount, playlistName}`. Turns a playlist into a Taste Quiz; the feature's only Spotify call, through the same cache as `/api/playlist`. | 10 / 10 min |
+| `/api/quiz/[code]` | GET | The quiz as a taker sees it — four titles per question, no answer key — plus the public ranking. Counts the open. | 60 / 10 min |
+| `/api/quiz/[code]/answer` | POST | `{name, answers, hintsUsed?, submissionId?}` → score, verdict and ranking. Graded server-side; a name is held once per quiz. | 60 / 10 min |
+| `/api/quiz/[code]/hint` | GET | `?q=N` (zero-based) → a clip of question N's real track, so the phone never names the answer in a request. `&refresh=1` repairs a dead URL. | 60 / 10 min (refresh: 10) |
+| `/api/quiz/[code]/board` | GET | `x-host-token` header → ranking, mean, and per-question correct counts naming each real song. 403 `quiz_not_host` otherwise. | 60 / 10 min |
 | `/api/status` | GET | `{throttled, approachingLimit, code, retryAfterSeconds}` — how much of the shared Spotify allowance is left. One KV read, never touches Spotify. Drives the site notice. | 120 / 10 min |
 | `/share` | GET | Web Share Target — extracts a playlist from shared text and redirects to `/?playlist=…`. | — |
 | `/icons/[size]` | GET | Generated PWA icons (`192`, `512`, `maskable`). | — |
@@ -257,7 +270,7 @@ Both read `GET /api/status`, which reads the same KV keys the admission gate wri
 
 ### Error messages
 
-`lib/error-messages.ts` is the only place a user-visible error string exists — one code union and one `{en, zh}` table, so a missing translation is a compile error. The server sends `{error, code}` and the client picks the language from the device locale. Localising server-side would be wrong: one room is read by several devices, and cached 404s would freeze one language into the cache for everyone.
+`lib/error-messages.ts` is the only place a user-visible error string exists — one code union and one `{en, zh}` table, so a missing translation is a compile error. The server sends `{error, code}` (plus `params` when the code carries a placeholder such as `{count}`, so the phone fills the template in its own language) and the client picks the language from the device locale. Localising server-side would be wrong: one room is read by several devices, and cached 404s would freeze one language into the cache for everyone.
 
 ### Release notes
 
@@ -266,7 +279,7 @@ Two hand-written changelogs, and a release updates both: [`CHANGELOG.md`](./CHAN
 ## Testing
 
 ```bash
-npm test              # 32 files, 591 cases — vitest, jsdom
+npm test              # 35 files, 715 cases — vitest, jsdom
 cd worker && npm test # Durable Object tests inside workerd
 ```
 
@@ -287,7 +300,7 @@ need more than a paragraph:
 - [**architecture**](docs/architecture.md) — the system in diagrams: the
   Vercel/Cloudflare split, one game end to end, and the four-layer shape shared
   by all three caches
-- [**viral-loop**](docs/viral-loop.md) — the five loop surfaces, and how to run
+- [**viral-loop**](docs/viral-loop.md) — the seven loop surfaces, and how to run
   and read `npm run stats` without drawing the wrong conclusion
 - [**operations**](docs/operations.md) — deploying (the Worker is manual),
   reading the cache logs, and symptom-by-symptom troubleshooting
