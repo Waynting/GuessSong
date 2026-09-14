@@ -27,19 +27,28 @@ export const QUIZ_CODE_LENGTH = 6;
 export const QUIZ_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /**
- * Presets rather than a free field. The host's "number of songs" control tops
- * out at 500 because a party plays through them; a quiz is answered by a cold
- * visitor on a phone in a group chat, and twenty questions is already the long
- * end of what that person will finish. See lib/song-count.ts for why its state
- * machine is not reused here — a pill row has none of the states it exists for.
+ * Ten to fifty, any integer, with four one-tap picks. The floor is set by the
+ * option count below: with two options a coin flip lands seven of ten 17% of
+ * the time, so fewer than ten questions cannot tell a friend from a stranger;
+ * at twenty it is 2% and at fifty it is gone. The ceiling is what a cold
+ * visitor on a phone in a group chat will finish — fifty two-option taps is a
+ * couple of minutes, and the host's own "number of songs" control tops out at
+ * 500 only because a party plays through them. The typed field reuses
+ * `lib/song-count.ts`'s state machine (`QUIZ_COUNT_CONTROL` in `lib/quiz.ts`),
+ * for the same two rules that module exists for.
  */
-export const QUIZ_QUESTION_COUNTS = [5, 10, 15, 20] as const;
-export const QUIZ_DEFAULT_QUESTION_COUNT = 10;
-export const QUIZ_MIN_QUESTIONS = 5;
-export const QUIZ_MAX_QUESTIONS = 20;
+export const QUIZ_QUESTION_COUNTS = [10, 20, 30, 50] as const;
+export const QUIZ_DEFAULT_QUESTION_COUNT = 20;
+export const QUIZ_MIN_QUESTIONS = 10;
+export const QUIZ_MAX_QUESTIONS = 50;
 
-/** One real track and three decoys per question. */
-export const QUIZ_OPTION_COUNT = 4;
+/**
+ * One real track and one decoy per question: a duel, not a list. Two options
+ * make the screen the two answers and nothing else, and put chance at 50% —
+ * which is why `QUIZ_MIN_QUESTIONS` is ten and `verdictFor`'s lowest passing
+ * bucket sits above a coin flip. Four was the first shape and read as a form.
+ */
+export const QUIZ_OPTION_COUNT = 2;
 
 /**
  * Scoreboard rows one quiz keeps. Past this a taker is still graded and shown

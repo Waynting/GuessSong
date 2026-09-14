@@ -76,6 +76,28 @@ export interface QuizCopy {
   boardShareLink: string;
   boardHintsColumn: string;
   boardRankingTitle: string;
+  /** The two songs the whole board turned on. */
+  boardEasiest: string;
+  boardHardest: string;
+  /* The duel page: what sits around the two answers */
+  backButton: string;
+  resultKicker: string;
+  /** Under the score: whose taste, or which playlist. */
+  resultSubjectOwner: string;
+  resultSubjectPlaylist: string;
+  rankLine: string;
+  reviewRight: string;
+  reviewMissed: string;
+  /* The host's panel on the setup page, once the link exists */
+  panelQuestionsFrom: string;
+  panelSend: string;
+  panelCopyLink: string;
+  panelCopied: string;
+  panelBoardLink: string;
+  panelDeviceOnly: string;
+  panelExpires: string;
+  panelShareTitle: string;
+  panelQrAlt: string;
 }
 
 export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
@@ -83,9 +105,9 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     introTitleOwner: "How well do you know {owner}'s music taste?",
     introTitlePlaylist: "How well do you know this playlist?",
     introBody:
-      "{count} questions. Each shows four songs and only one is really in the playlist — guess first. You get {hints} {hintWord} to hear the song if you're stuck.",
+      "{count} questions. Each is two songs and only one is really in the playlist — guess first. You get {hints} {hintWord} to hear the song if you're stuck.",
     ogDescription:
-      "{count} questions. Four songs each, only one is really in the playlist. Can you tell which?",
+      "{count} questions. Two songs each, only one is really in the playlist. Can you tell which?",
     nameLabel: "Your name",
     namePlaceholder: "So they know who beat them",
     startButton: "Start →",
@@ -138,13 +160,31 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     boardShareLink: "Send to friends",
     boardHintsColumn: "hints",
     boardRankingTitle: "Ranking",
+    boardEasiest: "Everyone knew",
+    boardHardest: "Nobody could place",
+    backButton: "Back",
+    resultKicker: "Your verdict",
+    resultSubjectOwner: "on {owner}'s taste",
+    resultSubjectPlaylist: "on \"{playlist}\"",
+    rankLine: "#{rank} of {count}",
+    reviewRight: "Right",
+    reviewMissed: "Missed",
+    panelQuestionsFrom: "{count} questions from",
+    panelSend: "Send to friends →",
+    panelCopyLink: "Copy link",
+    panelCopied: "✓ Copied",
+    panelBoardLink: "See results — who knows you best →",
+    panelDeviceOnly: "Results are only visible on this device.",
+    panelExpires: "The link stops working on {date}.",
+    panelShareTitle: "GuessSong taste quiz",
+    panelQrAlt: "QR code for quiz {code}",
   },
   zh: {
     introTitleOwner: "你有多懂 {owner} 的音樂品味？",
     introTitlePlaylist: "你有多懂這份歌單？",
     introBody:
-      "共 {count} 題。每題四首歌，只有一首真的在歌單裡 — 先用猜的。卡住的話有 {hints} {hintWord}可以聽片段。",
-    ogDescription: "共 {count} 題。每題四首歌，只有一首真的在歌單裡，你分得出來嗎？",
+      "共 {count} 題。每題兩首歌，只有一首真的在歌單裡 — 先用猜的。卡住的話有 {hints} {hintWord}可以聽片段。",
+    ogDescription: "共 {count} 題。每題兩首歌，只有一首真的在歌單裡，你分得出來嗎？",
     nameLabel: "你的名字",
     namePlaceholder: "讓對方知道是誰贏了",
     startButton: "開始 →",
@@ -197,6 +237,24 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     boardShareLink: "傳給朋友",
     boardHintsColumn: "提示",
     boardRankingTitle: "排行榜",
+    boardEasiest: "最多人答對",
+    boardHardest: "最少人答對",
+    backButton: "上一題",
+    resultKicker: "你的判決",
+    resultSubjectOwner: "對 {owner} 的品味",
+    resultSubjectPlaylist: "對「{playlist}」",
+    rankLine: "第 {rank} 名，共 {count} 人",
+    reviewRight: "答對",
+    reviewMissed: "答錯",
+    panelQuestionsFrom: "共 {count} 題，來自",
+    panelSend: "傳給朋友 →",
+    panelCopyLink: "複製連結",
+    panelCopied: "✓ 已複製",
+    panelBoardLink: "看結果：誰最懂你 →",
+    panelDeviceOnly: "結果只有這台裝置看得到。",
+    panelExpires: "連結會在 {date} 失效。",
+    panelShareTitle: "品味鑒定",
+    panelQrAlt: "測驗 {code} 的行動條碼",
   },
 };
 

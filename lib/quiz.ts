@@ -2,7 +2,7 @@
  * The playlist quiz — "how well do you know my music taste?" — as pure rules.
  *
  * A host turns a playlist into a link; a friend opens it on their own phone
- * and, question by question, picks which of four songs is really in the
+ * and, question by question, picks which of two songs is really in the
  * playlist. This module builds those questions, grades the answers and ranks
  * the board. It holds no KV, no fetch and no React, for the reason
  * `lib/room-poll.ts` and `lib/song-count.ts` give: the suite reaches `lib/`,
@@ -40,13 +40,16 @@
 
 import type { Track } from "@/types";
 import {
+  QUIZ_DEFAULT_QUESTION_COUNT,
   QUIZ_MAX_QUESTIONS,
   QUIZ_MIN_QUESTIONS,
   QUIZ_OPTION_COUNT,
+  QUIZ_QUESTION_COUNTS,
   type QuizOption,
   type QuizQuestionView,
   type QuizScore,
 } from "@/types/quiz";
+import type { CountControl, SongCountState } from "@/lib/song-count";
 
 /* ------------------------------------------------------------------ */
 /* Script buckets                                                      */
@@ -153,7 +156,7 @@ export interface DecoyEntry {
   /**
    * Other spellings of the same act, native script first. Matched by the
    * tiers like `artist`, and the spelling shown when the playlist's own
-   * artist is in that script — four options must read in one script, or the
+   * artist is in that script — both options must read in one script, or the
    * one that differs is the answer.
    */
   aliases?: readonly string[];
@@ -226,7 +229,11 @@ function shuffle<T>(items: T[], rng: () => number): T[] {
 }
 
 /**
- * Three wrong answers for one right one, as close to home as the pool allows.
+ * The wrong answer(s) for one right one — `QUIZ_OPTION_COUNT - 1`, which is
+ * one — as close to home as the pool allows. The tiers below were written for
+ * three and lose nothing at one: with a single decoy the *first* tier that
+ * has anything decides the whole question, so "another song by the same
+ * artist" is what most questions become, which is the hardest shape there is.
  *
  * The tiers, in order, and why the order is the point:
  *   1. another song by the *same* artist — "they love The Weeknd, but is Save
@@ -235,7 +242,7 @@ function shuffle<T>(items: T[], rng: () => number): T[] {
  *   2. a song by some *other* artist in the playlist — still the owner's taste,
  *      still not in the playlist.
  *   3. same script, popularity within `DECOY_POPULARITY_WINDOW` — so a deep-cut
- *      playlist does not get three chart-toppers as the obvious odd ones out.
+ *      playlist does not get a chart-topper as the obvious odd one out.
  *   4. same script, any popularity.
  *   5. anything left, then anything at all — a pool bucket can run dry against
  *      a playlist that contains most of it, and a question with two options is
@@ -290,7 +297,7 @@ export function pickDecoys(
     take(fresh.filter(tier));
   }
   // The pool ran dry for this quiz: allow a decoy to appear twice rather than
-  // ship a question with fewer than four options.
+  // ship a question with fewer than `QUIZ_OPTION_COUNT` options.
   if (chosen.length < count) take(eligible);
 
   for (const d of chosen) ctx.used.add(identity(d));
@@ -342,6 +349,28 @@ function primaryArtist(track: Track): string {
 }
 
 /** Clamp a requested count to what the playlist can support. */
+/**
+ * The setup page's question-count control, bounded for the quiz. Hands
+ * `lib/song-count.ts`'s state machine the quiz's pills and range so the two
+ * rules that module pins — reject a half-typed number per keystroke, clamp an
+ * out-of-range one on blur — apply here without a second copy of them.
+ */
+export const QUIZ_COUNT_CONTROL: CountControl = Object.freeze({
+  presets: QUIZ_QUESTION_COUNTS,
+  min: QUIZ_MIN_QUESTIONS,
+  max: QUIZ_MAX_QUESTIONS,
+});
+
+export const DEFAULT_QUIZ_COUNT_STATE: SongCountState = Object.freeze({
+  count: QUIZ_DEFAULT_QUESTION_COUNT,
+  field: "",
+});
+
+/** The control's count as a number; the quiz has no "all" and never will. */
+export function quizCountOf(state: SongCountState): number {
+  return typeof state.count === "number" ? state.count : QUIZ_DEFAULT_QUESTION_COUNT;
+}
+
 export function clampQuestionCount(requested: number, usable: number): number {
   const wanted = Number.isFinite(requested)
     ? Math.min(QUIZ_MAX_QUESTIONS, Math.max(QUIZ_MIN_QUESTIONS, Math.trunc(requested)))
@@ -465,16 +494,20 @@ export function isAnswerList(value: unknown, questionCount: number): value is nu
 /* ------------------------------------------------------------------ */
 
 /**
- * One hint per five questions, at least one. 5 → 1, 10 → 2, 15 → 3, 20 → 4.
+ * One hint per ten questions, at least one. 10 → 1, 20 → 2, 30 → 3, 50 → 5.
  *
  * Rationed rather than priced. Half a point for a hinted answer makes "8.5 /
  * 10" and invites using the hint on every question; a small allowance makes
  * guessing the default and the clip the thing you save for the one you cannot
  * place, which is what "guess first, then hear it" asks for. The count is a
  * tiebreak on the board, not a penalty.
+ *
+ * Was one per five with four options. With two, a hint is a guaranteed point
+ * rather than a nudge, so the same ratio would hand a fifty-question quiz ten
+ * free answers — a fifth of the score.
  */
 export function hintAllowance(questionCount: number): number {
-  return Math.max(1, Math.round(questionCount / 5));
+  return Math.max(1, Math.round(questionCount / 10));
 }
 
 /**
@@ -496,6 +529,12 @@ export function clampHintsUsed(value: unknown, questionCount: number): number {
  * a promise ten questions cannot keep; "close friend" is what the number
  * actually supports. The thresholds are on the ratio so every question count
  * reads the same way.
+ *
+ * The lowest passing bucket sits *above* chance. With `QUIZ_OPTION_COUNT`
+ * two, chance is 50%, and the 40% floor that four options allowed would have
+ * handed "getting there" to a coin. 60% is where a friend starts to show over
+ * the noise at twenty questions; the two above it are unchanged in spirit and
+ * moved up to keep the gaps even.
  */
 export const QUIZ_VERDICTS = ["soulmate", "close", "acquaintance", "stranger"] as const;
 export type QuizVerdict = (typeof QUIZ_VERDICTS)[number];
@@ -504,8 +543,8 @@ export function verdictFor(correct: number, total: number): QuizVerdict {
   if (total <= 0) return "stranger";
   const ratio = correct / total;
   if (ratio >= 0.9) return "soulmate";
-  if (ratio >= 0.7) return "close";
-  if (ratio >= 0.4) return "acquaintance";
+  if (ratio >= 0.75) return "close";
+  if (ratio >= 0.6) return "acquaintance";
   return "stranger";
 }
 

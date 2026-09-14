@@ -9,7 +9,7 @@
  * answers `unavailable` — which the page shows as "no clip", without charging
  * the hint.
  *
- * The allowance (`hintAllowance`, one per five questions) is enforced on the
+ * The allowance (`hintAllowance`, one per ten questions) is enforced on the
  * phone, not here: with no identity there is nothing to count a tap against,
  * so this route bounds the upstream spend by IP alone. Sixty per ten minutes
  * is a household of honest takers; a determined one can hear every question,

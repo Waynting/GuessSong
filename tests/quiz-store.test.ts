@@ -13,7 +13,15 @@ import {
 } from "@/lib/quiz-store";
 import { QUIZ_DECOY_POOL } from "@/lib/quiz-decoys";
 import { PREVIEW_FIELD_MAX } from "@/types/preview";
-import { QUIZ_CODE_LENGTH, QUIZ_MAX_ENTRIES, QUIZ_NAME_MAX, QUIZ_TTL_SECONDS } from "@/types/quiz";
+import {
+  QUIZ_CODE_LENGTH,
+  QUIZ_MAX_ENTRIES,
+  QUIZ_MAX_QUESTIONS,
+  QUIZ_MIN_QUESTIONS,
+  QUIZ_NAME_MAX,
+  QUIZ_OPTION_COUNT,
+  QUIZ_TTL_SECONDS,
+} from "@/types/quiz";
 import type { Track } from "@/types";
 
 vi.mock("@/lib/preview-cache", () => ({
@@ -33,12 +41,16 @@ const PLAYLIST = [
   track("6", "Mojito", "周杰倫"),
   track("7", "突然好想你", "五月天"),
   track("8", "Levitating", "Dua Lipa"),
+  track("9", "Karma Police", "Radiohead"),
+  track("10", "Someone Like You", "Adele"),
+  track("11", "Blinding Lights", "The Weeknd"),
+  track("12", "小幸運", "田馥甄"),
 ];
 
 async function make(overrides: Partial<Parameters<typeof createQuiz>[0]> = {}) {
   return createQuiz({
     tracks: PLAYLIST,
-    questionCount: 5,
+    questionCount: 10,
     ownerName: "Wayn",
     playlistName: "Late nights",
     locale: "zh",
@@ -64,7 +76,7 @@ describe("createQuiz", () => {
     const created = await make();
     expect(created.code).toHaveLength(QUIZ_CODE_LENGTH);
     expect(normalizeQuizCode(created.code)).toBe(created.code);
-    expect(created.questionCount).toBe(5);
+    expect(created.questionCount).toBe(10);
     expect(created.hostToken).toBeTruthy();
     expect(created.expiresAt).toBeGreaterThan(Date.now() + (QUIZ_TTL_SECONDS - 60) * 1000);
     expect(created.expiresAt).toBeLessThanOrEqual(Date.now() + QUIZ_TTL_SECONDS * 1000);
@@ -74,7 +86,7 @@ describe("createQuiz", () => {
     await expect(make({ tracks: PLAYLIST.slice(0, 3) })).rejects.toMatchObject({
       code: "quiz_too_few_tracks",
       status: 422,
-      params: { count: 5 },
+      params: { count: QUIZ_MIN_QUESTIONS },
     });
   });
 
@@ -115,7 +127,7 @@ describe("createQuiz", () => {
     expect(created.code).toHaveLength(QUIZ_CODE_LENGTH);
     expect(hsetnx.mock.calls.filter(([, field]) => field === "meta")).toHaveLength(2);
     // The quiz under the drawn code is whole.
-    expect((await getQuizView(created.code)).questions).toHaveLength(5);
+    expect((await getQuizView(created.code)).questions).toHaveLength(10);
 
     // Every draw collides: the host gets a retryable error, not an immortal key.
     hsetnx.mockReset().mockResolvedValue(false);
@@ -134,8 +146,8 @@ describe("createQuiz", () => {
     const b = await make({ seed: undefined });
     expect(a.code).not.toBe(b.code);
     expect(a.hostToken).not.toBe(b.hostToken);
-    expect((await getQuizView(a.code)).questions).toHaveLength(5);
-    expect((await getQuizView(b.code)).questions).toHaveLength(5);
+    expect((await getQuizView(a.code)).questions).toHaveLength(10);
+    expect((await getQuizView(b.code)).questions).toHaveLength(10);
   });
 
   it("deletes a claim whose key already held questions rather than build on stale data", async () => {
@@ -165,11 +177,11 @@ describe("getQuizView", () => {
     const view = await getQuizView(created.code);
     expect(view.code).toBe(created.code);
     expect(view.ownerName).toBe("Wayn");
-    expect(view.questionCount).toBe(5);
+    expect(view.questionCount).toBe(10);
     expect(view.hintAllowance).toBe(1);
-    expect(view.questions).toHaveLength(5);
+    expect(view.questions).toHaveLength(10);
     for (const q of view.questions) {
-      expect(q.options).toHaveLength(4);
+      expect(q.options).toHaveLength(QUIZ_OPTION_COUNT);
       expect(JSON.stringify(q)).not.toMatch(/answer|track/);
     }
     expect(view.scoreboard).toEqual([]);
@@ -202,7 +214,7 @@ describe("getQuizView", () => {
     expect(await peekQuiz(created.code)).toEqual({
       ownerName: "Wayn",
       playlistName: "Late nights",
-      questionCount: 5,
+      questionCount: 10,
       locale: "zh",
     });
   });
@@ -268,10 +280,10 @@ describe("submitQuizAnswers", () => {
     const created = await make();
     const key = await keyFor(created.code);
     const perfect = await submitQuizAnswers(created.code, "Alice", key, 0);
-    expect(perfect).toMatchObject({ correct: 5, total: 5, verdict: "soulmate", recorded: true, rank: 1, hintsUsed: 0 });
+    expect(perfect).toMatchObject({ correct: 10, total: 10, verdict: "soulmate", recorded: true, rank: 1, hintsUsed: 0 });
     expect(perfect.key).toEqual(key);
 
-    const wrong = key.map((a) => (a + 1) % 4);
+    const wrong = key.map((a) => (a + 1) % QUIZ_OPTION_COUNT);
     const zero = await submitQuizAnswers(created.code, "Bob", wrong, 1);
     expect(zero).toMatchObject({ correct: 0, verdict: "stranger", rank: 2 });
     expect(zero.scoreboard.map((s) => s.name)).toEqual(["Alice", "Bob"]);
@@ -335,11 +347,11 @@ describe("submitQuizAnswers", () => {
     const store = await getKvStore();
     for (let i = 0; i < QUIZ_MAX_ENTRIES; i += 1) {
       await store.hsetnx(`quiz:v1:${created.code}`, `s:p${i}`, {
-        name: `p${i}`, correct: 3, total: 5, hintsUsed: 0, at: i,
+        name: `p${i}`, correct: 6, total: 10, hintsUsed: 0, at: i,
       });
     }
     const late = await submitQuizAnswers(created.code, "Late", key, 0);
-    expect(late).toMatchObject({ correct: 5, recorded: false, rank: null });
+    expect(late).toMatchObject({ correct: 10, recorded: false, rank: null });
     expect(late.scoreboard).toHaveLength(QUIZ_MAX_ENTRIES);
     expect(late.scoreboard.some((s) => s.name === "Late")).toBe(false);
   });
@@ -353,7 +365,7 @@ describe("submitQuizAnswers", () => {
     const key = await keyFor(created.code);
     const names = ["小明", "🎉 party", "a".repeat(QUIZ_NAME_MAX), "  Wayne  "];
     for (const [i, n] of names.entries()) {
-      const r = await submitQuizAnswers(created.code, n, key.map((a, j) => (j <= i ? a : (a + 1) % 4)), 0);
+      const r = await submitQuizAnswers(created.code, n, key.map((a, j) => (j <= i ? a : (a + 1) % QUIZ_OPTION_COUNT)), 0);
       expect(r.recorded).toBe(true);
     }
     const view = await getQuizView(created.code);
@@ -393,7 +405,7 @@ describe("submitQuizAnswers", () => {
     const store = await getKvStore();
     await store.hsetnx(`quiz:v1:${created.code}`, "s:old", { name: "Old", correct: 2 });
     const view = await getQuizView(created.code);
-    expect(view.scoreboard).toEqual([{ name: "Old", correct: 2, total: 5, hintsUsed: 0, at: 0 }]);
+    expect(view.scoreboard).toEqual([{ name: "Old", correct: 2, total: 10, hintsUsed: 0, at: 0 }]);
   });
 });
 
@@ -423,7 +435,7 @@ describe("a resend after a lost response", () => {
     const first = await submitQuizAnswers(created.code, "Alice", key, 1, "attempt-1");
     // The reply was lost; the page resends the identical attempt.
     const again = await submitQuizAnswers(created.code, "alice", key, 1, "attempt-1");
-    expect(again).toMatchObject({ correct: 5, recorded: true, rank: 1, hintsUsed: 1 });
+    expect(again).toMatchObject({ correct: 10, recorded: true, rank: 1, hintsUsed: 1 });
     expect(again.scoreboard).toEqual(first.scoreboard);
     expect((await getQuizView(created.code)).scoreboard).toHaveLength(1);
     // A different attempt under the same name is still someone else.
@@ -446,7 +458,7 @@ describe("a resend after a lost response", () => {
     });
     const result = await submitQuizAnswers(created.code, "Bob", key, 0, "attempt-9");
     spy.mockRestore();
-    expect(result).toMatchObject({ correct: 5, recorded: true, rank: 1 });
+    expect(result).toMatchObject({ correct: 10, recorded: true, rank: 1 });
   });
 
   it("never sends the attempt id back out, on either view", async () => {
@@ -465,10 +477,10 @@ describe("what the taker's phone receives", () => {
     const mine = await submitQuizAnswers(created.code, "A", key, 0);
     expect(mine.scoreboard.every((s) => !("right" in s))).toBe(true);
     const view = await getQuizView(created.code);
-    expect(view.scoreboard).toEqual([{ name: "A", correct: 5, total: 5, hintsUsed: 0, at: expect.any(Number) }]);
+    expect(view.scoreboard).toEqual([{ name: "A", correct: 10, total: 10, hintsUsed: 0, at: expect.any(Number) }]);
     // The owner's board still has it.
     const board = await getQuizBoard(created.code, created.hostToken);
-    expect(board.scoreboard[0].right).toEqual([0, 1, 2, 3, 4]);
+    expect(board.scoreboard[0].right).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 });
 
@@ -479,7 +491,7 @@ describe("getQuizBoard", () => {
     await expect(getQuizBoard(created.code, "nope")).rejects.toMatchObject({ code: "quiz_not_host" });
     const board = await getQuizBoard(created.code, created.hostToken);
     expect(board).toMatchObject({ code: created.code, ownerName: "Wayn", takers: 0, averageCorrect: null });
-    expect(board.questions).toHaveLength(5);
+    expect(board.questions).toHaveLength(10);
     expect(board.questions.every((q) => q.answered === 0 && q.correct === 0)).toBe(true);
   });
 
@@ -487,10 +499,10 @@ describe("getQuizBoard", () => {
     const created = await make();
     const key = await keyFor(created.code);
     await submitQuizAnswers(created.code, "A", key, 0);
-    await submitQuizAnswers(created.code, "B", key.map((a, i) => (i === 0 ? (a + 1) % 4 : a)), 0);
+    await submitQuizAnswers(created.code, "B", key.map((a, i) => (i === 0 ? (a + 1) % QUIZ_OPTION_COUNT : a)), 0);
     const board = await getQuizBoard(created.code, created.hostToken);
     expect(board.takers).toBe(2);
-    expect(board.averageCorrect).toBeCloseTo(4.5);
+    expect(board.averageCorrect).toBeCloseTo(9.5);
     expect(board.questions[0]).toMatchObject({ answered: 2, correct: 1 });
     expect(board.questions[1]).toMatchObject({ answered: 2, correct: 2 });
     const store = await getKvStore();
@@ -504,11 +516,11 @@ describe("getQuizBoard", () => {
     const created = await make();
     const key = await keyFor(created.code);
     const store = await getKvStore();
-    await store.hsetnx(`quiz:v1:${created.code}`, "s:legacy", { name: "Legacy", correct: 1, total: 5, hintsUsed: 0, at: 1 });
+    await store.hsetnx(`quiz:v1:${created.code}`, "s:legacy", { name: "Legacy", correct: 1, total: 10, hintsUsed: 0, at: 1 });
     await submitQuizAnswers(created.code, "New", key, 0);
     const board = await getQuizBoard(created.code, created.hostToken);
     expect(board.takers).toBe(2);
-    expect(board.averageCorrect).toBeCloseTo(3);
+    expect(board.averageCorrect).toBeCloseTo(5.5);
     for (const q of board.questions) expect(q).toMatchObject({ answered: 1, correct: 1 });
     expect(board.scoreboard.map((s) => s.name)).toEqual(["New", "Legacy"]);
   });
@@ -516,7 +528,7 @@ describe("getQuizBoard", () => {
   it("does not store which option a taker picked, only which questions were right", async () => {
     const created = await make();
     const key = await keyFor(created.code);
-    await submitQuizAnswers(created.code, "A", key.map((a, i) => (i < 2 ? a : (a + 1) % 4)), 0);
+    await submitQuizAnswers(created.code, "A", key.map((a, i) => (i < 2 ? a : (a + 1) % QUIZ_OPTION_COUNT)), 0);
     const store = await getKvStore();
     const raw = await store.hgetall<unknown>(`quiz:v1:${created.code}`);
     expect(raw["s:a"]).toMatchObject({ right: [0, 1] });
@@ -557,7 +569,7 @@ describe("getQuizHint", () => {
         { ...track("1", long, "The Weeknd"), durationMs: 0 },
         ...PLAYLIST.slice(1),
       ],
-      questionCount: 8,
+      questionCount: PLAYLIST.length,
     });
     const store = await getKvStore();
     const raw = await store.hgetall<unknown>(`quiz:v1:${created.code}`);
@@ -607,7 +619,7 @@ describe("getQuizHint", () => {
     const created = await make();
     const store = await getKvStore();
     const hgetall = vi.spyOn(store, "hgetall");
-    for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 20, 999]) {
+    for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, QUIZ_MAX_QUESTIONS, 999]) {
       await expect(getQuizHint(created.code, bad)).rejects.toMatchObject({ code: "preview_request_invalid" });
     }
     expect(hgetall).not.toHaveBeenCalled();
@@ -616,7 +628,7 @@ describe("getQuizHint", () => {
 
   it("refuses an index outside the quiz, and an unknown code", async () => {
     const created = await make();
-    await expect(getQuizHint(created.code, 5)).rejects.toMatchObject({ code: "preview_request_invalid", status: 422 });
+    await expect(getQuizHint(created.code, 10)).rejects.toMatchObject({ code: "preview_request_invalid", status: 422 });
     await expect(getQuizHint(created.code, -1)).rejects.toMatchObject({ code: "preview_request_invalid" });
     await expect(getQuizHint(created.code, 1.5)).rejects.toMatchObject({ code: "preview_request_invalid" });
     await expect(getQuizHint("ZZZZZZ", 0)).rejects.toBeInstanceOf(QuizError);

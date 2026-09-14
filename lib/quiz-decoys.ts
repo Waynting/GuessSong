@@ -28,7 +28,7 @@
  * cannot disagree.
  *
  * Only imported by the create route. The friend's phone never sees the pool,
- * only the four options a question was built with.
+ * only the two options a question was built with.
  */
 
 import type { DecoyEntry } from "@/lib/quiz";
