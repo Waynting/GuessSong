@@ -49,6 +49,51 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.10.0",
+    date: "2026-09-14",
+    headline:
+      "Taste Quiz, a week in: the link opens on the quiz, your progress survives a reload, and a taken name is refused before you start.",
+    headlineZh:
+      "品味鑒定上線一週後的修正：連結會直接打開測驗、答到一半重新整理不會歸零、名字已經有人用會在開始前就告訴你。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "\"Make one for your friends\" now lands on the Taste Quiz form, not on the party game at the top of the page.",
+        textZh: "「幫你的朋友做一份」現在會直接落在品味鑒定的表單上，不再是頁面最上面的派對模式。",
+      },
+      {
+        kind: "fixed",
+        text: "If someone on the board already has your name you're told before you start, not after twenty questions. Finished earlier on this phone? Your result comes back with one tap instead of a second row on the board.",
+        textZh: "排行榜上已經有人用了你的名字，會在開始前就說，不用答完二十題才知道。之前在這支手機做完過？一鍵就能再看到你的結果，不會在榜上多出一行。",
+      },
+      {
+        kind: "fixed",
+        text: "Reloading mid-quiz, or swiping back on your phone, no longer throws your answers away. Back goes to the previous question; your progress is where you left it.",
+        textZh: "答到一半重新整理、或在手機上往回滑，答案不會不見了。返回會回到上一題，進度就停在你離開的地方。",
+      },
+      {
+        kind: "fixed",
+        text: "The two songs no longer give the answer away by how the singer's name is spelled — a decoy is credited the way your playlist credits that artist.",
+        textZh: "兩首歌不會再因為歌手名字的寫法而洩題：假選項的歌手會照你歌單裡的寫法來標。",
+      },
+      {
+        kind: "better",
+        text: "Pasted into a group chat, the quiz link now unfurls with a picture, like the home page does.",
+        textZh: "把連結貼進群組，預覽現在會帶圖，跟首頁一樣。",
+      },
+      {
+        kind: "better",
+        text: "A new verdict between \"getting there\" and \"total stranger\": land between half and six in ten and it's a coin flip, not a stranger. Stranger now means worse than guessing.",
+        textZh: "「有點懂」和「完全陌生人」之間多了一級：對一半到六成，是用猜的，不是陌生人。陌生人現在是比亂猜還差。",
+      },
+      {
+        kind: "better",
+        text: "The results page refreshes on a tap and only crowns \"everyone knew\" when everyone actually did. Share and copy say so when they fail. Making a second quiz no longer hides the link you just made, and the Chinese home page and the about page now mention the quiz.",
+        textZh: "結果頁可以手動重新整理，「大家都會」只在真的每個人都答對時才會出現。分享和複製失敗時會告訴你。再做一份不會把剛做好的連結收掉，中文首頁和「怎麼玩」也都提到了品味鑒定。",
+      },
+    ],
+  },
+  {
     version: "1.9.0",
     date: "2026-09-14",
     headline:
