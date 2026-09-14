@@ -65,8 +65,30 @@ describe("the message table", () => {
   it("has placeholders in exactly the codes whose callers pass params", () => {
     const withParams = CODES.filter((c) => placeholders(ERROR_MESSAGES[c].en).length > 0);
     expect(withParams.sort()).toEqual(
-      ["mixed_min_contributors", "mixed_playlists_failed", "spotify_cooldown"].sort()
+      ["mixed_min_contributors", "mixed_playlists_failed", "quiz_too_few_tracks", "spotify_cooldown"].sort()
     );
+  });
+
+  it("carries a server-filled placeholder across the wire so the phone can fill it again", () => {
+    // `quiz_too_few_tracks` is filled on the server. Without `params` on the
+    // body the client re-rendered the template from the code alone and the
+    // host read the literal "{count}".
+    const body = {
+      error: "That playlist is too short for a quiz — it needs at least 5 different songs.",
+      code: "quiz_too_few_tracks",
+      params: { count: 5 },
+    };
+    for (const locale of ["en", "zh"] as const) {
+      const text = describeError(apiError(body, "quiz_create_failed"), locale);
+      expect(text).toContain("5");
+      expect(text).not.toContain("{");
+    }
+    // `retryAfter` still wins for `{seconds}`, and junk in params is dropped.
+    const throttled = apiError(
+      { error: "x", code: "spotify_cooldown", retryAfter: 42.2, params: { seconds: 1, evil: { a: 1 } } },
+      "playlist_load_failed"
+    );
+    expect(throttled.params).toEqual({ seconds: 43 });
   });
 
   it("never blames the host's playlist for the app's spent quota", () => {
@@ -209,6 +231,28 @@ describe("isDeterministicPlaylistFailure", () => {
     for (const code of ["playlist_load_failed", "unknown", "server_error"] as const) {
       expect(isDeterministicPlaylistFailure(code), code).toBe(false);
     }
+  });
+
+  it("never suppresses a second 'Create quiz link' after a throttle or a transient failure", () => {
+    // app/page.tsx's handleCreateQuiz runs its refusal through the same
+    // shouldRememberRejection memo as a game start. The quiz added its own
+    // throttling code and four "we don't know" codes; listing any of them as
+    // deterministic would strand a host whose playlist was always fine behind
+    // a button that has quietly stopped asking — the exact hazard the two
+    // tests above pin for the game.
+    for (const code of [
+      "rate_limited_quiz_create",
+      "quiz_code_unavailable",
+      "quiz_create_failed",
+      "quiz_load_failed",
+      "quiz_answer_failed",
+      "quiz_board_failed",
+    ] as const) {
+      expect(isDeterministicPlaylistFailure(code), code).toBe(false);
+    }
+    // And the throttle itself must not read as a playlist problem, in either language.
+    expect(ERROR_MESSAGES.rate_limited_quiz_create.en).not.toMatch(/playlist|public|url/i);
+    expect(ERROR_MESSAGES.rate_limited_quiz_create.zh).not.toMatch(/歌單|公開|網址/);
   });
 
   it("says no to anything that isn't a code at all", () => {
