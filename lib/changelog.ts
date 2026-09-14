@@ -49,6 +49,31 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.11.0",
+    date: "2026-09-14",
+    headline:
+      "Taste Quiz: every question tells you right or wrong as you tap it, and the link's preview in the chat is about your quiz, not the party game.",
+    headlineZh:
+      "品味鑒定：每題按下去就知道對錯，貼進群組的連結預覽也會顯示你的測驗，不再是派對模式的罐頭卡片。",
+    changes: [
+      {
+        kind: "new",
+        text: "Tap a song and you're told right there whether it's the one — the right song lights up green, a wrong pick goes red — then the next question slides in. The score comes at the end; the answer list under it is gone, since you've already seen every answer.",
+        textZh: "按下一首歌，當場就告訴你對不對：對的那首會亮綠色，選錯會變紅色，然後才進下一題。分數在最後看；結果頁下面那份解答收掉了，因為每一題你都已經看過答案。",
+      },
+      {
+        kind: "fixed",
+        text: "Pasted into Facebook, Messenger or X, the quiz link now unfurls as your quiz — whose taste, how many questions, with its own picture — instead of the home page's card. It used to show \"Guess the Song — Free Music Guessing Party Game\" with your name nowhere.",
+        textZh: "把連結貼到 Facebook、Messenger 或 X，預覽現在會顯示你的測驗：是誰的品味、幾題、還有專屬的圖片，而不是首頁的卡片。之前它會顯示「Guess the Song — 免費猜歌派對遊戲」，你的名字完全不在上面。",
+      },
+      {
+        kind: "better",
+        text: "A question you've already answered stays answered: going back shows it with its verdict, and a reload mid-quiz puts you back on the same question with the verdicts you've seen.",
+        textZh: "答過的題目就是答過了：往回看會連同對錯一起顯示，中途重新整理也會回到同一題，之前看過的對錯都還在。",
+      },
+    ],
+  },
+  {
     version: "1.10.0",
     date: "2026-09-14",
     headline:

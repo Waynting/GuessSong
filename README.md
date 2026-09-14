@@ -211,6 +211,7 @@ Every route is IP rate limited (`lib/rate-limit.ts`) with a fixed window; limits
 | `/api/room/[code]/pool` | GET | `?sampledPerPlayer=N` + `x-host-token` header → the sampled, deduped pool. One-shot consume. | 20 / 10 min |
 | `/api/quiz` | POST | `{url, ownerName?, questionCount, locale?}` → `{code, hostToken, expiresAt, questionCount, playlistName}`. Turns a playlist into a Taste Quiz; the feature's only Spotify call, through the same cache as `/api/playlist`. | 10 / 10 min |
 | `/api/quiz/[code]` | GET | The quiz as a taker sees it — two titles per question, no answer key — plus the public ranking. Counts the open. | 60 / 10 min |
+| `/api/quiz/[code]/check` | POST | `{q, pick}` → `{answer, correct}` — the verdict on one question, the moment it is answered. Hands over one question's answer against a pick for it; records nothing. `q=0` counts the start. | 600 / 10 min |
 | `/api/quiz/[code]/answer` | POST | `{name, answers, hintsUsed?, submissionId?}` → score, verdict and ranking. Graded server-side; a name is held once per quiz. | 60 / 10 min |
 | `/api/quiz/[code]/hint` | GET | `?q=N` (zero-based) → a clip of question N's real track, so the phone never names the answer in a request. `&refresh=1` repairs a dead URL. | 60 / 10 min (refresh: 10) |
 | `/api/quiz/[code]/board` | GET | `x-host-token` header → ranking, mean, and per-question correct counts naming each real song. 403 `quiz_not_host` otherwise. | 60 / 10 min |

@@ -257,6 +257,34 @@ edits, and the board needs KV anyway); any per-person view — "my quizzes",
 That would be the answer that this audience does not convert off-site, and it
 is worth having.
 
+**Amended 2026-09-14 (1.11.0), twice, both from the first owner who shared one:**
+
+- *The card names the quiz.* The link unfurled on Facebook as the home page —
+  the party-game title over the party-game picture, the owner's name nowhere —
+  because a nested `generateMetadata` inherits the root layout's canonical
+  and Facebook resolves a canonical before it reads a card; and it drew no
+  card at all where the unfurler honours robots.txt, because `/q` was
+  disallowed. Both fixed (`app/q/[code]/page.tsx`, `app/robots.ts`,
+  `app/q/layout.tsx`). And the image is now rendered per quiz
+  (`app/q/[code]/opengraph-image.tsx`), which 1.10.0 had rejected as `ƒ` on
+  the most expensive render in the app paid once per unfurler per share. What
+  changed is where the cost is paid: the route's own `s-maxage` has the edge
+  render a quiz's card once a day per region. The picture is most of the
+  card; a card whose picture sells a different product is canned whatever
+  its title says.
+- *Right or wrong per question, the score at the end.* A tap now shows the
+  verdict at once (`POST /api/quiz/[code]/check`, the answer to one question
+  against a pick for it) and the result screen's folded answer list is gone.
+  The key-stays-on-the-server rule survives at question granularity: the
+  question is locked before the phone asks, and the check records nothing, so
+  the board is still one write from the sheet. Rejected: shipping the key
+  with the view, obfuscated, so the reveal costs no request — the rule the
+  taker page exists to keep. Cost: two KV commands per question rather than
+  two per taker; at thirteen quizzes a week, nothing, and `quiz_throttled:check`
+  is where that stops being true. Side effect worth having: the check on
+  question zero is the funnel's `started`, which splits "read the card and
+  left" from "played and stopped" — one number before.
+
 ---
 
 ## Rejected and still rejected
