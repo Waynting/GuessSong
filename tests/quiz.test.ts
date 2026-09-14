@@ -625,11 +625,24 @@ describe("verdictFor", () => {
     expect(verdictFor(15, 20)).toBe("close");
     expect(verdictFor(6, 10)).toBe("acquaintance");
     expect(verdictFor(30, 50)).toBe("acquaintance");
-    expect(verdictFor(5, 10)).toBe("stranger");
+    expect(verdictFor(5, 10)).toBe("guessing");
+    expect(verdictFor(11, 20)).toBe("guessing");
+    expect(verdictFor(4, 10)).toBe("stranger");
+    expect(verdictFor(0, 10)).toBe("stranger");
     expect(verdictFor(0, 0)).toBe("stranger");
-    // The lowest passing bucket sits above chance for a two-option question,
-    // so a coin flip reads as a stranger rather than as "getting there".
-    expect(verdictFor(QUIZ_MAX_QUESTIONS / 2, QUIZ_MAX_QUESTIONS)).toBe("stranger");
+  });
+
+  it("puts chance in its own bucket, below the lowest passing one and above stranger", () => {
+    // Two options make chance 50%. The lowest *passing* bucket sits above it,
+    // so a coin never reads as "getting there"; but 55% is where a friend who
+    // half-knows the playlist most often lands, and "total stranger" for that
+    // was the harshest label on the most common score. A coin is "guessing";
+    // "stranger" is worse than a coin.
+    expect(verdictFor(QUIZ_MAX_QUESTIONS / 2, QUIZ_MAX_QUESTIONS)).toBe("guessing");
+    expect(verdictFor(QUIZ_MAX_QUESTIONS / 2 - 1, QUIZ_MAX_QUESTIONS)).toBe("stranger");
+    expect(verdictFor(29, 50)).toBe("guessing");
+    expect(verdictFor(30, 50)).not.toBe("guessing");
+    expect(QUIZ_VERDICTS).toEqual(["soulmate", "close", "acquaintance", "guessing", "stranger"]);
   });
 
   it("isQuizVerdict admits exactly the declared buckets, since the value becomes a KV key", () => {

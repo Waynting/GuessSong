@@ -39,13 +39,53 @@
  * with the caption "that's the song that's in the playlist". Advancing is the
  * round teardown: bump the token, stop the clip, hand the element's `src`
  * back.
+ *
+ * ## What the phone remembers
+ *
+ * A quiz link is opened on a phone in a group chat, and there a reload, a
+ * swipe back, or a tab evicted in the background is the ordinary case. So
+ * the state a question needs — name, answers, index, hints left, which
+ * questions were charged, the `submissionId` — is written to
+ * `lib/quiz-progress.ts` on every change and put back on mount, at the same
+ * question. Finishing swaps that for the finished row (name, id, answers),
+ * which is what lets "See my result again" re-POST and have the server
+ * *replay* the row rather than refuse the taker their own name; and what
+ * lets Start on the intro tell "you, again" from "someone else has that
+ * name" before a single question is answered. Storage that throws — Safari
+ * with cookies blocked — costs the memory and nothing else.
+ *
+ * ## Browser history
+ *
+ * The phone's back gesture leaves the page unless the page gave it somewhere
+ * closer to go. Start pushes an entry and so does every `next()`, one per
+ * question, so browser Back and the in-page Back are one code path:
+ * `popstate` reads the step the entry stands for (`readQuizHistoryStep`)
+ * and goes there through `enterQuestion`, which retires the round first —
+ * a hint still resolving when Back fires lands nowhere. Back from the first
+ * question is the intro. The result screen folds its own entries away with
+ * one `history.go(-depth)`, so Back from there leaves the quiz rather than
+ * resurrecting question nineteen under a graded card.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { trackEvent } from "@/lib/analytics";
-import { apiError, describeError } from "@/lib/error-messages";
+import { AppError, apiError, describeError, errorMessage, type AppErrorCode } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { foldQuizName, rankOf, type QuizVerdict } from "@/lib/quiz";
+import {
+  clearQuizProgress,
+  findQuizSubmission,
+  fitsQuizProgress,
+  fitsQuizSubmission,
+  quizHistoryState,
+  readQuizHistoryStep,
+  recallQuizProgress,
+  recallQuizSubmissions,
+  rememberQuizSubmission,
+  saveQuizProgress,
+  type QuizSubmission,
+} from "@/lib/quiz-progress";
 import {
   QUIZ_COPY,
   fillCopy,
@@ -65,13 +105,20 @@ import {
   QUIZ_NAME_MAX,
   type AnswerQuizRequest,
   type AnswerQuizResponse,
+  type QuizScore,
   type QuizView,
 } from "@/types/quiz";
 import type { PreviewResult } from "@/types/preview";
 import { Shell } from "./shell";
 
 type Phase = "loading" | "error" | "intro" | "question" | "submitting" | "result";
-type HintState = "idle" | "loading" | "playing" | "none";
+/**
+ * `blocked` is a clip that was found and then refused by the browser — on
+ * iOS the `await fetch` between the tap and `play()` is where a gesture
+ * gets lost. The URL is fine and the next tap plays it, so the seam says so
+ * rather than silently returning the button to "hear a hint".
+ */
+type HintState = "idle" | "loading" | "playing" | "none" | "blocked";
 
 /** How many rows of the board to show before collapsing to "…and you". */
 const BOARD_ROWS = 10;
@@ -84,13 +131,16 @@ const BOARD_ROWS = 10;
 const FILL_MS = 240;
 
 /**
- * The verdict card's duotone, keyed by verdict so the four results are four
- * different pictures in the group chat. Never purple on white.
+ * The verdict card's duotone, keyed by verdict so the five results are five
+ * different pictures in the group chat. `guessing` sits between the blue
+ * and the grey — a slate that has stopped being a colour without yet being
+ * nothing. Never purple on white.
  */
 const VERDICT_MESH: Record<QuizVerdict, [string, string]> = {
   soulmate: ["#1DB954", "#0b3d2e"],
   close: ["#f5b942", "#3d2a0b"],
   acquaintance: ["#4f7cff", "#0b1a3d"],
+  guessing: ["#7a8fa8", "#141c26"],
   stranger: ["#8a8a8a", "#1c1c1c"],
 };
 
@@ -179,6 +229,7 @@ const DUEL_CSS = `
   }
   .q-prompt { font-size: 13px; color: #aaa; line-height: 1.35; flex: 1; }
   .q-prompt.is-live { color: #1DB954; }
+  .q-prompt.is-warn { color: #f5b942; }
   .q-hint {
     position: relative; flex: none;
     width: 44px; height: 44px; border-radius: 50%;
@@ -232,6 +283,18 @@ const DUEL_CSS = `
   .q-brand { position: absolute; top: 22px; left: 24px; font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; opacity: 0.7; }
   .q-rise { animation: q-rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 
+  .q-board-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .q-board-head .q-kicker { margin: 0; }
+  .q-refresh {
+    background: none; border: 1px solid #333; border-radius: 999px;
+    color: #aaa; font-size: 12px; padding: 4px 12px; line-height: 1.4;
+  }
+  .q-refresh:focus-visible { outline: 2px solid #1DB954; outline-offset: 2px; }
+  .q-refresh:disabled { opacity: 0.45; }
+  .q-share-url { font-size: 13px; color: #aaa; word-break: break-all; user-select: all; -webkit-user-select: all; text-align: center; }
+  .q-home { color: #1DB954; font-size: 16px; font-weight: 600; text-align: center; padding: 12px 0; }
+  .q-home:focus-visible { outline: 2px solid #1DB954; outline-offset: 2px; border-radius: 4px; }
+
   .q-review { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding: 0; list-style: none; }
   .q-review li { display: flex; gap: 10px; align-items: baseline; padding: 8px 10px; border-radius: 10px; background: #161616; font-size: 14px; }
   .q-review .q-mark { flex: none; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; width: 56px; }
@@ -250,6 +313,8 @@ export function QuizClient({ code }: { code: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [view, setView] = useState<QuizView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The code behind `error` while the page is in the error phase; decides the way out. */
+  const [errorCode, setErrorCode] = useState<AppErrorCode | null>(null);
   const [name, setName] = useState("");
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<number[]>([]);
@@ -257,49 +322,82 @@ export function QuizClient({ code }: { code: string }) {
   const [hint, setHint] = useState<HintState>("idle");
   const [result, setResult] = useState<AnswerQuizResponse | null>(null);
   const [copied, setCopied] = useState(false);
+  /** The page's own URL, shown to copy by hand once neither share nor clipboard worked. */
+  const [shareFailedUrl, setShareFailedUrl] = useState<string | null>(null);
+  /** The result screen's board, re-read on tap; starts as what grading returned. */
+  const [refreshing, setRefreshing] = useState(false);
+  const [boardError, setBoardError] = useState<string | null>(null);
+  /** This device's finished attempts at this quiz, most recent first. */
+  const [finished, setFinished] = useState<QuizSubmission[]>([]);
   /** Which way the incoming question slides. Set by `next()` and `back()`. */
   const [enterFrom, setEnterFrom] = useState<"next" | "back">("next");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /** Clip URLs already fetched, by question — replaying one is free. */
   const hintUrls = useRef<Map<number, string>>(new Map());
-  /** Questions whose hint was charged, so a clip that then fails to play can refund it. */
+  /**
+   * Questions whose hint was charged, so a clip that then fails to play can
+   * refund it — and, restored from storage after a reload, so a re-tap on a
+   * question already paid for fetches without charging twice.
+   */
   const charged = useRef<Set<number>>(new Set());
   /** Questions whose cached URL stopped playing; the next tap asks for a fresh one. */
   const needsRefresh = useRef<Set<number>>(new Set());
-  /** One per question on screen; `next()` and `back()` retire it. See the header. */
+  /** One per question on screen; `enterQuestion` retires it. See the header. */
   const round = useRef(createRoundToken());
   /** Questions whose clip actually started, so a mid-stream error is not refunded. */
   const heard = useRef<Set<number>>(new Set());
   /** The pending advance after a tap; `back()` and unmount cancel it. */
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
-   * Minted once per attempt. A resend after a lost response carries the same
-   * id, and the server replays the row instead of refusing the taker's own
-   * name. See `submitQuizAnswers`.
+   * Minted once per attempt, and carried across a reload by the stored
+   * progress. A resend after a lost response carries the same id, and the
+   * server replays the row instead of refusing the taker's own name. See
+   * `submitQuizAnswers`.
    */
-  const submissionId = useRef<string>(
-    typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
-  );
+  const submissionId = useRef<string>(mintSubmissionId());
   const openedRef = useRef(false);
+  /**
+   * The `popstate` handler, re-pointed after every render so it closes over
+   * the current phase and index without the listener being re-registered.
+   * The listener itself is registered once, below.
+   */
+  const onPop = useRef<(state: unknown) => void>(() => {});
 
   const load = useCallback(async () => {
     setPhase("loading");
     setError(null);
+    setErrorCode(null);
     try {
-      const res = await fetch(`/api/quiz/${encodeURIComponent(code)}`, { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) throw apiError(data, "quiz_load_failed");
-      const quiz = data as QuizView;
+      const quiz = await fetchView(code);
       setView(quiz);
-      setAnswers(new Array(quiz.questionCount).fill(-1));
-      setHintsLeft(quiz.hintAllowance);
-      setPhase("intro");
+      const done = recallQuizSubmissions(quiz.code).filter((s) => fitsQuizSubmission(s, quiz));
+      setFinished(done);
+      const progress = recallQuizProgress(quiz.code);
+      if (progress && fitsQuizProgress(progress, quiz)) {
+        // Back to the same question. The clip URLs are not kept: a re-tap
+        // asks the server, whose cache answers, and `charged` makes it free.
+        setName(progress.name);
+        setAnswers(progress.answers);
+        setIndex(progress.index);
+        setHintsLeft(progress.hintsLeft);
+        charged.current = new Set(progress.charged);
+        submissionId.current = progress.submissionId;
+        pushStep(quiz.code, progress.index);
+        setEnterFrom("next");
+        setPhase("question");
+      } else {
+        setAnswers(new Array(quiz.questionCount).fill(-1));
+        setHintsLeft(quiz.hintAllowance);
+        if (done[0]) setName(done[0].name);
+        setPhase("intro");
+      }
       if (!openedRef.current) {
         openedRef.current = true;
         trackEvent("quiz_opened", { question_count: quiz.questionCount });
       }
     } catch (e: unknown) {
+      setErrorCode(e instanceof AppError ? e.code : "quiz_load_failed");
       setError(describeError(e, locale, "quiz_load_failed"));
       setPhase("error");
     }
@@ -319,6 +417,71 @@ export function QuizClient({ code }: { code: string }) {
     []
   );
 
+  useEffect(() => {
+    const handler = (e: PopStateEvent) => onPop.current(e.state);
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
+  /**
+   * Every change while a question is on screen is written down. `charged`
+   * is a ref, not a dependency, and that is safe because every change to it
+   * is paired with one to `hintsLeft` — a charge takes one, a refund gives
+   * one back — so the snapshot taken here is never stale by more than the
+   * render that carries both. Not while submitting: nothing has changed
+   * since the last pick, and a replay from the intro passes through that
+   * phase with answers that were never this attempt's.
+   */
+  useEffect(() => {
+    if (!view || phase !== "question") return;
+    saveQuizProgress({
+      code: view.code,
+      name,
+      answers,
+      index,
+      hintsLeft,
+      charged: [...charged.current],
+      submissionId: submissionId.current,
+      expiresAt: view.expiresAt,
+      at: Date.now(),
+    });
+  }, [view, phase, name, answers, index, hintsLeft]);
+
+  useEffect(() => {
+    onPop.current = (state) => {
+      if (!view) return;
+      const target = readQuizHistoryStep(state, view.code);
+      if (phase === "result") {
+        // Forward into a question entry after the fold, or Back before it
+        // landed: bounce off it to the entry the quiz was opened on.
+        if (target) window.history.go(-target.depth);
+        return;
+      }
+      if (phase !== "intro" && phase !== "question") return;
+      if (!target) {
+        // The entry the link opened on: the intro, answers kept.
+        retireRound();
+        setPhase("intro");
+        return;
+      }
+      if (target.step >= view.questionCount) return;
+      enterQuestion(target.step, target.step < index ? "back" : "next");
+    };
+  });
+
+  /**
+   * The result folds the quiz's history entries away, so Back leaves rather
+   * than resurrecting a question under a graded card. An effect rather than
+   * a line in `submit()`: it runs after the commit that re-pointed `onPop`
+   * at a closure which knows the phase is `result`, and the `popstate` that
+   * `history.go` raises is a task queued after that.
+   */
+  useEffect(() => {
+    if (phase !== "result" || !view) return;
+    const current = readQuizHistoryStep(window.history.state, view.code);
+    if (current) window.history.go(-current.depth);
+  }, [phase, view]);
+
   function stopClip() {
     const audio = audioRef.current;
     if (!audio) return;
@@ -333,13 +496,13 @@ export function QuizClient({ code }: { code: string }) {
    * Two different failures land here and they want different follow-ups. A
    * `play()` refused by the browser (`NotAllowedError` — on iOS the `await
    * fetch` before it is the classic place a tap's gesture gets lost) means the
-   * URL is fine: refund, keep the URL, and the next tap plays it. A media
-   * failure — the element's `error` event, or `NotSupportedError` — means the
-   * CDN rotated the clip: refund, forget the URL, and mark the question so the
-   * next tap sends `refresh=1` (lib/preview-cache.ts on why the year-long
-   * entries need that). Marking the first case for refresh spent a
-   * cache-bypassing, five-call re-resolution on a working URL, and ten of
-   * those hit the refresh limiter.
+   * URL is fine: refund, keep the URL, say so on the seam, and the next tap
+   * plays it. A media failure — the element's `error` event, or
+   * `NotSupportedError` — means the CDN rotated the clip: refund, forget the
+   * URL, and mark the question so the next tap sends `refresh=1`
+   * (lib/preview-cache.ts on why the year-long entries need that). Marking
+   * the first case for refresh spent a cache-bypassing, five-call
+   * re-resolution on a working URL, and ten of those hit the refresh limiter.
    *
    * A clip that already started is not refunded: the hint was heard.
    */
@@ -356,8 +519,9 @@ export function QuizClient({ code }: { code: string }) {
       needsRefresh.current.add(question);
     }
     // A blocked play is not "no clip": the URL is fine and the button on the
-    // seam still offers it, so say nothing rather than the wrong thing.
-    setHint(cause === "media" ? "none" : "idle");
+    // seam still offers it. The seam says the clip did not start and to tap
+    // again — silence here read as the button having done nothing.
+    setHint(cause === "media" ? "none" : "blocked");
   }
 
   /**
@@ -403,7 +567,16 @@ export function QuizClient({ code }: { code: string }) {
       await playUrl(cached, question, isCurrent);
       return;
     }
-    if (hintsLeft <= 0) return;
+    // A question already paid for — before a reload, say — is fetched again
+    // for free; the allowance only gates a *new* charge.
+    const paid = charged.current.has(question);
+    if (!paid && hintsLeft <= 0) return;
+    // Still inside the tap: `load()` on the element counts as the user
+    // gesture iOS wants before a later, programmatic `play()` is allowed,
+    // and the `await fetch` below is exactly where that gesture used to be
+    // lost. Nothing is playing at this point, so this is the same reset the
+    // round teardown already performs.
+    stopClip();
     setHint("loading");
     const refresh = needsRefresh.current.has(question);
     try {
@@ -419,8 +592,10 @@ export function QuizClient({ code }: { code: string }) {
       // The URL is that question's whatever the screen shows now; keep it.
       hintUrls.current.set(question, data.previewUrl);
       if (!isCurrent()) return;
-      charged.current.add(question);
-      setHintsLeft((n) => n - 1);
+      if (!paid) {
+        charged.current.add(question);
+        setHintsLeft((n) => n - 1);
+      }
       await playUrl(data.previewUrl, question, isCurrent);
     } catch {
       if (isCurrent()) setHint("none");
@@ -455,6 +630,18 @@ export function QuizClient({ code }: { code: string }) {
   }
 
   /**
+   * The one way onto a question, from Start, `next()`, the in-page Back and
+   * the browser's. Retires the round first, whichever way it was left.
+   */
+  function enterQuestion(step: number, from: "next" | "back") {
+    retireRound();
+    setError(null);
+    setEnterFrom(from);
+    setIndex(step);
+    setPhase("question");
+  }
+
+  /**
    * A tap on a half. Records the answer and, unless this is the last
    * question, advances after the fill has had its moment. The last question
    * only selects: the submit button under the duel is the deliberate step.
@@ -472,32 +659,83 @@ export function QuizClient({ code }: { code: string }) {
 
   async function next() {
     if (!view) return;
-    retireRound();
     if (index + 1 < view.questionCount) {
-      setEnterFrom("next");
-      setIndex(index + 1);
+      pushStep(view.code, index + 1);
+      enterQuestion(index + 1, "next");
       return;
     }
-    await submit();
-  }
-
-  function back() {
-    if (!view || index === 0 || phase === "submitting") return;
-    retireRound();
-    setEnterFrom("back");
-    setIndex(index - 1);
-  }
-
-  async function submit() {
-    if (!view) return;
-    setPhase("submitting");
-    setError(null);
-    const body: AnswerQuizRequest = {
+    await submit({
       name,
       answers,
       hintsUsed: view.hintAllowance - hintsLeft,
       submissionId: submissionId.current,
-    };
+    });
+  }
+
+  /**
+   * The in-page Back. When the entry below is this quiz's previous question
+   * — the ordinary case, one entry per question — it is `history.back()`,
+   * and `popstate` does the rest, so the two Backs cannot drift. When it is
+   * not (a resume in a fresh tab has only the intro below it), the step is
+   * taken in place and the entry rewritten to match.
+   */
+  function back() {
+    if (!view || index === 0 || phase === "submitting") return;
+    const current = readQuizHistoryStep(window.history.state, view.code);
+    if (current && current.depth >= 2) {
+      window.history.back();
+      return;
+    }
+    window.history.replaceState(quizHistoryState(view.code, index - 1, current?.depth ?? 1), "");
+    enterQuestion(index - 1, "back");
+  }
+
+  /**
+   * Start, from the intro. Two checks before a question is shown, both
+   * against what the intro already has on screen: a name this phone finished
+   * under is a replay, not a refusal; a name someone else finished under is
+   * refused here rather than after every question is answered. The server's
+   * check stays the authority — a race can still 409, and that path is
+   * unchanged.
+   */
+  function start() {
+    if (!view) return;
+    const typed = name.trim();
+    if (!typed) return;
+    const mine = findQuizSubmission(finished, typed);
+    if (mine) {
+      void replay(mine);
+      return;
+    }
+    const folded = foldQuizName(typed);
+    if (view.scoreboard.some((row) => foldQuizName(row.name) === folded)) {
+      setError(errorMessage("quiz_name_taken", locale));
+      return;
+    }
+    pushStep(view.code, index);
+    enterQuestion(index, "next");
+  }
+
+  /** "See my result again": the stored row, re-POSTed so the server replays it. */
+  async function replay(mine: QuizSubmission) {
+    await submit(
+      { name: mine.name, answers: mine.answers, hintsUsed: mine.hintsUsed, submissionId: mine.submissionId },
+      { replay: true }
+    );
+  }
+
+  /**
+   * Takes the body explicitly rather than reading state, so a replay can
+   * send the stored row without first writing it into the screen: only a
+   * graded answer becomes the name, answers and id the result screen shows,
+   * and a replay that fails leaves the intro exactly as it was — a new name
+   * typed after it starts a fresh attempt, not a walk through someone else's
+   * filled-in answers.
+   */
+  async function submit(body: AnswerQuizRequest, options: { replay?: boolean } = {}) {
+    if (!view) return;
+    setPhase("submitting");
+    setError(null);
     try {
       const res = await fetch(`/api/quiz/${encodeURIComponent(code)}/answer`, {
         method: "POST",
@@ -507,14 +745,36 @@ export function QuizClient({ code }: { code: string }) {
       const data = await res.json();
       if (!res.ok) throw apiError(data, "quiz_answer_failed");
       const graded = data as AnswerQuizResponse;
+      const sid = body.submissionId ?? submissionId.current;
+      // The finished row replaces the progress: it is the way back to this
+      // screen, and the thing Start compares a typed name against.
+      clearQuizProgress(view.code);
+      const stored: QuizSubmission = {
+        code: view.code,
+        name: body.name,
+        submissionId: sid,
+        answers: body.answers,
+        hintsUsed: graded.hintsUsed,
+        expiresAt: view.expiresAt,
+        at: Date.now(),
+      };
+      rememberQuizSubmission(stored);
+      setFinished((prev) => [stored, ...prev.filter((s) => foldQuizName(s.name) !== foldQuizName(stored.name))]);
+      submissionId.current = sid;
+      setName(body.name);
+      setAnswers(body.answers);
       setResult(graded);
+      setBoardError(null);
       setPhase("result");
-      trackEvent("quiz_completed", {
-        question_count: graded.total,
-        correct: graded.correct,
-        hints_used: graded.hintsUsed,
-        verdict: graded.verdict,
-      });
+      // A replay is the same completion seen twice, not a second one.
+      if (!options.replay) {
+        trackEvent("quiz_completed", {
+          question_count: graded.total,
+          correct: graded.correct,
+          hints_used: graded.hintsUsed,
+          verdict: graded.verdict,
+        });
+      }
     } catch (e: unknown) {
       setError(describeError(e, locale, "quiz_answer_failed"));
       // Back to the name screen, answers kept: the usual refusal is a taken
@@ -524,14 +784,43 @@ export function QuizClient({ code }: { code: string }) {
     }
   }
 
+  /**
+   * The ranking, re-read once per tap. Friends finish while the taker is
+   * still looking at the board, and nothing else on this screen changes. No
+   * polling: the read limit is sixty per ten minutes per address, and a
+   * class is one address. Not an open — `quiz_opened` fired on the first
+   * load and `openedRef` keeps it there.
+   */
+  async function refreshBoard() {
+    if (!view || !result || refreshing) return;
+    setRefreshing(true);
+    setBoardError(null);
+    try {
+      const fresh = await fetchView(code);
+      const scoreboard: QuizScore[] = fresh.scoreboard;
+      setResult({
+        ...result,
+        scoreboard,
+        rank: result.recorded ? rankOf(scoreboard, name) : null,
+      });
+    } catch (e: unknown) {
+      setBoardError(describeError(e, locale, "quiz_load_failed"));
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   async function handleShare() {
     if (!view || !result) return;
+    setShareFailedUrl(null);
     const url = window.location.href;
     const text = takerShareText(copy, view, result);
     const outcome = await shareLink({ url, text }, `${text} ${url}`);
     if (outcome === "copied") {
       setCopied(true);
       setTimeout(() => setCopied(false), COPIED_FLASH_MS);
+    } else if (outcome === "failed") {
+      setShareFailedUrl(url);
     }
     trackEvent("quiz_share_tapped", { by: "taker", outcome });
   }
@@ -563,15 +852,24 @@ export function QuizClient({ code }: { code: string }) {
   }
 
   if (phase === "error" || !view) {
+    // A quiz that is gone is gone: retrying a 404 cannot help, and the one
+    // thing this visitor can still do is make their own.
+    const gone = errorCode === "quiz_not_found";
     return (
       <Shell>
         {styles}
         <div className="q-col" style={{ flex: 1, justifyContent: "center" }}>
           <p className="q-kicker">GuessSong</p>
           <p className="q-body">{error}</p>
-          <Button variant="outline" className="q-primary" onClick={() => void load()}>
-            {copy.retry}
-          </Button>
+          {gone ? (
+            <Link href="/" className="q-home">
+              {copy.notFoundCta}
+            </Link>
+          ) : (
+            <Button variant="outline" className="q-primary" onClick={() => void load()}>
+              {copy.retry}
+            </Button>
+          )}
         </div>
       </Shell>
     );
@@ -579,6 +877,7 @@ export function QuizClient({ code }: { code: string }) {
 
   if (phase === "intro") {
     const canStart = name.trim().length > 0;
+    const mine = finished[0] ?? null;
     return (
       <Shell>
         {styles}
@@ -600,18 +899,29 @@ export function QuizClient({ code }: { code: string }) {
               className="q-field"
               placeholder={copy.namePlaceholder}
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                setError(null);
+              }}
               maxLength={QUIZ_NAME_MAX}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && canStart) setPhase("question");
+                if (e.key === "Enter" && canStart) start();
               }}
             />
           </div>
-          <Button className="q-primary" onClick={() => setPhase("question")} disabled={!canStart}>
+          <Button className="q-primary" onClick={start} disabled={!canStart}>
             {copy.startButton}
           </Button>
+          {mine && (
+            <>
+              <Button variant="secondary" className="q-primary" onClick={() => void replay(mine)}>
+                {copy.resumeButton}
+              </Button>
+              <p className="q-muted">{fillCopy(copy.resumeNote, { name: mine.name })}</p>
+            </>
+          )}
           {error && <p className="q-error">{error}</p>}
-          {view.scoreboard.length > 0 && <Board view={view} copy={copy} youName={null} />}
+          {view.scoreboard.length > 0 && <Board view={view} copy={copy} youName={mine?.name ?? null} />}
           <p className="q-muted">{expires}</p>
         </section>
       </Shell>
@@ -624,16 +934,17 @@ export function QuizClient({ code }: { code: string }) {
     const last = index + 1 === view.questionCount;
     const busy = phase === "submitting";
     const hasCachedHint = hintUrls.current.has(index);
+    // Paid for already (this session or, restored, an earlier one): free to hear.
+    const canHear = hasCachedHint || charged.current.has(index) || hintsLeft > 0;
     const hintLabel =
       hint === "loading"
         ? copy.hintLoading
         : hint === "playing"
           ? copy.hintStop
-          : hasCachedHint || hintsLeft > 0
+          : canHear
             ? fillCopy(copy.hintButton, { remaining: hintsLeft })
             : copy.hintsGone;
-    const hintDisabled =
-      busy || hint === "loading" || (hint !== "playing" && !hasCachedHint && hintsLeft <= 0);
+    const hintDisabled = busy || hint === "loading" || (hint !== "playing" && !canHear);
     const prompt = view.ownerName
       ? fillCopy(copy.promptOwner, { owner: view.ownerName })
       : copy.promptPlaylist;
@@ -644,11 +955,16 @@ export function QuizClient({ code }: { code: string }) {
           ? copy.hintPlaying
           : hint === "none"
             ? copy.hintNone
-            : prompt;
+            : hint === "blocked"
+              ? copy.hintBlocked
+              : prompt;
 
     const seam = (
       <div className="q-seam" key="seam">
-        <p className={`q-prompt${hint === "playing" ? " is-live" : ""}`} aria-live="polite">
+        <p
+          className={`q-prompt${hint === "playing" ? " is-live" : ""}${hint === "blocked" ? " is-warn" : ""}`}
+          aria-live="polite"
+        >
           {seamText}
         </p>
         <button
@@ -679,7 +995,7 @@ export function QuizClient({ code }: { code: string }) {
               <rect x="17" y="6" width="2" height="4" rx="1" />
             </svg>
           )}
-          {hint !== "playing" && hint !== "loading" && (hasCachedHint || hintsLeft > 0) && (
+          {hint !== "playing" && hint !== "loading" && canHear && (
             <span className="q-hint-count" aria-hidden="true">
               {hintsLeft}
             </span>
@@ -811,13 +1127,37 @@ export function QuizClient({ code }: { code: string }) {
           <Button variant="secondary" className="q-primary" onClick={() => void handleShare()}>
             {copied ? copy.copied : copy.shareButton}
           </Button>
+          {shareFailedUrl && (
+            <>
+              <p className="q-muted" role="status">
+                {copy.shareFailed}
+              </p>
+              <p className="q-share-url">{shareFailedUrl}</p>
+            </>
+          )}
           {/* This is the surface. See lib/loop-links.ts, `quiz_result`. */}
           <LoopCtaButton surface="quiz_result">{copy.ctaButton}</LoopCtaButton>
         </div>
 
         {/* The board next — it is what the taker came to see and what the
             owner opens the link for. */}
-        <Board view={{ ...view, scoreboard: result.scoreboard }} copy={copy} youName={name} />
+        <Board
+          view={{ ...view, scoreboard: result.scoreboard }}
+          copy={copy}
+          youName={name}
+          action={
+            <button
+              type="button"
+              className="q-refresh"
+              onClick={() => void refreshBoard()}
+              disabled={refreshing}
+              aria-busy={refreshing}
+            >
+              {refreshing ? copy.refreshingBoard : copy.refreshBoard}
+            </button>
+          }
+        />
+        {boardError && <p className="q-error">{boardError}</p>}
         {!result.recorded && <p className="q-muted">{copy.boardFull}</p>}
 
         <details className="text-sm">
@@ -847,14 +1187,44 @@ export function QuizClient({ code }: { code: string }) {
   );
 }
 
+/**
+ * Makes the current history entry stand for `step`, pushing one when it does
+ * not already. The check is what keeps Start after a refused name — still on
+ * the last question's entry — from stacking a second entry for the same
+ * question, which would have made Back a no-op. No URL: the entry is the
+ * same page, and Next.js copies its own router state into whatever is pushed.
+ */
+function pushStep(quizCode: string, step: number) {
+  const current = readQuizHistoryStep(window.history.state, quizCode);
+  if (current && current.step === step) return;
+  window.history.pushState(quizHistoryState(quizCode, step, (current?.depth ?? 0) + 1), "");
+}
+
+/** One `GET /api/quiz/[code]`: the first load, a retry, and the board refresh share it. */
+async function fetchView(code: string): Promise<QuizView> {
+  const res = await fetch(`/api/quiz/${encodeURIComponent(code)}`, { cache: "no-store" });
+  const data = await res.json();
+  if (!res.ok) throw apiError(data, "quiz_load_failed");
+  return data as QuizView;
+}
+
+function mintSubmissionId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random()}`;
+}
+
 function Board({
   view,
   copy,
   youName,
+  action,
 }: {
   view: QuizView;
   copy: QuizCopy;
   youName: string | null;
+  /** A control on the heading's row — the result screen's refresh. */
+  action?: React.ReactNode;
 }) {
   const rows = view.scoreboard;
   if (rows.length === 0) return null;
@@ -891,7 +1261,10 @@ function Board({
 
   return (
     <div>
-      <p className="q-kicker mb-1">{heading}</p>
+      <div className="q-board-head">
+        <p className="q-kicker">{heading}</p>
+        {action}
+      </div>
       <ol className="flex flex-col">
         {shown.map((r, i) => row(r, i + 1))}
         {extra && (

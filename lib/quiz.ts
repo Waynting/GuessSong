@@ -568,7 +568,7 @@ export function clampHintsUsed(value: unknown, questionCount: number): number {
 /* ------------------------------------------------------------------ */
 
 /**
- * Four buckets, so the result is a sentence rather than a decimal. "83.7%" is
+ * Five buckets, so the result is a sentence rather than a decimal. "83.7%" is
  * a promise ten questions cannot keep; "close friend" is what the number
  * actually supports. The thresholds are on the ratio so every question count
  * reads the same way.
@@ -578,8 +578,14 @@ export function clampHintsUsed(value: unknown, questionCount: number): number {
  * handed "getting there" to a coin. 60% is where a friend starts to show over
  * the noise at twenty questions; the two above it are unchanged in spirit and
  * moved up to keep the gaps even.
+ *
+ * `guessing` is the band a coin lands in, 50–59%, and it exists because the
+ * harshest label used to start there: a friend who half-knows the playlist
+ * lands at 55% more often than anywhere else, and "total stranger" for that
+ * is a verdict nobody screenshots into the chat. `stranger` now means below
+ * chance — worse than guessing, which is its own kind of knowing.
  */
-export const QUIZ_VERDICTS = ["soulmate", "close", "acquaintance", "stranger"] as const;
+export const QUIZ_VERDICTS = ["soulmate", "close", "acquaintance", "guessing", "stranger"] as const;
 export type QuizVerdict = (typeof QUIZ_VERDICTS)[number];
 
 export function verdictFor(correct: number, total: number): QuizVerdict {
@@ -588,6 +594,7 @@ export function verdictFor(correct: number, total: number): QuizVerdict {
   if (ratio >= 0.9) return "soulmate";
   if (ratio >= 0.75) return "close";
   if (ratio >= 0.6) return "acquaintance";
+  if (ratio >= 0.5) return "guessing";
   return "stranger";
 }
 

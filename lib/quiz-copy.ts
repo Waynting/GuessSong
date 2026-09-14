@@ -28,6 +28,9 @@ export interface QuizCopy {
   nameLabel: string;
   namePlaceholder: string;
   startButton: string;
+  /** Under Start once this phone has already finished the quiz: replays the stored row. */
+  resumeButton: string;
+  resumeNote: string;
   progress: string;
   promptOwner: string;
   promptPlaylist: string;
@@ -35,6 +38,8 @@ export interface QuizCopy {
   hintLoading: string;
   hintPlaying: string;
   hintNone: string;
+  /** The clip was found but the browser refused to start it; a second tap plays it. */
+  hintBlocked: string;
   hintsGone: string;
   nextButton: string;
   submitButton: string;
@@ -46,9 +51,14 @@ export interface QuizCopy {
   boardTitleOwner: string;
   boardTitlePlaylist: string;
   boardFull: string;
+  /** The taker's own ranking, re-read once per tap — never polled. */
+  refreshBoard: string;
+  refreshingBoard: string;
   youMarker: string;
   shareButton: string;
   copied: string;
+  /** Neither the share sheet nor the clipboard worked; the link follows, to copy by hand. */
+  shareFailed: string;
   /** The taker's score, with an owner to name. */
   shareText: string;
   /** The taker's score when the quiz has no owner name. */
@@ -61,6 +71,8 @@ export interface QuizCopy {
   expires: string;
   loading: string;
   retry: string;
+  /** In place of Retry when the quiz is gone: retrying a 404 cannot help. */
+  notFoundCta: string;
   /* The owner's results page */
   boardPageTitle: string;
   boardQuestionCount: string;
@@ -118,6 +130,8 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     nameLabel: "Your name",
     namePlaceholder: "So they know who beat them",
     startButton: "Start →",
+    resumeButton: "See my result again",
+    resumeNote: "This phone already took it as {name}.",
     progress: "Question {n} of {total}",
     promptOwner: "Which of these is in {owner}'s playlist?",
     promptPlaylist: "Which of these is in the playlist?",
@@ -125,6 +139,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     hintLoading: "Finding a clip…",
     hintPlaying: "That's the song that's in the playlist",
     hintNone: "No clip for this one — the hint wasn't spent",
+    hintBlocked: "The clip couldn't start — tap the hint again",
     hintsGone: "No hints left",
     nextButton: "Next →",
     submitButton: "See my score",
@@ -135,15 +150,19 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
       soulmate: "Musical soulmate",
       close: "You really know their taste",
       acquaintance: "Getting there",
+      guessing: "Coin flip",
       stranger: "Total stranger",
     },
     reviewTitle: "The answers",
     boardTitleOwner: "Who knows {owner} best",
     boardTitlePlaylist: "Leaderboard",
     boardFull: "The board is full, so your score wasn't saved — it still counts.",
+    refreshBoard: "Refresh",
+    refreshingBoard: "Refreshing…",
     youMarker: "you",
     shareButton: "Share my score",
     copied: "Copied!",
+    shareFailed: "Couldn't share or copy — copy this link by hand:",
     shareText: "I got {correct}/{total} on {owner}'s music taste quiz. Can you beat me?",
     shareTextPlaylist: "I got {correct}/{total} on the \"{playlist}\" playlist quiz. Can you beat me?",
     ownerShareTextOwner: "How well do you know {owner}'s music taste? {count} questions.",
@@ -153,6 +172,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     expires: "This quiz expires on {date}.",
     loading: "Loading…",
     retry: "Try again",
+    notFoundCta: "Make one of your own →",
     boardPageTitle: "Results",
     boardQuestionCount: "{count} questions",
     boardTakers: "{count} took it",
@@ -199,6 +219,8 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     nameLabel: "你的名字",
     namePlaceholder: "讓對方知道是誰贏了",
     startButton: "開始 →",
+    resumeButton: "再看一次我的結果",
+    resumeNote: "這支手機已經用「{name}」作答過了。",
     progress: "第 {n} 題，共 {total} 題",
     promptOwner: "哪一首在 {owner} 的歌單裡？",
     promptPlaylist: "哪一首在歌單裡？",
@@ -206,6 +228,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     hintLoading: "找片段中…",
     hintPlaying: "這就是歌單裡的那一首",
     hintNone: "這首沒有片段 — 提示沒扣",
+    hintBlocked: "片段沒播出來 — 再點一次提示",
     hintsGone: "提示用完了",
     nextButton: "下一題 →",
     submitButton: "看我的分數",
@@ -216,15 +239,19 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
       soulmate: "音樂靈魂伴侶",
       close: "你真的很懂他的品味",
       acquaintance: "有點懂",
+      guessing: "用猜的",
       stranger: "完全不熟",
     },
     reviewTitle: "解答",
     boardTitleOwner: "誰最懂 {owner}",
     boardTitlePlaylist: "排行榜",
     boardFull: "排行榜已經滿了，分數沒有存下來 — 但還是算數。",
+    refreshBoard: "更新",
+    refreshingBoard: "更新中…",
     youMarker: "你",
     shareButton: "分享我的分數",
     copied: "已複製！",
+    shareFailed: "沒辦法分享或複製 — 請手動複製這個連結：",
     shareText: "我在 {owner} 的音樂品味測驗拿了 {correct}/{total}，你能贏我嗎？",
     shareTextPlaylist: "我在「{playlist}」這份歌單的測驗拿了 {correct}/{total}，你能贏我嗎？",
     ownerShareTextOwner: "你有多懂 {owner} 的音樂品味？共 {count} 題。",
@@ -234,6 +261,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     expires: "這個測驗會在 {date} 到期。",
     loading: "載入中…",
     retry: "再試一次",
+    notFoundCta: "自己做一個 →",
     boardPageTitle: "結果",
     boardQuestionCount: "共 {count} 題",
     boardTakers: "{count} 人作答",

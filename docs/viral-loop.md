@@ -193,8 +193,9 @@ Playlist quiz — the link-shaped surface
   board            7    58.3% of quizzes had the owner back for results
     acquaintance     7  ██████████████████████████████
     close            6  ██████████████████████████
+    guessing         3  █████████████
     soulmate         2  █████████
-    stranger         4  █████████████████
+    stranger         1  ████
 
   questions   quizzes  finishers  per quiz
     10 preset      3          9       3.0
@@ -228,7 +229,7 @@ say; a fresh deploy shows the four stages and the verdicts alone.)
 | `per quiz` | `opened ÷ created`. Below 1 means quizzes are being made and not sent — a share-step problem, not a quiz problem |
 | `of opens` | `completed ÷ opened`, the quiz itself. **`opened` is a ceiling, not a floor — see §6** |
 | `board` | the owner opened their results page *with the token* — a guessed URL lands on 403 and is not counted. `board ÷ created` is the owner's half of the loop: a quiz whose board is never opened was sent and forgotten. **Also a ceiling** — the page fetches on every mount |
-| the verdict bars | how completed quizzes came out (`quiz_verdict:<bucket>`, from `verdictFor` in `lib/quiz.ts`). The difficulty gauge — see §7 |
+| the verdict bars | how completed quizzes came out (`quiz_verdict:<bucket>`, from `verdictFor` in `lib/quiz.ts`): `soulmate` ≥ 90%, `close` ≥ 75%, `acquaintance` ≥ 60%, `guessing` ≥ 50% (the band a coin lands in), `stranger` below chance. The difficulty gauge — see §7 |
 | the `questions` table | one row per length that had a quiz made or finished (`quiz_len:created:<n>` / `quiz_len:completed:<n>`). `quizzes` is what hosts chose, tagged `default` / `preset` / `typed` so the typed field's use is visible; `finishers` is answer sheets graded for quizzes of that length; `per quiz` is `finishers ÷ quizzes` — two floors over each other, so unlike `of opens` it needs no ceiling. A row with finishers and no quizzes is a quiz made before the window and finished inside it |
 | `built shorter than the host asked for` | `quiz_clamped`: the playlist had fewer usable tracks than the requested count, so `createQuiz` shortened it. The panel shows the count it got and says nothing about the one asked for — this is the only record that anyone wanted more |
 | the `hints` line | the quiz's only per-question upstream path (`quiz_hint:<status>`, from `GET /api/quiz/[code]/hint`). `heard` is a clip served; `no clip` is a recording nothing has a clip for (a cached fact, free); `unavailable` is *us* — throttled or out of budget, and the page refunds the hint; `repaired` is a `refresh=1` re-resolve of a rotted URL. The second line is `heard ÷ completed` beside the mean allowance (`hintAllowance`, one per ten questions) of the quizzes that were finished |
@@ -319,6 +320,7 @@ working call to action deleted. Collect two weeks first. Shapes, not numbers:
 | `refused: answer` above 0 | a room of phones behind one address hit the answer limit | raise `QUIZ_ANSWER_LIMIT` in `app/api/quiz/[code]/answer/route.ts` — it was 20 and refused the 21st finisher in an office, which is why it is 60 |
 | `refused: read` above 0 | the same room hit the read limit — opens that never became opens | `QUIZ_READ_LIMIT` in `app/api/quiz/[code]/route.ts`; the two limits are sized together, keep them so |
 | verdicts pile at `soulmate` | the decoys are too easy to tell from the playlist | the trigger for a Spotify-backed decoy source (`artists/{id}/top-tracks`) — `CHANGELOG.md` 1.9.0, known gaps |
+| verdicts pile at `guessing` and `stranger` | takers are at or below a coin: the decoys are indistinguishable from the playlist, or the link is reaching people who do not know the owner | read the two apart from `close`/`acquaintance` before touching the decoys — a spread that is *only* the bottom two is the sending, not the questions |
 
 ---
 
