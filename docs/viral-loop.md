@@ -192,8 +192,9 @@ Playlist quiz — the link-shaped surface
   completed       19    61.3% of opens
     acquaintance     7  ██████████████████████████████
     close            6  ██████████████████████████
+    guessing         3  █████████████
     soulmate         2  █████████
-    stranger         4  █████████████████
+    stranger         1  ████
   the CTA on the result screen is the quiz_result row above
 ```
 
@@ -208,7 +209,7 @@ Playlist quiz — the link-shaped surface
 | `created` / `opened` / `completed` | the Taste Quiz funnel (`recordQuizStage` in `lib/loop-stats.ts`), bumped by the route that did the thing — `POST /api/quiz`, `GET /api/quiz/[code]`, `POST /api/quiz/[code]/answer` — not beaconed from a page, so nothing here is lost to a tab closing. The block is printed only once something has been recorded |
 | `per quiz` | `opened ÷ created`. Below 1 means quizzes are being made and not sent — a share-step problem, not a quiz problem |
 | `of opens` | `completed ÷ opened`, the quiz itself. **`opened` is a ceiling, not a floor — see §6** |
-| the verdict bars | how completed quizzes came out (`quiz_verdict:<bucket>`, from `verdictFor` in `lib/quiz.ts`). The difficulty gauge — see §7 |
+| the verdict bars | how completed quizzes came out (`quiz_verdict:<bucket>`, from `verdictFor` in `lib/quiz.ts`): `soulmate` ≥ 90%, `close` ≥ 75%, `acquaintance` ≥ 60%, `guessing` ≥ 50% (the band a coin lands in), `stranger` below chance. The difficulty gauge — see §7 |
 
 ---
 
@@ -273,6 +274,7 @@ working call to action deleted. Collect two weeks first. Shapes, not numbers:
 | `per quiz` below 1 | quizzes are being made and not sent | the share step on the setup page (`components/quiz-panel.tsx`), not the questions |
 | `of opens` well under 40% | takers open and do not finish; ten questions is too long for this audience | shorten `QUIZ_DEFAULT_QUESTION_COUNT` in `types/quiz.ts` before touching the questions — and remember `opened` is a ceiling (§6), so this reads worse than it is |
 | verdicts pile at `soulmate` | the decoys are too easy to tell from the playlist | the trigger for a Spotify-backed decoy source (`artists/{id}/top-tracks`) — `CHANGELOG.md` 1.9.0, known gaps |
+| verdicts pile at `guessing` and `stranger` | takers are at or below a coin: the decoys are indistinguishable from the playlist, or the link is reaching people who do not know the owner | read the two apart from `close`/`acquaintance` before touching the decoys — a spread that is *only* the bottom two is the sending, not the questions |
 
 ---
 
