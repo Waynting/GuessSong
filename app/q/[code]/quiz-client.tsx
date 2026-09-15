@@ -25,8 +25,13 @@
  * one question at a time against a pick for it, which is why the halves are
  * disabled the moment one is chosen and why Back shows an answered question
  * rather than reopening it. The chosen half fills white while the server is
- * asked, then green or red; the seam says which; and the next question
- * slides in after `REVEAL_MS`, long enough to read. A check that does not
+ * asked, then green or red — the verdict is painted on the tapped half, so
+ * a wrong pick is a red tile and the real song beside it is revealed with a
+ * green edge and a tick, never the green fill (the fill is what "right"
+ * looks like, and the first version put it on the answer instead: every
+ * tap ended with one green tile and nothing red, which read as always
+ * green); the seam says which; and the next question slides in after
+ * `REVEAL_MS`, long enough to read. A check that does not
  * come back — offline, throttled, slow past `CHECK_TIMEOUT_MS` — costs the
  * verdict and nothing else: the question advances after the plain fill and
  * the sheet is still graded at the end, so a quiz never stalls on a round
@@ -215,7 +220,7 @@ const DUEL_CSS = `
   /* Right and wrong differ in value, not only hue: a greyscale or a
      red-green-blind eye still reads the tally. */
   .q-seg.is-right { background: #1DB954; }
-  .q-seg.is-wrong { background: #7a2e2e; }
+  .q-seg.is-wrong { background: #e5484d; }
   .q-seg.is-done { background: #555; }
   .q-seg.is-now { background: #f0f0f0; }
   .q-progress-text { font-size: 11px; color: #777; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -253,13 +258,20 @@ const DUEL_CSS = `
   .q-half.is-on { background: #2a2a2a; color: #f0f0f0; border-color: #f0f0f0; }
   /* Answered, verdict never came, seen again after Back or a reload. */
   .q-half.is-locked { background: #1e1e1e; color: #f0f0f0; border-color: #555; }
+  /* Right and wrong are the two fills, on the half that was tapped; black
+     text on both so they differ in hue alone and not in weight. */
   .q-half.is-right { background: #1DB954; color: #000; border-color: #1DB954; }
-  .q-half.is-wrong { background: #2a1414; color: #f0f0f0; border-color: #ff6b6b; }
+  .q-half.is-wrong { background: #e5484d; color: #000; border-color: #e5484d; }
+  /* The real song under a wrong pick: revealed by its edge and tick, not by
+     the green fill — that fill is the right verdict, and on a wrong tap the
+     one strong colour on screen has to be the red. */
+  .q-half.is-answer { background: #161616; color: #f0f0f0; border-color: #1DB954; box-shadow: inset 0 0 0 1px #1DB954; }
   .q-half.is-off { opacity: 0.4; }
   .q-half-title { font-size: clamp(34px, 9vw, 64px); text-wrap: balance; overflow-wrap: anywhere; }
   .q-half-artist { font-size: 14px; color: #8a8a8a; font-weight: 400; }
   .q-half.is-right .q-half-artist { color: rgba(0,0,0,0.7); }
-  .q-half.is-wrong .q-half-artist { color: rgba(255,107,107,0.85); }
+  .q-half.is-wrong .q-half-artist { color: rgba(0,0,0,0.7); }
+  .q-half.is-answer .q-half-artist { color: #1DB954; }
   .q-check {
     position: absolute; top: 14px; right: 16px;
     width: 26px; height: 26px; border-radius: 50%;
@@ -270,7 +282,8 @@ const DUEL_CSS = `
   .q-half.is-on .q-check { opacity: 1; background: #f0f0f0; color: #000; border-color: #f0f0f0; }
   .q-half.is-locked .q-check { opacity: 1; background: #555; color: #000; border-color: #555; }
   .q-half.is-right .q-check { opacity: 1; background: #000; color: #1DB954; border-color: #000; }
-  .q-half.is-wrong .q-check { opacity: 1; background: #ff6b6b; color: #000; border-color: #ff6b6b; }
+  .q-half.is-wrong .q-check { opacity: 1; background: #000; color: #e5484d; border-color: #000; }
+  .q-half.is-answer .q-check { opacity: 1; background: #1DB954; color: #000; border-color: #1DB954; }
 
   .q-seam {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -1165,13 +1178,15 @@ export function QuizClient({ code }: { code: string }) {
         >
           {question.options.map((option, i) => {
             const selected = chosen === i;
-            const right = verdict >= 0 && i === verdict;
-            const wrong = verdict >= 0 && selected && !right;
-            // The real song stays lit when the pick was wrong: that is the reveal.
-            const dimmed = chosen >= 0 && !selected && !right;
+            // The verdict is on the tapped half. The real song under a wrong
+            // pick is `answer`: revealed, not dimmed, and never the green fill.
+            const right = verdict >= 0 && selected && i === verdict;
+            const wrong = verdict >= 0 && selected && i !== verdict;
+            const answer = verdict >= 0 && !selected && i === verdict;
+            const dimmed = chosen >= 0 && !selected && !answer;
             // Selected reads as "on its way" while the check is out and as
             // "locked" once it is plainly not coming — a parked question.
-            const tone = right ? " is-right" : wrong ? " is-wrong" : selected ? (parked ? " is-locked" : " is-on") : "";
+            const tone = right ? " is-right" : wrong ? " is-wrong" : answer ? " is-answer" : selected ? (parked ? " is-locked" : " is-on") : "";
             return [
               /* Plain toggle buttons, not ARIA radios: a radio group promises
                  arrow-key movement and a roving tabindex, and Tab between the
@@ -1187,7 +1202,7 @@ export function QuizClient({ code }: { code: string }) {
               >
                 {/* Neither the selected state nor the verdict is colour alone. */}
                 <span className="q-check" aria-hidden="true">
-                  {right ? "✓" : wrong ? "✗" : ""}
+                  {right || answer ? "✓" : wrong ? "✗" : ""}
                 </span>
                 <span className="q-display q-half-title">{option.title}</span>
                 {option.artist && <span className="q-half-artist">{option.artist}</span>}
