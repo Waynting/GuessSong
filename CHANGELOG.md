@@ -85,7 +85,7 @@ asks one question; everything with a default goes behind one line.
   hosted game. The old `/?mode=quiz` and `/?ref=quiz_result` spellings are
   redirected by `next.config.js` `redirects()` before any HTML is served,
   with the mount-effect redirect in `app/page.tsx` as the fallback.
-- **Tests: 816 → 891** across `tests/start-status.test.ts`,
+- **Tests: 816 → 894** across `tests/start-status.test.ts`,
   `tests/round-outcome.test.ts`, `tests/result-image.test.ts`,
   `tests/setup-pages.test.ts` (source pins for every `.tsx` invariant the
   split rests on) and extensions to the arrival, loop-redirect, loop-links,
