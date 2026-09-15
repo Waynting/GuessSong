@@ -58,6 +58,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "monthly",
       priority: 0.8,
     },
+    // The quiz's own page. English only, like the guides; no cluster.
+    {
+      url: `${BASE_URL}/quiz`,
+      lastModified: now,
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
     {
       url: `${BASE_URL}/guides`,
       lastModified: now,

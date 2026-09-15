@@ -77,6 +77,23 @@ export const LOOP_SURFACES = [
 export type LoopSurface = (typeof LOOP_SURFACES)[number];
 
 /**
+ * What the surfaces say. Declared here, beside the names, for the same
+ * reason the names are: the same sentence was written seven different ways
+ * across the pages that carry it ("Host the next one", "Scan to host your own
+ * party", "Scan to play your own", …), each a small decision about what the
+ * product is called and what it asks you to do. One phrase, three carriers —
+ * a button, a footer line, a QR caption — is all the variation the job needs.
+ * The quiz result keeps its own line in `lib/quiz-copy.ts`, because that link
+ * lands on the quiz's own page (`/quiz`) and is read in two languages.
+ */
+/** The loud one: a button on a screen the player has just finished with. */
+export const LOOP_CTA_LABEL = "Host your own game →";
+/** The quiet one: a line of text at the bottom of a player page. */
+export const LOOP_FOOTER_LABEL = "Made with GuessSong — host your own";
+/** Under a QR code, on a screen or printed into the result card. */
+export const LOOP_QR_CAPTION = "Scan to host your own game";
+
+/**
  * Where a visitor came from, as recorded on `game_started`.
  *
  * `organic` is everything that is not one of ours, which at 100% search

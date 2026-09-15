@@ -801,6 +801,31 @@ describe("QUIZ_COPY", () => {
     }
   });
 
+  it("dropped the four strings the /quiz page and the panel no longer render, in both languages", () => {
+    // `ctaButton` and `notFoundCta` became one `makeYourOwn`; `panelDeviceOnly`
+    // and `panelExpires` became one `panelResultsUntil`. A key that stays in
+    // the table after its last reader is gone is a translation nobody
+    // maintains — and a reader that comes back for it is a compile error,
+    // not an empty line, only while the key is really gone.
+    for (const gone of ["ctaButton", "notFoundCta", "panelDeviceOnly", "panelExpires"]) {
+      expect(gone in QUIZ_COPY.en, gone).toBe(false);
+      expect(gone in QUIZ_COPY.zh, gone).toBe(false);
+    }
+    expect(typeof QUIZ_COPY.en.makeYourOwn).toBe("string");
+    expect(typeof QUIZ_COPY.en.panelResultsUntil).toBe("string");
+  });
+
+  it("dates the panel's one constraint line — both halves say when the link ends", () => {
+    // `panelResultsUntil` folded "results are on this device" and "the link
+    // stops working on {date}" into one sentence. The placeholder-parity
+    // test above would pass if *both* languages lost the date; this is the
+    // assertion that the date is there at all.
+    for (const locale of ["en", "zh"] as const) {
+      expect(QUIZ_COPY[locale].panelResultsUntil, locale).toContain("{date}");
+      expect(fillCopy(QUIZ_COPY[locale].panelResultsUntil, { date: "2026-09-22" }), locale).toContain("2026-09-22");
+    }
+  });
+
   it("pluralises the English hint word and leaves the Chinese measure word alone", () => {
     expect(hintWord("en", 1)).toBe("hint");
     expect(hintWord("en", 0)).toBe("hints");

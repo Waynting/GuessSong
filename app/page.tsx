@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Track } from "@/types";
 import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolResponse } from "@/types/room";
@@ -24,26 +25,11 @@ import { saveGame } from "@/lib/game-storage";
 import { isBuzzerConfigured } from "@/lib/buzzer-client";
 import type { OpenRoom } from "@/lib/room-client";
 import { RoomPanel } from "@/components/room-panel";
-import { QuizPanel } from "@/components/quiz-panel";
-import {
-  recallLastQuiz,
-  rememberLastQuiz,
-  rememberQuizToken,
-  type LastQuiz,
-} from "@/lib/quiz-session";
-import {
-  QUIZ_MAX_QUESTIONS,
-  QUIZ_MIN_QUESTIONS,
-  QUIZ_NAME_MAX,
-  QUIZ_QUESTION_COUNTS,
-  type CreateQuizRequest,
-  type CreateQuizResponse,
-} from "@/types/quiz";
-import { DEFAULT_QUIZ_COUNT_STATE, QUIZ_COUNT_CONTROL, quizCountOf } from "@/lib/quiz";
-import { requestedSetupMode } from "@/lib/setup-arrival";
+import { QUIZ_SETUP_HREF, quizArrivalHref, requestedSetupMode } from "@/lib/setup-arrival";
 import { SiteFooter } from "@/components/site-footer";
 import { getGuide } from "@/lib/guides";
 import { InstallBanner } from "@/components/install-banner";
+import { CheckIcon, SetupBackdrop, SetupStyles, SpotifyIcon } from "@/components/setup-chrome";
 import {
   MixedPlaylistCollector,
   type MixedContribution,
@@ -58,10 +44,10 @@ import {
   commitCustom,
   isCustomSelected,
 } from "@/lib/song-count";
+import { MIXED_MIN_CONTRIBUTORS, startState, type SetupMode } from "@/lib/start-status";
 
 const CLIP_DURATIONS = [5, 10, 15, 20, 30];
 const MIXED_SAMPLE_COUNTS = [5, 8, 10, 12];
-const MIXED_MIN_CONTRIBUTORS = 2;
 
 /**
  * How many /api/playlist loads Mixed mode has in flight at once.
@@ -125,93 +111,30 @@ const HOME_GUIDES = [
 const FAQS: { q: string; a: string }[] = [
   {
     q: "How do you play the guess the song game?",
-    a: "One person hosts on a single screen. Paste a public Spotify playlist, add everyone's names, and the game plays a short clip (5 to 30 seconds) from a random track. Everyone shouts their guess out loud and the host taps whoever got it first: 3 points for the song title, 1 more for the album.",
+    a: "One person hosts on a single screen: paste a public Spotify playlist, add everyone's names, and the game plays a short clip from a random track. Everyone guesses out loud and the host taps whoever got it first — 3 points for the song, 1 more for the album.",
   },
   {
-    q: "Do I need a Spotify account or a login?",
-    a: "No. GuessSong never asks anyone to sign in, and there are no accounts to create. It reads the track list from any public playlist link and plays a short preview clip of each song.",
-  },
-  {
-    q: "Is it free?",
-    a: "Yes, completely free and open source. There is nothing to install and nothing to pay for — it runs in the browser.",
-  },
-  {
-    q: "How many people can play?",
-    a: "As many as fit around one screen. GuessSong is a local party game: the host controls the music and the scoreboard, and everyone else just listens and guesses. You can also turn on Buzzer Mode so players buzz in from their own phones.",
+    q: "Do I need a Spotify account, and is it free?",
+    a: "No login, no accounts and nothing to pay for — GuessSong is free and open source. It reads the track list from any public playlist link and plays a short preview of each song.",
   },
   {
     q: "Can everyone use their own playlist?",
-    a: "Yes — that's Mixed Playlist Mode. Everyone submits their own playlist, GuessSong merges them into one pool and removes duplicates, and you get a bonus point for guessing whose playlist a track came from.",
+    a: "Yes — that's Mixed Playlist Mode: everyone adds a playlist, GuessSong merges them into one pool, and you get a bonus point for guessing whose playlist a track came from. Turn on Buzzer Mode and players buzz in from their own phones instead of shouting.",
   },
   {
-    q: "Why do some songs have no audio?",
-    a: "Spotify stopped providing preview clips for many tracks in late 2024, so GuessSong looks the song up on iTunes and Deezer instead. A small number of tracks have no preview anywhere and get skipped — playlists with mainstream music tend to work best.",
+    q: "Which playlists work?",
+    a: "Any public Spotify playlist link; private playlists and Spotify's own editorial ones (Discover Weekly and the like) can't be read. Spotify stopped providing preview clips for many tracks in 2024, so clips come from iTunes and Deezer, and the few songs with no preview anywhere are skipped.",
   },
 ];
 
-/**
- * `quiz` is not a game. It makes a link for friends to open on their own
- * phones, and it is on this page because it starts from the same pasted
- * playlist — but it must never reach `recordHostedStart`: a quiz is one person
- * making something, not a room being hosted, and counting it would inflate
- * the one number the whole loop is judged on.
- */
-type SetupMode = "single" | "mixed" | "quiz";
-
-/**
- * A quiz this page made, as the panel shows it.
- *
- * The owner name rides along because the response does not carry it and the
- * panel outlives the form: the share sentence names whoever the quiz was
- * *made* for, and the host editing the name box afterwards — on the way to a
- * second quiz, or by accident — must not rewrite the text under a link that
- * has already been sent.
- */
-type CreatedQuiz = CreateQuizResponse & { ownerName: string | null };
-
-// `MixedSubMode` is imported rather than redeclared here. It was a local copy
-// with the same two members until the KV counters started keying off it, and a
-// second copy of a union whose members become part of a key is the shape that
-// drifts silently: the toggle would keep working, the counter would keep
-// counting, and they would be counting different things. Same reason
-// `lib/loop-links.ts` declares its surfaces once.
-
-function SpotifyIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-      <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-5 h-5">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
-function WaveformBg() {
-  const bars = Array.from({ length: 60 }, (_, i) => i);
-  return (
-    <div className="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden>
-      <div className="absolute bottom-0 left-0 right-0 h-64 flex items-end justify-center gap-[3px] opacity-[0.06]">
-        {bars.map((i) => (
-          <div
-            key={i}
-            className="waveform-bar bg-[#1DB954] rounded-t-sm"
-            style={{
-              width: "3px",
-              height: `${(20 + Math.sin(i * 0.4) * 15 + Math.sin(i * 0.9) * 20 + Math.cos(i * 0.7) * 15).toFixed(2)}%`,
-              animationDelay: `${(i * 0.05) % 2}s`,
-            }}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
+// `SetupMode` and `MixedSubMode` are imported rather than redeclared here.
+// `MixedSubMode` was a local copy with the same two members until the KV
+// counters started keying off it, and a second copy of a union whose members
+// become part of a key is the shape that drifts silently: the toggle would
+// keep working, the counter would keep counting, and they would be counting
+// different things. Same reason `lib/loop-links.ts` declares its surfaces
+// once. `SetupMode` moved to `lib/start-status.ts` with the Start button's
+// ladder, which is typed by it.
 
 export default function SetupPage() {
   const router = useRouter();
@@ -239,20 +162,12 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
-  // Taste quiz: what the host typed, what came back, and what this device
-  // made last time (offered back as the way to the board — see lib/quiz-session.ts).
-  const [quizOwnerName, setQuizOwnerName] = useState("");
-  // The question count is `lib/song-count.ts`'s control with the quiz's bounds
-  // (`QUIZ_COUNT_CONTROL`): the same two rules as "Number of Songs" below, so a
-  // half-typed "4" on the way to "45" never becomes the count.
-  const [quizCount, setQuizCount] = useState(DEFAULT_QUIZ_COUNT_STATE);
-  const [createdQuiz, setCreatedQuiz] = useState<CreatedQuiz | null>(null);
-  const [lastQuiz, setLastQuiz] = useState<LastQuiz | null>(null);
+  // Clip length, song count and the buzzer sit behind one summary line. Every
+  // one of them has a default most hosts never touch, and laid out flat they
+  // were three rows of pills between the playlist and the Start button.
+  const [showSettings, setShowSettings] = useState(false);
   const locale = useErrorLocale();
   const firstInputRef = useRef<HTMLInputElement>(null);
-  // The setup form itself, for an arrival that asked for a mode: the hero and
-  // the install pitch sit above it, and on a phone that is three screens.
-  const setupCardRef = useRef<HTMLDivElement>(null);
 
   /**
    * The last submission that failed in a way the submission itself determines,
@@ -274,7 +189,7 @@ export default function SetupPage() {
   // What the one room has to do, given the modes picked above. Pass-the-phone
   // with the buzzer off needs no room at all, and never opens one.
   const collectsPlaylists = setupMode === "mixed" && mixedSubMode === "room";
-  const needsRoom = (collectsPlaylists || buzzerEnabled) && setupMode !== "quiz";
+  const needsRoom = collectsPlaylists || buzzerEnabled;
 
   function addMixedContribution(c: MixedContribution) {
     setMixedContributions((prev) => [...prev, c]);
@@ -298,16 +213,10 @@ export default function SetupPage() {
     setRoomError(null);
   }
 
-  /**
-   * The one way the mode pills change the mode. Leaving the quiz is the only
-   * thing besides making another quiz that takes the host's link off screen:
-   * editing the form does not, because a tap on a count pill is not a
-   * decision to throw away a link that may already be in a group chat.
-   */
+  /** The one way the mode link and the card header change the mode. */
   function chooseMode(mode: SetupMode) {
     setSetupMode(mode);
     resetRoom();
-    if (mode !== "quiz") setCreatedQuiz(null);
   }
 
   async function handleRoomStart() {
@@ -387,30 +296,15 @@ export default function SetupPage() {
     const ref = query.get("ref");
     if (ref) rememberLoopRef(ref);
 
-    // An arrival that asked for a mode gets it, and gets the form on screen.
-    // `?ref=quiz_result` is a friend who just took a quiz and tapped "make one
-    // for your friends"; `?mode=quiz` is the same intent from a content page.
-    // Landing either of them on Single Playlist under the hero — the quiz pill
-    // three screens down and unmarked — is what this fixes. The rule is in
-    // lib/setup-arrival.ts, and it is null for every other arrival.
-    //
-    // Scrolled on the next frame rather than here: the card is already in the
-    // DOM, but the mode has not been committed yet and the fade-in is about
-    // to start. The card's own `scroll-margin-top` absorbs the 16px the
-    // animation translates it by, so it settles just under the top edge.
-    const requested = requestedSetupMode(query);
-    if (requested) {
-      setSetupMode(requested);
-      requestAnimationFrame(() => {
-        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        setupCardRef.current?.scrollIntoView({
-          block: "start",
-          behavior: reduceMotion ? "auto" : "smooth",
-        });
-      });
+    // A link that asked for the quiz. `/?mode=quiz` was how the content pages
+    // reached it while the quiz was a mode of this form, and `/?ref=quiz_result`
+    // was the loop's warm arm landing here; both sit in old chats and cached
+    // pages, so they are honoured with a redirect to the page the quiz has now.
+    // The rule is in lib/setup-arrival.ts, and it is null for every other arrival.
+    if (requestedSetupMode(query) === "quiz") {
+      window.location.replace(quizArrivalHref(query));
+      return;
     }
-
-    setLastQuiz(recallLastQuiz());
   }, []);
 
   /**
@@ -536,65 +430,6 @@ export default function SetupPage() {
       // Only failures the URL itself determines are remembered. A throttled or
       // unknown one has to stay retryable — the host's link may be perfect and
       // the next attempt may well be the one that works.
-      lastRejectedRef.current = shouldRememberRejection(e)
-        ? { key: submissionKey, message }
-        : null;
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  /**
-   * The quiz path. Same URL box, same `/api/*` conventions, and the same
-   * rejection memo as a game start — keyed with its own prefix so a refused
-   * quiz does not shadow a game start for the same link. Deliberately not a
-   * hosted start (see `SetupMode`).
-   */
-  async function handleCreateQuiz() {
-    setError(null);
-    if (!playlistUrl.trim()) {
-      setError(errorMessage("playlist_url_required", locale));
-      return;
-    }
-    const questionCount = quizCountOf(quizCount);
-    const submissionKey = `quiz:${playlistUrl}:${questionCount}`;
-    const rejected = lastRejectedRef.current;
-    if (rejected && rejected.key === submissionKey) {
-      setError(rejected.message);
-      return;
-    }
-    setLoading(true);
-    const body: CreateQuizRequest = {
-      url: playlistUrl,
-      ownerName: quizOwnerName.trim() || undefined,
-      questionCount,
-      locale,
-    };
-    try {
-      const res = await fetch("/api/quiz", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw apiError(data, "quiz_create_failed");
-      const created = data as CreateQuizResponse;
-      const ownerName = quizOwnerName.trim() || null;
-      setCreatedQuiz({ ...created, ownerName });
-      const remembered: LastQuiz = {
-        code: created.code,
-        ownerName,
-        playlistName: created.playlistName,
-        createdAt: Date.now(),
-        expiresAt: created.expiresAt,
-      };
-      rememberLastQuiz(remembered);
-      rememberQuizToken(created.code, created.hostToken);
-      setLastQuiz(remembered);
-      trackEvent("quiz_created", { question_count: created.questionCount });
-    } catch (e: unknown) {
-      const message = describeError(e, locale, "quiz_create_failed");
       lastRejectedRef.current = shouldRememberRejection(e)
         ? { key: submissionKey, message }
         : null;
@@ -740,6 +575,24 @@ export default function SetupPage() {
     }
   }
 
+  const startBusy = loading || roomStarting;
+  const startState_ = startState({
+    setupMode,
+    mixedSubMode,
+    busy: startBusy,
+    needsRoom,
+    roomOpen: openedRoom !== null,
+    buzzerEnabled,
+    buzzerPlayerCount,
+    mixedContributions: mixedContributions.length,
+    roomSubmissions: roomSubmissions.length,
+  });
+  const startClick = setupMode === "single"
+    ? handleStart
+    : mixedSubMode === "phone"
+    ? handleMixedStart
+    : handleRoomStart;
+
   return (
     <>
       <script
@@ -756,361 +609,9 @@ export default function SetupPage() {
           }),
         }}
       />
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap');
+      <SetupStyles />
 
-        :root {
-          --green: #1DB954;
-          --green-dim: #169c44;
-          --bg: #111111;
-          --surface: #1a1a1a;
-          --surface2: #222222;
-          --border: #2a2a2a;
-          --text: #f0f0f0;
-          --muted: #777;
-        }
-
-        body { background: var(--bg); font-family: 'Outfit', sans-serif; color: var(--text); }
-
-        .hero-title {
-          font-family: 'Bebas Neue', sans-serif;
-          font-size: clamp(2.8rem, 8vw, 6rem);
-          letter-spacing: 0.02em;
-          line-height: 0.9;
-          background: linear-gradient(135deg, #ffffff 0%, #aaffc8 40%, #1DB954 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-          text-shadow: none;
-        }
-
-        .card {
-          background: var(--surface);
-          border: 1px solid var(--border);
-          border-radius: 16px;
-        }
-
-        .url-input {
-          width: 100%;
-          background: var(--surface2);
-          border: 1.5px solid var(--border);
-          border-radius: 10px;
-          padding: 14px 48px 14px 16px;
-          font-size: 15px;
-          font-family: 'Outfit', sans-serif;
-          color: var(--text);
-          transition: border-color 0.2s, box-shadow 0.2s;
-          outline: none;
-        }
-        .url-input:focus {
-          border-color: var(--green);
-          box-shadow: 0 0 0 3px rgba(29,185,84,0.12);
-        }
-        .url-input.valid { border-color: var(--green); }
-        .url-input::placeholder { color: var(--muted); }
-
-        .player-input {
-          flex: 1;
-          background: var(--surface2);
-          border: 1.5px solid var(--border);
-          border-radius: 8px;
-          padding: 11px 14px;
-          font-size: 14px;
-          font-family: 'Outfit', sans-serif;
-          color: var(--text);
-          outline: none;
-          transition: border-color 0.2s;
-        }
-        .player-input:focus { border-color: var(--green); }
-        .player-input::placeholder { color: var(--muted); }
-
-        .pill {
-          padding: 8px 12px;
-          border-radius: 999px;
-          font-size: 14px;
-          font-weight: 600;
-          border: 1.5px solid var(--border);
-          background: var(--surface2);
-          color: var(--muted);
-          cursor: pointer;
-          transition: all 0.15s;
-          font-family: 'Outfit', sans-serif;
-        }
-        .pill:hover { border-color: #444; color: var(--text); }
-        .pill.active {
-          background: var(--green);
-          border-color: var(--green);
-          color: #000;
-          box-shadow: 0 0 16px rgba(29,185,84,0.4);
-        }
-
-        /* Same pill, but a field. The spinners are hidden because they are the
-           wrong affordance at this size and clip the text inside the radius. */
-        .count-input {
-          width: 92px;
-          text-align: center;
-          color: var(--text);
-          -moz-appearance: textfield;
-        }
-        .count-input::-webkit-outer-spin-button,
-        .count-input::-webkit-inner-spin-button {
-          -webkit-appearance: none;
-          margin: 0;
-        }
-        .count-input:focus {
-          outline: none;
-          border-color: var(--green);
-        }
-        .count-input::placeholder { color: var(--muted); font-weight: 600; }
-        /* Selected reads the same here as on a pill. Without it a committed
-           custom count is dark text in a dark field while every preset lights
-           up green, so the row looks like nothing is chosen. */
-        .count-input.active { color: #000; }
-        .count-input.active::placeholder { color: rgba(0,0,0,0.45); }
-        /* A phone. The card's inner width is the viewport less 98px of
-           padding and border — 277px at 375, 262px at 360 — and the quiz's
-           count row (four pills, the typed field, four 8px gaps) is ~294px at
-           the sizes above, so the field wrapped to a row of its own. Three
-           pixels off each pill side and a narrower field bring the row to
-           ~257px: it fits at 360 with a few pixels to spare, and "Custom",
-           the widest placeholder, still clears the field's padding. The
-           Number of Songs row has one more pill and wraps either way; it is
-           unchanged in shape. */
-        @media (max-width: 420px) {
-          .pill { padding: 8px 9px; }
-          .count-input { width: 76px; padding-left: 8px; padding-right: 8px; }
-        }
-
-        .link-btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 8px 16px;
-          border-radius: 999px;
-          border: 1.5px solid rgba(29,185,84,0.35);
-          background: rgba(29,185,84,0.06);
-          color: var(--green);
-          font-family: 'Outfit', sans-serif;
-          font-size: 13px;
-          font-weight: 600;
-          text-decoration: none;
-          /* The footer's "What's new" is a <button> in the same row as the
-             mailto <a>. Buttons don't inherit either of these. */
-          cursor: pointer;
-          line-height: 1.2;
-          transition: border-color 0.15s, background 0.15s, transform 0.1s;
-        }
-        .link-btn:hover {
-          border-color: var(--green);
-          background: rgba(29,185,84,0.12);
-          transform: translateY(-1px);
-        }
-
-        .start-btn {
-          width: 100%;
-          padding: 16px;
-          background: var(--green);
-          color: #000;
-          font-family: 'Outfit', sans-serif;
-          font-size: 18px;
-          font-weight: 700;
-          border: none;
-          border-radius: 12px;
-          cursor: pointer;
-          letter-spacing: 0.03em;
-          transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
-          box-shadow: 0 4px 24px rgba(29,185,84,0.3);
-        }
-        .start-btn:hover:not(:disabled) {
-          background: #1ed760;
-          box-shadow: 0 4px 32px rgba(29,185,84,0.5);
-          transform: translateY(-1px);
-        }
-        .start-btn:active:not(:disabled) { transform: translateY(0); }
-        .start-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-
-        .add-player-btn {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 14px;
-          font-weight: 500;
-          color: var(--green);
-          background: none;
-          border: 1.5px dashed rgba(29,185,84,0.4);
-          border-radius: 8px;
-          padding: 9px 16px;
-          cursor: pointer;
-          transition: all 0.15s;
-          font-family: 'Outfit', sans-serif;
-          width: 100%;
-          justify-content: center;
-        }
-        .add-player-btn:hover {
-          border-color: var(--green);
-          background: rgba(29,185,84,0.05);
-        }
-
-        .remove-btn {
-          width: 32px;
-          height: 32px;
-          border-radius: 50%;
-          background: var(--surface2);
-          border: 1px solid var(--border);
-          color: var(--muted);
-          font-size: 18px;
-          line-height: 1;
-          cursor: pointer;
-          transition: all 0.15s;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-        }
-        .remove-btn:hover { background: #3a1a1a; border-color: #662222; color: #ef4444; }
-
-        .section-label {
-          font-size: 11px;
-          font-weight: 600;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: var(--muted);
-          margin-bottom: 10px;
-        }
-
-        /* Crawlable prose. The setup form above is almost entirely UI chrome,
-           so without this the homepage has nothing for Google to match a
-           query like "guess the song game" against. */
-        .seo-section { margin-top: 44px; }
-        .seo-h2 {
-          font-size: 15px;
-          font-weight: 600;
-          color: #999;
-          margin-bottom: 10px;
-        }
-        .seo-p {
-          font-size: 13px;
-          font-weight: 300;
-          line-height: 1.7;
-          color: #666;
-        }
-        .seo-p + .seo-p { margin-top: 10px; }
-        .guide-links {
-          margin-top: 14px;
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-          gap: 10px;
-        }
-        .guide-link {
-          display: block;
-          background: #1a1a1a;
-          border: 1px solid #2a2a2a;
-          border-radius: 10px;
-          padding: 14px 16px;
-          text-decoration: none;
-          transition: border-color 0.15s ease;
-        }
-        .guide-link:hover { border-color: #1DB954; }
-        .guide-link-title {
-          color: #f0f0f0;
-          font-size: 14.5px;
-          font-weight: 600;
-          line-height: 1.4;
-          margin-bottom: 4px;
-        }
-        .guide-link-desc {
-          color: #888;
-          font-size: 12.5px;
-          font-weight: 300;
-          line-height: 1.5;
-        }
-        .faq-list { margin-top: 12px; display: flex; flex-direction: column; gap: 14px; }
-        .faq-q {
-          font-size: 13px;
-          font-weight: 500;
-          color: #999;
-          margin-bottom: 4px;
-        }
-        .faq-a {
-          font-size: 13px;
-          font-weight: 300;
-          line-height: 1.7;
-          color: #666;
-        }
-        .faq-a a { color: #1DB954; }
-        .faq-a a:hover { text-decoration: underline; }
-
-        .waveform-bar {
-          animation: waveform 2.4s ease-in-out infinite alternate;
-        }
-        @keyframes waveform {
-          from { transform: scaleY(0.4); }
-          to { transform: scaleY(1); }
-        }
-
-        .fade-in {
-          opacity: 0;
-          transform: translateY(16px);
-          animation: fadeUp 0.5s ease forwards;
-        }
-        .fade-in-1 { animation-delay: 0.05s; }
-        .fade-in-2 { animation-delay: 0.15s; }
-        .fade-in-3 { animation-delay: 0.25s; }
-        .fade-in-4 { animation-delay: 0.35s; }
-        .fade-in-5 { animation-delay: 0.45s; }
-        @keyframes fadeUp {
-          to { opacity: 1; transform: translateY(0); }
-        }
-
-        .dot-pulse::after {
-          content: '...';
-          animation: dots 1.2s steps(4, end) infinite;
-        }
-        @keyframes dots {
-          0%, 20% { content: ''; }
-          40% { content: '.'; }
-          60% { content: '..'; }
-          80%, 100% { content: '...'; }
-        }
-
-        .spinner {
-          width: 20px; height: 20px;
-          border: 2.5px solid rgba(0,0,0,0.3);
-          border-top-color: #000;
-          border-radius: 50%;
-          animation: spin 0.7s linear infinite;
-          display: inline-block;
-          vertical-align: middle;
-          margin-right: 8px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        .noise-overlay {
-          position: fixed;
-          inset: 0;
-          pointer-events: none;
-          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-          opacity: 0.025;
-        }
-      `}</style>
-
-      <div className="noise-overlay" aria-hidden />
-      <WaveformBg />
-
-      {/* Radial glow top-center */}
-      <div
-        aria-hidden
-        style={{
-          position: "fixed",
-          top: "-20%",
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: "600px",
-          height: "400px",
-          background: "radial-gradient(ellipse at center, rgba(29,185,84,0.08) 0%, transparent 70%)",
-          pointerEvents: "none",
-        }}
-      />
+      <SetupBackdrop />
 
       <main
         style={{
@@ -1124,372 +625,119 @@ export default function SetupPage() {
         }}
       >
         <div style={{ width: "100%", maxWidth: "480px" }}>
-          {/* Header */}
-          <div className={`text-center mb-8 ${mounted ? "fade-in fade-in-1" : ""}`}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", marginBottom: "8px" }}>
-              <div style={{ color: "#1DB954" }}>
-                <SpotifyIcon />
-              </div>
-              <span style={{ fontSize: "13px", fontWeight: 500, color: "#777", letterSpacing: "0.08em" }}>
-                PARTY GAME
-              </span>
+          {/* Header. One title, one line under it, and the language switch
+              in the corner. It had an eyebrow, two taglines, a Chinese slogan,
+              a "How to play" pill and a GitHub plea — six things before the
+              form, on a page whose whole job is the form. The footer still
+              links every one of those destinations. */}
+          <div
+            className={`text-center mb-8 ${mounted ? "fade-in fade-in-1" : ""}`}
+            style={{ position: "relative" }}
+          >
+            {/* Crawl path to /zh. The href is the signal; the label is a
+                switch, mirroring the "English" one on /zh. */}
+            <a href="/zh" hrefLang="zh-TW" lang="zh-TW" className="lang-switch">
+              中文
+            </a>
+            <div style={{ color: "#1DB954", display: "flex", justifyContent: "center", marginBottom: "10px" }}>
+              <SpotifyIcon />
             </div>
             <h1 className="hero-title">GuessSong</h1>
             {/* This is an <h2>, not a <p>, so crawlers see the generic phrase
                 people actually search for — the H1 is brand-only. */}
             <h2 style={{ color: "#666", fontSize: "15px", marginTop: "12px", fontWeight: 300 }}>
-              Play a clip. Guess the song. Compete.
+              Play a clip, guess the song — free, for any Spotify playlist, no login.
             </h2>
-            <p style={{ color: "#555", fontSize: "12px", marginTop: "8px" }}>
-              The free music guessing game for any Spotify playlist — no login required
-            </p>
-            {/* Crawl path to /zh with Chinese anchor text — that anchor is the
-                signal, so keep the keyword in the link, not around it. */}
-            <p style={{ color: "#555", fontSize: "12px", marginTop: "4px" }}>
-              <a
-                href="/zh"
-                hrefLang="zh-TW"
-                style={{ color: "#666", textDecoration: "underline", textUnderlineOffset: "3px" }}
-              >
-                猜歌遊戲・派對音樂猜謎，適合朋友聚會
-              </a>
-            </p>
-            <p style={{ marginTop: "10px" }}>
-              <a href="/about" className="link-btn">How to play →</a>
-            </p>
-            <p style={{ color: "#555", fontSize: "13px", marginTop: "8px", fontWeight: 300, display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-              If you like, give me a star
-              <a href="https://github.com/Waynting/GuessSong" target="_blank" rel="noopener noreferrer" style={{ color: "#555", display: "inline-flex", transition: "color 0.15s" }} onMouseEnter={e => (e.currentTarget.style.color = "#f0f0f0")} onMouseLeave={e => (e.currentTarget.style.color = "#555")}>
-                <svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15" aria-label="GitHub">
-                  <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
-                </svg>
-              </a>
-            </p>
-          </div>
-
-          {/* Install pitch — shown before the setup form */}
-          <div className={mounted ? "fade-in fade-in-2" : ""}>
-            <InstallBanner />
           </div>
 
           {/* Card */}
           <div
-            ref={setupCardRef}
             className={`card ${mounted ? "fade-in fade-in-2" : ""}`}
             style={{ padding: "28px", display: "flex", flexDirection: "column", gap: "24px", scrollMarginTop: "32px" }}
           >
 
-            {/* Game Mode */}
-            <div>
-              <p className="section-label">Game Mode</p>
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                <button
-                  className={`pill${setupMode === "single" ? " active" : ""}`}
-                  onClick={() => chooseMode("single")}
-                >
-                  Single Playlist
-                </button>
-                <button
-                  className={`pill${setupMode === "mixed" ? " active" : ""}`}
-                  onClick={() => chooseMode("mixed")}
-                >
-                  Mixed Playlist 🔀
-                </button>
-                <button
-                  className={`pill${setupMode === "quiz" ? " active" : ""}`}
-                  onClick={() => chooseMode("quiz")}
-                >
-                  Taste Quiz 🎧
+            {/* The mode, when it is not the default. Single Playlist is
+                what 95% of games are, so it gets no label and no pill: the
+                card simply opens on it. Mixed is reached from the link under
+                the Start button, and this header is the way back. */}
+            {setupMode === "mixed" && (
+              <div className="settings-row">
+                <p className="section-label" style={{ marginBottom: 0 }}>Mixed Playlist</p>
+                <button type="button" className="text-link" onClick={() => chooseMode("single")}>
+                  ← Single playlist
                 </button>
               </div>
-              {setupMode === "mixed" && (
-                <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                  Pass this phone around — everyone adds their own playlist, then we mix them together.
-                </p>
-              )}
-              {setupMode === "quiz" && (
-                <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                  Not a party — a link. Friends open it on their own phone, guess which songs are
-                  really in your playlist, and land on a leaderboard of who knows you best.
-                </p>
-              )}
-            </div>
+            )}
 
-            {setupMode !== "mixed" ? (
-              <>
-                {/* Playlist URL — shared by the single game and the quiz */}
-                <div>
-                  <p className="section-label">Spotify Playlist</p>
-                  <div style={{ position: "relative" }}>
-                    <input
-                      ref={firstInputRef}
-                      type="url"
-                      className={`url-input${isValidSpotifyUrl ? " valid" : ""}`}
-                      placeholder="https://open.spotify.com/playlist/..."
-                      value={playlistUrl}
-                      onChange={(e) => setPlaylistUrl(e.target.value)}
-                      spellCheck={false}
-                    />
-                    {isValidSpotifyUrl && (
-                      <span
-                        style={{
-                          position: "absolute",
-                          right: "14px",
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                          color: "#1DB954",
-                        }}
-                      >
-                        <CheckIcon />
-                      </span>
-                    )}
-                  </div>
-                  {isEditorial && (
-                    <p
+            {setupMode === "single" && (
+              <div>
+                <p className="section-label">Spotify Playlist</p>
+                <div style={{ position: "relative" }}>
+                  <input
+                    ref={firstInputRef}
+                    type="url"
+                    className={`url-input${isValidSpotifyUrl ? " valid" : ""}`}
+                    placeholder="https://open.spotify.com/playlist/..."
+                    value={playlistUrl}
+                    onChange={(e) => setPlaylistUrl(e.target.value)}
+                    spellCheck={false}
+                  />
+                  {isValidSpotifyUrl && (
+                    <span
                       style={{
-                        marginTop: "8px",
-                        fontSize: "12px",
-                        color: "#f59e0b",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px",
+                        position: "absolute",
+                        right: "14px",
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        color: "#1DB954",
                       }}
                     >
-                      <span>⚠</span> Editorial playlists (Discover Weekly, etc.) may not work
-                    </p>
+                      <CheckIcon />
+                    </span>
                   )}
                 </div>
-
-                {setupMode === "quiz" && (
-                  <>
-                    <div>
-                      <label className="section-label" htmlFor="quiz-owner-name" style={{ display: "block" }}>
-                        Your Name
-                      </label>
-                      <input
-                        id="quiz-owner-name"
-                        type="text"
-                        className="player-input"
-                        placeholder="Whose taste is this? (optional)"
-                        value={quizOwnerName}
-                        maxLength={QUIZ_NAME_MAX}
-                        style={{ width: "100%" }}
-                        onChange={(e) => setQuizOwnerName(e.target.value)}
-                      />
-                      <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                        Goes in the title: &ldquo;How well do you know {quizOwnerName.trim() || "…"}&rsquo;s music taste?&rdquo;
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="section-label">Questions</p>
-                      {/* The number is the answer; the pills and the field are two ways to set it. */}
-                      <p
-                        aria-live="polite"
-                        style={{
-                          display: "flex",
-                          alignItems: "baseline",
-                          gap: "10px",
-                          margin: "0 0 10px",
-                          lineHeight: 1,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontFamily: "'Bebas Neue', sans-serif",
-                            fontSize: "56px",
-                            color: "#1DB954",
-                            letterSpacing: "0.02em",
-                          }}
-                        >
-                          {quizCountOf(quizCount)}
-                        </span>
-                        <span style={{ fontSize: "13px", color: "#999", fontWeight: 500 }}>questions</span>
-                      </p>
-                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                        {QUIZ_QUESTION_COUNTS.map((c) => (
-                          <button
-                            key={c}
-                            className={`pill${quizCount.count === c && !isCustomSelected(quizCount, QUIZ_COUNT_CONTROL) ? " active" : ""}`}
-                            onClick={() => setQuizCount(selectPreset(c))}
-                          >
-                            {c}
-                          </button>
-                        ))}
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={QUIZ_MIN_QUESTIONS}
-                          max={QUIZ_MAX_QUESTIONS}
-                          className={`pill count-input${isCustomSelected(quizCount, QUIZ_COUNT_CONTROL) ? " active" : ""}`}
-                          placeholder={`${QUIZ_MIN_QUESTIONS}–${QUIZ_MAX_QUESTIONS}`}
-                          aria-label={`Custom number of questions, ${QUIZ_MIN_QUESTIONS} to ${QUIZ_MAX_QUESTIONS}`}
-                          value={quizCount.field}
-                          onChange={(e) => {
-                            // Same reason as the song count below: read the
-                            // value before the updater React runs later.
-                            const raw = e.target.value;
-                            setQuizCount((s) => typeCustom(s, raw, QUIZ_COUNT_CONTROL));
-                          }}
-                          onBlur={() => setQuizCount((s) => commitCustom(s, QUIZ_COUNT_CONTROL))}
-                        />
-                      </div>
-                      <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                        Each question is two songs — one from your playlist, one that isn&apos;t.
-                        Friends guess first and get a few audio hints for when they&apos;re stuck.
-                        Any number from {QUIZ_MIN_QUESTIONS} to {QUIZ_MAX_QUESTIONS}.
-                      </p>
-                    </div>
-                  </>
+                {isEditorial && (
+                  <p
+                    style={{
+                      marginTop: "8px",
+                      fontSize: "12px",
+                      color: "#f59e0b",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <span>⚠</span> Editorial playlists (Discover Weekly, etc.) may not work
+                  </p>
                 )}
-              </>
-            ) : (
-              <>
-                {/* Collection sub-mode */}
+              </div>
+            )}
+
+              {/* Pass-the-phone collects playlists right here. The QR flow
+                  collects them in the room step at the bottom instead, so
+                  there is nothing to show for it this far up — the way
+                  across to it sits under the room card. */}
+            {setupMode === "mixed" && mixedSubMode === "phone" && (
                 <div>
-                  <p className="section-label">How to Collect</p>
-                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <p className="section-label">Collect Playlists</p>
+                  <MixedPlaylistCollector
+                    contributions={mixedContributions}
+                    onAdd={addMixedContribution}
+                    onRemove={removeMixedContribution}
+                  />
+                  <p style={{ marginTop: "12px" }}>
                     <button
-                      className={`pill${mixedSubMode === "room" ? " active" : ""}`}
+                      type="button"
+                      className="text-link"
                       onClick={() => {
                         setMixedSubMode("room");
                         resetRoom();
                       }}
                     >
-                      QR Code
+                      Use a QR code instead →
                     </button>
-                    <button
-                      className={`pill${mixedSubMode === "phone" ? " active" : ""}`}
-                      onClick={() => {
-                        setMixedSubMode("phone");
-                        resetRoom();
-                      }}
-                    >
-                      Pass This Phone
-                    </button>
-                  </div>
-                </div>
-
-                {/* Pass-the-phone collects playlists right here. The QR flow
-                    collects them in the room step at the bottom instead, so
-                    there is nothing to show for it this far up. */}
-                {mixedSubMode === "phone" && (
-                  <div>
-                    <p className="section-label">Collect Playlists</p>
-                    <MixedPlaylistCollector
-                      contributions={mixedContributions}
-                      onAdd={addMixedContribution}
-                      onRemove={removeMixedContribution}
-                    />
-                  </div>
-                )}
-
-                {/* Songs per Player */}
-                <div>
-                  <p className="section-label">Songs Per Player</p>
-                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                    {MIXED_SAMPLE_COUNTS.map((c) => (
-                      <button
-                        key={c}
-                        className={`pill${sampledPerPlayer === c ? " active" : ""}`}
-                        onClick={() => setSampledPerPlayer(c)}
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                  <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                    Caps how many tracks each player&apos;s playlist contributes, after duplicates are merged.
                   </p>
                 </div>
-              </>
-            )}
-
-            {/* Buzzer Mode — the reason the host gets to play too. Hidden
-                entirely when NEXT_PUBLIC_BUZZER_WS_URL is unset, because
-                without a Worker there is no room to open. */}
-            {isBuzzerConfigured() && setupMode !== "quiz" && (
-              <div>
-                <p className="section-label">Buzzer Mode</p>
-                {/* Label says what the tap does, colour says what the state is.
-                    A grey button reading "Off" was reporting status where a
-                    control belongs — you couldn't tell whether it meant "it is
-                    off" or "tap to turn it off". */}
-                <button
-                  className={`pill${buzzerEnabled ? " active" : ""}`}
-                  onClick={() => {
-                    setBuzzerEnabled((v) => !v);
-                    resetRoom();
-                  }}
-                  aria-pressed={buzzerEnabled}
-                >
-                  {buzzerEnabled ? "✓ On" : "Turn on"}
-                </button>
-                <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                  {buzzerEnabled
-                    ? "Everyone scans in and gets a buzzer on their phone. The server decides who was first, so you can stop refereeing and actually play."
-                    : "Turn this on to give every player a buzzer on their phone."}
-                </p>
-              </div>
-            )}
-
-            {/* Clip Duration — not for the quiz, which plays clips only as hints */}
-            {setupMode !== "quiz" && (
-            <div>
-              <p className="section-label">Clip Duration</p>
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                {CLIP_DURATIONS.map((d) => (
-                  <button
-                    key={d}
-                    className={`pill${clipDuration === d ? " active" : ""}`}
-                    onClick={() => setClipDuration(d)}
-                  >
-                    {d}s
-                  </button>
-                ))}
-              </div>
-            </div>
-            )}
-
-            {/* Number of Songs — single-playlist mode only; mixed mode uses per-player sampling instead */}
-            {setupMode === "single" && (
-              <div>
-                <p className="section-label">Number of Songs</p>
-                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                  {SONG_COUNTS.map((c) => (
-                    <button
-                      key={c}
-                      className={`pill${songCount.count === c ? " active" : ""}`}
-                      onClick={() => setSongCount(selectPreset(c))}
-                    >
-                      {c === "all" ? "All" : c}
-                    </button>
-                  ))}
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={MAX_SONG_COUNT}
-                    className={`pill count-input${isCustomSelected(songCount) ? " active" : ""}`}
-                    placeholder="Custom"
-                    aria-label={`Custom number of songs, 1 to ${MAX_SONG_COUNT}`}
-                    value={songCount.field}
-                    onChange={(e) => {
-                      // Read the value out before the updater, which React runs
-                      // later: `e.target` is the live input, so a second
-                      // keystroke landing first would make the callback read a
-                      // different value than the event carried.
-                      const raw = e.target.value;
-                      setSongCount((s) => typeCustom(s, raw));
-                    }}
-                    onBlur={() => setSongCount(commitCustom)}
-                  />
-                </div>
-                <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                  How many tracks to play from the shuffled playlist. Type any number up
-                  to {MAX_SONG_COUNT} — a shorter playlist just plays every track it has.
-                </p>
-              </div>
             )}
 
             {/* Players — the manual roster, and only when phones are not
@@ -1531,6 +779,141 @@ export default function SetupPage() {
                   </div>
             )}
 
+            {/* Settings — clip length, song count and the buzzer, behind one
+                line that reads the current values. Everything here has a
+                default, and the things a host must decide (playlist, players)
+                come first. Buzzer Mode still swaps the roster for the room
+                card when toggled from in here. Hidden entirely when
+                NEXT_PUBLIC_BUZZER_WS_URL is unset, because without a Worker
+                there is no room to open. */}
+            <div>
+              <p className="section-label">Settings</p>
+              <div className="settings-row">
+                <p className="settings-summary">
+                  {[
+                    `${clipDuration}s clips`,
+                    setupMode === "mixed"
+                      ? `${sampledPerPlayer} songs per player`
+                      : songCount.count === "all"
+                      ? "All songs"
+                      : `${songCount.count} songs`,
+                    ...(isBuzzerConfigured() ? [`Buzzer ${buzzerEnabled ? "on" : "off"}`] : []),
+                  ].join(" · ")}
+                </p>
+                <button
+                  type="button"
+                  className="text-link"
+                  onClick={() => setShowSettings((v) => !v)}
+                  aria-expanded={showSettings}
+                  aria-controls={showSettings ? "setup-settings" : undefined}
+                >
+                  {showSettings ? "Done ▴" : "Change ▾"}
+                </button>
+              </div>
+
+              {showSettings && (
+                <div
+                  id="setup-settings"
+                  style={{ display: "flex", flexDirection: "column", gap: "20px", marginTop: "16px" }}
+                >
+                  {/* Clip Duration */}
+                  <div>
+                    <p className="section-label">Clip Duration</p>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      {CLIP_DURATIONS.map((d) => (
+                        <button
+                          key={d}
+                          className={`pill${clipDuration === d ? " active" : ""}`}
+                          onClick={() => setClipDuration(d)}
+                        >
+                          {d}s
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Number of Songs — single-playlist mode only; mixed mode uses per-player sampling instead */}
+                  {setupMode === "single" && (
+                    <div>
+                      <p className="section-label">Number of Songs</p>
+                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                        {SONG_COUNTS.map((c) => (
+                          <button
+                            key={c}
+                            className={`pill${songCount.count === c ? " active" : ""}`}
+                            onClick={() => setSongCount(selectPreset(c))}
+                          >
+                            {c === "all" ? "All" : c}
+                          </button>
+                        ))}
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={MAX_SONG_COUNT}
+                          className={`pill count-input${isCustomSelected(songCount) ? " active" : ""}`}
+                          placeholder="Custom"
+                          aria-label={`Custom number of songs, 1 to ${MAX_SONG_COUNT}`}
+                          value={songCount.field}
+                          onChange={(e) => {
+                            // Read the value out before the updater, which React runs
+                            // later: `e.target` is the live input, so a second
+                            // keystroke landing first would make the callback read a
+                            // different value than the event carried.
+                            const raw = e.target.value;
+                            setSongCount((s) => typeCustom(s, raw));
+                          }}
+                          onBlur={() => setSongCount(commitCustom)}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Songs per Player — the mixed pool's cap, after duplicates are merged */}
+                  {setupMode === "mixed" && (
+                    <div>
+                      <p className="section-label">Songs Per Player</p>
+                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                        {MIXED_SAMPLE_COUNTS.map((c) => (
+                          <button
+                            key={c}
+                            className={`pill${sampledPerPlayer === c ? " active" : ""}`}
+                            onClick={() => setSampledPerPlayer(c)}
+                          >
+                            {c}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Buzzer Mode — the reason the host gets to play too. */}
+                  {isBuzzerConfigured() && (
+                    <div>
+                      <p className="section-label">Buzzer Mode</p>
+                      {/* Label says what the tap does, colour says what the state is.
+                          A grey button reading "Off" was reporting status where a
+                          control belongs — you couldn't tell whether it meant "it is
+                          off" or "tap to turn it off". */}
+                      <button
+                        className={`pill${buzzerEnabled ? " active" : ""}`}
+                        onClick={() => {
+                          setBuzzerEnabled((v) => !v);
+                          resetRoom();
+                        }}
+                        aria-pressed={buzzerEnabled}
+                      >
+                        {buzzerEnabled ? "✓ On" : "Turn on"}
+                      </button>
+                      <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                        Everyone buzzes from their phone.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* The room — one code, one QR, doing whichever jobs the settings
                 above ask for. Deliberately last: the code is what turns a
                 configured game into a gathering, and printing it before the
@@ -1553,105 +936,41 @@ export default function SetupPage() {
                     {roomError}
                   </p>
                 )}
+                {collectsPlaylists && (
+                  <p style={{ marginTop: "12px" }}>
+                    <button
+                      type="button"
+                      className="text-link"
+                      onClick={() => {
+                        setMixedSubMode("phone");
+                        resetRoom();
+                      }}
+                    >
+                      Pass this phone around instead →
+                    </button>
+                  </p>
+                )}
               </div>
             )}
 
-            {/* The quiz's own ending: the link, with the button that makes
-                another one below it. Kept apart from the Start button because
-                nothing about a quiz is a game start. The panel stays up while
-                the host edits the form — it used to vanish on the first tap
-                of a count pill, leaving a link in someone's chat that this
-                screen no longer showed — and is replaced only by the next
-                quiz, or by leaving the mode (`chooseMode`). */}
-            {setupMode === "quiz" && createdQuiz && (
-              <QuizPanel
-                code={createdQuiz.code}
-                ownerName={createdQuiz.ownerName}
-                playlistName={createdQuiz.playlistName}
-                questionCount={createdQuiz.questionCount}
-                expiresAt={createdQuiz.expiresAt}
-                locale={locale}
-              />
-            )}
-            {setupMode === "quiz" && !createdQuiz && lastQuiz && (
-              <p style={{ fontSize: "12px", color: "#666", textAlign: "center" }}>
-                Your last quiz{lastQuiz.playlistName ? ` (${lastQuiz.playlistName})` : ""} is still
-                open —{" "}
-                <a href={`/q/${lastQuiz.code.toUpperCase()}/board`} className="link-btn">
-                  see who knows you best →
-                </a>
-              </p>
-            )}
-
-            {/* Start Button */}
+            {/* Start Button. Whether it is live and the line under it are
+                one rule, in lib/start-status.ts where the suite can reach it;
+                only the wiring stays here — which handler, and the label. The
+                button says what it does; what it is waiting for goes on the
+                line under it. */}
             <div>
-              {(() => {
-                const loadingLabel = (
+              <button className="start-btn" onClick={startClick} disabled={startState_.disabled}>
+                {startBusy ? (
                   <>
                     <span className="spinner" />
                     Loading playlist
                     <span className="dot-pulse" />
                   </>
-                );
-                if (setupMode === "quiz") {
-                  // Under the panel once a link exists, and worded as a second
-                  // link rather than a repeat: pressing it makes a new code,
-                  // it does not change the one already sent.
-                  return (
-                    <button className="start-btn" onClick={handleCreateQuiz} disabled={loading}>
-                      {loading ? loadingLabel : createdQuiz ? "Create a new link →" : "Create quiz link →"}
-                    </button>
-                  );
-                }
-                const isMixedPhone = setupMode === "mixed" && mixedSubMode === "phone";
-                const isMixedRoom = collectsPlaylists;
-                const phoneShort = MIXED_MIN_CONTRIBUTORS - mixedContributions.length;
-                const roomShort = MIXED_MIN_CONTRIBUTORS - roomSubmissions.length;
-                const busy = loading || roomStarting;
-                // Every flow that needs phones needs its one room open first.
-                // Not a minimum player count for the buzzer though: latecomers
-                // can scan in mid-game, and blocking on an arbitrary number
-                // would strand a host whose friends are still finding the QR.
-                // Mixed·QR is the exception — its pool is built from what the
-                // mailbox has when Start is tapped, so it does need people.
-                const roomNotReady = needsRoom && !openedRoom;
-                const disabled =
-                  busy ||
-                  roomNotReady ||
-                  (isMixedPhone && mixedContributions.length < MIXED_MIN_CONTRIBUTORS) ||
-                  (isMixedRoom && roomSubmissions.length < MIXED_MIN_CONTRIBUTORS);
-                const onClick = setupMode === "single"
-                  ? handleStart
-                  : isMixedPhone
-                  ? handleMixedStart
-                  : handleRoomStart;
-
-                let label: ReactNode = "Start Game →";
-                if (busy) {
-                  label = loadingLabel;
-                } else if (isMixedPhone && phoneShort > 0) {
-                  label = `Add ${phoneShort} more player${phoneShort === 1 ? "" : "s"} to start`;
-                } else if (roomNotReady) {
-                  label = "Open the room first";
-                } else if (isMixedRoom && roomShort > 0) {
-                  // Playlists, not players. The host is a player too but scans
-                  // nothing, so counting people here read as "wait for another
-                  // guest" when what was actually missing was the host's own
-                  // playlist — which they add from the room card.
-                  label = `Waiting for ${roomShort} more playlist${roomShort === 1 ? "" : "s"}`;
-                } else if (buzzerEnabled) {
-                  label =
-                    buzzerPlayerCount > 0
-                      ? `Start Game — ${buzzerPlayerCount} phone${buzzerPlayerCount === 1 ? "" : "s"} ready →`
-                      : "Start Game (nobody scanned yet) →";
-                }
-
-                return (
-                  <button className="start-btn" onClick={onClick} disabled={disabled}>
-                    {label}
-                  </button>
-                );
-              })()}
+                ) : (
+                  "Start Game →"
+                )}
+              </button>
+              {startState_.status && <p className="start-status">{startState_.status}</p>}
 
               {/* `role="alert"`: a failed submit is announced, not just
                   painted. Without it a screen reader hears the button go
@@ -1673,22 +992,37 @@ export default function SetupPage() {
                   {error}
                 </div>
               )}
+
+              {/* The other two ways in, as links rather than a pill row above
+                  the form: one is 3% of games and the other is not a game and
+                  has its own page. */}
+              <div className="mode-links">
+                {setupMode !== "mixed" && (
+                  <button type="button" className="text-link" onClick={() => chooseMode("mixed")}>
+                    Everyone brings a playlist? Mixed mode →
+                  </button>
+                )}
+                {setupMode === "single" && <span className="mode-links-sep" aria-hidden>·</span>}
+                <Link href={QUIZ_SETUP_HREF} className="text-link">
+                  Make a Taste Quiz link →
+                </Link>
+              </div>
             </div>
           </div>
+
+          {/* Install pitch — under the card, for hosts who have run a game
+              before. It arrives after hydration, so it sits where its late
+              arrival moves nothing the host is already reading. */}
+          <InstallBanner />
 
           {/* Prose for search engines and first-time visitors alike. */}
           <section className="seo-section">
             <h2 className="seo-h2">What is GuessSong?</h2>
             <p className="seo-p">
-              GuessSong is a free guess the song game for parties. The host pastes any
-              public Spotify playlist, the game plays a short clip from a random track,
-              and everyone races to name it out loud. No login, no app to install, no
-              accounts — one screen and a room full of people is all you need.
-            </p>
-            <p className="seo-p">
-              It works as a music quiz for game nights, road trips, classrooms and office
-              parties. Want everyone&apos;s taste in the mix? Mixed Playlist Mode merges
-              every player&apos;s playlist into one round.
+              GuessSong is a free music guessing game for parties: paste any public
+              Spotify playlist, and the host plays a short clip while everyone races to
+              name the song. No login and no accounts — one screen and a room full of
+              people is all you need.
             </p>
             <p style={{ marginTop: "14px" }}>
               <a href="/about" className="link-btn">See how to play →</a>

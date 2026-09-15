@@ -24,6 +24,7 @@
  */
 
 import { isLoopSurface, type LoopSurface } from "@/lib/loop-links";
+import { QUIZ_SETUP_HREF, isQuizSurface } from "@/lib/setup-arrival";
 import { recordLoopClick, recordLoopThrottled } from "@/lib/loop-stats";
 
 /** Where an unrecognised segment lands. Still the setup page, just unattributed. */
@@ -63,10 +64,13 @@ export async function handleLoopHit(
     };
   }
 
-  // Attribution rides on the query string so the setup page can read it after
-  // the redirect. The surface is already narrowed, so nothing untrusted is
-  // being reflected back into the URL.
-  const destination = `${LOOP_FALLBACK_DESTINATION}?ref=${rawSurface}`;
+  // Attribution rides on the query string so the landing page can read it
+  // after the redirect. The surface is already narrowed, so nothing untrusted
+  // is being reflected back into the URL. A click that followed a quiz lands
+  // on the quiz's own page: the person was just promised "make your own", and
+  // the party form is not that.
+  const landing = isQuizSurface(rawSurface) ? QUIZ_SETUP_HREF : LOOP_FALLBACK_DESTINATION;
+  const destination = `${landing}?ref=${rawSurface}`;
 
   if (!allowed) {
     // A party is a dozen phones behind one NAT and the limiter is keyed by IP,

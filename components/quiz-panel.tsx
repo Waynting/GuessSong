@@ -2,8 +2,8 @@
 
 /**
  * What the host sees once their quiz exists: the link, and every way to move
- * it. Inline styles, because it sits on `app/page.tsx`, which is styled that
- * way throughout.
+ * it. Inline styles, because it sits on `/quiz` (`app/quiz/quiz-create.tsx`),
+ * which is styled that way throughout.
  *
  * The one part of the setup page that is not English by convention: what
  * leaves this panel — the share sentence, the sheet title — lands in the
@@ -96,34 +96,35 @@ export function QuizPanel({
         <img
           src={qr}
           alt={fillCopy(copy.panelQrAlt, { code })}
-          style={{ width: "160px", height: "160px", margin: "0 auto 12px", borderRadius: "8px" }}
+          style={{ width: "160px", height: "160px", margin: "0 auto 14px", borderRadius: "8px" }}
         />
       )}
-      <a
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={{
-          display: "block",
-          fontFamily: "monospace",
-          fontSize: "13px",
-          color: "#1DB954",
-          wordBreak: "break-all",
-          marginBottom: "14px",
-        }}
-      >
-        {url.replace(/^https?:\/\//, "")}
-      </a>
-      {/* Under the link it points at, and announced: a screen reader hears
-          why the button went quiet. Amber rather than red — nothing is broken,
-          this browser just does not offer the shortcut. */}
+      {/* The URL as text appears only when the buttons cannot move it: the
+          QR and the two buttons are the link, and a monospace address under
+          them was a third copy of the same thing. Announced, so a screen
+          reader hears why the button went quiet. Amber rather than red —
+          nothing is broken, this browser just does not offer the shortcut. */}
       {feedback === "failed" && (
-        <p
-          role="status"
-          style={{ fontSize: "12px", color: "#f59e0b", margin: "-6px 0 14px", lineHeight: 1.5 }}
-        >
-          {copy.panelShareFailed}
-        </p>
+        <div role="status" style={{ marginBottom: "14px" }}>
+          <p style={{ fontSize: "12px", color: "#f59e0b", lineHeight: 1.5 }}>
+            {copy.panelShareFailed}
+          </p>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "block",
+              fontFamily: "monospace",
+              fontSize: "13px",
+              color: "#1DB954",
+              wordBreak: "break-all",
+              marginTop: "6px",
+            }}
+          >
+            {url.replace(/^https?:\/\//, "")}
+          </a>
+        </div>
       )}
       <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap" }}>
         <button className="start-btn" style={{ width: "auto", padding: "12px 24px" }} onClick={handleShare}>
@@ -138,10 +139,7 @@ export function QuizPanel({
       </a>
       {/* A constraint, not a caption: one notch up from the 12px #666 captions. */}
       <p style={{ fontSize: "13px", color: "#999", marginTop: "8px", lineHeight: 1.5 }}>
-        {copy.panelDeviceOnly}
-      </p>
-      <p style={{ fontSize: "12px", color: "#666", marginTop: "4px", lineHeight: 1.5 }}>
-        {fillCopy(copy.panelExpires, { date: formatQuizDate(expiresAt, locale) })}
+        {fillCopy(copy.panelResultsUntil, { date: formatQuizDate(expiresAt, locale) })}
       </p>
     </div>
   );

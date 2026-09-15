@@ -1,38 +1,45 @@
 /**
- * What the URL the setup page arrived on says about which mode to open in.
+ * Where a link that asks for the Taste Quiz should land.
  *
- * Two ways in, one rule. A friend who has just finished someone's quiz taps
- * "Make one for your friends", which is `/r/quiz_result`, and the redirect
- * lands them on `/?ref=quiz_result`. Before this that page opened on Single
- * Playlist with the hero on screen and the Taste Quiz pill three screens down
- * and unmarked — the call to action delivered people to a page that did not
- * look like the thing they had just been promised, and the loop's one warm
- * arm was being measured against that landing. `/about` and `/zh` link the
- * quiz with an explicit `?mode=quiz`, which says the same thing without
- * spending a loop count on a link that is not a loop surface.
+ * The quiz has its own page, `/quiz`. It used to be a mode of the setup form
+ * at `/`, reached by `?mode=quiz` from the content pages and by
+ * `?ref=quiz_result` from the loop's one warm arm — a friend who has just
+ * finished someone's quiz and tapped "make your own". Those two spellings are
+ * still out there, in group chats and in cached pages, so `/` recognises them
+ * and redirects rather than opening on the party form with the quiz nowhere
+ * in sight, which is the landing this file was first written to fix.
  *
  * Kept in `lib/` so the rule has a test — `app/page.tsx` reads the query off
  * `window.location` in an effect, which the suite cannot reach — and typed
  * against `LoopSurface` so a renamed surface is a compile error here rather
- * than a redirect that quietly lands on the wrong tab again.
+ * than a redirect that quietly lands on the wrong page again.
  */
 
 import { isLoopSurface, type LoopSurface } from "@/lib/loop-links";
 
+/** The quiz's own page. Content pages and the loop both point here. */
+export const QUIZ_SETUP_HREF = "/quiz";
+
 /**
- * The modes a URL may ask for. Only the quiz for now: Single Playlist is the
- * default and Mixed is one tap away from it, so neither has a link that needs
- * to say so. Extending this is adding a member and a trigger below, not a
- * second mechanism.
+ * The modes a URL may ask for. Only the quiz: Single Playlist is the default
+ * and Mixed is one tap away from it, so neither has a link that needs to say
+ * so. Extending this is adding a member and a trigger below, not a second
+ * mechanism.
  */
 export type RequestedSetupMode = "quiz";
 
 /**
  * Loop surfaces whose visitor was just shown a quiz and followed a call to
  * make one. A `Set<LoopSurface>` rather than a string compare so the surface
- * name is spelled once, in `lib/loop-links.ts`.
+ * name is spelled once, in `lib/loop-links.ts`. `lib/loop-redirect.ts` reads
+ * it to send those clicks straight to `/quiz`; `/` reads it to catch the
+ * ones that still arrive the old way.
  */
 const QUIZ_SURFACES: ReadonlySet<LoopSurface> = new Set<LoopSurface>(["quiz_result"]);
+
+export function isQuizSurface(surface: LoopSurface): boolean {
+  return QUIZ_SURFACES.has(surface);
+}
 
 /**
  * `null` for every arrival that asked for nothing, which is nearly all of
@@ -51,5 +58,13 @@ export function requestedSetupMode(query: URLSearchParams): RequestedSetupMode |
   return null;
 }
 
-/** The link a content page uses to open the setup page on the quiz. */
-export const QUIZ_SETUP_HREF = "/?mode=quiz";
+/**
+ * The `/quiz` URL an old-style arrival is redirected to. The `ref` rides
+ * along when it is one of ours, so the loop attribution the click carried is
+ * not lost in the hop; anything else in the query is dropped, because nothing
+ * else in it was ever meant for the quiz.
+ */
+export function quizArrivalHref(query: URLSearchParams): string {
+  const ref = query.get("ref");
+  return isLoopSurface(ref) ? `${QUIZ_SETUP_HREF}?ref=${ref}` : QUIZ_SETUP_HREF;
+}

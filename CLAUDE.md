@@ -156,14 +156,14 @@ Four rules hold this together, and each replaces something that fails silently:
 
 - **`lib/guides.ts` declares a guide once, and four things derive from it** — the route, the `/guides` index, `app/sitemap.ts`, and the "read next" links on its siblings. Hand-syncing those fails the same way `lib/loop-links.ts` does: a guide missing from the sitemap is a page Google never comes back for, and nothing on screen says so. `tests/guides.test.ts` asserts every slug has a directory and vice versa, that each article's own `SLUG` constant matches its path (a copy-pasted article that kept the source's constant renders the wrong canonical under the right URL), and that every guide has at least one inbound sibling link.
 - **`requireGuide`, `guideMetadata` and `formatGuideDate` live in `lib/guides.ts`, not beside the component that calls them.** Same reason `lib/song-count.ts` gives: the suite only reaches `lib/`, and vitest cannot import a `.tsx` module here. `app/guides/guide-shell.tsx` re-exports `guideMetadata` and keeps only the JSX. Moving that logic back into the shell silently drops it out of test range.
-- **`components/site-footer.tsx` is the only place the policy pages are linked from.** It replaced three hand-rolled `<footer>` blocks. A reviewer — Google's or a player's — looks for the privacy policy in the footer, and a page that omits it reads as a page that does not have one; three copies is three chances for one page to lose the link by being edited alone. `tests/site-policy.test.ts` pins that all three landing pages render it, that both privacy pages name AdSense, Analytics and cookies and carry the opt-out link, and that the `/zh` footer contains no English label.
+- **`components/site-footer.tsx` is the only place the policy pages are linked from.** It replaced three hand-rolled `<footer>` blocks. A reviewer — Google's or a player's — looks for the privacy policy in the footer, and a page that omits it reads as a page that does not have one; three copies is three chances for one page to lose the link by being edited alone. `tests/site-policy.test.ts` pins that `/`, `/about`, `/zh` and `/quiz` all render it, that both privacy pages name AdSense, Analytics and cookies and carry the opt-out link, and that the `/zh` footer contains no English label.
 - **`CATEGORY_BLURB` in `app/guides/page.tsx` is keyed by `GuideCategory`, not `string`.** A new category with no blurb has to be a compile error, not an `undefined` rendered under the heading — the same rule `lib/error-messages.ts` follows for its translation table. `GUIDE_CATEGORIES` is still ordered by hand, and a category added to the union but not to that array makes its guides unreachable from `/guides`; the partition test is what catches that, not the compiler.
 
 **The guides are English only, deliberately.** `/zh` is written natively rather than translated, so eight translated articles under it would be the one seam in the thing that page is for. The policy pages are bilingual because those have to be readable by the person they bind. `/zh`'s footer links to `/guides` under a Chinese label and lands in English — a known seam, kept because hiding the section from Chinese readers is worse.
 
 **A language pair goes through `languageCluster()` in `app/sitemap.ts`, never two hand-written entries.** The rule it enforces — every URL in a cluster carries the identical annotation set, because a one-sided declaration is a weaker signal than none — was written as a comment at the top of that file and then broken three entries below it, on the policy pages, in the release that added them. The helper computes the set once and gives it to both halves. `tests/guides.test.ts` asserts every alternate a sitemap entry names is itself in the sitemap with a matching set, and `tests/site-policy.test.ts` parses each policy page's `languages` block for all three tags rather than merely grepping for the word.
 
-`/guides`, `/privacy`, `/terms` and `/contact` must stay out of `app/robots.ts`'s disallow list. That list is for ephemeral room codes and the counting redirect; a content page landing in it would be invisible to exactly the crawler it was written for. `/q` stays out too, for the unfurlers' sake (above) — a quiz link is kept out of the index by `noindex`, not by robots. `tests/site-policy.test.ts` asserts both.
+`/guides`, `/privacy`, `/terms`, `/contact` and `/quiz` must stay out of `app/robots.ts`'s disallow list. That list is for ephemeral room codes and the counting redirect; a content page landing in it would be invisible to exactly the crawler it was written for. `/q` stays out too, for the unfurlers' sake (above) — a quiz link is kept out of the index by `noindex`, not by robots — and it has a second reason now: disallow entries are *prefixes*, so a `/q` coming back would hide `/quiz`, the one indexable page the quiz has, along with the links. `tests/site-policy.test.ts` asserts all of it, parsing the list as prefixes rather than grepping for the path.
 
 ## Environment Variables
 
@@ -263,7 +263,7 @@ picker, above.
 The game page holds **one** `<audio>` element and one set of phase state across
 every round, so anything that awaits mid-round — resolving a preview, repairing
 a rotted URL — can come back after the host has pressed Skip Track, Reveal
-Answer or Quit. `playClip` renders the "Skip Track" button *during* its own
+Answer or End Game. `playClip` renders the "Skip Track" button *during* its own
 await, 1500ms in, which makes a host advancing while a preview resolves the
 ordinary case rather than a corner one.
 
@@ -280,8 +280,8 @@ ordinary case rather than a corner one.
   must go through it.** It stops the clip, bumps the token, hands the `<audio>`
   element's `src` back, and clears the loading affordances — four things whose
   ordering nothing in the suite can reach, because the guard lives in a
-  component the tests cannot import. `nextTrack`, `endGame` and Quit all call
-  it; a fifth path that forgets the bump fails silently, which is the bug this
+  component the tests cannot import. `nextTrack` and `endGame` both call
+  it; a third path that forgets the bump fails silently, which is the bug this
   exists to prevent.
 - **A stale answer is dropped from the round but still cached.** `previewCache`
   is keyed by track id, so a resolution that came back to the wrong round is

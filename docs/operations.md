@@ -35,7 +35,7 @@ No `.github/workflows`. Nothing runs the suite before a merge. Before opening a
 pull request:
 
 ```bash
-npm test              # 40 files, 811 tests, ~2s
+npm test              # 45 files, 894 tests, ~2s
 npx tsc --noEmit
 npx eslint app lib components
 npm run build         # see the warning below
@@ -127,7 +127,7 @@ seconds a network blip costs.
 
 The signature is a `500` with `content-length: 0` and no `code` in the body,
 on every route at once including `/api/playlist` and `/api/preview`, while `/`
-itself still serves `200` because the static pages touch no KV:
+and `/quiz` still serve `200` because the static pages touch no KV:
 
 ```
 curl -i -X POST https://www.guessong.app/api/playlist \
@@ -251,9 +251,11 @@ and a cheap route invoked in a loop is usually the problem.
 ### "Spotify says 429"
 
 The cooldown in `lib/playlist-cache.ts` parks all *uncached* loads for the
-`Retry-After` duration (clamped 30s–15min), shared across instances via KV.
-Cached playlists keep serving throughout, so a party already mid-game is
-unaffected.
+`Retry-After` duration (clamped 30s–24h — `QUOTA_EXCEEDED` carries a value in
+the tens of thousands of seconds), shared across instances via KV. The key's
+own TTL is `COOLDOWN_PROBE_SECONDS` (15 min), so the gate re-probes on schedule
+and a refused probe rewrites the cooldown from a fresh header. Cached playlists
+keep serving throughout, so a party already mid-game is unaffected.
 
 If it is persistent rather than a spike, lower `SPOTIFY_MAX_LOADS_PER_MINUTE`.
 Its default of 40 is a guess — the right value depends on which quota tier the
@@ -304,6 +306,21 @@ lives in that device's `localStorage` (`guesssong_quiz_tokens`, the ten most
 recent, `lib/quiz-session.ts`) and nowhere else — there is no account to sync
 it to. The public ranking on `/q/<code>` is the fallback; the board is gated
 because its per-question rows are the answer key, so do not make it public.
+
+### "An old quiz link opens the party form"
+
+The quiz has its own page since 1.12.0 (`/quiz`, static). Two spellings
+predate it and are still in group chats and cached pages: `/?mode=quiz` (the
+content pages' link) and `/?ref=quiz_result` (the loop's warm arm). Both are
+redirected to `/quiz` by `redirects()` in `next.config.js`, in Vercel's routing
+layer before any HTML is served, and the query rides along so the loop ref
+survives the hop. `app/page.tsx` keeps a mount-effect fallback
+(`requestedSetupMode` → `quizArrivalHref`, `lib/setup-arrival.ts`) that does
+the same one full page load later. So if the party form is what loads, the
+config entry is gone — `tests/next-config.test.ts` pins both rules — and if it
+flashes and then goes to `/quiz`, only the fallback is running. In GA4 the
+same defect reads as `quiz_created.arrived_from = "quiz_result"` dropping while
+`click:quiz_result` in `npm run stats` holds.
 
 ### "A clip plays but the answer card disagrees"
 

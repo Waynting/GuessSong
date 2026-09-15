@@ -17,9 +17,10 @@ interface MixedPlaylistCollectorProps {
 /**
  * v0 pass-the-phone collector: each player takes the host's device, enters
  * their name + playlist URL, and hands it to the next person. The
- * "just added" screen masks the form between turns — reuses app/page.tsx's
- * global .card/.pill/.player-input/.url-input/.start-btn styles rather than
- * declaring its own, since it only ever renders inside that page.
+ * "just added" screen masks the form between turns — reuses the setup
+ * pages' shared .card/.pill/.player-input/.url-input/.start-btn styles
+ * (`<SetupStyles />` in components/setup-chrome.tsx) rather than declaring
+ * its own, since it only ever renders inside that shell.
  */
 export function MixedPlaylistCollector({
   contributions,
@@ -51,10 +52,9 @@ export function MixedPlaylistCollector({
   if (isFull) {
     form = (
       <div className="card" style={{ padding: "28px", textAlign: "center" }}>
-        <p style={{ fontSize: "16px", color: "#1DB954", fontWeight: 600, marginBottom: "6px" }}>
-          {ROOM_MAX_SUBMISSIONS} players joined — that&apos;s the max
+        <p style={{ fontSize: "16px", color: "#1DB954", fontWeight: 600 }}>
+          {ROOM_MAX_SUBMISSIONS} players is the max — remove someone to add another.
         </p>
-        <p style={{ fontSize: "13px", color: "#777" }}>Remove someone below to add another.</p>
       </div>
     );
   } else if (justAdded) {

@@ -75,12 +75,17 @@ export interface QuizCopy {
   ownerShareTextOwner: string;
   ownerShareTextPlaylist: string;
   hintStop: string;
-  ctaButton: string;
+  /**
+   * The way out and into making one: under a taker's result (the loop's
+   * `quiz_result` surface) and in place of Retry when the quiz is gone, where
+   * retrying a 404 cannot help. One phrase for both, like `LOOP_CTA_LABEL` —
+   * it is the quiz's own because the link lands on the quiz's own page
+   * (`/quiz`) and is read in the taker's language.
+   */
+  makeYourOwn: string;
   expires: string;
   loading: string;
   retry: string;
-  /** In place of Retry when the quiz is gone: retrying a 404 cannot help. */
-  notFoundCta: string;
   /* The owner's results page */
   boardPageTitle: string;
   boardQuestionCount: string;
@@ -91,6 +96,7 @@ export interface QuizCopy {
   boardQuestionLabel: string;
   boardCorrectRate: string;
   boardNoData: string;
+  /** Only where the reader is not the owner: the way to the quiz they can take. */
   boardOpenQuiz: string;
   boardCopyLink: string;
   boardShareLink: string;
@@ -102,7 +108,7 @@ export interface QuizCopy {
   /** Fetches the board again on tap; no polling, the route is tightly limited. */
   boardRefresh: string;
   boardRefreshing: string;
-  /** Share sheet and clipboard both refused: point at the URL printed above. */
+  /** Share sheet and clipboard both refused; the URL is printed under this line, to copy by hand. */
   boardShareFailed: string;
   /* The duel page: what sits around the two answers */
   backButton: string;
@@ -121,11 +127,11 @@ export interface QuizCopy {
   panelSend: string;
   panelCopyLink: string;
   panelCopied: string;
-  /** Neither the share sheet nor the clipboard worked. The link is on screen as text; say so. */
+  /** Neither the share sheet nor the clipboard worked. The link is printed under this line; say so. */
   panelShareFailed: string;
   panelBoardLink: string;
-  panelDeviceOnly: string;
-  panelExpires: string;
+  /** Two constraints in one line: results are on this device, and the link has an end. */
+  panelResultsUntil: string;
   panelShareTitle: string;
   panelQrAlt: string;
 }
@@ -135,7 +141,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     introTitleOwner: "How well do you know {owner}'s music taste?",
     introTitlePlaylist: "How well do you know this playlist?",
     introBody:
-      "{count} questions. Each is two songs and only one is really in the playlist — guess first. You get {hints} {hintWord} to hear the song if you're stuck.",
+      "{count} questions, two songs each — only one is really in the playlist. You get {hints} {hintWord} to hear the song if you're stuck.",
     ogDescription:
       "{count} questions. Two songs each, only one is really in the playlist. Can you tell which?",
     ogFallbackTitle: "How well do you know your friend's music taste?",
@@ -183,11 +189,10 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     ownerShareTextOwner: "How well do you know {owner}'s music taste? {count} questions.",
     ownerShareTextPlaylist: "How well do you know the \"{playlist}\" playlist? {count} questions.",
     hintStop: "Stop",
-    ctaButton: "Make one for your friends →",
+    makeYourOwn: "Make your own quiz →",
     expires: "This quiz expires on {date}.",
     loading: "Loading…",
     retry: "Try again",
-    notFoundCta: "Make one of your own →",
     boardPageTitle: "Results",
     boardQuestionCount: "{count} questions",
     boardTakers: "{count} took it",
@@ -206,7 +211,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     boardHardest: "Nobody could place",
     boardRefresh: "Refresh",
     boardRefreshing: "Refreshing…",
-    boardShareFailed: "Couldn't open the share sheet or the clipboard — select the link above and copy it by hand.",
+    boardShareFailed: "Couldn't open the share sheet or the clipboard — copy this link by hand:",
     backButton: "Back",
     resultKicker: "Your verdict",
     resultSubjectOwner: "on {owner}'s taste",
@@ -219,10 +224,9 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     panelSend: "Send to friends →",
     panelCopyLink: "Copy link",
     panelCopied: "✓ Copied",
-    panelShareFailed: "Couldn't share or copy from here — press and hold the link above to copy it.",
-    panelBoardLink: "See results — who knows you best →",
-    panelDeviceOnly: "Results are only visible on this device.",
-    panelExpires: "The link stops working on {date}.",
+    panelShareFailed: "Couldn't share or copy from here — press and hold this link to copy it:",
+    panelBoardLink: "See results →",
+    panelResultsUntil: "Results show only on this device, until {date}.",
     panelShareTitle: "GuessSong taste quiz",
     panelQrAlt: "QR code for quiz {code}",
   },
@@ -230,7 +234,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     introTitleOwner: "你有多懂 {owner} 的音樂品味？",
     introTitlePlaylist: "你有多懂這份歌單？",
     introBody:
-      "共 {count} 題。每題兩首歌，只有一首真的在歌單裡 — 先用猜的。卡住的話有 {hints} {hintWord}可以聽片段。",
+      "共 {count} 題，每題兩首歌，只有一首真的在歌單裡。卡住的話有 {hints} {hintWord}可以聽片段。",
     ogDescription: "共 {count} 題。每題兩首歌，只有一首真的在歌單裡，你分得出來嗎？",
     ogFallbackTitle: "你有多懂朋友的音樂品味？",
     ogFallbackDescription: "每題兩首歌，只有一首真的在歌單裡，你分得出來嗎？",
@@ -276,11 +280,10 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     ownerShareTextOwner: "你有多懂 {owner} 的音樂品味？共 {count} 題。",
     ownerShareTextPlaylist: "你有多懂「{playlist}」這份歌單？共 {count} 題。",
     hintStop: "停止",
-    ctaButton: "幫你的朋友也做一個 →",
+    makeYourOwn: "自己做一份品味鑒定 →",
     expires: "這個測驗會在 {date} 到期。",
     loading: "載入中…",
     retry: "再試一次",
-    notFoundCta: "自己做一個 →",
     boardPageTitle: "結果",
     boardQuestionCount: "共 {count} 題",
     boardTakers: "{count} 人作答",
@@ -299,7 +302,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     boardHardest: "最少人答對",
     boardRefresh: "重新整理",
     boardRefreshing: "更新中…",
-    boardShareFailed: "打不開分享面板，也寫不進剪貼簿 — 請選取上面的連結，手動複製。",
+    boardShareFailed: "打不開分享面板，也寫不進剪貼簿 — 請手動複製這個連結：",
     backButton: "上一題",
     resultKicker: "你的判決",
     resultSubjectOwner: "對 {owner} 的品味",
@@ -312,10 +315,9 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     panelSend: "傳給朋友 →",
     panelCopyLink: "複製連結",
     panelCopied: "✓ 已複製",
-    panelShareFailed: "這裡沒辦法分享或複製 — 長按上面的連結來複製。",
-    panelBoardLink: "看結果：誰最懂你 →",
-    panelDeviceOnly: "結果只有這台裝置看得到。",
-    panelExpires: "連結會在 {date} 失效。",
+    panelShareFailed: "這裡沒辦法分享或複製 — 長按這個連結來複製：",
+    panelBoardLink: "看結果 →",
+    panelResultsUntil: "結果只有這台裝置看得到，連結會在 {date} 失效。",
     panelShareTitle: "品味鑒定",
     panelQrAlt: "測驗 {code} 的行動條碼",
   },

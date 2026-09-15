@@ -73,6 +73,16 @@ describe("parseLastQuiz", () => {
     expect(parseLastQuiz(JSON.stringify({ code: "ABC234" }), NOW)).toBeNull();
   });
 
+  it("rejects a code that is not six characters of the room alphabet, and canonicalises one that is", () => {
+    // The code goes straight into `/q/<code>/board`; the sibling parser
+    // (`parseQuizTokens`) already refused anything off the alphabet, and a
+    // localStorage entry is no more trustworthy than a token.
+    for (const code of ["../x", "ABC01O", "LONGCODE1", "<script>", "ABC23", ""]) {
+      expect(parseLastQuiz(JSON.stringify({ code, expiresAt: NOW + 1 }), NOW), code).toBeNull();
+    }
+    expect(parseLastQuiz(JSON.stringify({ code: "abc234", expiresAt: NOW + 1 }), NOW)?.code).toBe("ABC234");
+  });
+
   it("does not throw on garbage", () => {
     for (const raw of ["", "{", "null", "[]", "42", '"x"']) {
       expect(parseLastQuiz(raw, NOW)).toBeNull();

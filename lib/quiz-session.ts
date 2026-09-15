@@ -57,12 +57,14 @@ export function parseLastQuiz(raw: string, now = Date.now()): LastQuiz | null {
   try {
     const value = JSON.parse(raw) as Partial<LastQuiz> | null;
     if (!value || typeof value !== "object") return null;
-    if (typeof value.code !== "string" || !value.code) return null;
+    if (typeof value.code !== "string") return null;
+    const code = value.code.toUpperCase();
+    if (!CODE_SHAPE.test(code)) return null;
     if (typeof value.expiresAt !== "number" || !Number.isFinite(value.expiresAt)) return null;
     if (value.expiresAt <= now) return null;
     if (value.expiresAt > now + QUIZ_TTL_SECONDS * 1000) return null;
     return {
-      code: value.code,
+      code,
       ownerName: typeof value.ownerName === "string" ? value.ownerName : null,
       playlistName: typeof value.playlistName === "string" ? value.playlistName : "",
       createdAt: typeof value.createdAt === "number" ? value.createdAt : 0,

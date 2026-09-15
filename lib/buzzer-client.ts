@@ -56,7 +56,7 @@ export async function createBuzzerRoom(): Promise<Omit<BuzzerRoomHandle, "hostNa
       );
     }
     if (res.status === 429) {
-      // Reachable by an ordinary host: changing Game Mode discards the open
+      // Reachable by an ordinary host: switching mode (or the buzzer) discards the open
       // room, so a few rounds of indecision burn through the per-IP budget.
       // Both translations of this code say what to do about it rather than
       // "please try again".

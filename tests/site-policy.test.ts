@@ -132,7 +132,7 @@ describe("site footer", () => {
     // The three landing pages each had their own <footer> before this; the
     // whole point of the shared one is that a page cannot lose the policy links
     // by being edited on its own.
-    for (const page of ["app/page.tsx", "app/about/page.tsx", "app/zh/page.tsx"]) {
+    for (const page of ["app/page.tsx", "app/about/page.tsx", "app/zh/page.tsx", "app/quiz/page.tsx"]) {
       expect(read(page), `${page} does not render SiteFooter`).toContain("SiteFooter");
     }
   });
@@ -157,8 +157,19 @@ describe("robots", () => {
     // The disallow list is for ephemeral rooms and the counting redirect. A
     // guide or a policy page landing in it would be invisible to exactly the
     // crawler it was written for.
-    for (const path of ["/guides", "/privacy", "/terms", "/contact"]) {
+    for (const path of ["/guides", "/privacy", "/terms", "/contact", "/quiz"]) {
       expect(disallowed, `robots.ts disallows ${path}`).not.toContain(`"${path}"`);
+    }
+  });
+
+  it("does not catch /quiz with a prefix meant for something else", () => {
+    // Disallow rules are prefixes. "/q" is kept out for the unfurlers'
+    // sake (below), and a "/qui" or "/quiz" would hide the one indexable
+    // page the quiz has; a "/q" coming back would hide both it and the
+    // links. Parse the list rather than grep it, so a prefix is a prefix.
+    const prefixes = [...disallowed.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    for (const prefix of prefixes) {
+      expect("/quiz".startsWith(prefix), `robots.ts prefix ${prefix} hides /quiz`).toBe(false);
     }
   });
 

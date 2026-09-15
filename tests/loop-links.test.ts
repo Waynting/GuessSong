@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
+  LOOP_CTA_LABEL,
+  LOOP_FOOTER_LABEL,
+  LOOP_QR_CAPTION,
   LOOP_SURFACES,
   arrivedFrom,
   isLoopSurface,
@@ -140,5 +143,36 @@ describe("arrivedFrom", () => {
     for (const value of ["buzz_cta", "nonsense", null, ""]) {
       expect(allowed).toContain(arrivedFrom(value as LoopSurface | null));
     }
+  });
+});
+
+describe("the loop's three sentences", () => {
+  const labels = { LOOP_CTA_LABEL, LOOP_FOOTER_LABEL, LOOP_QR_CAPTION };
+
+  it("are three different, non-empty, one-line strings", () => {
+    // One goes through `fillText` on the result card, which does not wrap
+    // and draws a newline as a glyph; the other two sit in one-line slots.
+    for (const [name, label] of Object.entries(labels)) {
+      expect(label.trim(), name).toBe(label);
+      expect(label.length, name).toBeGreaterThan(0);
+      expect(label, name).not.toMatch(/[\r\n]/);
+    }
+    expect(new Set(Object.values(labels)).size).toBe(3);
+  });
+
+  it("name the product in the footer exactly once, because the footer bolds it by splitting on it", () => {
+    // components/loop-cta.tsx does `LOOP_FOOTER_LABEL.split("GuessSong")` and
+    // renders `[prefix, <b>GuessSong</b>, suffix]`. Zero occurrences drops the
+    // wordmark from the one line whose job is to say the name; two would
+    // drop whatever sat between them, silently.
+    expect(LOOP_FOOTER_LABEL.split("GuessSong")).toHaveLength(2);
+  });
+
+  it("keep the QR caption short enough to sit beside the code on the result card", () => {
+    // lib/result-image.ts prints it at 13px to the right of a 60px QR on a
+    // card whose text column is a few hundred pixels wide. A caption that
+    // grows into a sentence is a caption that runs off the picture, and
+    // nothing in the save path would say so.
+    expect(LOOP_QR_CAPTION.length).toBeLessThanOrEqual(40);
   });
 });

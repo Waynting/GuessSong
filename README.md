@@ -4,7 +4,7 @@ A local party music guessing game powered by Spotify playlists. Live at **[guess
 
 No login, no accounts. The host pastes a public Spotify playlist URL, everyone guesses out loud, and the host awards points.
 
-Current version: **1.11.0** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **1.12.0** — see [CHANGELOG.md](./CHANGELOG.md).
 
 ## How It Works
 
@@ -50,7 +50,7 @@ Two orthogonal choices: **how you play** and **where the songs come from**.
 
 Buzzer Mode and Mixed Playlist Mode share a single room code and QR: the host claims the buzzer room first, then opens the playlist mailbox under the same code.
 
-### Taste Quiz — the third option on the setup page, and not a game
+### Taste Quiz — its own page (`/quiz`), and not a game
 
 Paste a playlist, type your name, pick 10–50 questions, and you get a **link** to send to a group chat instead of a game to host. A friend opens it on their own phone and answers "which of these two songs is really in the playlist?" — one real, one decoy, no audio in the question. A 30s clip is a *hint*, rationed at one per ten questions, and using fewer only breaks ties. Every tap says right or wrong on the spot; at the end they get a score, a verdict (`soulmate` / `close` / `acquaintance` / `stranger`) and the public ranking. The results page (`/q/<code>/board`), which names the answers and shows who got each question, opens only on the device that made the quiz. A quiz lives seven days.
 
@@ -173,7 +173,8 @@ ipconfig getifaddr en0            # macOS Wi-Fi — e.g. 10.107.0.98
 
 ```
 app/
-  page.tsx                   Setup — playlist, players, clip length, mode selection
+  page.tsx                   Setup — playlist, players, a folded settings row, Mixed mode
+  quiz/                      Taste Quiz creation page (page.tsx + quiz-create.tsx)
   game/page.tsx              The game — phase machine, playback, scoring, result images
   about/                     "How to play" page
   zh/                        Traditional-Chinese landing page (written natively, not translated)
@@ -189,11 +190,12 @@ app/
   error.tsx, global-error.tsx  Error boundaries — see "When the client throws" below
   icon.tsx, opengraph-image.tsx, robots.ts, sitemap.ts
 components/                  Buzzer button + host panel, room panel, mixed collector,
-                             quiz panel, install banner, changelog modal, service notice,
-                             crash screen, ui/ (shadcn primitives)
+                             quiz panel, install banner, changelog modal (its overlay lazy-loaded
+                             from changelog-dialog.tsx), setup chrome (the stylesheet and backdrop
+                             / and /quiz share), service notice, crash screen, ui/ (shadcn primitives)
 lib/                         All shared logic — see "Architecture" below
 worker/                      Cloudflare Worker + BuzzerRoom Durable Object
-tests/                       40 Vitest files, 811 cases
+tests/                       45 Vitest files, 894 cases
 types/                       Track, room, quiz, preview, and service-status wire types
 ```
 
@@ -282,7 +284,7 @@ Two hand-written changelogs, and a release updates both: [`CHANGELOG.md`](./CHAN
 ## Testing
 
 ```bash
-npm test              # 40 files, 811 cases — vitest, jsdom
+npm test              # 45 files, 894 cases — vitest, jsdom
 cd worker && npm test # Durable Object tests inside workerd
 ```
 

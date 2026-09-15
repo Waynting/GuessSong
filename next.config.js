@@ -19,6 +19,28 @@ const devOrigins = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // The quiz used to be a mode of the form at `/`, reached by `?mode=quiz`
+  // from the content pages and `?ref=quiz_result` from the loop. Both live on
+  // in old chats, and `app/page.tsx` still redirects them from a mount effect
+  // as a fallback — but that fallback costs a full load of `/` first. These
+  // run in Vercel's routing layer before any HTML is served. The incoming
+  // query is carried over, so `?ref=quiz_result` reaches `/quiz` intact.
+  async redirects() {
+    return [
+      {
+        source: "/",
+        has: [{ type: "query", key: "mode", value: "quiz" }],
+        destination: "/quiz",
+        permanent: false,
+      },
+      {
+        source: "/",
+        has: [{ type: "query", key: "ref", value: "quiz_result" }],
+        destination: "/quiz",
+        permanent: false,
+      },
+    ];
+  },
   allowedDevOrigins: devOrigins,
   // Pin the workspace root to this directory. Next otherwise walks up looking
   // for lockfiles and, on a machine with a stray ~/package-lock.json, picks

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { LOOP_SURFACES } from "@/lib/loop-links";
+import { LOOP_SURFACES, arrivedFrom } from "@/lib/loop-links";
+import { QUIZ_SETUP_HREF, isQuizSurface } from "@/lib/setup-arrival";
 
 const recorded = vi.hoisted(() => ({
   clicks: [] as string[],
@@ -41,9 +42,30 @@ describe("handleLoopHit — the happy path", () => {
       const outcome = await handleLoopHit(surface, true);
       expect(outcome.surface).toBe(surface);
       expect(outcome.counted).toBe(true);
-      expect(outcome.destination).toBe(`/?ref=${surface}`);
+      // A quiz surface lands on the quiz's own page; everything else on the
+      // party form. Either way the ref rides along for attribution.
+      const landing = isQuizSurface(surface) ? QUIZ_SETUP_HREF : "/";
+      expect(outcome.destination).toBe(`${landing}?ref=${surface}`);
     }
     expect(recorded.clicks).toEqual([...LOOP_SURFACES]);
+  });
+
+  it("sends the quiz's warm arm to /quiz, not to the party form", async () => {
+    const outcome = await handleLoopHit("quiz_result", true);
+    expect(outcome.destination).toBe("/quiz?ref=quiz_result");
+  });
+
+  it("hands every landing page a ref it reads back as the surface that was clicked", async () => {
+    // Both `/` and `/quiz` store the ref with `rememberLoopRef` and
+    // `game_started` reads it through `arrivedFrom`. Parsed as a browser
+    // would, so a landing that moved to a different path cannot pass on the
+    // strength of a string prefix.
+    for (const surface of LOOP_SURFACES) {
+      const { destination } = await handleLoopHit(surface, true);
+      const url = new URL(destination, "https://www.guessong.app");
+      expect(["/", QUIZ_SETUP_HREF], surface).toContain(url.pathname);
+      expect(arrivedFrom(url.searchParams.get("ref")), surface).toBe(surface);
+    }
   });
 });
 
@@ -82,6 +104,19 @@ describe("handleLoopHit — the visitor always lands somewhere useful", () => {
     const outcome = await handleLoopHit("buzz_footer", false);
     expect(outcome.destination).toBe("/?ref=buzz_footer");
     expect(outcome.surface).toBe("buzz_footer");
+  });
+
+  it("keeps a throttled quiz click on the quiz page — the landing is decided before the limiter, not by it", async () => {
+    // A class of thirty finishing one quiz behind one address is exactly
+    // the case that spends the window. Losing the count is the deal; losing
+    // the page they were promised is not.
+    const outcome = await handleLoopHit("quiz_result", false);
+    expect(outcome).toEqual({
+      surface: "quiz_result",
+      destination: "/quiz?ref=quiz_result",
+      counted: false,
+      throttled: true,
+    });
   });
 });
 

@@ -354,16 +354,20 @@ export function RoomPanel({
               style={{ display: "block", fontSize: "12px", color: "#777", marginBottom: "6px" }}
               htmlFor="host-name"
             >
-              Your name — you can buzz from this screen too
+              Your name
             </label>
             <input
               id="host-name"
               className="player-input"
               value={hostName}
               onChange={(e) => setHostName(e.target.value)}
+              placeholder="Your name"
               maxLength={24}
-              style={{ marginBottom: "16px", textAlign: "center" }}
+              style={{ marginBottom: "6px", textAlign: "center" }}
             />
+            <p style={{ fontSize: "12px", color: "#777", marginBottom: "16px", textAlign: "center" }}>
+              You can buzz from this screen too.
+            </p>
           </>
         )}
         <button className="start-btn" onClick={handleOpen} disabled={opening}>
@@ -406,7 +410,7 @@ export function RoomPanel({
         {copied ? "✓ Link copied" : "Share Join Link"}
       </button>
       <p style={{ fontSize: "12px", color: "#666", marginBottom: "14px" }}>
-        Can&apos;t scan? Send that link instead — it&apos;s the same thing.
+        Or send the link.
       </p>
 
       <p style={{ fontSize: "12px", color: "#666", marginBottom: roster.length ? "10px" : "0" }}>
@@ -447,8 +451,8 @@ export function RoomPanel({
       {roster.length === 0 && (!room.buzzer || connected) && (
         <p style={{ fontSize: "12px", color: "#555", marginTop: "10px" }}>
           {room.buzzer
-            ? "Nobody has scanned yet. You can still start — latecomers can join mid-game."
-            : "Nobody has scanned yet."}
+            ? "Nobody yet — latecomers can join mid-game."
+            : "Nobody yet."}
         </p>
       )}
 
@@ -472,7 +476,7 @@ export function RoomPanel({
           ) : (
             <>
               <p style={{ fontSize: "12px", color: "#777", marginBottom: "8px" }}>
-                Add your own playlist — you can&apos;t scan your own QR code.
+                Add your own playlist too.
               </p>
               {!buzzer && (
                 <input
@@ -522,8 +526,7 @@ export function RoomPanel({
           say so rather than letting a host wonder why one QR covers both. */}
       {room.buzzer && room.collectsPlaylists && (
         <p style={{ fontSize: "12px", color: "#555", marginTop: "12px", lineHeight: 1.5 }}>
-          One code for both: players add a playlist and get a buzzer in the same
-          step. Playlists close when the game starts; the buzzers stay open.
+          One code does both — playlists close when the game starts, buzzers stay open.
         </p>
       )}
     </div>
@@ -532,10 +535,10 @@ export function RoomPanel({
 
 function describeRoom(collectsPlaylists: boolean, buzzer: boolean): string {
   if (collectsPlaylists && buzzer) {
-    return "One QR code does both — players scan it, add their own playlist, and get a buzzer on their phone.";
+    return "One QR code does both — players scan it to add a playlist and get a buzzer.";
   }
   if (collectsPlaylists) {
-    return "Generate a QR code — players scan it to add their own playlist from their own phone.";
+    return "Players scan a QR code to add their own playlist.";
   }
-  return "Open the room so everyone can scan in before the music starts. Each player gets a buzzer on their own phone.";
+  return "Players scan a QR code to get a buzzer on their phone.";
 }

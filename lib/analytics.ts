@@ -121,6 +121,12 @@ export type AnalyticsEvent =
         game_mode?: GameMode;
         /** Buzzer mode only: most phones connected at once. The reach denominator. */
         peak_phone_count?: number;
+        /**
+         * The host pressed End Game before the last track was played out.
+         * Quit used to leave without this event at all; now every exit is
+         * one, so this is what keeps "finished" from meaning "abandoned".
+         */
+        ended_early: boolean;
       };
     }
   | {
@@ -352,12 +358,14 @@ export type AnalyticsEvent =
   /*
    * The playlist quiz. The KV copy of this funnel is in lib/loop-stats.ts
    * (`recordQuizStage`), and that is the copy decisions are made from; these
-   * are here for cohorting — in particular `game_started.arrived_from =
-   * "quiz_result"`, the 60-day conversion no server counter can see.
+   * are here for cohorting — in particular `arrived_from = "quiz_result"`, the
+   * 60-day conversion no server counter can see. The quiz link lands on
+   * `/quiz`, so the natural conversion is a `quiz_created` with that ref; a
+   * `game_started` with it is the same person weeks later.
    */
   | {
       name: "quiz_created";
-      params: { question_count: number };
+      params: { question_count: number; arrived_from?: ArrivedFrom };
     }
   | {
       /** A friend's phone loaded a quiz. The denominator for `quiz_completed`. */

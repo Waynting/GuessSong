@@ -34,14 +34,6 @@ function GitHubIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-function StarIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden>
-      <path d="M12 2l2.955 6.09 6.72.885-4.914 4.665 1.233 6.66L12 17.085 6.006 20.3l1.233-6.66L2.325 8.975l6.72-.885L12 2z" />
-    </svg>
-  );
-}
-
 function WaveformBg() {
   const bars = Array.from({ length: 60 }, (_, i) => i);
   return (
@@ -87,9 +79,9 @@ const STEPS = [
 
 const FEATURES = [
   {
-    emoji: "🔓",
-    title: "No login required",
-    desc: "No Spotify account, no sign-up, no cookies-wall. Open the page and play.",
+    emoji: "🆓",
+    title: "Free, no login",
+    desc: "No Spotify account, no sign-up, nothing to install. Open the page and play.",
   },
   {
     emoji: "🎧",
@@ -97,39 +89,14 @@ const FEATURES = [
     desc: "Your road-trip mix, K-pop hits, 80s classics — if it's a public Spotify playlist, it works.",
   },
   {
-    emoji: "🔀",
-    title: "Mixed Playlist Mode",
-    desc: "Merge everyone's playlists into one pool and see who can guess whose taste is playing.",
+    emoji: "🗣️",
+    title: "You are the judge",
+    desc: "Everyone guesses out loud and the host awards the points, so it works in any language.",
   },
   {
-    emoji: "⚡",
-    title: "Zero setup",
-    desc: "Nothing to install, nothing stored on a server. All game state lives in your browser.",
-  },
-  {
-    emoji: "🎚️",
-    title: "Tune the difficulty",
-    desc: "5-second clips for the pros, 30 seconds for a chill night. Pick how many songs each round runs.",
-  },
-  {
-    emoji: "📷",
-    title: "QR code rooms",
-    desc: "No app to install — players scan a code and submit their own playlist from their own phone.",
-  },
-  {
-    emoji: "🔗",
-    title: "Taste Quiz",
-    desc: "Turn a playlist into a link. Friends guess which songs are really yours from their own phone, and a leaderboard says who knows you best.",
-  },
-  {
-    emoji: "🔎",
-    title: "Smart audio fallback",
-    desc: "When Spotify has no preview for a track, GuessSong automatically finds one on iTunes or Deezer.",
-  },
-  {
-    emoji: "🆓",
-    title: "Free & open source",
-    desc: "The whole thing is open code on GitHub. Fork it, remix it, host your own.",
+    emoji: "📱",
+    title: "Phones optional",
+    desc: "Mix everyone's playlists through a QR code, or give every player a buzzer on their own phone.",
   },
 ];
 
@@ -137,12 +104,12 @@ const MIXED_COLLECT = [
   {
     emoji: "📱",
     title: "Pass This Phone",
-    desc: 'No backend, no waiting. Each player takes the host\'s device, types their name and their Spotify playlist link, then passes it on — a masked "✓ added" confirms it without revealing their tracks to the room.',
+    desc: "Each player takes the host's phone, adds their name and playlist link, and passes it on. Nobody sees anyone else's tracks.",
   },
   {
     emoji: "📷",
     title: "QR Code Room",
-    desc: "The host taps Create Room and gets a 4-character code plus a QR code. Players scan it (or open the shared link) on their own phone, submit their playlist, and watch it appear on the host's screen live.",
+    desc: "The host opens a room and shows a QR code. Players scan it on their own phone, submit a playlist, and appear on the host's screen live.",
   },
 ];
 
@@ -243,29 +210,6 @@ export default function AboutPage() {
           box-shadow: 0 4px 32px rgba(29,185,84,0.5);
           transform: translateY(-1px);
         }
-
-        .cta-secondary {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          padding: 14px 28px;
-          background: var(--surface2);
-          color: var(--text);
-          font-family: 'Outfit', sans-serif;
-          font-size: 16px;
-          font-weight: 600;
-          border: 1.5px solid var(--border);
-          border-radius: 12px;
-          cursor: pointer;
-          text-decoration: none;
-          transition: border-color 0.15s, transform 0.1s, background 0.15s;
-        }
-        .cta-secondary:hover {
-          border-color: var(--green);
-          background: rgba(29,185,84,0.06);
-          transform: translateY(-1px);
-        }
-        .cta-secondary .star-glyph { color: #ffd75e; display: inline-flex; }
 
         .step-card {
           display: flex;
@@ -476,10 +420,6 @@ export default function AboutPage() {
               <Link href="/" className="cta-primary">
                 Play Now →
               </Link>
-              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="cta-secondary">
-                <span className="star-glyph"><StarIcon /></span>
-                Star on GitHub
-              </a>
             </div>
           </header>
 
@@ -505,9 +445,8 @@ export default function AboutPage() {
             <p className="eyebrow" style={{ marginBottom: "8px" }}>New · Multiplayer</p>
             <h2 className="section-title" style={{ marginBottom: "12px" }}>Mixed Playlist Mode 🔀</h2>
             <p style={{ color: "#999", fontSize: "14px", fontWeight: 300, lineHeight: 1.6, marginBottom: "24px", maxWidth: "560px" }}>
-              Don&apos;t stop at one playlist — everyone brings their own. GuessSong merges
-              everyone&apos;s tracks into a single mixed pool, dedupes the overlaps, and turns
-              the round into a battle of taste: can you tell whose playlist a song came from?
+              Everyone brings their own playlist and GuessSong merges them into one pool.
+              The extra question each round: whose playlist did that song come from?
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px", marginBottom: "12px" }}>
               {MIXED_COLLECT.map((m) => (
@@ -532,19 +471,15 @@ export default function AboutPage() {
             </div>
           </section>
 
-          {/* Taste Quiz — the one mode that is not a party. Linked with the
-              explicit ?mode=quiz so the setup page opens on it; a plain "/"
-              lands on Single Playlist with the quiz pill three screens down. */}
+          {/* Taste Quiz — the one thing here that is not a party. It has its
+              own page; `QUIZ_SETUP_HREF` is where that lives. */}
           <section className="fade-in fade-in-3">
             <p className="eyebrow" style={{ marginBottom: "8px" }}>New · Send a link</p>
             <h2 className="section-title" style={{ marginBottom: "12px" }}>Taste Quiz 🎧</h2>
             <p style={{ color: "#999", fontSize: "14px", fontWeight: 300, lineHeight: 1.6, marginBottom: "16px", maxWidth: "560px" }}>
-              Not a party — a link. Paste your playlist, pick how many questions, and send
-              the link to your friends. Each question is two songs and only one is really in
-              your playlist; they guess on their own phone, with a few audio hints for when
-              they&apos;re stuck, and land on a leaderboard of who knows your taste best.
-              Nobody has to be in the same room, nobody logs in, and the link stays open for
-              a week.
+              Not a party — a link. Friends open it on their own phone, guess which of two
+              songs is really in your playlist, and land on a leaderboard of who knows your
+              taste best.
             </p>
             <Link href={QUIZ_SETUP_HREF} className="link-btn">
               Make a Taste Quiz →
@@ -635,9 +570,6 @@ export default function AboutPage() {
                   <GitHubIcon size={18} />
                   Star on GitHub
                 </a>
-                <Link href="/" className="cta-secondary">
-                  Start a game →
-                </Link>
               </div>
             </div>
           </section>

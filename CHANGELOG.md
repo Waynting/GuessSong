@@ -5,6 +5,127 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-09-15
+
+The landing page had seven calls to action above the fold and a form that
+put three modes, five clip lengths, six song-count controls, a buzzer toggle
+and eight Start-button labels in front of every host — for a product where
+`npm run stats` says 95% of games are one playlist, Mixed is 3.4% and the
+quiz is 1.4% of what the page creates. This release cuts the page down to
+the one thing it is for, gives the Taste Quiz its own page, and trims the
+game screen and every loop surface to match. One rule throughout: a screen
+asks one question; everything with a default goes behind one line.
+
+### Changed
+
+- **Landing page** (`app/page.tsx`). The mode pills are gone; the card opens
+  on the single-playlist form. Mixed mode is a text link under Start and the
+  quiz is a link to its own page. Clip length, song count and Buzzer Mode
+  fold behind one summary line (`15s clips · 20 songs · Buzzer off — Change`).
+  The Start button has three states — `Start Game →`, the spinner, disabled —
+  and what it is waiting for is a status line under it, not a label on it;
+  that ladder is `lib/start-status.ts` (with `MIXED_MIN_CONTRIBUTORS` and
+  `SetupMode`), pinned by `tests/start-status.test.ts`. The hero is the
+  wordmark, one tagline and a `中文` switch; the FAQ is four questions of two
+  sentences; every helper paragraph is one sentence or gone.
+- **The setup stylesheet is shared** (`components/setup-chrome.tsx`).
+  The 400-line `<style>` block `RoomPanel`, `QuizPanel` and
+  `MixedPlaylistCollector` quietly depended on now has a name and two
+  callers (`/` and `/quiz`). It is a client module: rendered straight from a
+  server component the whole string was serialised into the RSC payload as
+  well as the HTML.
+- **Install banner** (`components/install-banner.tsx`). Shown only to a
+  device that has hosted a game (`getHostGameCount() >= 1`), as one row, under
+  the card so its post-hydration arrival moves nothing the host is reading.
+  The share-from-Spotify pitch appears only on Android, where the share
+  target exists; elsewhere the line is "Open it from your home screen next
+  time", and the no-prompt fallback says "Install it from your browser's
+  menu" rather than naming a menu item that differs per browser.
+- **Game page** (`app/game/page.tsx`). Reveal Answer is the one primary
+  button during a round; Stop, Replay and the album-art hint are a compact
+  row under it. The album (+1) and whose-playlist (+2) pickers are compact
+  rows under the song picker. The three "No one" buttons are gone: pressing
+  Next Track with nothing awarded is what nobody-got-it looks like, and in
+  Buzzer Mode it still tells the room — `lib/round-outcome.ts`
+  (`announcesNoScore`, tested) decides when, and `BuzzerHostPanel.resolve()`
+  ignores a round the room never opened so a silent track no longer files
+  the previous round's buzz count. Quit is gone; End Game is the one exit,
+  and `game_finished` carries `ended_early` so completion rates stay
+  readable. Play Again is the finished screen's one primary button.
+- **Loop copy is declared once** (`lib/loop-links.ts`): `LOOP_CTA_LABEL`,
+  `LOOP_FOOTER_LABEL` ("Made with GuessSong — host your own", keeping the
+  imperative so the footer click series stays comparable) and
+  `LOOP_QR_CAPTION`, replacing seven phrasings across seven files; the quiz
+  result's own line is `makeYourOwn` in `lib/quiz-copy.ts`.
+- **Copy trims** on the room panel, the pass-the-phone collector, the quiz
+  panel and board, `/j`, `/buzz` and `/about` (nine feature cards to four,
+  one Play link, one GitHub link).
+- **The "What's new" overlay loads on first tap** (`components/changelog-dialog.tsx`,
+  `lib/changelog-ui.ts`). The footer button used to pull every bilingual
+  release note into each page's first load — the largest non-framework
+  chunk on the site. First Load JS: `/` 164 → 147 kB, `/quiz` 124 kB.
+  Both lazy chunks (this and `QuizPanel`) fail soft — a line under the
+  button, or the quiz link as plain text — rather than routing a tab from
+  before a deploy to the crash screen; the quiz panel shows "Making your
+  link…" until it lands, so a re-enabled button never sits over an empty
+  space.
+- **Tap targets and contrast.** `.text-link` has a 32px hit area and a
+  focus ring; the Start status line, mode links and language switch are
+  13px `#999`; the compact scoring chips and clip buttons are 32–36px tall;
+  End Game on phones is 11px with real padding.
+
+### Added
+
+- **`/quiz`** (`app/quiz/page.tsx`, `app/quiz/quiz-create.tsx`): the Taste
+  Quiz's own page — static, self-canonical, in the sitemap, `QuizPanel`
+  loaded on demand. `QUIZ_SETUP_HREF` is `/quiz`; `/about` and `/zh` link
+  through it; `/r/quiz_result` lands on `/quiz?ref=quiz_result` directly
+  (`lib/loop-redirect.ts`), and `quiz_created` carries `arrived_from` so the
+  warm arm's conversion is still measured now that it is a quiz, not a
+  hosted game. The old `/?mode=quiz` and `/?ref=quiz_result` spellings are
+  redirected by `next.config.js` `redirects()` before any HTML is served,
+  with the mount-effect redirect in `app/page.tsx` as the fallback.
+- **Tests: 816 → 894** across `tests/start-status.test.ts`,
+  `tests/round-outcome.test.ts`, `tests/result-image.test.ts`,
+  `tests/setup-pages.test.ts` (source pins for every `.tsx` invariant the
+  split rests on) and extensions to the arrival, loop-redirect, loop-links,
+  guides, site-policy and quiz suites.
+
+### Fixed
+
+- **The expired-quiz screen sent "Make your own quiz" to the party form.**
+  `app/q/[code]/quiz-client.tsx` now links `QUIZ_SETUP_HREF`.
+- **`parseLastQuiz` accepted any non-empty string as a code** before it went
+  into the board href; it now enforces `CODE_SHAPE` like `parseQuizTokens`.
+- The settings toggle's `aria-controls` no longer names a panel that is not
+  rendered while collapsed.
+
+### Known gaps
+
+- **Quiz creation may drop.** The quiz went from a pill to a text link and
+  its own page; read `created` in `npm run stats` two weeks after this
+  deploy before deciding whether it needs more prominence. Its conversion
+  now reads on `quiz_created.arrived_from` in GA4; `game_started.arrived_from
+  = "quiz_result"` is the same person weeks later.
+- **Two GA4 series break at this deploy:** `game_finished` now includes
+  abandoned games (`ended_early` separates them) and the footer surfaces'
+  copy changed (the KV click counters keep their names).
+- **The suite cannot reach the runtime flows** — Mixed·QR, a buzzer round
+  with nothing awarded, creating a quiz on a phone; the manual plan is in
+  `~/.gstack/projects/Waynting-GuessSong/*-feat-simplify-ui-ship-test-plan-*.md`.
+- **`endGame()` does not send the buzzer room a reveal** (pre-existing).
+- **In Buzzer Mode the room stays open while the host works the bonus
+  rows.** "No one" used to lock the phones the instant the answer went up;
+  now the lock goes out with Next Track, so a buzz that lands during scoring
+  makes `announcesNoScore` false and that round gets neither a reveal nor a
+  `buzz_round_resolved` — the "nobody knew it" instrument undercounts by
+  exactly those rounds. A product call on whether Reveal Answer should lock
+  the room when no buzz is pending.
+- **Simplification follow-ups skipped:** a shared `PlaylistUrlField`, a
+  `SetupShell`, merging `lib/setup-arrival.ts`'s three exports, deduping the
+  test helpers, and importing `SpotifyIcon`/`WaveformBg` on `/about` and
+  `/zh` from `setup-chrome`.
+
 ## [1.11.0] - 2026-09-14
 
 Two changes from the first owner who shared a quiz, the same evening 1.10.0

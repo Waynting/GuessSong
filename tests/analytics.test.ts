@@ -130,6 +130,7 @@ describe("trackEvent", () => {
         rounds_played: 12,
         total_tracks: 16,
         duration_seconds: 240,
+        ended_early: false,
         playlist_source: "mixed",
       });
       trackEvent("preview_miss", {

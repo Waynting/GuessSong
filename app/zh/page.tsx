@@ -370,8 +370,7 @@ export default function ZhPage() {
             </p>
           </section>
 
-          {/* 品味鑒定：唯一不是派對的模式。連結帶 ?mode=quiz，設定頁會直接開在這個
-              模式；只給 "/" 會落在單一歌單、品味鑒定的按鈕在三個螢幕以下。 */}
+          {/* 品味鑒定：唯一不是派對的功能，有自己的頁面；連結由 QUIZ_SETUP_HREF 決定。 */}
           <section>
             <p className="zh-eyebrow" style={{ marginBottom: "10px" }}>新功能 · 傳連結</p>
             <h2 className="zh-section-title" style={{ marginBottom: "14px" }}>品味鑒定 🎧</h2>
