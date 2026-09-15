@@ -54,6 +54,41 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.12.0",
+    date: "2026-09-15",
+    headline:
+      "A simpler start: paste a playlist, add players, press Start. The other modes and the settings step aside, and the Taste Quiz has its own page.",
+    headlineZh:
+      "更簡單的開場：貼上歌單、加玩家、按開始。其他模式和設定都退到一旁，品味鑒定也有了自己的頁面。",
+    changes: [
+      {
+        kind: "new",
+        text: "The Taste Quiz lives at guessong.app/quiz now — its own page instead of a third button on the party form. Old links still get you there.",
+        textZh: "品味鑒定現在在 guessong.app/quiz，有自己的頁面，不再是派對表單上的第三個按鈕。舊連結還是會帶你過去。",
+      },
+      {
+        kind: "better",
+        text: "The home page asks three things: playlist, players, Start. Clip length, song count and Buzzer Mode sit behind one line that shows what they are set to, and Mixed mode is a link under Start.",
+        textZh: "首頁只問三件事：歌單、玩家、開始。片段長度、歌曲數和搶答模式收在一行裡，看得到目前的設定；混合歌單模式變成開始按鈕下面的一個連結。",
+      },
+      {
+        kind: "better",
+        text: "During a round, Reveal Answer is the one big button; pause, replay and the album-art hint sit smaller under it. The three No one buttons are gone: if nobody got it, just press Next Track. Quit is gone too — End Game takes you to the scores.",
+        textZh: "一回合裡，「揭曉答案」是唯一的大按鈕；暫停、重播和專輯封面提示縮小放在下面。三個「沒人答對」按鈕拿掉了：沒人猜到就直接按下一首。「離開」也拿掉了，「結束遊戲」會帶你到計分板。",
+      },
+      {
+        kind: "better",
+        text: "Every page loads lighter: these release notes only download when you open them, and buttons and links are easier to tap on a phone.",
+        textZh: "每一頁都變輕了：這份更新內容只有在你打開時才下載，按鈕和連結在手機上也更好按。",
+      },
+      {
+        kind: "fixed",
+        text: "On a quiz link that has expired, Make your own quiz now goes to the quiz page rather than the party game.",
+        textZh: "在已經過期的測驗連結上，「自己做一份品味鑒定」現在會到測驗頁面，而不是派對模式。",
+      },
+    ],
+  },
+  {
     version: "1.11.0",
     date: "2026-09-14",
     headline:
