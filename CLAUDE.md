@@ -263,7 +263,7 @@ picker, above.
 The game page holds **one** `<audio>` element and one set of phase state across
 every round, so anything that awaits mid-round — resolving a preview, repairing
 a rotted URL — can come back after the host has pressed Skip Track, Reveal
-Answer or Quit. `playClip` renders the "Skip Track" button *during* its own
+Answer or End Game. `playClip` renders the "Skip Track" button *during* its own
 await, 1500ms in, which makes a host advancing while a preview resolves the
 ordinary case rather than a corner one.
 
@@ -280,8 +280,8 @@ ordinary case rather than a corner one.
   must go through it.** It stops the clip, bumps the token, hands the `<audio>`
   element's `src` back, and clears the loading affordances — four things whose
   ordering nothing in the suite can reach, because the guard lives in a
-  component the tests cannot import. `nextTrack`, `endGame` and Quit all call
-  it; a fifth path that forgets the bump fails silently, which is the bug this
+  component the tests cannot import. `nextTrack` and `endGame` both call
+  it; a third path that forgets the bump fails silently, which is the bug this
   exists to prevent.
 - **A stale answer is dropped from the round but still cached.** `previewCache`
   is keyed by track id, so a resolution that came back to the wrong round is

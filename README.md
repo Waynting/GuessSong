@@ -50,7 +50,7 @@ Two orthogonal choices: **how you play** and **where the songs come from**.
 
 Buzzer Mode and Mixed Playlist Mode share a single room code and QR: the host claims the buzzer room first, then opens the playlist mailbox under the same code.
 
-### Taste Quiz — the third option on the setup page, and not a game
+### Taste Quiz — its own page (`/quiz`), and not a game
 
 Paste a playlist, type your name, pick 10–50 questions, and you get a **link** to send to a group chat instead of a game to host. A friend opens it on their own phone and answers "which of these two songs is really in the playlist?" — one real, one decoy, no audio in the question. A 30s clip is a *hint*, rationed at one per ten questions, and using fewer only breaks ties. Every tap says right or wrong on the spot; at the end they get a score, a verdict (`soulmate` / `close` / `acquaintance` / `stranger`) and the public ranking. The results page (`/q/<code>/board`), which names the answers and shows who got each question, opens only on the device that made the quiz. A quiz lives seven days.
 
@@ -173,7 +173,8 @@ ipconfig getifaddr en0            # macOS Wi-Fi — e.g. 10.107.0.98
 
 ```
 app/
-  page.tsx                   Setup — playlist, players, clip length, mode selection
+  page.tsx                   Setup — playlist, players, a folded settings row, Mixed mode
+  quiz/                      Taste Quiz creation page (page.tsx + quiz-create.tsx)
   game/page.tsx              The game — phase machine, playback, scoring, result images
   about/                     "How to play" page
   zh/                        Traditional-Chinese landing page (written natively, not translated)
