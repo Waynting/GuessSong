@@ -2,31 +2,44 @@
 
 import { useEffect, useState } from "react";
 import { promptInstall, isStandalone } from "@/lib/pwa";
+import { getHostGameCount } from "@/lib/host-session";
 
 /**
- * Install pitch block on the home page, shown above the setup form.
- * Always visible (it never hides on click — only once the app is actually
- * installed or already running standalone). Clicking Install triggers the
- * native prompt when the browser offers one; otherwise it expands manual
- * "add to home screen" instructions so the button is never a dead end.
+ * Install pitch on the home page: one row above the setup form.
+ *
+ * Shown only to a device that has hosted a game before. A first visit is
+ * someone deciding whether to paste a playlist at all, and this block used to
+ * sit between the title and the form on every one of them — a three-step
+ * share-from-Spotify walkthrough plus a paragraph of per-OS instructions,
+ * selling a shortcut that only pays off for the host who comes back. Hidden
+ * by default so the server never renders it, and gone for good once the app
+ * is installed or already running standalone.
+ *
+ * Install is never a dead end: when the browser offers no native prompt, one
+ * line points at its own menu.
  */
 export function InstallBanner() {
-  const [hidden, setHidden] = useState(false);
+  const [visible, setVisible] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  // The share target — Spotify's share sheet listing GuessSong — only exists on
+  // Android. Pitching it to an iPhone promises a menu item that is not there.
+  const [sharesFromSpotify, setSharesFromSpotify] = useState(false);
 
   useEffect(() => {
-    if (isStandalone()) setHidden(true);
-    const onInstalled = () => setHidden(true);
+    if (isStandalone() || getHostGameCount() < 1) return;
+    setSharesFromSpotify(/Android/i.test(navigator.userAgent));
+    setVisible(true);
+    const onInstalled = () => setVisible(false);
     window.addEventListener("appinstalled", onInstalled);
     return () => window.removeEventListener("appinstalled", onInstalled);
   }, []);
 
-  if (hidden) return null;
+  if (!visible) return null;
 
   async function handleInstall() {
     const outcome = await promptInstall();
     // No native prompt available (unsupported browser, already dismissed,
-    // criteria not met yet) — show manual instructions instead.
+    // criteria not met yet) — say where the manual one lives.
     if (outcome === null) setShowHelp(true);
   }
 
@@ -36,13 +49,13 @@ export function InstallBanner() {
         .install-banner {
           display: flex;
           flex-direction: column;
-          gap: 14px;
+          gap: 10px;
           text-align: left;
           background: rgba(29,185,84,0.06);
           border: 1px solid rgba(29,185,84,0.3);
           border-radius: 12px;
-          padding: 16px;
-          margin-bottom: 16px;
+          padding: 14px 16px;
+          margin-top: 16px;
           font-family: 'Outfit', sans-serif;
         }
         .install-banner-row {
@@ -69,58 +82,14 @@ export function InstallBanner() {
           transition: background 0.15s, transform 0.1s;
         }
         .install-banner-btn:hover { background: #1ed760; transform: translateY(-1px); }
-
-        .share-flow {
-          background: rgba(0,0,0,0.25);
-          border: 1px solid rgba(29,185,84,0.18);
-          border-radius: 10px;
-          padding: 12px 14px;
-        }
-        .share-flow-label {
-          font-size: 10px;
-          font-weight: 700;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: #1DB954;
-          margin-bottom: 8px;
-        }
-        .share-flow-steps {
-          display: flex;
-          flex-wrap: wrap;
-          align-items: center;
-          gap: 6px;
-        }
-        .share-flow-step {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          background: #1a1a1a;
-          border: 1px solid #2a2a2a;
-          border-radius: 999px;
-          padding: 6px 12px;
-          font-size: 12px;
-          font-weight: 500;
-          color: #ddd;
-          white-space: nowrap;
-        }
-        .share-flow-arrow { color: #1DB954; font-size: 13px; font-weight: 700; }
-        .share-flow-note {
-          font-size: 11px;
-          color: #777;
-          line-height: 1.5;
-          font-weight: 300;
-          margin-top: 8px;
-        }
-
         .install-banner-help {
           font-size: 12px;
           color: #999;
-          line-height: 1.6;
+          line-height: 1.5;
           font-weight: 300;
           border-top: 1px solid rgba(29,185,84,0.15);
           padding-top: 10px;
         }
-        .install-banner-help strong { color: #ccc; font-weight: 600; }
       `}</style>
       <div className="install-banner">
         <div className="install-banner-row">
@@ -129,11 +98,12 @@ export function InstallBanner() {
           </span>
           <span className="install-banner-text">
             <span className="install-banner-title" style={{ display: "block" }}>
-              Install GuessSong as an app
+              Install GuessSong
             </span>
             <span className="install-banner-desc" style={{ display: "block" }}>
-              Runs in its own window — and shows up in your phone&apos;s share
-              menu.
+              {sharesFromSpotify
+                ? "Share a playlist from Spotify straight into the game."
+                : "Open it from your home screen next time."}
             </span>
           </span>
           <button className="install-banner-btn" onClick={handleInstall}>
@@ -141,42 +111,10 @@ export function InstallBanner() {
           </button>
         </div>
 
-        <div className="share-flow">
-          <p className="share-flow-label">After installing</p>
-          <div className="share-flow-steps">
-            <span className="share-flow-step">
-              <span aria-hidden>🎵</span> Open a playlist in Spotify
-            </span>
-            <span className="share-flow-arrow" aria-hidden>
-              →
-            </span>
-            <span className="share-flow-step">
-              <span aria-hidden>📤</span> Tap Share
-            </span>
-            <span className="share-flow-arrow" aria-hidden>
-              →
-            </span>
-            <span className="share-flow-step">
-              <span aria-hidden>📲</span> Choose GuessSong
-            </span>
-          </div>
-          <p className="share-flow-note">
-            The playlist imports automatically — no copy-pasting links. Sharing
-            from Spotify works on Android; on iPhone and desktop, paste the
-            link below instead.
-          </p>
-        </div>
-
         {showHelp && (
-          <span className="install-banner-help">
-            Your browser didn&apos;t offer an automatic install — add it
-            manually: <strong>Android Chrome</strong>: menu ⋮ →{" "}
-            <strong>Install app</strong> (or <strong>Add to Home screen</strong>
-            ). <strong>Desktop Chrome</strong>: install icon in the address
-            bar, or menu ⋮ → <strong>Cast, save and share</strong> →{" "}
-            <strong>Install page as app</strong>. <strong>iPhone Safari</strong>
-            : Share → <strong>Add to Home Screen</strong>.
-          </span>
+          <p className="install-banner-help">
+            Install it from your browser&apos;s menu.
+          </p>
         )}
       </div>
     </>

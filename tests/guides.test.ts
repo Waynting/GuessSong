@@ -242,6 +242,17 @@ describe("sitemap", () => {
     }
   });
 
+  it("lists the quiz's own page, and lists it alone — English only, like the guides", () => {
+    // /quiz is a durable page describing a feature, unlike /q/<code>. It
+    // left the party form at `/` and has to be reachable from the sitemap
+    // on its own; `/zh` still links it but has no half of its own, so an
+    // alternates block here would name a URL that does not exist.
+    const quiz = sitemap().find((e) => new URL(e.url).pathname === "/quiz");
+    expect(quiz, "sitemap is missing /quiz").toBeDefined();
+    expect(quiz!.alternates).toBeUndefined();
+    expect(urls.some((u) => new URL(u).pathname === "/zh/quiz")).toBe(false);
+  });
+
   it("has no duplicate URLs", () => {
     expect(new Set(urls).size).toBe(urls.length);
   });
