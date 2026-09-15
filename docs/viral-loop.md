@@ -34,11 +34,11 @@ codes, and last the one surface whose carrier is a URL rather than a QR.
 |---|---|---|
 | `buzz_footer` | buzzer page, all three return paths (`app/buzz/[code]/page.tsx:210`, `:243`) | always, including the pre-join form |
 | `buzz_cta` | buzzer page, full-width button (`app/buzz/[code]/page.tsx:289`) | between rounds, after the first resolves |
-| `join_footer` | Mixed Playlist submit page (`app/j/[code]/page.tsx:147`) | always |
+| `join_footer` | Mixed Playlist submit page (`app/j/[code]/page.tsx:146`) | always |
 | `join_submitted` | Mixed Playlist confirmation screen (`app/j/[code]/page.tsx:103`) | after a playlist is submitted |
 | `game_over` | QR on the host's Game Over screen (`app/game/page.tsx`, `<LoopQr />`) | party mode, end of game |
 | `share` | QR drawn into the result card image (`lib/result-image.ts`'s `drawCardFooter`) | wherever the picture ends up |
-| `quiz_result` | the result screen of a Taste Quiz (`app/q/[code]/quiz-client.tsx:1275`, `<LoopCtaButton surface="quiz_result">`) | after a taker has submitted their answers |
+| `quiz_result` | the result screen of a Taste Quiz (`app/q/[code]/quiz-client.tsx:1295`, `<LoopCtaButton surface="quiz_result">`) | after a taker has submitted their answers |
 
 `quiz_result` (1.9.0) is the first surface reached by tapping a URL in a group
 chat rather than by scanning a QR off a screen or out of an image. It is kept
@@ -55,6 +55,12 @@ counter simply stops incrementing, and that arm reads as "nobody clicked it".
 You would then correctly conclude the call to action was useless and delete one
 that was working. Same single-union trick `lib/buzzer-protocol.ts` uses across
 the Worker boundary.
+
+Since 1.12.0 the *copy* is declared beside the names, for the same reason:
+`LOOP_CTA_LABEL` (the button), `LOOP_FOOTER_LABEL` ("Made with GuessSong — host
+your own") and `LOOP_QR_CAPTION` replaced seven phrasings across seven files.
+The quiz result keeps its own line, `makeYourOwn` in `lib/quiz-copy.ts`, because
+it is read in two languages and lands somewhere else (below).
 
 ### The buzz CTA gate
 
@@ -106,8 +112,21 @@ Consequences worth not undoing:
 - `/r` is in `app/robots.ts`'s disallow list, for the same reason.
 
 **Every branch still redirects.** Unknown segment, spent rate limit, KV
-unavailable: the visitor reaches `/` regardless, and only the count is lost. The
-person clicking is precisely the person this feature exists to reach.
+unavailable: the visitor reaches the setup page regardless, and only the count
+is lost. The person clicking is precisely the person this feature exists to
+reach.
+
+**The quiz arm lands on `/quiz`, not `/`.** `handleLoopHit` sends a
+`quiz_result` click to `/quiz?ref=quiz_result` (`isQuizSurface` in
+`lib/setup-arrival.ts`), because the person was just promised "make your own"
+and the party form is not that; every other arm still lands on `/`. The quiz
+page remembers the ref the same way `/` does (`rememberLoopRef`, 60 days), so
+the conversion to read for this arm is `quiz_created.arrived_from` — a
+`game_started` carrying `quiz_result` is the same person weeks later. Before
+1.12.0 the redirect went to `/?ref=quiz_result` and `app/page.tsx` opened its
+form on the quiz pill — the party page doing two jobs, which is what `/quiz`
+ends. The old spelling is redirected by `next.config.js` (see
+[operations.md](operations.md#an-old-quiz-link-opens-the-party-form)).
 
 ### Attribution is delayed on purpose
 
@@ -226,7 +245,7 @@ say; a fresh deploy shows the five stages and the verdicts alone.)
 | `Games started` | real hosted parties — only the paths that call `recordHostedStart` |
 | `Repeat hosts` | games at index ≥ 2. **The number this work is waiting on** |
 | `created` / `opened` / `started` / `completed` / `board` | the Taste Quiz funnel (`recordQuizStage` in `lib/loop-stats.ts`), bumped by the route that did the thing — `POST /api/quiz`, `GET /api/quiz/[code]`, `POST /api/quiz/[code]/check` with `q=0`, `POST /api/quiz/[code]/answer`, `GET /api/quiz/[code]/board` — not beaconed from a page, so nothing here is lost to a tab closing. The block is printed only once something has been recorded |
-| `en 4 · zh 8` | the language each quiz was made in (`quiz_locale:<l>`, the `locale` the setup page sends). Which audience the bilingual panel is reaching — the share sentence and the friend's page render in this language |
+| `en 4 · zh 8` | the language each quiz was made in (`quiz_locale:<l>`, the `locale` the quiz page (`/quiz`) sends). Which audience the bilingual panel is reaching — the share sentence and the friend's page render in this language |
 | `per quiz` | `opened ÷ created`. Below 1 means quizzes are being made and not sent — a share-step problem, not a quiz problem |
 | `started` / `answered a question` | the first question's check — the first half tapped, once per attempt, since an answered question is locked. `started ÷ opened` is the intro card: a friend who read it and left. **Dated**: it began with the per-question reveal (1.11.0), so a window straddling that deploy reads low against opens |
 | `of opens` | `completed ÷ opened`, the whole taker side. **`opened` is a ceiling, not a floor — see §6** |
@@ -316,12 +335,12 @@ working call to action deleted. Collect two weeks first. Shapes, not numbers:
 | `Repeat hosts` share rising | someone actually came back | monetisation moves from next quarter to next month |
 | `Repeat hosts` stays low | **not** "nobody returns" | cross-check against GA4 returning users, which rides a cookie and is unaffected by the ITP eviction above |
 | `quiz_result` reads like `share` after two weeks | this audience does not convert off-site, link or QR alike | the reading D9 in `decisions.md` said it would reopen on — a real answer, worth having |
-| `per quiz` below 1 | quizzes are being made and not sent | the share step on the setup page (`components/quiz-panel.tsx`), not the questions |
+| `per quiz` below 1 | quizzes are being made and not sent | the share step on `/quiz` (`components/quiz-panel.tsx`), not the questions |
 | `of starts` well under 40% | takers start and do not finish | read the `questions` table before touching anything: if `per quiz` falls with length, the default is too long — shorten `QUIZ_DEFAULT_QUESTION_COUNT` in `types/quiz.ts`; if it is flat, length is not the reason |
 | `started` well under `opened` | takers open the card and never tap a half | the intro — the name field and the Start button on `app/q/[code]/quiz-client.tsx` — not the questions. Remember `opened` is a ceiling (§6), so this reads worse than it is |
-| `typed` rows are empty after two weeks | nobody uses the typed field | leave it; it costs nothing on screen. Delete it only if the setup form needs the room |
+| `typed` rows are empty after two weeks | nobody uses the typed field | leave it; it costs nothing on screen. Delete it only if the quiz form needs the room |
 | `built shorter` is a large share of `created` | hosts want longer quizzes than their playlists give | say so on the panel (`components/quiz-panel.tsx`) before the link is shared, or cap the picker at the playlist's usable count once it is known |
-| `board` well under `created` | owners send the link and do not come back for results | the board is where the owner's share button is, so this is a second share arm going unused — put the results where the owner already is (the setup page's `QuizPanel` already remembers the last quiz) rather than growing the board |
+| `board` well under `created` | owners send the link and do not come back for results | the board is where the owner's share button is, so this is a second share arm going unused — put the results where the owner already is (`/quiz`'s `QuizPanel` already remembers the last quiz) rather than growing the board |
 | `heard per completed` near the allowance | takers spend every hint they have | at two options a hint is a whole point, so the verdict spread is flattering; read `stranger` as the honest bucket, and consider one per twenty |
 | `unavailable` a visible share of hints | the quiz is being served in throttled minutes | same reading as the preview cache's `unavailable` row below it: the shared egress IP is being throttled, and the quiz is one more caller on it. Not a quiz problem |
 | `repaired` climbing | the year-long positive cache is rotting under the quiz | expected at a low rate; a jump means the CDN rotated a batch. Nothing to do unless `heard` falls with it |

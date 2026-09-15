@@ -4,7 +4,7 @@ A local party music guessing game powered by Spotify playlists. Live at **[guess
 
 No login, no accounts. The host pastes a public Spotify playlist URL, everyone guesses out loud, and the host awards points.
 
-Current version: **1.11.0** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **1.12.0** — see [CHANGELOG.md](./CHANGELOG.md).
 
 ## How It Works
 
@@ -190,11 +190,12 @@ app/
   error.tsx, global-error.tsx  Error boundaries — see "When the client throws" below
   icon.tsx, opengraph-image.tsx, robots.ts, sitemap.ts
 components/                  Buzzer button + host panel, room panel, mixed collector,
-                             quiz panel, install banner, changelog modal, service notice,
-                             crash screen, ui/ (shadcn primitives)
+                             quiz panel, install banner, changelog modal (its overlay lazy-loaded
+                             from changelog-dialog.tsx), setup chrome (the stylesheet and backdrop
+                             / and /quiz share), service notice, crash screen, ui/ (shadcn primitives)
 lib/                         All shared logic — see "Architecture" below
 worker/                      Cloudflare Worker + BuzzerRoom Durable Object
-tests/                       40 Vitest files, 811 cases
+tests/                       45 Vitest files, 894 cases
 types/                       Track, room, quiz, preview, and service-status wire types
 ```
 
@@ -283,7 +284,7 @@ Two hand-written changelogs, and a release updates both: [`CHANGELOG.md`](./CHAN
 ## Testing
 
 ```bash
-npm test              # 40 files, 811 cases — vitest, jsdom
+npm test              # 45 files, 894 cases — vitest, jsdom
 cd worker && npm test # Durable Object tests inside workerd
 ```
 

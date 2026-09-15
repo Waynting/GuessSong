@@ -285,6 +285,20 @@ is worth having.
   question zero is the funnel's `started`, which splits "read the card and
   left" from "played and stopped" — one number before.
 
+**Amended 2026-09-15 (1.12.0): its own page, not a mode of the form.** The
+quiz had been the third pill on the party form at `/` — "not a party" beside
+the two things that are, on the page whose whole job is starting one — and it
+was 1.4% of what that page created. It now lives at `/quiz`
+(`app/quiz/page.tsx`): static, indexable, in the sitemap, linked from the party
+form as text. The loop arm follows it: `/r/quiz_result` lands on
+`/quiz?ref=quiz_result` (`lib/loop-redirect.ts`), so the conversion to read
+for the warm arm is `quiz_created.arrived_from` rather than `game_started`'s —
+a person promised "make your own" is making a quiz, not hosting a party. The
+old `/?mode=quiz` and `/?ref=quiz_result` spellings redirect in
+`next.config.js`. **Would reopen** stands as written; the earlier question is
+whether a pill becoming a link costs creations at all, which is `created` in
+`npm run stats` two weeks after the deploy (`CHANGELOG.md` 1.12.0, known gaps).
+
 ---
 
 ## Rejected and still rejected
