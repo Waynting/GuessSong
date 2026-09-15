@@ -10,8 +10,9 @@
  *
  * A cross-culture party is where that question stops being academic. Two rooms
  * can produce the same final scoreboard while one of them had a song title
- * named almost every round and the other had the host tapping "No one" three
- * times a round because nobody in the room had heard any of it. The scoreboard
+ * named almost every round and the other had the host pressing Next Track
+ * with nothing awarded, three rounds out of four, because nobody in the room
+ * had heard any of it. The scoreboard
  * cannot tell those apart. This can, and it prints on the screen the host is
  * already looking at, which is the only place a number gets read without
  * someone deciding to go and find it.

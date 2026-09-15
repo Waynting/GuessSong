@@ -16,6 +16,7 @@ import {
 import { loadGame } from "@/lib/game-storage";
 import { fetchPreview, fetchPreviewBatch } from "@/lib/preview-client";
 import { createRoundToken } from "@/lib/round-token";
+import { announcesNoScore } from "@/lib/round-outcome";
 import { isPreviewSettled, type PreviewBatchTrack } from "@/types/preview";
 import { BuzzerHostPanel, type BuzzerControls } from "@/components/buzzer-host-panel";
 import { LoopQr } from "@/components/loop-qr";
@@ -51,8 +52,7 @@ function InstallCta({ onInstall }: { onInstall: () => void }) {
           Install GuessSong
         </span>
         <span className="install-cta-desc" style={{ display: "block" }}>
-          Next time, share any playlist from Spotify straight to GuessSong and
-          start playing.
+          Next time, share a playlist from Spotify straight into the game.
         </span>
       </span>
       <button className="install-cta-btn" onClick={onInstall}>
@@ -183,27 +183,60 @@ export default function GamePage() {
    * Stop drops it to "guessing", the clip running out does the same. When the
    * two phases rendered different rows, buttons appeared and vanished as a
    * side effect of that churn, and the host lost whichever control they were
-   * reaching for. One row, always the same three, until Reveal ends the round.
+   * reaching for. One block, always the same set, until Reveal ends the round.
+   *
+   * Reveal is the only primary control: it is the one the host presses every
+   * round. Stop/Resume, Replay and the album-art hint sit under it as one
+   * compact row, so the eye lands on the action and not on a bank of equally
+   * weighted buttons.
    */
   function clipControls() {
     return (
-      <>
-        {audioPlaying ? (
-          <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={holdClip}>
-            Stop
-          </button>
-        ) : (
-          <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={resumeClip}>
-            Resume
-          </button>
-        )}
-        <button className="btn-ghost" style={{ flex: "0 0 auto" }} onClick={replayClip}>
-          Replay
-        </button>
+      <div className="clip-controls">
         <button className="btn-primary" onClick={reveal}>
           Reveal Answer →
         </button>
-      </>
+        <div className="clip-secondary">
+          {audioPlaying ? (
+            <button className="btn-ghost compact" onClick={holdClip}>
+              Stop
+            </button>
+          ) : (
+            <button className="btn-ghost compact" onClick={resumeClip}>
+              Resume
+            </button>
+          )}
+          <button className="btn-ghost compact" onClick={replayClip}>
+            Replay
+          </button>
+          {currentTrack?.albumImageUrl && (
+            <button
+              className={`btn-ghost compact${albumHintShown ? " used" : ""}`}
+              onClick={() => setAlbumHintShown(true)}
+              disabled={albumHintShown}
+            >
+              {albumHintShown ? "Album Art Shown" : "Show Album Art Hint"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /**
+   * The waiting-phase escape hatch, shared by the "still finding audio" and
+   * "no audio" branches so the pair cannot drift apart.
+   */
+  function skipControls() {
+    return (
+      <div className="btn-row">
+        <button className="btn-primary" onClick={reveal}>
+          Reveal Answer →
+        </button>
+        <button className="btn-ghost" onClick={nextTrack}>
+          Skip Track
+        </button>
+      </div>
     );
   }
 
@@ -555,7 +588,8 @@ export default function GamePage() {
     // while the round is "locked", so resolving here made the Correct and Wrong
     // buttons on the next screen silent no-ops — the queue never advanced and
     // the phones never heard the outcome. The round closes when the host
-    // actually calls it: correct(), reveal() on "No one", or next().
+    // actually calls it: correct(), or next() — which sends reveal() first
+    // when nobody scored, see nextTrack().
     setPhase("revealed");
   }
 
@@ -612,8 +646,12 @@ export default function GamePage() {
     setTimeout(() => setScorePulse(null), 600);
   }
 
-  /** Fire game_finished exactly once (guards endGame + nextTrack double entry). */
-  function trackGameFinished() {
+  /**
+   * Fire game_finished exactly once (guards endGame + nextTrack double entry).
+   * `endedEarly` is the caller's to say: End Game before the last reveal is
+   * early; the last track ending — played out or skipped — is not.
+   */
+  function trackGameFinished(endedEarly: boolean) {
     if (finishedTrackedRef.current) return;
     finishedTrackedRef.current = true;
     trackEvent("game_finished", {
@@ -622,6 +660,7 @@ export default function GamePage() {
       duration_seconds: Math.round((Date.now() - gameStartTimeRef.current) / 1000),
       playlist_source: playlistSource,
       game_mode: mode,
+      ended_early: endedEarly,
       // The reach denominator: how many phones this game actually touched.
       // Only meaningful in buzzer mode, so it's omitted elsewhere rather than
       // reported as 0 and dragging the average down.
@@ -630,8 +669,18 @@ export default function GamePage() {
   }
 
   function nextTrack() {
+    // The song row's "No one" button used to tell the room that nobody scored
+    // (host:reveal, so the phones hear the round is over and the analytics
+    // count a round nobody got). Pressing Next Track is how a host says that
+    // now, so the same message goes out here, under exactly the conditions
+    // that button used to render: the answer is up, nothing has been awarded,
+    // and no buzz is waiting on a verdict.
+    const room = buzzerControlsRef.current;
+    if (room && announcesNoScore({ phase, pointsAwarded, buzzesPending: room.buzzes.length })) {
+      room.reveal();
+    }
     retireRound();
-    buzzerControlsRef.current?.next();
+    room?.next();
     trackEvent("round_completed", {
       round_index: currentIndex + 1,
       skipped: phase !== "revealed",
@@ -653,7 +702,7 @@ export default function GamePage() {
     }
 
     if (currentIndex + 1 >= tracks.length) {
-      trackGameFinished();
+      trackGameFinished(false);
       setPhase("finished");
     } else {
       setCurrentIndex((i) => i + 1);
@@ -671,7 +720,7 @@ export default function GamePage() {
 
   function endGame() {
     retireRound();
-    trackGameFinished();
+    trackGameFinished(currentIndex + 1 < tracks.length || phase !== "revealed");
     setPhase("finished");
   }
 
@@ -1136,6 +1185,28 @@ export default function GamePage() {
           white-space: nowrap;
         }
         .btn-ghost:hover { border-color: #444; color: #999; }
+        .btn-ghost.compact { padding: 9px 14px; min-height: 36px; font-size: 12.5px; font-weight: 500; color: #777; }
+        .btn-ghost.compact:disabled { cursor: default; }
+        .btn-ghost.compact.used { color: #1DB954; border-color: rgba(29,185,84,0.5); opacity: 0.7; }
+
+        /* Playing / guessing: Reveal on top, everything else in one quiet row */
+        .clip-controls { display: flex; flex-direction: column; gap: 8px; }
+        .clip-controls .btn-primary { flex: none; width: 100%; }
+        .clip-secondary { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+
+        .end-game-btn {
+          background: none;
+          border: 1px solid #2a2a2a;
+          border-radius: var(--radius);
+          color: #888;
+          font-size: 12px;
+          font-family: 'Outfit', sans-serif;
+          font-weight: 600;
+          padding: 6px 12px;
+          cursor: pointer;
+          transition: color 0.15s, border-color 0.15s;
+        }
+        .end-game-btn:hover { color: #1DB954; border-color: #1DB954; }
 
         /* Revealed state */
         .track-reveal { text-align: center; padding: 4px 0 16px; }
@@ -1191,6 +1262,29 @@ export default function GamePage() {
         .player-pick-btn:hover { border-color: #1DB954; color: #1DB954; background: rgba(29,185,84,0.08); }
         .player-pick-btn.picked { background: #1DB954; border-color: #1DB954; color: #000; }
         .player-pick-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .player-pick-btn.compact { padding: 8px 12px; min-height: 32px; font-size: 12px; font-weight: 500; color: #999; }
+
+        /* Bonus rows (album, whose playlist): one line, label then chips */
+        .score-row-compact {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          margin-bottom: 12px;
+        }
+        .score-row-label {
+          font-size: 12px;
+          font-weight: 600;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: #999;
+          /* Its own line, so five players' chips never orphan it. */
+          flex-basis: 100%;
+          margin-right: 4px;
+          white-space: nowrap;
+        }
+        .score-row-done { font-size: 12px; color: #1DB954; }
 
         .no-score-label { text-align: center; color: #555; font-size: 14px; margin-bottom: 14px; padding: 10px; }
 
@@ -1418,16 +1512,10 @@ export default function GamePage() {
           flex-shrink: 0;
         }
 
-        .finished-btn-row {
-          display: flex;
-          gap: 12px;
+        .btn-lg {
           flex-shrink: 0;
           width: 100%;
           max-width: 480px;
-          flex-wrap: wrap;
-        }
-        .btn-lg {
-          flex: 1;
           padding: 13px 24px;
           font-family: 'Outfit', sans-serif;
           font-size: 15px;
@@ -1440,8 +1528,16 @@ export default function GamePage() {
         }
         .btn-lg.green { background: #1DB954; color: #000; box-shadow: 0 4px 24px rgba(29,185,84,0.3); }
         .btn-lg.green:hover { background: #1ed760; transform: translateY(-1px); box-shadow: 0 4px 32px rgba(29,185,84,0.5); }
-        .btn-lg.outline { background: transparent; color: #666; border: 1.5px solid #2a2a2a; }
-        .btn-lg.outline:hover { color: #999; border-color: #444; }
+        .finished-secondary {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          justify-content: center;
+          flex-shrink: 0;
+          width: 100%;
+          max-width: 480px;
+          margin-top: 10px;
+        }
 
         .install-cta {
           width: 100%;
@@ -1482,7 +1578,7 @@ export default function GamePage() {
             grid-template-rows: 56px 1fr auto;
           }
           .sidebar { border-left: none; border-top: 1px solid #1e1e1e; max-height: 140px; }
-          .end-game-btn { font-size: 10px !important; padding: 4px 8px !important; }
+          .end-game-btn { font-size: 11px; padding: 8px 12px; }
         }
       `}</style>
 
@@ -1506,49 +1602,15 @@ export default function GamePage() {
             <span>{tracks.length}</span>
           </div>
           <span className="playlist-name">{playlistName}</span>
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            {phase !== "finished" && (
-              <button
-                className="end-game-btn"
-                onClick={endGame}
-                style={{
-                  background: "none",
-                  border: "1px solid #2a2a2a",
-                  borderRadius: "var(--radius)",
-                  color: "#888",
-                  fontSize: "12px",
-                  fontFamily: "Outfit, sans-serif",
-                  fontWeight: 600,
-                  padding: "6px 12px",
-                  cursor: "pointer",
-                  transition: "all 0.15s",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.color = "#1DB954"; e.currentTarget.style.borderColor = "#1DB954"; }}
-                onMouseLeave={e => { e.currentTarget.style.color = "#888"; e.currentTarget.style.borderColor = "#2a2a2a"; }}
-              >
-                End Game
-              </button>
-            )}
-            <button
-              onClick={() => { retireRound(); router.push("/"); }}
-              style={{
-                background: "none",
-                border: "1px solid #2a2a2a",
-                borderRadius: "var(--radius)",
-                color: "#555",
-                fontSize: "12px",
-                fontFamily: "Outfit, sans-serif",
-                fontWeight: 500,
-                padding: "6px 12px",
-                cursor: "pointer",
-                transition: "all 0.15s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.borderColor = "#ef4444"; }}
-              onMouseLeave={e => { e.currentTarget.style.color = "#555"; e.currentTarget.style.borderColor = "#2a2a2a"; }}
-            >
-              Quit
+          {/* One exit, not two. End Game goes to the final scores, and the
+              scores screen is where "Play Again" leads home — a second button
+              that dropped the host on "/" with no confirmation lost whole
+              games to a mis-tap. */}
+          {phase !== "finished" && (
+            <button className="end-game-btn" onClick={endGame}>
+              End Game
             </button>
-          </div>
+          )}
         </header>
 
         {/* MAIN AREA */}
@@ -1647,28 +1709,10 @@ export default function GamePage() {
                     <p style={{ color: "#1DB954", fontSize: "13px", letterSpacing: "0.06em", marginBottom: "12px" }}>
                       Finding audio…
                     </p>
-                    {loadingSkipVisible && (
-                      <div className="btn-row">
-                        <button className="btn-primary" onClick={reveal}>
-                          Reveal Answer →
-                        </button>
-                        <button className="btn-ghost" onClick={nextTrack}>
-                          Skip Track
-                        </button>
-                      </div>
-                    )}
+                    {loadingSkipVisible && skipControls()}
                   </div>
                 ) : noAudio ? (
-                  <div>
-                    <div className="btn-row">
-                      <button className="btn-primary" onClick={reveal}>
-                        Reveal Answer →
-                      </button>
-                      <button className="btn-ghost" onClick={nextTrack}>
-                        Skip Track
-                      </button>
-                    </div>
-                  </div>
+                  skipControls()
                 ) : (
                   <p style={{ color: "#555", fontSize: "13px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
                     Press Play to start the clip
@@ -1682,31 +1726,16 @@ export default function GamePage() {
                 <p className="listening-label" style={{ marginBottom: "12px" }}>
                   {clipPaused ? "Paused — someone buzzed in" : "Listening…"}
                 </p>
-                <div className="btn-row" style={{ marginBottom: "8px" }}>
-                  {clipControls()}
-                </div>
-                <button
-                  className="btn-ghost"
-                  style={{ width: "100%", ...(albumHintShown ? { color: "#1DB954", borderColor: "#1DB954", opacity: 0.7 } : {}) }}
-                  onClick={() => setAlbumHintShown(true)}
-                  disabled={albumHintShown}
-                >
-                  {albumHintShown ? "Album Art Shown" : "Show Album Art Hint"}
-                </button>
+                {clipControls()}
               </div>
             )}
 
             {phase === "guessing" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <p style={{ textAlign: "center", fontSize: "20px", fontWeight: 600, color: "#f0f0f0", marginBottom: "4px" }}>
+              <div>
+                <p style={{ textAlign: "center", fontSize: "20px", fontWeight: 600, color: "#f0f0f0", marginBottom: "12px" }}>
                   What&apos;s the song?
                 </p>
-                <div className="btn-row">{clipControls()}</div>
-                {!albumHintShown && currentTrack?.albumImageUrl && (
-                  <button className="btn-ghost" onClick={() => setAlbumHintShown(true)}>
-                    Show Album Art Hint
-                  </button>
-                )}
+                {clipControls()}
               </div>
             )}
 
@@ -1782,47 +1811,38 @@ export default function GamePage() {
                           {p.name}
                         </button>
                       ))}
-                      <button
-                        className="btn-ghost"
-                        onClick={() => {
-                          // Nobody scored, so the round is over — tell the room
-                          // now rather than leaving the phones showing a live
-                          // queue until the host gets to Next Track.
-                          buzzerControlsRef.current?.reveal();
-                          setPointsAwarded(true);
-                        }}
-                      >
-                        No one
-                      </button>
                     </div>
                   </>
                 ) : (
                   <p style={{ textAlign: "center", color: "#1DB954", fontSize: "13px", marginBottom: "14px" }}>
-                    {roundWinner ? `+3 pts → ${roundWinner}` : "No one scored"}
+                    +3 pts → {roundWinner}
                   </p>
                 )}
 
-                {/* Album scoring — 1 pt, only if track has album */}
+                {/* Album scoring — 1 pt, only if track has album. Compact: the
+                    song is the question every round, the album is the bonus,
+                    and three equal-sized banks of the same names made the host
+                    hunt for which row was which. No "No one" button — Next
+                    Track is what nobody-got-it looks like. */}
                 {currentTrack?.albumName && (
-                  <>
-                    <p className="who-scored">Who guessed the album? (+1 pt)</p>
+                  <div className="score-row-compact">
+                    <span className="score-row-label">Album +1</span>
                     {!albumPointsAwarded ? (
-                      <div className="player-picker" style={{ marginBottom: "14px" }}>
-                        {players.map((p) => (
-                          <button key={p.name} className="player-pick-btn" onClick={() => awardAlbumPoint(p.name)}>
-                            {p.name}
-                          </button>
-                        ))}
-                        <button className="btn-ghost" onClick={() => setAlbumPointsAwarded(true)}>
-                          No one
+                      players.map((p) => (
+                        <button
+                          key={p.name}
+                          className="player-pick-btn compact"
+                          onClick={() => awardAlbumPoint(p.name)}
+                        >
+                          {p.name}
                         </button>
-                      </div>
+                      ))
                     ) : (
-                      <p style={{ textAlign: "center", color: "#1DB954", fontSize: "13px", marginBottom: "14px" }}>
-                        {albumWinner ? `+1 pt → ${albumWinner}` : "No one scored"}
-                      </p>
+                      <span className="score-row-done">
+                        +1 pt → {albumWinner}
+                      </span>
                     )}
-                  </>
+                  </div>
                 )}
 
                 {/* Source scoring — 2 pts, Mixed Playlist Mode only. Every player is */}
@@ -1830,29 +1850,24 @@ export default function GamePage() {
                 {/* contributor doesn't know which of their tracks made the pool, so they */}
                 {/* may not recognize their own track any faster than anyone else. */}
                 {currentTrack?.contributors && currentTrack.contributors.length > 0 && (
-                  <>
-                    <p className="who-scored">Who guessed whose playlist this is? (+2 pts)</p>
+                  <div className="score-row-compact">
+                    <span className="score-row-label">Whose playlist +2</span>
                     {!sourcePointsAwarded ? (
-                      <div className="player-picker" style={{ marginBottom: "14px" }}>
-                        {players.map((p) => (
-                          <button
-                            key={p.name}
-                            className="player-pick-btn"
-                            onClick={() => awardSourcePoint(p.name)}
-                          >
-                            {p.name}
-                          </button>
-                        ))}
-                        <button className="btn-ghost" onClick={() => setSourcePointsAwarded(true)}>
-                          No one
+                      players.map((p) => (
+                        <button
+                          key={p.name}
+                          className="player-pick-btn compact"
+                          onClick={() => awardSourcePoint(p.name)}
+                        >
+                          {p.name}
                         </button>
-                      </div>
+                      ))
                     ) : (
-                      <p style={{ textAlign: "center", color: "#1DB954", fontSize: "13px", marginBottom: "14px" }}>
-                        {sourceWinner ? `+2 pts → ${sourceWinner}` : "No one scored"}
-                      </p>
+                      <span className="score-row-done">
+                        +2 pts → {sourceWinner}
+                      </span>
                     )}
-                  </>
+                  </div>
                 )}
 
                 <button className="btn-primary" onClick={nextTrack} style={{ flex: "none", display: "block", margin: "0 auto", minWidth: "180px", width: "fit-content" }}>
@@ -1916,21 +1931,23 @@ export default function GamePage() {
 
               {installCta && <InstallCta onInstall={handleInstall} />}
 
-              {/* Buttons — always visible, pinned at bottom */}
-              <div className="finished-btn-row">
-                <button className="btn-lg green" onClick={playAgain}>
-                  Play Again →
-                </button>
-                <button className="btn-lg outline" onClick={downloadResultImage}>
+              {/* One primary — the thing everyone on this screen does next —
+                  and the save/share actions as a quieter row under it, so
+                  four same-sized buttons stop competing for the tap. */}
+              <button className="btn-lg green" onClick={playAgain}>
+                Play Again →
+              </button>
+              <div className="finished-secondary">
+                <button className="btn-ghost compact" onClick={downloadResultImage}>
                   Save Results
                 </button>
                 {playlistSource === "mixed" && (
-                  <button className="btn-lg outline" onClick={downloadTasteCard}>
+                  <button className="btn-ghost compact" onClick={downloadTasteCard}>
                     Save Taste Card
                   </button>
                 )}
                 {playlistSource === "mixed" && (
-                  <button className="btn-lg outline" onClick={copyMixList}>
+                  <button className="btn-ghost compact" onClick={copyMixList}>
                     {mixCopied ? "Copied ✓" : "Copy the Mix"}
                   </button>
                 )}

@@ -145,11 +145,19 @@ export function BuzzerHostPanel({
 
   const resolve = useCallback(
     (verdict: "correct" | "wrong" | "revealed") => {
-      trackEvent("buzz_round_resolved", {
-        round_index: roundIndex + 1,
-        verdict,
-        buzz_count: buzzCountRef.current,
-      });
+      // A round the room never opened — a silent track, or Reveal pressed
+      // from the "Finding audio…" row before any clip played — is not
+      // counted: no phone could buzz, and `buzzCountRef` still holds the
+      // previous round's number. The message still goes out, though. A
+      // verdict on an idle round is a no-op for the Worker, and a room whose
+      // queue survived a reconnect gap is unstuck by exactly that message.
+      if (openedForRound.current === roundIndex) {
+        trackEvent("buzz_round_resolved", {
+          round_index: roundIndex + 1,
+          verdict,
+          buzz_count: buzzCountRef.current,
+        });
+      }
       if (verdict === "revealed") return hostReveal();
       hostVerdict(verdict);
     },
