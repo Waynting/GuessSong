@@ -94,16 +94,13 @@ export default function JoinRoomPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <p className="text-sm text-muted-foreground">
-              You can close this page now — the host will start the game once everyone&apos;s in.
-              No one else can see your playlist.
+              You can close this page — the host starts the game once everyone&apos;s in.
             </p>
             {/* This screen used to end here. It is the one moment on this page
                 where the player has finished the task, has nothing left to do,
                 and is still looking — which makes it the best placement in the
                 whole flow and, until now, a dead end. */}
-            <LoopCtaButton surface="join_submitted">
-              Host your own game →
-            </LoopCtaButton>
+            <LoopCtaButton surface="join_submitted" />
           </CardContent>
         </Card>
       </main>

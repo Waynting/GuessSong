@@ -91,6 +91,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { QUIZ_SETUP_HREF } from "@/lib/setup-arrival";
 import { trackEvent } from "@/lib/analytics";
 import { AppError, apiError, describeError, errorMessage, type AppErrorCode } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
@@ -994,8 +995,8 @@ export function QuizClient({ code }: { code: string }) {
           <p className="q-kicker">GuessSong</p>
           <p className="q-body">{error}</p>
           {gone ? (
-            <Link href="/" className="q-home">
-              {copy.notFoundCta}
+            <Link href={QUIZ_SETUP_HREF} className="q-home">
+              {copy.makeYourOwn}
             </Link>
           ) : (
             <Button variant="outline" className="q-primary" onClick={() => void load()}>
@@ -1291,7 +1292,7 @@ export function QuizClient({ code }: { code: string }) {
             </>
           )}
           {/* This is the surface. See lib/loop-links.ts, `quiz_result`. */}
-          <LoopCtaButton surface="quiz_result">{copy.ctaButton}</LoopCtaButton>
+          <LoopCtaButton surface="quiz_result">{copy.makeYourOwn}</LoopCtaButton>
         </div>
 
         {/* The board next — it is what the taker came to see and what the

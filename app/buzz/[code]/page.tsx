@@ -265,7 +265,7 @@ export default function BuzzPlayerPage() {
       />
 
       <p className="px-1 text-center text-xs text-muted-foreground">
-        Hold your phone ready. Buzz the moment the clip starts, then shout the answer.
+        Buzz the moment the clip starts, then shout the answer.
       </p>
 
       {/*
@@ -288,9 +288,7 @@ export default function BuzzPlayerPage() {
         <LoopCtaButton
           surface="buzz_cta"
           active={snapshot?.phase === "idle" && (snapshot?.roundIndex ?? 0) >= 1}
-        >
-          Host the next one →
-        </LoopCtaButton>
+        />
       </div>
     </main>
   );

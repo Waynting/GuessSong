@@ -5,6 +5,8 @@
  * to draw its own content rows.
  */
 
+import { LOOP_QR_CAPTION } from "@/lib/loop-links";
+
 export interface ResultCanvas {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
@@ -149,7 +151,7 @@ export async function drawCardFooter(
   ctx.font = "13px sans-serif";
   ctx.fillStyle = "#666";
   ctx.fillText(
-    qrDataUrl ? "Scan to play your own" : "guessong.app",
+    qrDataUrl ? LOOP_QR_CAPTION : "guessong.app",
     textX,
     y + 64
   );

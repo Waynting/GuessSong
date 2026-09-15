@@ -21,7 +21,12 @@
  */
 
 import { useEffect } from "react";
-import { loopHref, type LoopSurface } from "@/lib/loop-links";
+import {
+  LOOP_CTA_LABEL,
+  LOOP_FOOTER_LABEL,
+  loopHref,
+  type LoopSurface,
+} from "@/lib/loop-links";
 import { reportLoopClick, reportLoopImpression } from "@/lib/loop-client";
 
 /**
@@ -54,6 +59,10 @@ export function useLoopSurface(
   };
 }
 
+// The wordmark is bolded; everything around it comes from the one declared
+// string, so the footer cannot drift from the label the rest of the loop uses.
+const [footerPrefix, footerSuffix] = LOOP_FOOTER_LABEL.split("GuessSong");
+
 /**
  * The quiet one. A line of text at the bottom of a page saying what this is.
  *
@@ -70,7 +79,9 @@ export function LoopFooter({ surface }: { surface: LoopSurface }) {
         onClick={onClick}
         className="underline-offset-4 hover:underline"
       >
-        Played with <span className="font-semibold">GuessSong</span> — host your own
+        {footerPrefix}
+        <span className="font-semibold">GuessSong</span>
+        {footerSuffix}
       </a>
     </p>
   );
@@ -79,10 +90,14 @@ export function LoopFooter({ surface }: { surface: LoopSurface }) {
 /**
  * The loud one. Shown at the moments a player has just finished doing
  * something and is looking at a screen with nothing left on it.
+ *
+ * Says `LOOP_CTA_LABEL` unless a caller has a reason to differ — the quiz
+ * result does, because its link lands on the quiz's own page (`/quiz`) and
+ * is read in the taker's language.
  */
 export function LoopCtaButton({
   surface,
-  children,
+  children = LOOP_CTA_LABEL,
   /**
    * When false the button keeps its space and stops existing for the user.
    *
@@ -94,7 +109,7 @@ export function LoopCtaButton({
   active = true,
 }: {
   surface: LoopSurface;
-  children: React.ReactNode;
+  children?: React.ReactNode;
   active?: boolean;
 }) {
   const { href, onClick } = useLoopSurface(surface, active);

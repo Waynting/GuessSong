@@ -338,11 +338,11 @@ export default function QuizBoardPage() {
           </section>
         )}
 
-        {/* Getting more people onto it is the whole job of this page */}
+        {/* Getting more people onto it is the whole job of this page. Two
+            buttons are the link; the address as text appears only when
+            neither can move it, and the quiz itself is one tap away in the
+            owner's own chat, so no third button opens it. */}
         <section className="flex flex-col gap-2">
-          <p className="break-all text-center font-mono text-xs text-[#1DB954]">
-            {url.replace(/^https?:\/\//, "")}
-          </p>
           <div className="flex gap-2">
             <Button className="flex-1" onClick={() => void handleShare()}>
               {copy.boardShareLink} →
@@ -352,13 +352,13 @@ export default function QuizBoardPage() {
             </Button>
           </div>
           {shareFailed && (
-            <p role="alert" className="text-center text-xs leading-relaxed text-[#f5b942]">
-              {copy.boardShareFailed}
-            </p>
+            <div role="alert" className="text-center text-xs leading-relaxed">
+              <p className="text-[#f5b942]">{copy.boardShareFailed}</p>
+              <p className="mt-1 break-all font-mono text-[#1DB954]">
+                {url.replace(/^https?:\/\//, "")}
+              </p>
+            </div>
           )}
-          <Button asChild variant="outline">
-            <a href={`/q/${code}`}>{copy.boardOpenQuiz} →</a>
-          </Button>
           <p className="mt-2 text-center text-xs text-[#666]">
             {fillCopy(copy.expires, { date: formatQuizDate(board.expiresAt, locale) })}
           </p>

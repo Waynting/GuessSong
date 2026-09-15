@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useState } from "react";
-import type { LoopSurface } from "@/lib/loop-links";
+import { LOOP_QR_CAPTION, type LoopSurface } from "@/lib/loop-links";
 import { loopQrDataUrl } from "@/lib/loop-qr";
 import { reportLoopImpression } from "@/lib/loop-client";
 
@@ -90,7 +90,7 @@ export function LoopQr({
           GuessSong
         </div>
         <div style={{ fontSize: "12px", color: "#666", marginTop: "2px" }}>
-          Scan to host your own party
+          {LOOP_QR_CAPTION}
         </div>
       </div>
     </div>

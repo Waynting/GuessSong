@@ -23,10 +23,15 @@
  * its reads to the wrong version.
  */
 
-export type ChangelogLocale = "en" | "zh";
+// The locale type and the overlay's chrome strings live in lib/changelog-ui.ts
+// so the footer button can import them without pulling every release note
+// into the page's first load; re-exported here so nothing else has to know.
+export type { ChangelogLocale } from "./changelog-ui";
+export { CHANGELOG_UI } from "./changelog-ui";
+import type { ChangelogLocale } from "./changelog-ui";
 
-/** How a line reads on the page. Purely presentational grouping. */
-export type ChangeKind = "new" | "better" | "fixed";
+export type { ChangeKind } from "./changelog-ui";
+import type { ChangeKind } from "./changelog-ui";
 
 export interface ChangelogChange {
   kind: ChangeKind;
@@ -704,39 +709,6 @@ export const CHANGELOG: ChangelogEntry[] = [
 
 /** The newest release. Used as the `version` on the `changelog_opened` event. */
 export const LATEST_VERSION = CHANGELOG[0].version;
-
-/** Every string the overlay renders that isn't release content. */
-export const CHANGELOG_UI: Record<
-  ChangelogLocale,
-  {
-    trigger: string;
-    title: string;
-    currentVersion: string;
-    close: string;
-    kinds: Record<ChangeKind, string>;
-    footnotePrefix: string;
-    footnoteSuffix: string;
-  }
-> = {
-  en: {
-    trigger: "What's new",
-    title: "What's new",
-    currentVersion: "Currently on v",
-    close: "Close what's new",
-    kinds: { new: "New", better: "Better", fixed: "Fixed" },
-    footnotePrefix: "Older releases and the full technical history live in ",
-    footnoteSuffix: " in the repo.",
-  },
-  zh: {
-    trigger: "更新內容",
-    title: "更新內容",
-    currentVersion: "目前版本 v",
-    close: "關閉更新內容",
-    kinds: { new: "新增", better: "改善", fixed: "修正" },
-    footnotePrefix: "更早的版本和完整的技術紀錄都在原始碼的 ",
-    footnoteSuffix: " 裡。",
-  },
-};
 
 /** Pick a change's text for a locale. Keeps the ternary out of the JSX. */
 export function changeText(change: ChangelogChange, locale: ChangelogLocale): string {
