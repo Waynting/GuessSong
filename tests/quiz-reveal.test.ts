@@ -160,3 +160,48 @@ describe("the reveal asks for one question's key against a pick for it", () => {
     expect(QUIZ_COPY.en.revealRight).not.toBe(QUIZ_COPY.en.revealWrong);
   });
 });
+
+describe("the verdict is painted on the pick, and wrong is red", () => {
+  const source = read(CLIENT);
+  const body = code(source);
+
+  /** The `background` of one `.q-half.<state>` rule, as `[r, g, b]`. */
+  function fill(state: string): [number, number, number] {
+    const rule = source.match(new RegExp(`\\.q-half\\.${state} \\{([^}]*)\\}`));
+    expect(rule, `.q-half.${state} rule`).not.toBeNull();
+    const hex = rule![1].match(/background:\s*#([0-9a-f]{6})\b/i);
+    expect(hex, `.q-half.${state} background`).not.toBeNull();
+    const n = parseInt(hex![1], 16);
+    return [n >> 16, (n >> 8) & 0xff, n & 0xff];
+  }
+
+  it("fills a wrong pick with a red that is red, not a dark tint of the unanswered tile", () => {
+    // What shipped in 1.11.0 was `#2a1414`: on a `#111` page that is the
+    // unanswered tile with a thin red edge, while the real song beside it
+    // got the full Spotify green. Every tap ended with one bright green
+    // tile and nothing red, which read as "always green". A wrong pick
+    // has to be the saturated fill on the tile that was tapped.
+    const [r, g, b] = fill("is-wrong");
+    expect(r).toBeGreaterThanOrEqual(0xc0);
+    expect(g).toBeLessThanOrEqual(0x70);
+    expect(b).toBeLessThanOrEqual(0x70);
+    // And it is a fill, so the badge and artist invert on it like the green.
+    expect(source).toMatch(/\.q-half\.is-wrong \.q-check \{[^}]*background: #000;/);
+  });
+
+  it("keeps the green fill for a right pick and reveals the answer under a wrong one without it", () => {
+    // Green means "you were right". The real song shown under a wrong pick
+    // is the reveal, and it must not wear the same fill or the wrong
+    // verdict reads as green — a green edge and the tick say which one it
+    // was without stealing the verdict.
+    expect(body).toMatch(/const right = verdict >= 0 && selected && i === verdict;/);
+    expect(body).toMatch(/const answer = verdict >= 0 && !selected && i === verdict;/);
+    expect(body).toMatch(/right \? " is-right" : wrong \? " is-wrong" : answer \? " is-answer"/);
+    const [r, g, b] = fill("is-right");
+    expect([r, g, b]).toEqual([0x1d, 0xb9, 0x54]);
+    const reveal = source.match(/\.q-half\.is-answer \{([^}]*)\}/);
+    expect(reveal).not.toBeNull();
+    expect(reveal![1]).not.toMatch(/background:\s*#1DB954/i);
+    expect(reveal![1]).toMatch(/border-color:\s*#1DB954/i);
+  });
+});
