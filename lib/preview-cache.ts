@@ -649,11 +649,14 @@ const QUALIFIER_SUFFIX = new RegExp(
  * from the sibling album track next to it.
  *
  * Close to lib/mixed-playlist.ts's fingerprint() and deliberately not shared
- * with it, in two ways that matter. It strips `explicit`, which that one does
- * not; and it normalises through normalizeName's Unicode alphabet rather than
- * fingerprint's `[^a-z0-9]`, because the ASCII form takes "小幸運" to the empty
- * string — which would turn the tier below off for the exact catalogue it was
- * added to protect. Syncing the two by hand is how that gets undone.
+ * with it. It strips `explicit`, which that one does not, and its qualifier
+ * regex is anchored (above) where that one still reaches from the first
+ * hyphen — a dedupe key can afford an over-merge that a clip picker cannot.
+ * Both normalise through a Unicode alphabet now; fingerprint's used to be
+ * `[^a-z0-9]`, which took "小幸運" to the empty string, and this one never
+ * was, because the empty string would turn the tier below off for the exact
+ * catalogue it was added to protect. Syncing the two by hand is how one of
+ * them gets that back.
  */
 function looseName(value: string): string {
   return normalizeName(value.replace(FEAT_PARENTHETICAL, "").replace(QUALIFIER_SUFFIX, ""));
