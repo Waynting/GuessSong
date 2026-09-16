@@ -6,6 +6,7 @@ import {
   clampQuestionCount,
   creditedArtists,
   displayArtist,
+  displayDecoyTitle,
   displayTitle,
   foldQuizName,
   gradeAnswers,
@@ -20,6 +21,7 @@ import {
   sortScoreboard,
   stripAnswerKey,
   summarizeBoard,
+  titleKey,
   usableQuizTracks,
   verdictFor,
   isQuizVerdict,
@@ -105,6 +107,41 @@ describe("displayTitle", () => {
     expect(displayTitle("Something [Live]")).toBe("Something");
   });
 
+  it("strips a full-width qualifier, and one whose brackets do not match", () => {
+    // Both seen on Spotify (2026-09-15): a mainland release closes with ）,
+    // and one Taiwanese release opens with ( and closes with ）.
+    expect(displayTitle("光亮（大型紀錄片《紫禁城》主題歌）")).toBe("光亮");
+    expect(displayTitle("路過人間 (電視劇《我們與惡的距離》插曲）")).toBe("路過人間");
+    expect(displayTitle("不將就 (電影\"何以笙簫默\"片尾曲)")).toBe("不將就");
+    expect(displayTitle("演员【Live】")).toBe("演员");
+    expect(displayTitle("Everybody's Changing – Live At Airwaves Festival")).toBe("Everybody's Changing");
+    expect(displayTitle("歌 － Live")).toBe("歌");
+  });
+
+  it("strips a dashed tail that carries a line terminator, and stays fast doing it", () => {
+    // `.*` could not cross the newline, so this title kept its tail and the
+    // engine retried every split of both whitespace runs before giving up:
+    // cubic, 1.2s at 3,000 characters. `[\s\S]*` makes the tail unconditional.
+    // The newline has to survive `name.trim()` — a character after it — or
+    // the regex never sees it and the old code answers in 0.09ms.
+    expect(displayTitle("Song - Live\nat Wembley")).toBe("Song");
+    const pathological = "x" + " ".repeat(1500) + "-" + " ".repeat(1500) + "y\nz";
+    const started = performance.now();
+    expect(displayTitle(pathological)).toBe("x");
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  it("strips every dash in the class, and a full-width square bracket", () => {
+    // Six dashes: hyphen, en, em, full-width hyphen, U+2010, U+2011. ［…］ is
+    // the third full-width opener.
+    for (const dash of ["-", "–", "—", "－", "\u2010", "\u2011"]) {
+      expect(displayTitle(`Song ${dash} Live`), JSON.stringify(dash)).toBe("Song");
+    }
+    expect(displayTitle("演員［Live］")).toBe("演員");
+    // A dash with no space on one side is still part of the title.
+    expect(displayTitle("Song —Live")).toBe("Song —Live");
+  });
+
   it("keeps hyphenated words and leading bracket groups", () => {
     expect(displayTitle("Hip-Hop Is Dead")).toBe("Hip-Hop Is Dead");
     expect(displayTitle("(Sittin' On) The Dock of the Bay")).toBe("(Sittin' On) The Dock of the Bay");
@@ -116,20 +153,93 @@ describe("displayTitle", () => {
   });
 });
 
+describe("titleKey", () => {
+  // Every pair here is one song Spotify lists both ways, or lists one way
+  // where the pool had the other (search API, 2026-09-15). Before the fold,
+  // each was a decoy that could be in the playlist and still be offered as
+  // the wrong answer.
+  it("folds Traditional and Simplified onto one key", () => {
+    expect(titleKey("演员")).toBe(titleKey("演員"));
+    expect(titleKey("丑八怪")).toBe(titleKey("醜八怪"));
+    expect(titleKey("像我这样的人")).toBe(titleKey("像我這樣的人"));
+    expect(titleKey("化身孤岛的鲸")).toBe(titleKey("化身孤島的鯨"));
+    expect(titleKey("年少有为")).toBe(titleKey("年少有為"));
+    expect(titleKey("大鱼")).toBe(titleKey("大魚 - 唱片版"));
+    // The character the raw table chained through: 麼 → 么 → 幺. Both
+    // spellings of the most common word in the language must key alike.
+    expect(titleKey("怎么了")).toBe(titleKey("怎麼了"));
+    expect(titleKey("为什么")).toBe(titleKey("為什麼"));
+    expect(titleKey(titleKey("怎麼了"))).toBe(titleKey("怎麼了"));
+  });
+
+  it("folds spacing, punctuation, case and width", () => {
+    expect(titleKey("Play我呸")).toBe(titleKey("Play 我呸"));
+    expect(titleKey("踩.腳.踏.車")).toBe(titleKey("踩...腳踏車"));
+    expect(titleKey("God’s Menu")).toBe(titleKey("God's Menu"));
+    expect(titleKey("you’re the one I love")).toBe(titleKey("you're the one i love"));
+    expect(titleKey("Ｐｌａｙ我呸")).toBe(titleKey("Play我呸"));
+    expect(titleKey("光亮（大型紀錄片《紫禁城》主題歌）")).toBe(titleKey("光亮"));
+  });
+
+  it("still tells different songs apart, and never keys a title to nothing", () => {
+    expect(titleKey("晴天")).not.toBe(titleKey("七里香"));
+    expect(titleKey("Hello")).not.toBe(titleKey("Halo"));
+    expect(titleKey("成全")).toBe("成全");
+    // All punctuation: the folded title itself rather than the empty string,
+    // so two such titles do not collide on "".
+    expect(titleKey("...")).toBe("...");
+    expect(titleKey("K.")).toBe("k");
+    expect(titleKey("...")).not.toBe(titleKey("!!!"));
+    // displayTitle keeps "(Intro)" whole; the key still drops its brackets,
+    // so a playlist "(Intro)" excludes a pool "Intro".
+    expect(titleKey("(Intro)")).toBe("intro");
+  });
+
+  it("keys a blank title to the empty string rather than throwing", () => {
+    // usableQuizTracks drops a track with no name and the pool test refuses
+    // an empty entry, so nothing in production asks this; the contract is
+    // that the fold never throws and a blank stays blank.
+    expect(titleKey("")).toBe("");
+    expect(titleKey("   ")).toBe("");
+    expect(titleKey("\u3000")).toBe("");
+  });
+
+  it("folds a compatibility ideograph through NFKC before the table, and drops symbols outside the BMP", () => {
+    // U+F900 is the compatibility form of 豈; NFKC takes it to U+8C48 and the
+    // table takes that to 岂. The noise class runs with the `u` flag, so an
+    // emoji is one symbol and not two halves of a surrogate pair.
+    expect(titleKey("\uF900")).toBe(titleKey("岂"));
+    expect(titleKey("豈")).toBe(titleKey("岂"));
+    expect(titleKey("Hello 🎵")).toBe("hello");
+    expect(titleKey("🎵")).toBe("🎵");
+  });
+});
+
 describe("songKey and foldQuizName", () => {
   it("keys the same recording under one key regardless of case, spacing and qualifiers", () => {
     expect(songKey("Hello - Live", "Adele")).toBe(songKey("hello", "ADELE "));
     expect(songKey("Hello", "Adele")).not.toBe(songKey("Hello", "Lionel Richie"));
+    expect(songKey("演员", "Joker Xue")).toBe(songKey("演員", "Joker Xue"));
+    // The artist half folds the same way: one act credited in two scripts is
+    // still one act.
+    expect(songKey("演员", "薛之谦")).toBe(songKey("演員", "薛之謙"));
+    expect(songKey("Hello", "ＡＤＥＬＥ")).toBe(songKey("Hello", "Adele"));
   });
 
-  it("folds names the way the room roster does", () => {
+  it("folds names the way the room roster does, and never folds script", () => {
     expect(foldQuizName("  Alice ")).toBe("alice");
+    // The store's `s:<name>` hash field and lib/room.ts's fold both derive
+    // from this: a Traditional and a Simplified name are two takers, as they
+    // are two players. `foldText`, the artist-credit key beside it in
+    // lib/quiz.ts, folds script; this must not.
+    expect(foldQuizName("陳")).toBe("陳");
+    expect(foldQuizName("陳")).not.toBe(foldQuizName("陈"));
   });
 });
 
 describe("pickDecoys", () => {
   function ctxFor(tracks: Track[]) {
-    const playlistTitles = new Set(tracks.map((t) => displayTitle(t.name).toLowerCase()));
+    const playlistTitles = new Set(tracks.map((t) => titleKey(t.name)));
     return { playlistTitles, playlistArtists: creditedArtists(tracks), pool: bucketPool(POOL), used: new Set<string>() };
   }
 
@@ -191,6 +301,176 @@ describe("pickDecoys", () => {
       const decoys = pickDecoys({ name: "Hello - Live", artist: "Adele" }, ctxFor(tracks), seededRng(seed), THREE);
       expect(decoys.map((d) => d.title)).not.toContain("Hello");
       expect(decoys.map((d) => d.title)).not.toContain("Creep");
+    }
+  });
+
+  it("never offers a song that is in the playlist under the spelling Spotify uses", () => {
+    // The reported bug: a Joker Xue playlist carries his catalogue as
+    // Spotify lists it, in Simplified, and the pool had it in Traditional.
+    // The same-artist tier then served 演員 as "not in the playlist" to a
+    // friend who could see 演员 was, and — the target's own key not folding
+    // either — could serve 剛剛好 as the wrong answer to 刚刚好.
+    const pool: DecoyEntry[] = [
+      { name: "演員", artist: "Joker Xue", aliases: ["薛之謙"], popularity: 72 },
+      { name: "醜八怪", artist: "Joker Xue", aliases: ["薛之謙"], popularity: 68 },
+      { name: "剛剛好", artist: "Joker Xue", aliases: ["薛之謙"], popularity: 67 },
+      { name: "紳士", artist: "Joker Xue", aliases: ["薛之謙"], popularity: 64 },
+      { name: "光亮", artist: "Zhou Shen", aliases: ["周深"], popularity: 62 },
+      { name: "Spring Day", artist: "BTS", aka: ["봄날"], popularity: 72 },
+      { name: "Dynamite", artist: "BTS", popularity: 82 },
+      { name: "晴天", artist: "Jay Chou", aliases: ["周杰倫"], popularity: 80 },
+    ];
+    const tracks = [
+      track("1", "演员", ["Joker Xue"], 72),
+      track("2", "丑八怪", ["Joker Xue"], 68),
+      track("3", "刚刚好", ["Joker Xue"], 67),
+      track("4", "光亮（大型紀錄片《紫禁城》主題歌）", ["Zhou Shen"], 62),
+      track("5", "봄날", ["BTS"], 72),
+    ];
+    const ctx = () => ({
+      playlistTitles: new Set(tracks.map((t) => titleKey(t.name))),
+      playlistArtists: creditedArtists(tracks),
+      pool: bucketPool(pool),
+      used: new Set<string>(),
+    });
+    for (let seed = 0; seed < 20; seed += 1) {
+      const decoys = pickDecoys({ name: "刚刚好", artist: "Joker Xue", popularity: 67 }, ctx(), seededRng(seed), THREE);
+      const titles = decoys.map((d) => d.title);
+      // 紳士 is the only Joker Xue song not in the playlist; the rest fall
+      // through to the script tier, never to a playlist song.
+      expect(titles).toContain("紳士");
+      for (const t of ["演員", "醜八怪", "剛剛好", "光亮"]) expect(titles).not.toContain(t);
+      // Through the aka: "Spring Day" is 봄날, which is in the playlist.
+      const bts = pickDecoys({ name: "봄날", artist: "BTS", popularity: 72 }, ctx(), seededRng(seed), THREE);
+      expect(bts.map((d) => d.title)).not.toContain("Spring Day");
+      expect(bts.map((d) => d.title)).not.toContain("봄날");
+    }
+  });
+
+  it("shows a decoy's title in the real option's script, through its aka", () => {
+    const spring: DecoyEntry = { name: "Spring Day", artist: "BTS", aka: ["봄날"], popularity: 72 };
+    expect(displayDecoyTitle(spring, "Dynamite")).toBe("Spring Day");
+    expect(displayDecoyTitle(spring, "예뻤어")).toBe("봄날");
+    // No title in the wanted script: Spotify's.
+    expect(displayDecoyTitle(spring, "晴天")).toBe("Spring Day");
+    expect(displayDecoyTitle({ name: "晴天", artist: "Jay Chou", popularity: 80 }, "Dynamite")).toBe("晴天");
+    // The script is the shown title's: a Hangul guest credit in the qualifier
+    // must not put 봄날 beside "Dynamite".
+    expect(displayDecoyTitle(spring, "Dynamite (feat. 지민)")).toBe("Spring Day");
+    // And the picker uses it: a Hangul real option gets the Hangul title.
+    const pool = bucketPool([spring, { name: "Dynamite", artist: "BTS", popularity: 82 }]);
+    const ctx = { playlistTitles: new Set<string>(), playlistArtists: new Map<string, string>(), pool, used: new Set<string>() };
+    const decoys = pickDecoys({ name: "예뻤어", artist: "BTS", popularity: 70 }, ctx, seededRng(1), 2);
+    expect(decoys.map((d) => d.title).sort()).toEqual(["Dynamite", "봄날"]);
+    // The aka also puts the entry in the Hangul bucket for the script tiers.
+    expect(pool[0].scripts.has("ko")).toBe(true);
+    expect(pool[0].scripts.has("latin")).toBe(true);
+    expect(scriptBucket(pool[0].name)).toBe("latin");
+  });
+
+  it("buckets an empty aka like no aka, and one aka that keys like the name as one key", () => {
+    const [plain, empty, same, other] = bucketPool([
+      { name: "Spring Day", artist: "BTS", popularity: 72 },
+      { name: "Spring Day", artist: "BTS", aka: [], popularity: 72 },
+      { name: "Spring Day", artist: "BTS", aka: ["Spring day"], popularity: 72 },
+      { name: "Spring Day", artist: "BTS", aka: ["봄날"], popularity: 72 },
+    ]);
+    for (const d of [plain, empty, same]) {
+      expect([...d.titleKeys]).toEqual(["springday"]);
+      expect([...d.scripts]).toEqual(["latin"]);
+      expect(d.titleKey).toBe("springday");
+    }
+    expect([...other.titleKeys]).toEqual(["springday", "봄날"]);
+    expect([...other.scripts]).toEqual(["latin", "ko"]);
+    // The primary title stays the identity whatever the aka adds.
+    expect(other.titleKey).toBe("springday");
+  });
+
+  it("shows the first aka in the real option's script, and Spotify's title when the aka is empty", () => {
+    const two: DecoyEntry = { name: "Spring Day", artist: "BTS", aka: ["春日", "봄날"], popularity: 72 };
+    expect(displayDecoyTitle(two, "예뻤어")).toBe("봄날");
+    expect(displayDecoyTitle(two, "晴天")).toBe("春日");
+    expect(displayDecoyTitle(two, "Dynamite")).toBe("Spring Day");
+    const none: DecoyEntry = { name: "Spring Day", artist: "BTS", aka: [], popularity: 72 };
+    expect(displayDecoyTitle(none, "예뻤어")).toBe("Spring Day");
+    // The real option's script is read from its title alone: a Latin title
+    // by a Mandopop act wants a Latin decoy title, and gets Spotify's when
+    // the decoy has none.
+    expect(displayDecoyTitle({ name: "晴天", artist: "Jay Chou", aliases: ["周杰倫"], popularity: 80 }, "Mojito")).toBe("晴天");
+  });
+
+  it("reaches an entry through its aka's script when no artist tier matches", () => {
+    // Before `scripts`, a K-pop entry bucketed as `latin` from its English
+    // name alone, so a Hangul real option by an act the pool does not know
+    // fell to tier 3/4 among Latin titles and never saw 봄날. With the
+    // popularity in range this is tier 3; without one it is tier 4; both
+    // must read the aka's bucket, and show the aka.
+    const pool: DecoyEntry[] = [
+      { name: "Spring Day", artist: "BTS", aka: ["봄날"], popularity: 72 },
+      { name: "Levitating", artist: "Dua Lipa", popularity: 70 },
+      { name: "Physical", artist: "Dua Lipa", popularity: 71 },
+      { name: "Creep", artist: "Radiohead", popularity: 69 },
+    ];
+    const ctx = () => ({
+      playlistTitles: new Set<string>(),
+      playlistArtists: new Map<string, string>(),
+      pool: bucketPool(pool),
+      used: new Set<string>(),
+    });
+    for (let seed = 0; seed < 10; seed += 1) {
+      const near = pickDecoys({ name: "예뻤어", artist: "DAY6", popularity: 70 }, ctx(), seededRng(seed), 1);
+      expect(near.map((d) => d.title)).toEqual(["봄날"]);
+      const any = pickDecoys({ name: "예뻤어", artist: "DAY6" }, ctx(), seededRng(seed), 1);
+      expect(any.map((d) => d.title)).toEqual(["봄날"]);
+    }
+  });
+
+  it("spends an entry once, whichever of its titles it showed", () => {
+    // `used` is keyed on the primary titleKey, so 봄날 on one question is
+    // "Spring Day" spent on the next: a taker must not meet the same decoy
+    // twice under two spellings.
+    const pool: DecoyEntry[] = [
+      { name: "Spring Day", artist: "BTS", aka: ["봄날"], popularity: 72 },
+      { name: "Levitating", artist: "Dua Lipa", popularity: 70 },
+      { name: "Physical", artist: "Dua Lipa", popularity: 71 },
+      { name: "Creep", artist: "Radiohead", popularity: 69 },
+    ];
+    for (let seed = 0; seed < 10; seed += 1) {
+      const ctx = {
+        playlistTitles: new Set<string>(),
+        playlistArtists: new Map<string, string>(),
+        pool: bucketPool(pool),
+        used: new Set<string>(),
+      };
+      const first = pickDecoys({ name: "예뻤어", artist: "DAY6", popularity: 70 }, ctx, seededRng(seed), 1);
+      expect(first.map((d) => d.title)).toEqual(["봄날"]);
+      const second = pickDecoys({ name: "Dynamite", artist: "DAY6", popularity: 70 }, ctx, seededRng(seed + 100), 1);
+      expect(second.map((d) => d.title)).not.toContain("Spring Day");
+      expect(second.map((d) => d.title)).not.toContain("봄날");
+      expect(second).toHaveLength(1);
+    }
+  });
+
+  it("excludes an entry whose aka is the real song, with nothing else in the playlist", () => {
+    // The eligibility check reads every key of an entry against the target's
+    // own key, not only the playlist set: a caller with an empty playlist
+    // set and a Hangul target must still never be offered its own song.
+    const pool: DecoyEntry[] = [
+      { name: "Spring Day", artist: "BTS", aka: ["봄날"], popularity: 72 },
+      { name: "Levitating", artist: "Dua Lipa", popularity: 70 },
+      { name: "Physical", artist: "Dua Lipa", popularity: 71 },
+    ];
+    const ctx = () => ({
+      playlistTitles: new Set<string>(),
+      playlistArtists: new Map<string, string>(),
+      pool: bucketPool(pool),
+      used: new Set<string>(),
+    });
+    for (let seed = 0; seed < 10; seed += 1) {
+      const titles = pickDecoys({ name: "봄날", artist: "DAY6", popularity: 70 }, ctx(), seededRng(seed), THREE).map((d) => d.title);
+      expect(titles).not.toContain("Spring Day");
+      expect(titles).not.toContain("봄날");
+      expect(titles).toHaveLength(2);
     }
   });
 
@@ -286,7 +566,7 @@ describe("pickDecoys with Spotify's romanised artists", () => {
   ];
   function ctxFor(tracks: Track[]) {
     return {
-      playlistTitles: new Set(tracks.map((t) => displayTitle(t.name).toLowerCase())),
+      playlistTitles: new Set(tracks.map((t) => titleKey(t.name))),
       playlistArtists: creditedArtists(tracks),
       pool: bucketPool(POOL_ALIASED),
       used: new Set<string>(),
@@ -344,7 +624,7 @@ describe("displayArtist follows the playlist's own credits", () => {
   const playlist = [track("1", "年少有為", ["Ronghao Li"], 72), track("2", "默", ["那英"], 70)];
   function ctxFor(tracks: Track[]) {
     return {
-      playlistTitles: new Set(tracks.map((t) => displayTitle(t.name).toLowerCase())),
+      playlistTitles: new Set(tracks.map((t) => titleKey(t.name))),
       playlistArtists: creditedArtists(tracks),
       pool: bucketPool(pool),
       used: new Set<string>(),
@@ -362,6 +642,19 @@ describe("displayArtist follows the playlist's own credits", () => {
       ["ronghao li", "Ronghao Li"],
       ["那英", "那英"],
     ]);
+  });
+
+  it("creditedArtists keys one act credited in two scripts once, first spelling first", () => {
+    // Two Spotify artist ids, one act: the Simplified release and the
+    // Traditional one. One key, so the same-artist tier reaches both, and the
+    // playlist's first spelling is what a decoy by that act is credited as.
+    const a = creditedArtists([track("1", "A", ["周興哲"]), track("2", "B", ["周兴哲"])]);
+    expect([...a]).toEqual([["周兴哲", "周興哲"]]);
+    const b = creditedArtists([track("1", "A", ["周兴哲"]), track("2", "B", ["周興哲"])]);
+    expect([...b]).toEqual([["周兴哲", "周兴哲"]]);
+    const eric: DecoyEntry = { name: "怎麼了", artist: "Eric Chou", aliases: ["周興哲"], popularity: 71 };
+    expect(displayArtist(eric, "Jay Chou", a)).toBe("周興哲");
+    expect(displayArtist(eric, "Jay Chou", b)).toBe("周兴哲");
   });
 
   it("shows an act the playlist credits exactly as the playlist credits it, whatever the real option's script", () => {
@@ -489,6 +782,94 @@ describe("buildQuiz", () => {
     expect(quiz.find((q) => q.track.id === "13")?.track.durationMs).toBe(0);
   });
 
+  it("never puts a playlist song on the wrong side of a question, under any spelling Spotify uses", () => {
+    // End to end against the production pool, with the titles Spotify
+    // actually returned for these tracks on 2026-09-15. Every one of these
+    // is a pool song; before `titleKey` folded scripts, brackets and
+    // translations, the same-artist tier served most of them back as "not in
+    // the playlist".
+    const tracks = [
+      track("1", "演员", ["Joker Xue"], 72),
+      track("2", "丑八怪", ["Joker Xue"], 68),
+      track("3", "刚刚好", ["Joker Xue"], 67),
+      track("4", "绅士", ["Joker Xue"], 64),
+      track("5", "像我这样的人", ["Mao Buyi"], 68),
+      track("6", "化身孤岛的鲸", ["Zhou Shen"], 60),
+      track("7", "光亮（大型紀錄片《紫禁城》主題歌）", ["Zhou Shen"], 62),
+      track("8", "年少有为", ["Ronghao Li"], 72),
+      track("9", "Spring Day", ["BTS"], 72),
+      track("10", "Good day", ["IU"], 70),
+      track("11", "Through the Night", ["IU"], 72),
+      track("12", "Red Flavor", ["Red Velvet"], 66),
+      track("13", "Play我呸", ["JOLIN"], 62),
+      track("14", "God’s Menu", ["Stray Kids"], 74),
+    ];
+    const inPlaylist = new Set(tracks.map((t) => titleKey(t.name)));
+    for (let seed = 0; seed < 10; seed += 1) {
+      const quiz = buildQuiz({ tracks, questionCount: 14, pool: QUIZ_DECOY_POOL, rng: seededRng(seed) });
+      expect(quiz).toHaveLength(14);
+      for (const q of quiz) {
+        for (const [i, option] of q.options.entries()) {
+          if (i === q.answer) continue;
+          expect(inPlaylist.has(titleKey(option.title)), `${option.title} · ${option.artist} (seed ${seed})`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("shows the real option without its full-width qualifier and keeps Spotify's title on the stored track", () => {
+    // The hint route picks a recording by the full title; the option must
+    // not carry the qualifier, or 光亮（大型紀錄片《紫禁城》主題歌） beside a
+    // plain decoy is the answer by its length.
+    const tracks = [
+      ...playlist.slice(0, 9),
+      track("13", "光亮（大型紀錄片《紫禁城》主題歌）", ["Zhou Shen"], 62),
+      track("14", "路過人間 (電視劇《我們與惡的距離》插曲）", ["Yisa Yu"], 62),
+    ];
+    const quiz = buildQuiz({ tracks, questionCount: 11, pool: QUIZ_DECOY_POOL, rng: seededRng(13) });
+    const light = quiz.find((q) => q.track.id === "13");
+    expect(light?.track.name).toBe("光亮（大型紀錄片《紫禁城》主題歌）");
+    expect(light?.options[light.answer].title).toBe("光亮");
+    const passing = quiz.find((q) => q.track.id === "14");
+    expect(passing?.track.name).toBe("路過人間 (電視劇《我們與惡的距離》插曲）");
+    expect(passing?.options[passing.answer].title).toBe("路過人間");
+    // Both are pool songs; neither may be the decoy for the other or itself.
+    for (const q of [light, passing]) {
+      for (const [i, option] of (q?.options ?? []).entries()) {
+        if (i === q?.answer) continue;
+        expect(["光亮", "路過人間"]).not.toContain(option.title);
+      }
+    }
+  });
+
+  it("excludes the pool's 怎麼了 for a Simplified 怎么了, and reaches the same-artist tier through a Simplified credit", () => {
+    // 怎麼了 (Eric Chou) is in the production pool. A Simplified release
+    // spells it 怎么了 and credits 周兴哲; before the table was closed the
+    // first keyed differently, and before the artist fold the second never
+    // matched the pool's 周興哲 alias.
+    const tracks = [
+      track("1", "怎么了", ["周兴哲"], 71),
+      track("2", "你，好不好？", ["周兴哲"], 73),
+      track("3", "晴天", ["Jay Chou"], 80),
+    ];
+    const ctx = () => ({
+      playlistTitles: new Set(tracks.map((t) => titleKey(t.name))),
+      playlistArtists: creditedArtists(tracks),
+      pool: bucketPool(QUIZ_DECOY_POOL),
+      used: new Set<string>(),
+    });
+    for (let seed = 0; seed < 20; seed += 1) {
+      const titles = pickDecoys({ name: "怎么了", artist: "周兴哲", popularity: 71 }, ctx(), seededRng(seed), 3).map((d) => d.title);
+      expect(titles).not.toContain("怎麼了");
+      expect(titles).not.toContain("你，好不好？");
+      const decoys = pickDecoys({ name: "你，好不好？", artist: "周兴哲", popularity: 73 }, ctx(), seededRng(seed));
+      expect(decoys).toHaveLength(1);
+      // Same-artist tier, shown as the playlist credits him.
+      expect(decoys[0].artist).toBe("周兴哲");
+      expect(["以後別做朋友", "如果雨之後", "永不失聯的愛"]).toContain(decoys[0].title);
+    }
+  });
+
   it("strips the answer key and nothing else from the taker's view", () => {
     const quiz = buildQuiz({ tracks: playlist, questionCount: 10, pool: POOL, rng: seededRng(12) });
     const view = stripAnswerKey(quiz);
@@ -531,6 +912,21 @@ describe("clampQuestionCount", () => {
 });
 
 describe("usableQuizTracks", () => {
+  it("asks about a song once when the playlist carries it in both scripts", () => {
+    // songKey runs the title through titleKey now, so a playlist that has a
+    // mainland release and a Taiwanese one of the same song — 演员 and 演員
+    // by the same act — is one question, as a remaster next to the original
+    // already was.
+    const twice = [
+      track("1", "演员", ["Joker Xue"], 72),
+      track("2", "演員", ["Joker Xue"], 72),
+      track("3", "演员 - Live", ["Joker Xue"], 70),
+      track("4", "演员（電影主題曲）", ["Joker Xue"], 70),
+      track("5", "演員", ["Someone Else"], 60),
+    ];
+    expect(usableQuizTracks(twice).map((t) => t.id)).toEqual(["1", "5"]);
+  });
+
   it("skips holes and non-objects, and keeps a track whose artists field is not an array", () => {
     // A payload that has been through parseGamePayload can carry `artists: []`;
     // one that has not can carry anything. Neither may take the builder down.
@@ -854,7 +1250,37 @@ describe("QUIZ_DECOY_POOL", () => {
       expect(d.popularity).toBeGreaterThanOrEqual(0);
       expect(d.popularity).toBeLessThanOrEqual(100);
       for (const a of d.aliases ?? []) expect(a.trim()).toBeTruthy();
+      // An aka is another title, not the same one again.
+      for (const a of d.aka ?? []) {
+        expect(a.trim()).toBeTruthy();
+        expect(titleKey(a), `${d.name} aka ${a}`).not.toBe(titleKey(d.name));
+      }
     }
+  });
+
+  it("never lists one song twice across an act's names and akas", () => {
+    // The duplicate check above keys on the primary title; an aka that
+    // equals another entry's name or aka under the same act is the same song
+    // listed twice, and a quiz that spends one can still serve the other.
+    const seen = new Map<string, string>();
+    for (const d of bucketed) {
+      for (const key of d.titleKeys) {
+        const id = `${key}|${d.artist}`;
+        expect(seen.get(id) ?? d.name, `${d.name} — ${d.artist} shares ${id}`).toBe(d.name);
+        seen.set(id, d.name);
+      }
+    }
+  });
+
+  it("titles K-pop as Spotify does — in English, with the Hangul as an aka", () => {
+    // Spotify lists 봄날 as "Spring Day", 으르렁 as "Growl", 밤편지 as "Through
+    // the Night" (2026-09-15). A Hangul `name` here is a title no playlist
+    // carries, so the song can be in the playlist and still be the decoy.
+    for (const d of QUIZ_DECOY_POOL) {
+      expect(scriptBucket(d.name), `${d.name} — ${d.artist}`).not.toBe("ko");
+    }
+    const spring = QUIZ_DECOY_POOL.find((d) => d.artist === "BTS" && d.name === "Spring Day");
+    expect(spring?.aka).toContain("봄날");
   });
 
   it("credits every act the way Spotify does: a Latin canonical name unless Spotify keeps it native", () => {
@@ -875,12 +1301,13 @@ describe("QUIZ_DECOY_POOL", () => {
   it("is deep enough in every script to fill a twenty-question quiz without repeats", () => {
     const need = QUIZ_MAX_QUESTIONS * (QUIZ_OPTION_COUNT - 1);
     for (const script of ["latin", "zh", "ja", "ko"] as const) {
-      const size = bucketed.filter((d) => d.script === script).length;
+      const size = bucketed.filter((d) => d.scripts.has(script)).length;
       // latin and zh are where the site's hosts are and must stand on their
       // own. ja leans on the same-artist tier and cross-script fallbacks. ko is
       // small by construction: Spotify titles most K-pop in Latin script, so
-      // those entries bucket as `latin` on both sides — the same-artist tier is
-      // what serves a K-pop playlist, not this bucket.
+      // those entries bucket as `latin` on both sides and reach `ko` only
+      // through a Hangul `aka` — the same-artist tier is what serves a K-pop
+      // playlist, not this bucket.
       const floor = { latin: need, zh: need, ja: 30, ko: 10 }[script];
       expect(size, script).toBeGreaterThanOrEqual(floor);
     }

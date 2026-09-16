@@ -41,14 +41,26 @@ export function mixedRosterKey(playlistUrls: string[]): string {
  * non-Spotify sources exist) collapses to a single pooled track. This is a
  * best-effort fingerprint, not exact matching — occasional over/under-merge
  * is an accepted tradeoff for a "delight, not precision" feature.
+ *
+ * "Occasional" has a floor, and the ASCII form of this key was under it: it
+ * kept `[a-z0-9]` and nothing else, which took every Chinese, Japanese and
+ * Korean title to the empty string. A Mandopop room — this site's audience —
+ * pooled to one track per artist, and every song by a natively credited act
+ * (告五人, 吳青峰) merged with every other; two contributors' different Jay
+ * Chou songs were "shared", and charged to both quotas. The letter and number
+ * classes keep every script; NFKC folds full-width Latin first. Deliberately
+ * not lib/quiz.ts's `titleKey`: that one folds Traditional to Simplified
+ * through a 3,000-character table this key does not need on the setup page,
+ * and lib/preview-cache.ts's `looseName` is kept apart for its own reasons.
  */
 export function fingerprint(name: string, artists: string[]): string {
   const normalize = (s: string) =>
     s
+      .normalize("NFKC")
       .toLowerCase()
       .replace(/[([]feat\.?[^)\]]*[)\]]/g, "")
       .replace(/[-([].*?(remaster(ed)?|live|version|edit|mix|mono|stereo|deluxe)[^)\]]*[)\]]?/gi, "")
-      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
       .trim();
 
   const primaryArtist = artists[0] ?? "";

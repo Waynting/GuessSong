@@ -54,6 +54,31 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.12.1",
+    date: "2026-09-16",
+    headline:
+      "The Taste Quiz no longer calls a song from your playlist the wrong answer, and Mixed Playlist Mode keeps every Chinese, Japanese and Korean song in the pool.",
+    headlineZh:
+      "品味鑒定不會再把你歌單裡的歌當成錯誤答案；混合歌單模式也不會再弄丟中文、日文、韓文歌了。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "A song that is in your playlist could be shown as the wrong answer whenever Spotify spells it differently from our list: Simplified Chinese for a mainland artist (演员 next to 演員), an English title for K-pop (Spring Day is 봄날), a full-width bracket, an extra space. The quiz now reads all of those as the same song.",
+        textZh: "只要 Spotify 的寫法跟我們的名單不一樣，歌單裡的歌就有可能被當成錯誤選項：大陸歌手的簡體字（演员和演員）、K-pop 的英文歌名（Spring Day 就是 봄날）、全形括號、多一個空格。現在這些都會被認出是同一首歌。",
+      },
+      {
+        kind: "fixed",
+        text: "Mixed Playlist Mode was merging every Chinese, Japanese or Korean song by one artist into a single song, so a Jay Chou playlist came out as one Jay Chou track. Every song counts now.",
+        textZh: "混合歌單模式之前會把同一位歌手的中日韓歌曲全部合併成一首，一份周杰倫歌單最後只剩一首周杰倫。現在每一首都算數。",
+      },
+      {
+        kind: "better",
+        text: "A K-pop question shows its decoy in the same language as the real song: 봄날 beside a Korean title, Spring Day beside an English one. And an artist credited two ways on Spotify (周興哲 and 周兴哲) counts as one, so the quiz can still pick the harder same-artist decoy.",
+        textZh: "K-pop 的題目，誘答選項會用跟正確答案一樣的語言：韓文歌名旁邊是 봄날，英文歌名旁邊是 Spring Day。Spotify 上有兩種寫法的歌手（周興哲和周兴哲）也會被當成同一位，題目還是能挑出最難分的同歌手選項。",
+      },
+    ],
+  },
+  {
     version: "1.12.0",
     date: "2026-09-15",
     headline:

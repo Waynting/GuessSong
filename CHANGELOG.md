@@ -5,6 +5,92 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.1] - 2026-09-16
+
+A player reported the Taste Quiz "listing a song as not in the playlist when
+it is". It was: the decoy exclusion compared titles folded only for case and
+whitespace, and Spotify spells the same song differently from
+`lib/quiz-decoys.ts` often enough that 21 of the pool's 257 Chinese and Korean
+titles never matched at all. Checking for the same class of bug found a second
+one in Mixed Playlist Mode that had been there since the feature shipped.
+
+### Fixed
+
+- **A playlist song could be the quiz's wrong answer.** Spotify lists a
+  mainland act's catalogue in Simplified Chinese where the pool is Traditional
+  (Joker Xue's 演员/丑八怪/刚刚好/绅士, Mao Buyi's 像我这样的人, Zhou Shen's
+  化身孤岛的鲸), closes a qualifier with a full-width bracket
+  (光亮（大型紀錄片《紫禁城》主題歌）), spells a title with or without spaces and
+  dots (Play我呸, 踩.腳.踏.車) or a curly apostrophe (God’s Menu), and titles
+  nearly all K-pop in English (Spring Day, not 봄날). On the old code a
+  Simplified Joker Xue playlist got 演員 as the decoy for 演员 — the same song,
+  the other script. `titleKey` in `lib/quiz.ts` is now the one place a title
+  becomes a key: qualifier strip (full-width brackets and dashes included) →
+  NFKC → lowercase → Traditional→Simplified through `lib/cjk-fold.ts` → drop
+  whitespace, punctuation and symbols. `songKey`, `bucketPool`, `pickDecoys`
+  and `buildQuiz` all go through it. Pool entries gained `aka`, other titles
+  Spotify lists the same recording under; they exclude too, and
+  `displayDecoyTitle` shows whichever is in the real option's script. Fourteen
+  K-pop entries were renamed to Spotify's English titles with the Hangul as
+  `aka`; Play我呸, 踩.腳.踏.車 and 姊妹 (aka 姊妹 Jie Mei) corrected. Verified
+  against the search API, one query per pool title.
+- **`lib/cjk-fold.ts` is generated, and the generator closes the table.**
+  OpenCC's raw character tables chain 麼→么→幺 (么 is also listed as a variant
+  of 幺), so a first cut keyed 怎麼了 and 怎么了 apart and reopened the bug for
+  the most common word in the language. `scripts/gen-cjk-fold.mjs` chases
+  every target to a fixpoint; `tests/cjk-fold.test.ts` asserts closure over all
+  3,122 pairs. The table lands only in the `/api/quiz` server chunk (verified in
+  the build) — by tree-shaking, so `lib/quiz.ts` must never reference
+  `titleKey`/`bucketPool` at module scope.
+- **Mixed Playlist Mode pooled a Mandopop room to one track per artist.**
+  `fingerprint()` in `lib/mixed-playlist.ts` kept `[a-z0-9]` and nothing else,
+  which took every Chinese, Japanese and Korean title to the empty string:
+  eleven tracks from two contributors pooled to two, and every song by a
+  natively credited act (告五人, 吳青峰) merged with every other. The key now
+  keeps `\p{L}\p{N}` after NFKC. Silent since the feature shipped — a short
+  pool is just a short game.
+- **`TRAILING_DASH_QUALIFIER` was cubic** on a title of `x<spaces>-<spaces>y\nz`
+  (1.2s at 3,000 characters; inherited from the regex it replaced). `[\s\S]*`
+  makes the tail unconditional; the worst case is now the quadratic
+  all-space shape the bracket rule shares.
+
+### Changed
+
+- **`foldText` folds an artist credit through the same Traditional→Simplified
+  table** (case, whitespace and NFKC otherwise), so a playlist crediting
+  周兴哲 reaches the pool's 周興哲 alias and the same-artist tier fires;
+  `creditedArtists` keys the two scripts as one act, first spelling seen.
+  `foldQuizName` (taker names, the store's hash field) is untouched and
+  pinned so.
+- `displayDecoyTitle` buckets the shown title, not the raw one, so a Hangul
+  guest credit in a qualifier does not put 봄날 beside "Dynamite".
+- `BucketedDecoy.script` is gone; the same-script tiers read `scripts`, every
+  bucket one of the entry's titles lands in.
+- **Tests: 894 → 925.** `tests/quiz.test.ts` drives the production pool
+  against fourteen of Spotify's own spellings; `tests/cjk-fold.test.ts` is new;
+  `tests/mixed-playlist.test.ts` pins that eleven Mandopop tracks pool to
+  eleven.
+
+### Known gaps
+
+- **A Simplified playlist still gets Traditional decoy titles.** The
+  exclusion is fixed; the display is not: a 演员 question shows 紳士 beside it.
+  A mild script tell, not a wrong answer. Fixing it needs a
+  Simplified→Traditional direction the table deliberately does not have, or
+  a "playlist is Simplified" heuristic.
+- **A playlist over `MAX_PLAYLIST_TRACKS` (500) is sampled**, so the
+  exclusion set is the sample's. No code path in this release.
+- **`fingerprint()` does not fold Traditional/Simplified** (演员 and 演員 pool
+  as two tracks in a Mixed room) — deliberate, to keep the table off the
+  setup page. And the setup page now ships a `\p{L}\p{N}` regex: a browser
+  without Unicode property escapes (Firefox < 78, Safari < 11.1) throws inside
+  the Mixed-mode Start handler and reads as `playlist_load_failed`.
+- The `DecoyContext` literal is hand-built eleven times in `tests/quiz.test.ts`;
+  one helper would stop it drifting from `buildQuiz`.
+- The preview picker sends the full Spotify title (full-width qualifier
+  included) to iTunes and Deezer; whether that costs a clip for titles like
+  光亮（…主題歌） is unmeasured.
+
 ## [1.12.0] - 2026-09-15
 
 The landing page had seven calls to action above the fold and a form that

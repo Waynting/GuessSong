@@ -59,12 +59,57 @@ describe("fingerprint", () => {
     );
   });
 
+  it("keeps two CJK songs by one artist apart", () => {
+    // The key used to keep only [a-z0-9], which took every Chinese, Japanese
+    // and Korean title to the empty string: a Mandopop playlist pooled to one
+    // track per artist, and every song by a natively credited act (告五人,
+    // 吳青峰) merged with every other.
+    expect(fingerprint("小幸運", ["Hebe Tien"])).not.toBe(fingerprint("魔鬼中的天使", ["Hebe Tien"]));
+    expect(fingerprint("披星戴月的想你", ["告五人"])).not.toBe(fingerprint("起風了", ["吳青峰"]));
+    expect(fingerprint("夜に駆ける", ["YOASOBI"])).not.toBe(fingerprint("群青", ["YOASOBI"]));
+    expect(fingerprint("봄날", ["BTS"])).not.toBe(fingerprint("Dynamite", ["BTS"]));
+    // And the same song still collapses across the usual noise.
+    expect(fingerprint("小幸運 - Live", ["Hebe Tien"])).toBe(fingerprint("小幸運", ["hebe tien"]));
+    expect(fingerprint("Ｐｌａｙ我呸", ["JOLIN"])).toBe(fingerprint("Play我呸", ["JOLIN"]));
+  });
+
+  it("still strips a feat. credit and a live qualifier from a CJK title, full-width brackets included", () => {
+    // NFKC runs first, so a mainland release's （feat. …） reaches the same
+    // ASCII-bracket feat. regex the Latin case does; and the qualifier reach
+    // works on a CJK title now that the alphabet keeps it.
+    expect(fingerprint("小幸運（feat. 某人）", ["田馥甄"])).toBe(fingerprint("小幸運", ["田馥甄"]));
+    expect(fingerprint("小幸運 (feat. 某人)", ["田馥甄"])).toBe(fingerprint("小幸運", ["田馥甄"]));
+    expect(fingerprint("夜曲 (Live)", ["Jay Chou"])).toBe(fingerprint("夜曲", ["Jay Chou"]));
+    expect(fingerprint("夜曲 - Remastered 2020", ["Jay Chou"])).toBe(fingerprint("夜曲", ["Jay Chou"]));
+    // And the primary-artist rule is unchanged for a natively credited act.
+    expect(fingerprint("披星戴月的想你", ["告五人", "someone"])).toBe(fingerprint("披星戴月的想你", ["告五人"]));
+  });
+
   it("distinguishes different songs", () => {
     expect(fingerprint("Song One", ["Artist"])).not.toBe(fingerprint("Song Two", ["Artist"]));
   });
 });
 
 describe("poolContributions", () => {
+  it("pools a Mandopop playlist song by song, not artist by artist", () => {
+    const jay = ["晴天", "七里香", "稻香", "告白氣球", "青花瓷", "夜曲", "安靜", "說好不哭"].map((name, i) =>
+      makeTrack({ id: `jay-${i}`, name, artists: ["Jay Chou"] })
+    );
+    const native = ["披星戴月的想你", "愛人錯過", "唯一"].map((name, i) =>
+      makeTrack({ id: `a5-${i}`, name, artists: ["告五人"] })
+    );
+    const pooled = poolContributions(
+      [
+        { playerName: "A", tracks: jay },
+        { playerName: "B", tracks: native },
+      ],
+      8
+    );
+    expect(pooled).toHaveLength(11);
+    expect(new Set(pooled.map((t) => t.name)).size).toBe(11);
+    for (const t of pooled) expect(t.contributors).toHaveLength(1);
+  });
+
   it("merges a shared track's contributors instead of duplicating it", () => {
     const shared = makeTrack({ id: "shared", name: "Shared Song", artists: ["Someone"] });
     const contributions: PlaylistContribution[] = [
