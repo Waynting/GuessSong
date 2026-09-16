@@ -195,7 +195,7 @@ components/                  Buzzer button + host panel, room panel, mixed colle
                              / and /quiz share), service notice, crash screen, ui/ (shadcn primitives)
 lib/                         All shared logic — see "Architecture" below
 worker/                      Cloudflare Worker + BuzzerRoom Durable Object
-tests/                       45 Vitest files, 894 cases
+tests/                       46 Vitest files, 925 cases
 types/                       Track, room, quiz, preview, and service-status wire types
 ```
 
@@ -284,7 +284,7 @@ Two hand-written changelogs, and a release updates both: [`CHANGELOG.md`](./CHAN
 ## Testing
 
 ```bash
-npm test              # 45 files, 894 cases — vitest, jsdom
+npm test              # 46 files, 925 cases — vitest, jsdom
 cd worker && npm test # Durable Object tests inside workerd
 ```
 

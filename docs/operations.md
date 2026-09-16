@@ -35,7 +35,7 @@ No `.github/workflows`. Nothing runs the suite before a merge. Before opening a
 pull request:
 
 ```bash
-npm test              # 45 files, 894 tests, ~2s
+npm test              # 46 files, 925 tests, ~2s
 npx tsc --noEmit
 npx eslint app lib components
 npm run build         # see the warning below
@@ -321,6 +321,24 @@ config entry is gone — `tests/next-config.test.ts` pins both rules — and if 
 flashes and then goes to `/quiz`, only the fallback is running. In GA4 the
 same defect reads as `quiz_created.arrived_from = "quiz_result"` dropping while
 `click:quiz_result` in `npm run stats` holds.
+
+### "The quiz offered a song that is in my playlist as the wrong answer"
+
+Reported in those words and fixed in 1.12.1: the exclusion compared titles
+folded for case and whitespace only, and Spotify spells the same song
+differently from `lib/quiz-decoys.ts` (Simplified for a mainland act, a
+full-width bracket on a qualifier, K-pop in English). Both sides now go through
+`titleKey` (`lib/quiz.ts`), a pool entry excludes under its `aka` titles too,
+and `tests/quiz.test.ts` drives the production pool against fourteen of
+Spotify's own spellings. Two causes remain, told apart by the playlist's size:
+
+- **Over 500 tracks:** `loadPlaylist` samples anything past
+  `MAX_PLAYLIST_TRACKS` (`lib/spotify.ts`), so the quiz excludes the sample's
+  titles, not the playlist's. Known, unfixed; only a shorter playlist avoids it.
+- **Under 500:** a pool title Spotify never uses. Search the track
+  (`GET /v1/search?type=track`), make the entry's `name` the spelling Spotify
+  returns, move the old one to `aka`, and add the pair to that test. Not by
+  editing `lib/cjk-fold.ts`, which is generated.
 
 ### "A clip plays but the answer card disagrees"
 
