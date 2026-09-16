@@ -50,6 +50,12 @@ import {
   type QuizScore,
 } from "@/types/quiz";
 import type { CountControl, SongCountState } from "@/lib/song-count";
+// A 20KB character table. It stays out of the browser bundle only because
+// nothing a client component imports from this module reaches it — the build
+// tree-shakes it away, not a module boundary. Never reference `titleKey`,
+// `bucketPool` or `foldText` at module scope here (a memoised
+// `bucketPool(QUIZ_DECOY_POOL)` is the obvious one); do that in the route.
+import { foldHan } from "@/lib/cjk-fold";
 
 /* ------------------------------------------------------------------ */
 /* Script buckets                                                      */
@@ -64,8 +70,9 @@ import type { CountControl, SongCountState } from "@/lib/song-count";
  * so the pool and the playlist are bucketed by one rule and cannot disagree —
  * a K-pop track titled in Latin script lands in `latin` on both sides.
  *
- * Deliberately not `lib/mixed-playlist.ts`'s `fingerprint()`, which normalises
- * through `[^a-z0-9]` and takes 小幸運 to the empty string.
+ * Deliberately not `lib/mixed-playlist.ts`'s `fingerprint()`: that is a string
+ * identity and this is a classification, and the two answer different
+ * questions.
  */
 export type ScriptBucket = "latin" | "zh" | "ja" | "ko";
 
@@ -105,9 +112,39 @@ export function foldQuizName(name: string): string {
   return name.trim().toLowerCase();
 }
 
+/**
+ * An artist credit as a key — `foldedArtists`, `creditedArtists`, the
+ * same-artist tier and the artist half of `songKey`. Case, whitespace, NFKC
+ * and the Traditional→Simplified fold `titleKey` uses, for the reason it uses
+ * it: Spotify credits a mainland act in whichever script the release used, so
+ * a playlist crediting 薛之谦 has to reach the pool's 薛之謙 alias or the
+ * same-artist tier never fires for it and `displayArtist` shows the other
+ * script beside the playlist's own. Not the qualifier or punctuation strip —
+ * a credit has neither.
+ */
 function foldText(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
+  return foldHan(value.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " "));
 }
+
+/**
+ * ` - Remastered 2011`, ` – Live`, `－ Live`: a spaced dash — hyphen, en or em
+ * dash, the full-width hyphen, or the two Unicode hyphens U+2010/U+2011 — and
+ * everything after it. `[\s\S]*` rather than `.*`: with `.` the tail could
+ * not cross a line terminator, so on a title of `x<spaces>-<spaces>y\nz` the
+ * engine retried every split of both whitespace runs before giving up —
+ * cubic, 1.2s at 3,000 characters — while a title with a newline after the
+ * dash kept its tail. Now the tail always matches and the worst case is the
+ * quadratic all-space one the bracket rule below shares (~100ms at 16k,
+ * which nothing sends).
+ */
+const TRAILING_DASH_QUALIFIER = /\s+[-–—－‐‑]\s+[\s\S]*$/;
+/**
+ * `(feat. …)`, `[Live]`, and their full-width forms: Spotify stores a mainland
+ * or Hong Kong release's qualifier as 光亮（大型紀錄片《紫禁城》主題歌）, and one
+ * Taiwanese release as 路過人間 (電視劇《…》插曲） — ASCII opener, full-width
+ * closer — so any opener may pair with any closer.
+ */
+const TRAILING_BRACKET_QUALIFIER = /\s*[(\[（［【][^)\]）］】]*[)\]）］】]\s*$/;
 
 /**
  * The title as an answer option shows it.
@@ -122,20 +159,45 @@ function foldText(value: string): string {
 export function displayTitle(name: string): string {
   const trimmed = name.trim();
   const stripped = trimmed
-    .replace(/\s+-\s+.*$/, "")
-    .replace(/\s*[([][^)\]]*[)\]]\s*$/, "")
+    .replace(TRAILING_DASH_QUALIFIER, "")
+    .replace(TRAILING_BRACKET_QUALIFIER, "")
     .trim();
   return stripped || trimmed;
 }
 
+/** Whitespace, punctuation and symbols: nothing a title is identified by. */
+const TITLE_NOISE = /[\s\p{P}\p{S}]+/gu;
+
 /**
- * The identity of a song for "is this decoy already in the playlist". Loose on
- * purpose: a pool "Hello" must be excluded by a playlist "Hello - Live", and
- * excluding a few extra decoys costs nothing where letting one through puts
- * the same song on both sides of a question.
+ * A title as a key — the one place a title becomes one, for the reason
+ * `lib/room.ts` has one `fold()`: "is this decoy already in the playlist" is
+ * decided by comparing these, and a second spelling of the fold is a second
+ * answer to that question.
+ *
+ * Loose on purpose, and every fold here was a song that reached the wrong side
+ * of a question. Spotify lists a mainland act's catalogue in Simplified
+ * Chinese where the pool is written in Traditional (演员 / 演員, 像我这样的人 /
+ * 像我這樣的人 — `foldHan`), spells a title with or without the spaces (Play我呸
+ * / Play 我呸) or the dots (踩.腳.踏.車 / 踩...腳踏車), and puts a curly
+ * apostrophe on one release and a straight one on another (God’s Menu). NFKC
+ * folds full-width Latin and the compatibility ideographs first. Two different
+ * songs that fold together cost one decoy that was fine; one song that does
+ * not fold together puts the playlist's own song up as the wrong answer.
+ */
+export function titleKey(name: string): string {
+  const folded = foldHan(displayTitle(name).normalize("NFKC").toLowerCase());
+  return folded.replace(TITLE_NOISE, "") || folded.trim();
+}
+
+/**
+ * The identity of a playlist track for asking about a song once
+ * (`usableQuizTracks`): the title through `titleKey`, plus the folded primary
+ * artist. The exclusion is title-only and lives in `pickDecoys`; this is the
+ * one place the artist joins the key, so "Hello" by Adele and "Hello" by
+ * Lionel Richie are two questions while "Hello - Live" and "Hello" are one.
  */
 export function songKey(name: string, artist: string): string {
-  return `${foldText(displayTitle(name))}|${foldText(artist)}`;
+  return `${titleKey(name)}|${foldText(artist)}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -161,26 +223,62 @@ export interface DecoyEntry {
    * option whose spelling nothing else on the quiz uses is the answer.
    */
   aliases?: readonly string[];
+  /**
+   * Other titles Spotify lists the same recording under, for the exclusion
+   * and for display in the real option's script. K-pop is the case: Spotify
+   * titles BTS's 봄날 "Spring Day", IU's 밤편지 "Through the Night", EXO's
+   * 으르렁 "Growl" (measured 2026-09-15), and a title-only exclusion cannot
+   * bridge a translation the way `titleKey` bridges a spelling. `name` is
+   * Spotify's title, because that is what a playlist carries; the native one
+   * goes here, and is what a Hangul-titled real option is shown beside.
+   */
+  aka?: readonly string[];
   /** Spotify's 0–100, approximately. Only compared, never shown. */
   popularity: number;
 }
 
 /** A pool entry with the derived fields the picker keys on. */
 export interface BucketedDecoy extends DecoyEntry {
-  script: ScriptBucket;
-  /** The title alone, folded. What excludes a decoy that is in the playlist. */
+  /** Every bucket one of its titles lands in. The same-script tiers read this. */
+  scripts: ReadonlySet<ScriptBucket>;
+  /** `titleKey` of `name`: the entry's identity. */
   titleKey: string;
+  /** `titleKey` of every title, `aka` included. What excludes a decoy that is in the playlist. */
+  titleKeys: ReadonlySet<string>;
   /** Every spelling of the act, folded. */
   foldedArtists: ReadonlySet<string>;
 }
 
+/** Every title a decoy goes by: Spotify's, then its `aka`s. */
+function titlesOf(decoy: DecoyEntry): string[] {
+  return [decoy.name, ...(decoy.aka ?? [])];
+}
+
 export function bucketPool(pool: readonly DecoyEntry[]): BucketedDecoy[] {
-  return pool.map((entry) => ({
-    ...entry,
-    script: scriptBucket(...(entry.aliases ?? []), entry.artist, entry.name),
-    titleKey: foldText(displayTitle(entry.name)),
-    foldedArtists: new Set([entry.artist, ...(entry.aliases ?? [])].map(foldText)),
-  }));
+  return pool.map((entry) => {
+    const titles = titlesOf(entry);
+    const bucketOf = (title: string) => scriptBucket(...(entry.aliases ?? []), entry.artist, title);
+    return {
+      ...entry,
+      scripts: new Set(titles.map(bucketOf)),
+      titleKey: titleKey(entry.name),
+      titleKeys: new Set(titles.map(titleKey)),
+      foldedArtists: new Set([entry.artist, ...(entry.aliases ?? [])].map(foldText)),
+    };
+  });
+}
+
+/**
+ * Which title of a decoy to show: the first one in the real option's script,
+ * else Spotify's. The title-side half of `displayArtist`'s script rule, and
+ * only ever different from `name` through `aka` — a K-pop entry shows "Spring
+ * Day" beside "Dynamite" and 봄날 beside 예뻤어. The script is read off the
+ * title as the taker sees it: "Dynamite (feat. 지민)" is shown as "Dynamite",
+ * and bucketing the qualifier would put 봄날 beside it.
+ */
+export function displayDecoyTitle(decoy: DecoyEntry, targetName: string): string {
+  const wanted = scriptBucket(displayTitle(targetName));
+  return titlesOf(decoy).find((t) => scriptBucket(t) === wanted) ?? decoy.name;
 }
 
 /**
@@ -222,7 +320,8 @@ export function displayArtist(
 /**
  * Every act the playlist credits, folded, mapped to the spelling it credits
  * them under. The first spelling seen wins; Spotify has one name per artist
- * id, so a second spelling of one act is two artist ids and two keys here.
+ * id, so a second spelling of one act is two artist ids and, unless the two
+ * fold together (周興哲 and 周兴哲 do, through `foldText`), two keys here.
  * This is what `displayArtist` reads, and it is the only place a playlist
  * credit becomes a key — the same reason `lib/room.ts` has one `fold()`.
  */
@@ -244,10 +343,10 @@ export const DECOY_POPULARITY_WINDOW = 20;
 
 export interface DecoyContext {
   /**
-   * Every title in the playlist, folded, so no decoy is also a right answer.
-   * Title alone, not title-and-artist: the pool and the playlist spell an
-   * artist differently often enough (see `DecoyEntry.artist`) that keying on
-   * both let 晴天 by 周杰倫 be offered next to 晴天 by Jay Chou.
+   * Every title in the playlist as `titleKey` keys it, so no decoy is also a
+   * right answer. Title alone, not title-and-artist: the pool and the playlist
+   * spell an artist differently often enough (see `DecoyEntry.artist`) that
+   * keying on both let 晴天 by 周杰倫 be offered next to 晴天 by Jay Chou.
    */
   playlistTitles: ReadonlySet<string>;
   /**
@@ -296,10 +395,11 @@ function shuffle<T>(items: T[], rng: () => number): T[] {
  *      a playlist that contains most of it, and a question with two options is
  *      worse than one whose decoys repeat.
  *
- * Never a song whose title is in the playlist, at any tier: that would put
- * the right answer on both sides of the question. The artist is shown as the
- * playlist credits them, or failing that in the real track's script
- * (`displayArtist`).
+ * Never a song whose title is in the playlist, at any tier and under any of
+ * its titles: that would put the right answer on both sides of the question.
+ * The artist is shown as the playlist credits them, or failing that in the
+ * real track's script (`displayArtist`); the title likewise
+ * (`displayDecoyTitle`).
  */
 export function pickDecoys(
   target: DecoyTarget,
@@ -307,14 +407,17 @@ export function pickDecoys(
   rng: () => number,
   count = QUIZ_OPTION_COUNT - 1
 ): QuizOption[] {
-  const targetTitle = foldText(displayTitle(target.name));
+  const targetTitle = titleKey(target.name);
   const targetArtist = foldText(target.artist);
   const script = scriptBucket(target.artist, target.name);
   const identity = (d: BucketedDecoy) => `${d.titleKey}|${d.artist}`;
 
-  const eligible = ctx.pool.filter(
-    (d) => d.titleKey !== targetTitle && !ctx.playlistTitles.has(d.titleKey)
-  );
+  const eligible = ctx.pool.filter((d) => {
+    for (const key of d.titleKeys) {
+      if (key === targetTitle || ctx.playlistTitles.has(key)) return false;
+    }
+    return true;
+  });
   const fresh = eligible.filter((d) => !ctx.used.has(identity(d)));
 
   const sameArtist = (d: BucketedDecoy) => d.foldedArtists.has(targetArtist);
@@ -323,10 +426,10 @@ export function pickDecoys(
     sameArtist,
     (d) => !sameArtist(d) && inPlaylist(d),
     (d) =>
-      d.script === script &&
+      d.scripts.has(script) &&
       typeof target.popularity === "number" &&
       Math.abs(d.popularity - target.popularity) <= DECOY_POPULARITY_WINDOW,
-    (d) => d.script === script,
+    (d) => d.scripts.has(script),
     () => true,
   ];
 
@@ -350,7 +453,10 @@ export function pickDecoys(
   if (chosen.length < count) take(eligible);
 
   for (const d of chosen) ctx.used.add(identity(d));
-  return chosen.map((d) => ({ title: d.name, artist: displayArtist(d, target.artist, ctx.playlistArtists) }));
+  return chosen.map((d) => ({
+    title: displayDecoyTitle(d, target.name),
+    artist: displayArtist(d, target.artist, ctx.playlistArtists),
+  }));
 }
 
 /* ------------------------------------------------------------------ */
@@ -447,7 +553,7 @@ export function buildQuiz(input: BuildQuizInput): QuizQuestion[] {
   const count = clampQuestionCount(input.questionCount, usable.length);
 
   const playlistTitles = new Set<string>();
-  for (const t of usable) playlistTitles.add(foldText(displayTitle(t.name)));
+  for (const t of usable) playlistTitles.add(titleKey(t.name));
 
   const ctx: DecoyContext = {
     playlistTitles,

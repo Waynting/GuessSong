@@ -21,6 +21,17 @@
  * when the playlist itself is in that script (告五人, 吳青峰, 理想混蛋 and
  * 信樂團 are the ones Spotify keeps native).
  *
+ * **The title is Spotify's too, and where Spotify has two, the other is an
+ * `aka`.** The exclusion — never a decoy that is in the playlist — compares
+ * titles through `titleKey`, which folds case, spacing, punctuation and
+ * Traditional/Simplified, so 演員 here excludes Joker Xue's 演员 there. What
+ * it cannot fold is a translation: Spotify titles most K-pop in English
+ * ("Spring Day", not 봄날; "Growl", not 으르렁 — measured 2026-09-15), so those
+ * entries carry the English title as `name` and the Hangul as `aka`, and the
+ * quiz shows whichever is in the real option's script. A pool title Spotify
+ * never uses is a decoy that can be in the playlist and still be offered as
+ * the wrong answer — the bug this paragraph replaced.
+ *
  * `popularity` is Spotify's 0–100, approximately and from memory. It is only
  * ever compared within `DECOY_POPULARITY_WINDOW`, never shown, so being off by
  * ten costs nothing. The script bucket is *not* stored — `bucketPool` derives
@@ -33,16 +44,18 @@
 
 import type { DecoyEntry } from "@/lib/quiz";
 
-type Songs = Array<[title: string, popularity: number]>;
+/** `[title, popularity]` or `[title, popularity, [otherTitle, …]]` — see `DecoyEntry.aka`. */
+type Songs = Array<[title: string, popularity: number, aka?: readonly string[]]>;
 
 /** `artist(spotifyName, songs)` or `artist(spotifyName, [nativeAlias, …], songs)`. */
 function artist(name: string, aliasesOrSongs: readonly string[] | Songs, maybeSongs?: Songs): DecoyEntry[] {
   const aliases = maybeSongs ? (aliasesOrSongs as readonly string[]) : [];
   const songs = (maybeSongs ?? aliasesOrSongs) as Songs;
-  return songs.map(([title, popularity]) => ({
+  return songs.map(([title, popularity, aka]) => ({
     name: title,
     artist: name,
     ...(aliases.length ? { aliases } : {}),
+    ...(aka?.length ? { aka } : {}),
     popularity,
   }));
 }
@@ -72,10 +85,10 @@ export const QUIZ_DECOY_POOL: readonly DecoyEntry[] = [
   ]),
   ...artist("JOLIN", ["蔡依林", "Jolin Tsai"], [
     ["舞孃", 68], ["日不落", 69], ["玫瑰少年", 70], ["怪美的", 65], ["說愛你", 66],
-    ["倒帶", 67], ["大藝術家", 63], ["Play 我呸", 62],
+    ["倒帶", 67], ["大藝術家", 63], ["Play我呸", 62],
   ]),
   ...artist("A-Mei Chang", ["張惠妹", "A-Mei"], [
-    ["聽海", 70], ["記得", 69], ["三天三夜", 65], ["我最親愛的", 68], ["姊妹", 63],
+    ["聽海", 70], ["記得", 69], ["三天三夜", 65], ["我最親愛的", 68], ["姊妹", 63, ["姊妹 Jie Mei"]],
     ["掉了", 64], ["連名帶姓", 66], ["身後", 62],
   ]),
   ...artist("Stefanie Sun", ["孫燕姿"], [
@@ -143,7 +156,7 @@ export const QUIZ_DECOY_POOL: readonly DecoyEntry[] = [
   ...artist("Zhang Zhen Yue", ["張震嶽"], [["愛我別走", 64], ["再見", 63], ["思念是一種病", 62]]),
   ...artist("Karen Mok", ["莫文蔚"], [["陰天", 62], ["慢慢喜歡你", 66], ["愛", 60]]),
   ...artist("Khalil Fong", ["方大同"], [["特別的人", 64], ["愛愛愛", 60], ["三人遊", 58]]),
-  ...artist("Soft Lipa", ["蛋堡"], [["史詩", 58], ["踩...腳踏車", 56]]),
+  ...artist("Soft Lipa", ["蛋堡"], [["史詩", 58], ["踩.腳.踏.車", 56]]),
   ...artist("Cosmos People", ["宇宙人"], [["一起去跑步", 58], ["飛翔", 56]]),
   ...artist("Yisa Yu", ["郁可唯"], [["路過人間", 62], ["指望", 58]]),
   ...artist("Ronald Cheng", ["鄭中基"], [["無賴", 60], ["我代你哭", 55]]),
@@ -170,27 +183,28 @@ export const QUIZ_DECOY_POOL: readonly DecoyEntry[] = [
   ...artist("Creepy Nuts", [["Bling-Bang-Bang-Born", 80], ["のびしろ", 60]]),
 
   /* ---------------------------------------------------------------- */
-  /* 한국어 — titles as Spotify lists them, mostly Latin script         */
+  /* 한국어 — titles as Spotify lists them, which is English for nearly   */
+  /* every one; the Hangul title rides along as `aka`                     */
   /* ---------------------------------------------------------------- */
-  ...artist("BTS", [["Dynamite", 82], ["Butter", 80], ["Boy With Luv", 76], ["봄날", 72], ["DNA", 72], ["Fake Love", 71]]),
+  ...artist("BTS", [["Dynamite", 82], ["Butter", 80], ["Boy With Luv", 76], ["Spring Day", 72, ["봄날"]], ["DNA", 72], ["Fake Love", 71]]),
   ...artist("BLACKPINK", [["DDU-DU DDU-DU", 78], ["How You Like That", 78], ["Kill This Love", 76], ["Pink Venom", 74], ["Shut Down", 72]]),
   ...artist("NewJeans", [["Ditto", 80], ["Hype Boy", 82], ["Super Shy", 80], ["OMG", 78], ["Attention", 76]]),
   ...artist("IVE", [["LOVE DIVE", 78], ["I AM", 76], ["After LIKE", 76], ["ELEVEN", 72]]),
   ...artist("aespa", [["Next Level", 74], ["Supernova", 78], ["Spicy", 72], ["Savage", 70]]),
-  ...artist("IU", [["Blueming", 76], ["Celebrity", 74], ["좋은 날", 70], ["Love wins all", 72], ["밤편지", 72], ["Palette", 68]]),
+  ...artist("IU", [["Blueming", 76], ["Celebrity", 74], ["Good day", 70, ["좋은 날"]], ["Love wins all", 72], ["Through the Night", 72, ["밤편지"]], ["Palette", 68]]),
   ...artist("LE SSERAFIM", [["ANTIFRAGILE", 76], ["UNFORGIVEN", 72], ["FEARLESS", 70], ["Perfect Night", 74]]),
-  ...artist("SEVENTEEN", [["Super", 74], ["HOT", 70], ["아주 NICE", 66]]),
-  ...artist("Stray Kids", [["神메뉴", 74], ["MANIAC", 72], ["S-Class", 72]]),
+  ...artist("SEVENTEEN", [["Super", 74], ["HOT", 70], ["VERY NICE", 66, ["아주 NICE"]]]),
+  ...artist("Stray Kids", [["God's Menu", 74, ["神메뉴"]], ["MANIAC", 72], ["S-Class", 72]]),
   ...artist("TWICE", [["TT", 72], ["FANCY", 74], ["Feel Special", 72], ["The Feels", 70]]),
-  ...artist("Red Velvet", [["Psycho", 74], ["Bad Boy", 70], ["빨간 맛", 66]]),
-  ...artist("BIGBANG", [["뱅뱅뱅", 70], ["FANTASTIC BABY", 70], ["봄여름가을겨울", 72]]),
+  ...artist("Red Velvet", [["Psycho", 74], ["Bad Boy", 70], ["Red Flavor", 66, ["빨간 맛"]]]),
+  ...artist("BIGBANG", [["BANG BANG BANG", 70, ["뱅뱅뱅"]], ["FANTASTIC BABY", 70], ["Still Life", 72, ["봄여름가을겨울"]]]),
   ...artist("PSY", [["Gangnam Style", 74], ["That That", 66]]),
   ...artist("(G)I-DLE", [["Queencard", 74], ["TOMBOY", 72], ["Nxde", 70]]),
   ...artist("Jung Kook", [["Seven", 84], ["Standing Next to You", 80], ["3D", 76]]),
   ...artist("Jimin", [["Like Crazy", 80], ["Who", 78]]),
-  ...artist("EXO", [["Love Shot", 72], ["으르렁", 66], ["Ko Ko Bop", 64]]),
-  ...artist("DAY6", [["예뻤어", 70], ["한 페이지가 될 수 있게", 72], ["Zombie", 66]]),
-  ...artist("AKMU", [["어떻게 이별까지 사랑하겠어, 널 사랑하는 거지", 72], ["Love Lee", 66]]),
+  ...artist("EXO", [["Love Shot", 72], ["Growl", 66, ["으르렁"]], ["Ko Ko Bop", 64]]),
+  ...artist("DAY6", [["You Were Beautiful", 70, ["예뻤어"]], ["Time of Our Life", 72, ["한 페이지가 될 수 있게"]], ["Zombie", 66]]),
+  ...artist("AKMU", [["How can I love the heartbreak, you're the one I love", 72, ["어떻게 이별까지 사랑하겠어, 널 사랑하는 거지"]], ["Love Lee", 66]]),
 
   /* ---------------------------------------------------------------- */
   /* Latin script                                                      */
