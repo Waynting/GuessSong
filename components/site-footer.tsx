@@ -75,6 +75,10 @@ export function SiteFooter({ locale = "en" }: { locale?: FooterLocale }) {
           width: 100%;
           margin-top: 48px;
           padding-top: 24px;
+          /* The last thing on every page that has it, so the installed
+             app's home indicator lands here: viewport-fit=cover runs the
+             page under it. */
+          padding-bottom: env(safe-area-inset-bottom);
           border-top: 1px solid #2a2a2a;
           text-align: center;
           font-family: 'Outfit', sans-serif;
@@ -100,8 +104,12 @@ export function SiteFooter({ locale = "en" }: { locale?: FooterLocale }) {
           font-family: inherit;
           transition: color 0.15s ease;
         }
-        .site-footer-nav a:hover,
-        .site-footer-nav button:hover { color: #1DB954; }
+        @media (hover: hover) {
+          .site-footer-nav a:hover,
+          .site-footer-nav button:hover { color: #1DB954; }
+        }
+        .site-footer-nav a:active,
+        .site-footer-nav button:active { color: #1DB954; opacity: 0.6; transition: none; }
         .site-footer-meta {
           display: flex;
           gap: 8px 14px;

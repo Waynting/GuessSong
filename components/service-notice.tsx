@@ -212,7 +212,8 @@ export function ServiceNotice({ locale: forced }: ServiceNoticeProps = {}) {
           font-weight: 600;
           cursor: pointer;
         }
-        .sn-dismiss:hover { background: #24d363 }
+        @media (hover: hover) { .sn-dismiss:hover { background: #24d363 } }
+        .sn-dismiss:active { background: #24d363; transform: scale(0.97); transition: none }
         .sn-repo {
           color: #9a9a9a;
           font-family: Outfit, system-ui, sans-serif;
@@ -221,7 +222,8 @@ export function ServiceNotice({ locale: forced }: ServiceNoticeProps = {}) {
           border-bottom: 1px solid #3a3a3a;
           padding-bottom: 1px;
         }
-        .sn-repo:hover { color: #1DB954; border-bottom-color: #1DB954 }
+        @media (hover: hover) { .sn-repo:hover { color: #1DB954; border-bottom-color: #1DB954 } }
+        .sn-repo:active { color: #1DB954; border-bottom-color: #1DB954; opacity: 0.6; transition: none }
         /* This dialog traps Tab between the button and this link, so keyboard
            focus lands here by design and needs to be visible on #1a1a1a. */
         .sn-repo:focus-visible {

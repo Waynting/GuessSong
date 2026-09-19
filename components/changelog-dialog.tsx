@@ -114,6 +114,9 @@ export function ChangelogDialog({ locale, onClose: close }: ChangelogDialogProps
           from { opacity: 0; transform: translateY(12px) }
           to { opacity: 1; transform: translateY(0) }
         }
+        /* Rendered under the setup sheet, which strips the tap highlight from
+           every button on the premise that each paints its own press. */
+        .cl-close:active { background: #333; color: #f0f0f0; transition: none }
         .cl-scroll::-webkit-scrollbar { width: 8px }
         .cl-scroll::-webkit-scrollbar-thumb {
           background: #333; border-radius: 999px;
@@ -176,12 +179,13 @@ export function ChangelogDialog({ locale, onClose: close }: ChangelogDialogProps
           </div>
           <button
             type="button"
+            className="cl-close"
             onClick={close}
             aria-label={ui.close}
             style={{
               flexShrink: 0,
-              width: "32px",
-              height: "32px",
+              width: "40px",
+              height: "40px",
               borderRadius: "8px",
               border: "1px solid #2a2a2a",
               background: "#222",

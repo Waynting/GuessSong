@@ -11,8 +11,9 @@
  *
  * `100dvh` with a `100vh` fallback: the duel fills the viewport, and on a
  * phone `100vh` is the viewport with the browser chrome hidden, which puts the
- * lower half under the toolbar. Safe-area insets keep the seam and the back
- * link off the home indicator. Reduced motion switches every transition and
+ * lower half under the toolbar. The top and bottom safe-area insets keep the
+ * seam and the back link off the home indicator; the side insets are padded
+ * once for the whole site in app/globals.css. Reduced motion switches every transition and
  * animation below this frame off at once.
  */
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -33,11 +34,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
           gap: 12px;
           background: #111;
           color: #f0f0f0;
+          /* Top and bottom only: the side insets are body's, in
+             app/globals.css, and adding them here again doubled them. */
           padding:
             calc(14px + env(safe-area-inset-top))
-            calc(16px + env(safe-area-inset-right))
+            16px
             calc(14px + env(safe-area-inset-bottom))
-            calc(16px + env(safe-area-inset-left));
+            16px;
           overflow-x: hidden;
         }
         .q-display {

@@ -81,7 +81,8 @@ export function InstallBanner() {
           cursor: pointer;
           transition: background 0.15s, transform 0.1s;
         }
-        .install-banner-btn:hover { background: #1ed760; transform: translateY(-1px); }
+        @media (hover: hover) { .install-banner-btn:hover { background: #1ed760; transform: translateY(-1px); } }
+        .install-banner-btn:active { transform: scale(0.97); transition: none; }
         .install-banner-help {
           font-size: 12px;
           color: #999;

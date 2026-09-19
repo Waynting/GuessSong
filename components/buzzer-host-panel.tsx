@@ -209,7 +209,7 @@ export function BuzzerHostPanel({
         <button
           type="button"
           onClick={() => setShowJoin((v) => !v)}
-          className="rounded-xl bg-[#222] px-3 py-1.5 text-xs text-[#bbb]"
+          className="rounded-xl bg-[#222] px-3 py-1.5 text-xs text-[#bbb] active:bg-[#333]"
         >
           {showJoin ? "Hide QR" : "Show QR"}
         </button>

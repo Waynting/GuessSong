@@ -14,6 +14,7 @@ import {
   type MixedPlaylistMeta,
 } from "@/lib/game-session";
 import { loadGame } from "@/lib/game-storage";
+import { useScreenWakeLock } from "@/lib/wake-lock";
 import { fetchPreview, fetchPreviewBatch } from "@/lib/preview-client";
 import { createRoundToken } from "@/lib/round-token";
 import { announcesNoScore } from "@/lib/round-outcome";
@@ -272,6 +273,11 @@ export default function GamePage() {
     setMixedMeta(data.mixedPlaylistMeta ?? null);
     gameStartTimeRef.current = Date.now();
   }, [router]);
+
+  // The phone is the screen and the speaker, and left alone through a long
+  // guess it locks, which pauses the clip. Held for the whole game, final
+  // scores included — that is the screen the room scans the QR off.
+  useScreenWakeLock(tracks.length > 0);
 
   /**
    * Resolve the whole game's previews in one request, before the first round.
@@ -961,6 +967,21 @@ export default function GamePage() {
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html, body { overflow: hidden; max-width: 100vw; }
         body { background: #111; color: #f0f0f0; font-family: 'Outfit', sans-serif; }
+        /* A drag past the top of the card is Android's pull-to-refresh, and a
+           refresh here is round one with the scores wiped: the game payload
+           in sessionStorage is the setup, not the progress. Refused on the
+           root and on the scroller so the gesture has nowhere to chain to. */
+        html, body { overscroll-behavior-y: none; }
+
+        /* Phones. Every control below has a :active rule, so the grey flash
+           a touch browser lays over a tapped element is noise on top of it;
+           touch-action: manipulation stops two quick taps on Next Track
+           from being read as double-tap-to-zoom; and nothing on this screen
+           is prose, so a long press should not start selecting it. Hover rules are behind
+           (hover: hover) throughout, because a tap on a touch screen leaves
+           :hover applied until the next tap lands somewhere else. */
+        button, a { -webkit-tap-highlight-color: transparent; }
+        button { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
 
         /* One corner radius for every button, control and surface on this
            screen. It used to be five values picked per element (8, 10, 12, 14,
@@ -973,8 +994,16 @@ export default function GamePage() {
 
         .game-layout {
           display: grid;
-          grid-template-rows: 56px 1fr;
-          grid-template-columns: 1fr 300px;
+          grid-template-rows: 56px minmax(0, 1fr);
+          /* minmax(0, 1fr), not 1fr. A bare 1fr is minmax(auto, 1fr), and
+             auto lets the column grow to the widest thing in it, which is
+             the top bar's one-line contents: round badge, playlist name,
+             End Game. On a 390px phone that came to 435px, so the whole
+             game ran 45px past the right edge, End Game was half a button
+             and the scoreboard's numbers were off screen, and the
+             overflow: hidden above meant nothing could be scrolled into
+             view. Longer playlist names made it worse. */
+          grid-template-columns: minmax(0, 1fr) 300px;
           height: 100dvh;
           max-height: 100dvh;
           overflow: hidden;
@@ -984,9 +1013,11 @@ export default function GamePage() {
 
         .top-bar {
           grid-column: 1 / -1;
+          min-width: 0;
           display: flex;
           align-items: center;
           justify-content: space-between;
+          gap: 12px;
           padding: 0 24px;
           background: rgba(17,17,17,0.95);
           border-bottom: 1px solid #222;
@@ -1015,16 +1046,22 @@ export default function GamePage() {
           color: #555;
           font-weight: 400;
           max-width: 300px;
+          /* min-width: 0 is what lets the ellipsis happen inside the flex
+             row instead of the row growing to fit the name. */
+          min-width: 0;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
+        .round-badge, .end-game-btn { flex-shrink: 0; }
 
         /* MAIN AREA */
         .main-area {
           position: relative;
           overflow-y: auto;
           overflow-x: hidden;
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
           display: flex;
           align-items: flex-start;
           justify-content: center;
@@ -1073,6 +1110,13 @@ export default function GamePage() {
           height: 100%;
           object-fit: cover;
           transition: filter 0.7s ease, transform 0.7s ease;
+          /* The blur is CSS. A long press on iOS opens the image callout,
+             which previews the file as it is: the answer, in a sheet, in the
+             middle of the guessing. The overlay takes every tap anyway. */
+          pointer-events: none;
+          -webkit-touch-callout: none;
+          -webkit-user-select: none;
+          user-select: none;
         }
         .album-img.blurred { filter: blur(18px) brightness(0.4) saturate(0.4); transform: scale(1.08); }
         .album-img.revealed { filter: blur(0) brightness(1) saturate(1); transform: scale(1); }
@@ -1099,8 +1143,8 @@ export default function GamePage() {
           box-shadow: 0 0 40px rgba(29,185,84,0.5);
           transition: transform 0.15s, box-shadow 0.15s;
         }
-        .play-btn:hover { transform: scale(1.06); box-shadow: 0 0 56px rgba(29,185,84,0.7); }
-        .play-btn:active { transform: scale(0.97); }
+        @media (hover: hover) { .play-btn:hover { transform: scale(1.06); box-shadow: 0 0 56px rgba(29,185,84,0.7); } }
+        .play-btn:active { transform: scale(0.97); transition: none; }
         .play-icon { width: 0; height: 0; border-style: solid; border-width: 14px 0 14px 24px; border-color: transparent transparent transparent #000; margin-left: 4px; }
 
         /* Progress bar */
@@ -1167,8 +1211,12 @@ export default function GamePage() {
           cursor: pointer;
           transition: background 0.15s, transform 0.1s;
         }
-        .btn-primary:hover { background: #1ed760; transform: translateY(-1px); }
-        .btn-primary:active { transform: translateY(0); }
+        @media (hover: hover) { .btn-primary:hover { background: #1ed760; transform: translateY(-1px); } }
+        /* Pressed states land on touchstart — transition: none here, so
+           the eased transition on the base rule only runs on release; with
+           it on both ends an 80ms tap let go before the 150ms ease arrived
+           and the press read as a flicker. */
+        .btn-primary:active { transform: scale(0.98); transition: none; }
         .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 
         .btn-ghost {
@@ -1184,7 +1232,8 @@ export default function GamePage() {
           transition: all 0.15s;
           white-space: nowrap;
         }
-        .btn-ghost:hover { border-color: #444; color: #999; }
+        @media (hover: hover) { .btn-ghost:hover { border-color: #444; color: #999; } }
+        .btn-ghost:active { border-color: #444; color: #999; background: rgba(255,255,255,0.06); transform: scale(0.98); transition: none; }
         .btn-ghost.compact { padding: 9px 14px; min-height: 36px; font-size: 12.5px; font-weight: 500; color: #777; }
         .btn-ghost.compact:disabled { cursor: default; }
         .btn-ghost.compact.used { color: #1DB954; border-color: rgba(29,185,84,0.5); opacity: 0.7; }
@@ -1206,7 +1255,8 @@ export default function GamePage() {
           cursor: pointer;
           transition: color 0.15s, border-color 0.15s;
         }
-        .end-game-btn:hover { color: #1DB954; border-color: #1DB954; }
+        @media (hover: hover) { .end-game-btn:hover { color: #1DB954; border-color: #1DB954; } }
+        .end-game-btn:active { color: #1DB954; border-color: #1DB954; transform: scale(0.97); transition: none; }
 
         /* Revealed state */
         .track-reveal { text-align: center; padding: 4px 0 16px; }
@@ -1259,7 +1309,8 @@ export default function GamePage() {
           cursor: pointer;
           transition: all 0.15s;
         }
-        .player-pick-btn:hover { border-color: #1DB954; color: #1DB954; background: rgba(29,185,84,0.08); }
+        @media (hover: hover) { .player-pick-btn:hover { border-color: #1DB954; color: #1DB954; background: rgba(29,185,84,0.08); } }
+        .player-pick-btn:active { background: rgba(29,185,84,0.15); border-color: #1DB954; transform: scale(0.97); transition: none; }
         .player-pick-btn.picked { background: #1DB954; border-color: #1DB954; color: #000; }
         .player-pick-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .player-pick-btn.compact { padding: 8px 12px; min-height: 32px; font-size: 12px; font-weight: 500; color: #999; }
@@ -1351,7 +1402,7 @@ export default function GamePage() {
           flex-direction: column;
           align-items: center;
           justify-content: flex-start;
-          padding: 28px 24px 24px;
+          padding: 28px 24px calc(24px + env(safe-area-inset-bottom));
           animation: fade-in 0.4s ease;
           overflow: hidden;
         }
@@ -1506,7 +1557,10 @@ export default function GamePage() {
           border: 1px solid #333;
           border-radius: 8px;
           font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-          font-size: 12px;
+          /* Focusable (it selects itself on focus), so the 16px floor from
+             components/setup-chrome.tsx applies: smaller and iOS zooms the
+             final screen into it. */
+          font-size: 16px;
           line-height: 1.5;
           resize: vertical;
           flex-shrink: 0;
@@ -1527,7 +1581,8 @@ export default function GamePage() {
           white-space: nowrap;
         }
         .btn-lg.green { background: #1DB954; color: #000; box-shadow: 0 4px 24px rgba(29,185,84,0.3); }
-        .btn-lg.green:hover { background: #1ed760; transform: translateY(-1px); box-shadow: 0 4px 32px rgba(29,185,84,0.5); }
+        @media (hover: hover) { .btn-lg.green:hover { background: #1ed760; transform: translateY(-1px); box-shadow: 0 4px 32px rgba(29,185,84,0.5); } }
+        .btn-lg.green:active { transform: scale(0.985); transition: none; }
         .finished-secondary {
           display: flex;
           gap: 8px;
@@ -1570,15 +1625,142 @@ export default function GamePage() {
           cursor: pointer;
           transition: background 0.15s, transform 0.1s;
         }
-        .install-cta-btn:hover { background: #1ed760; transform: translateY(-1px); }
+        @media (hover: hover) { .install-cta-btn:hover { background: #1ed760; transform: translateY(-1px); } }
+        .install-cta-btn:active { transform: scale(0.97); transition: none; }
 
+        /* PHONES. The host's phone is a remote control: whatever the round
+           needs next sits under the thumb without a scroll, and the room's
+           standings are a glance, not a panel. Three things had to give for
+           that, all measured on a 390×844 viewport.
+
+           The album art. Full-width it was 270px of a 648px main area, and
+           the reveal (title, artist, who-scored, the picker, the album row,
+           Next Track) ran to 807px, so Next Track was below the fold every
+           round. Sized to the viewport's height now, so it shrinks on a
+           short phone before the controls do.
+
+           The scoreboard. A 140px list under the card showed two of four
+           players and cost the reveal its last button. It is one row of
+           chips now, ranked left to right, scrolling sideways when the room
+           is bigger than the screen. Same markup; the rank, name and score
+           are still there.
+
+           The paddings. 32px around the card and 28px inside it were desktop
+           breathing room; at 390px wide that was 120px of the width spent
+           on nothing. */
         @media (max-width: 768px) {
           .game-layout {
-            grid-template-columns: 1fr;
-            grid-template-rows: 56px 1fr auto;
+            grid-template-columns: minmax(0, 1fr);
+            grid-template-rows: 56px minmax(0, 1fr) auto;
           }
-          .sidebar { border-left: none; border-top: 1px solid #1e1e1e; max-height: 140px; }
-          .end-game-btn { font-size: 11px; padding: 8px 12px; }
+          .top-bar { padding: 0 14px; }
+          .playlist-name { max-width: none; flex: 1; text-align: center; }
+          .end-game-btn { font-size: 11px; padding: 8px 12px; min-height: 40px; }
+
+          /* The card stays top-anchored in every phase, waiting included,
+             where its one control sits high on the screen: the art is the
+             game's face there, and a card that moved between phases would
+             move Reveal and Next Track with it. */
+          .main-area { padding: 14px 14px 20px; }
+          .game-card { padding: 18px 16px 16px; }
+          /* Up to full width while the room is guessing — the blurred
+             square with the play button in it is the game's face, and the
+             card under it is short — sized by the viewport's height and
+             capped at 340px, so a short phone gets smaller art before the
+             reveal too. At the reveal it collapses to a smaller share, and
+             the title, picker and Next Track take the room it gives back:
+             the art gives way before the controls do. The collapse is a
+             cut, not a transition: animating width
+             reflows the whole card for every frame, on top of the un-blur
+             that is already running, and a phone GPU drops frames on both. */
+          /* Each width twice: a browser without dvh (iOS before 15.4, older
+             webviews) drops the whole declaration, and without the vh line
+             first the art would stay at the base width: 100% in every phase
+             — the old layout back, silently. */
+          .album-wrap {
+            width: min(100%, clamp(180px, 42vh, 340px));
+            width: min(100%, clamp(180px, 42dvh, 340px));
+            margin: 0 auto 14px;
+          }
+          .album-wrap.revealed {
+            width: min(100%, clamp(140px, 27vh, 240px));
+            width: min(100%, clamp(140px, 27dvh, 240px));
+          }
+          /* A short phone (an iPhone SE is 667px) has ~560px for the card at
+             the reveal and the controls alone need 435 of it, so the art is
+             a thumbnail there: the answer is the title, and the art has
+             already had its moment. */
+          @media (max-height: 700px) {
+            .album-wrap.revealed {
+              width: min(100%, clamp(110px, 18vh, 240px));
+              width: min(100%, clamp(110px, 18dvh, 240px));
+            }
+          }
+          .play-btn { width: 76px; height: 76px; }
+          .progress-wrap { margin-bottom: 14px; }
+          .track-reveal { padding: 0 0 12px; }
+          .track-name { font-size: clamp(26px, 7.5vw, 34px); }
+
+          /* Thumb-sized. 44px is the floor for anything tapped once per
+             round; the bonus chips are tapped less and read as secondary
+             at 36px. */
+          .btn-primary { min-height: 48px; font-size: 16px; }
+          .btn-ghost { min-height: 44px; }
+          .btn-ghost.compact { min-height: 40px; }
+          .player-pick-btn { min-height: 44px; padding: 9px 16px; font-size: 15px; }
+          .player-pick-btn.compact { min-height: 36px; }
+          .player-picker { gap: 8px; }
+          .score-row-label { text-align: center; }
+
+          .sidebar {
+            border-left: none;
+            border-top: 1px solid #1e1e1e;
+            max-height: none;
+            padding-bottom: env(safe-area-inset-bottom);
+          }
+          .sidebar-header { display: none; }
+          .score-list {
+            display: flex;
+            gap: 6px;
+            padding: 8px 12px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-x: contain;
+            /* Snaps to a whole chip when a scroll ends near one — proximity,
+               not mandatory, so the strip still scrolls freely. */
+            scroll-snap-type: x proximity;
+            scroll-padding-inline: 12px;
+          }
+          .score-list::-webkit-scrollbar { display: none; }
+          .score-row {
+            flex: 0 0 auto;
+            scroll-snap-align: start;
+            gap: 8px;
+            padding: 6px 12px 6px 10px;
+            border-radius: var(--radius);
+            background: #161616;
+            border: 1px solid #222;
+          }
+          .score-row.leader { background: rgba(29,185,84,0.08); border-color: rgba(29,185,84,0.35); }
+          .score-row-left { gap: 6px; }
+          /* The sidebar's greys were tuned for #0e0e0e; on the chip's
+             #161616 the rank vanished and the score, the chip's payload,
+             sat under 3:1. Lifted to read across a dim room. */
+          .rank-num { width: auto; color: #666; }
+          .player-name-score { font-size: 13px; max-width: 120px; }
+          .score-chip { font-size: 18px; line-height: 1; color: #aaa; }
+
+          /* Fixed to the viewport, so body's side insets (app/globals.css)
+             do not reach it: it pads for the landscape notch itself. */
+          .finished-overlay {
+            padding:
+              20px
+              max(16px, env(safe-area-inset-right))
+              calc(16px + env(safe-area-inset-bottom))
+              max(16px, env(safe-area-inset-left));
+          }
         }
       `}</style>
 
@@ -1625,13 +1807,16 @@ export default function GamePage() {
 
           {/* Game card */}
           <div className="game-card">
-            {/* Album art */}
-            <div className="album-wrap">
+            {/* Album art. `revealed` is read by the phone layout, which
+                collapses the art at the reveal to make room for the scoring
+                controls under it. */}
+            <div className={`album-wrap${isRevealed ? " revealed" : ""}`}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={showAlbumArt ? albumArt : ALBUM_PLACEHOLDER}
                 alt="Album art"
                 className={`album-img${isRevealed ? " revealed" : showAlbumArt ? " blurred" : " blurred"}`}
+                draggable={false}
               />
               {/* Play button overlay */}
               {phase === "waiting" && !noAudio && (
