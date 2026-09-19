@@ -5,6 +5,121 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-09-19
+
+Most games are hosted from a phone, and the game page had never been measured
+on one. On a 390×844 viewport the grid column was 435px wide — End Game half
+a button, the scoreboard's numbers off screen, and `html, body { overflow:
+hidden }` meaning nothing could be scrolled into view — the reveal ran to
+807px in a 648px area so Next Track was below the fold every round, and the
+first tap on the setup page zoomed it to 107% because the playlist field was
+15px. None of it reproduced on a laptop. This release is the phone layout,
+the three bugs, and a test file that reads the rules back out of the source.
+
+### Fixed
+
+- **The game ran 45px past the right edge of a phone.** `.game-layout`'s
+  column was a bare `1fr`, which is `minmax(auto, 1fr)`, and `auto` let the
+  column grow to the top bar's one-line contents (round badge, playlist name,
+  End Game). It is `minmax(0, 1fr)` now in both the two-column and the
+  stacked layout, with `min-width: 0` on `.top-bar` and `.playlist-name` so
+  the name ellipsizes inside the row instead of the row growing to fit it.
+- **Every field under 16px zoomed the page on iOS.** `.url-input` was 15px
+  and `.player-input` 14px; iOS Safari zooms into a focused input with a
+  smaller computed font-size and does not zoom back out. All three setup
+  classes in `components/setup-chrome.tsx` are 16px now, and so is the
+  clipboard-fallback `<textarea>` on the finished screen, which selects
+  itself on focus. `tests/mobile.test.ts` pins the floor, the cascade order
+  that lets `.count-input`'s 16px outrank `.pill`'s 14px, and the shadcn
+  `Input`'s `text-base` that the join and quiz pages rely on.
+- **`env(safe-area-inset-*)` was 0px on every phone.** The quiz shell had
+  been padding by it for a release; without `viewport-fit=cover` the insets
+  never resolve. `app/layout.tsx` sets `viewportFit: "cover"`, and because
+  that lets every page run under the landscape notch, `app/globals.css` pads
+  `body`'s sides by the insets once — outside `@layer`, since the game
+  page's own `* { padding: 0 }` reset is unlayered and an unlayered rule
+  beats any layered one. The quiz shell keeps only its top and bottom
+  insets so the sides are not doubled; the fixed finished overlay pads for
+  itself.
+- **A long press on the blurred album art previewed the answer.** The blur
+  is CSS; iOS's image callout shows the file as stored. `.album-img` takes
+  no pointer events and no touch callout, and is `draggable={false}`.
+- **`useScreenWakeLock` could orphan a sentinel.** Found by the coverage
+  audit before it shipped: a tab hidden and shown inside the mount request's
+  few milliseconds made both calls ask, and the cleanup released only the
+  last one — the screen stayed on after Play Again. One request in flight at
+  a time now, with the regression test.
+
+### Added
+
+- **A phone layout for `/game`**, under `@media (max-width: 768px)` in the
+  page's stylesheet, that treats the host's phone as a remote control. The
+  art is sized by the viewport's height (`clamp(180px, 42dvh, 340px)`, at
+  most full width) while the room is guessing and collapses at the reveal to
+  `clamp(140px, 27dvh, 240px)`, 18dvh under 700px tall, so the title, the
+  picker and Next Track land on screen
+  without a scroll — measured on 390×844, 375×667 and 412×915. The collapse
+  is a cut, not a transition: animating width reflows the card every frame
+  on top of the un-blur, and a phone GPU drops frames on both. The
+  scoreboard is one row of chips, ranked left to right, scroll-snapped,
+  scrolling sideways past four players; every control tapped once a round
+  is at least 40px tall. The game's desktop layout is unchanged
+  (`tests/mobile.test.ts` reads the phone block by matching its braces); on
+  the setup page the pills grew to 40px and the remove button to 36px at
+  every width, because those are tap targets on a phone and were 36px and
+  32px.
+- **`lib/wake-lock.ts` keeps the screen on for the whole game.** A phone left
+  alone through a long guess locks, and a locked iPhone pauses the clip. The
+  browser releases the lock whenever the tab is hidden and never hands it
+  back, so the hook re-requests on `visibilitychange`; every failure is
+  silent by design. Held through the final scores — that is the screen the
+  room scans the QR off. `tests/wake-lock.test.ts` drives the hook under
+  jsdom through every branch, the wake lock stubbed.
+- **Pressed states for touch.** Every `:hover` on the setup and game
+  surfaces, and on the footer, the outage notice and the install banner
+  rendered under them, sits behind `@media (hover: hover)` — a tap applies
+  `:hover` and leaves it applied until the next tap lands elsewhere — and
+  every control has a `:active` carrying `transition: none`, so the press
+  lands on touchstart rather than at the end of the base rule's ease. The platform's tap highlight
+  is stripped on that basis, `touch-action: manipulation` stops two quick
+  taps on Next Track reading as double-tap-to-zoom, and the game page
+  refuses Android's pull-to-refresh (`overscroll-behavior-y: none`), which
+  would have restarted the game at round one with the scores wiped.
+- **The iOS home-screen title and status bar** (`appleWebApp`; the manifest's
+  `display: standalone` was already what made it an app), and `themeColor`
+  aligned to `public/manifest.json`'s `#111111`: Android painted the address
+  bar green on a #111 page and dark once installed.
+
+### Changed
+
+- **Tests: 936 → 994.** `tests/mobile.test.ts` pins every rule above by
+  reading the source, the way `tests/setup-pages.test.ts` does, including a
+  brace-matched scan that names any `:hover` left outside `(hover: hover)`
+  and any hovered control without a `:active`. `tests/wake-lock.test.ts` is
+  the first test here to render a hook with `react-dom/client` under jsdom.
+- `CLAUDE.md` gains "Phones are the host's screen": the six rules and why
+  each fails with the desktop looking fine.
+
+### Known gaps
+
+- **A reload is still round one with the scores wiped.** The sessionStorage
+  payload is the setup, not the progress; pull-to-refresh is refused now,
+  but a webview evicting the tab or a mis-swiped back gesture still lands
+  the host there. Persisting `currentIndex` and the scores is its own change.
+- **A landscape phone gets the desktop grid** (every notched phone is over
+  768px wide in landscape). The body-level side insets keep it out from
+  under the camera, but the 300px sidebar and 24px paddings are the desktop's.
+- **`/j/[code]` and `/buzz/[code]` are still in the system font** — the
+  shadcn card, not the setup page's Bebas Neue and Outfit. Functional on a
+  phone, off-brand.
+- **A wake lock the platform drops while the page stays visible is not
+  re-requested until the next hide/show.** `lib/wake-lock.ts` listens to
+  `visibilitychange`, not to the sentinel's `release` event; a `release`
+  listener that re-asks needs a backoff or it loops under battery saver.
+- **The chip strip gives no sign that a fifth player is off screen.** The
+  scrollbar is hidden and there is no edge fade; a mask would also fade a
+  fourth chip that exactly fits. Needs an overflow-aware treatment.
+
 ## [1.12.2] - 2026-09-19
 
 A host reported that the game "can't be played at all — I loaded a compatible
