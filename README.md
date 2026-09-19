@@ -104,7 +104,7 @@ cp .env.example .env.local
 | `SPOTIFY_CLIENT_SECRET` | ⤴ | |
 | `UPSTASH_REDIS_REST_URL` | Production | Backs rooms, quizzes, rate limits, and both caches (`lib/kv.ts`). Unset locally → in-process `Map`, which is fine for one `next dev` process but **not** for multi-instance serverless. Free tier at [upstash.com](https://upstash.com). |
 | `UPSTASH_REDIS_REST_TOKEN` | ⤴ | |
-| `NEXT_PUBLIC_BUZZER_WS_URL` | Buzzer Mode only | `ws://127.0.0.1:8787` locally, `wss://guesssong-buzzer.<subdomain>.workers.dev` in production. Unset → the Buzzer Mode toggle is hidden. |
+| `NEXT_PUBLIC_BUZZER_WS_URL` | Buzzer Mode only | `ws://127.0.0.1:8787` locally, `wss://guesssong-buzzer.<subdomain>.workers.dev` in production. `https://` works too — the client folds it into `wss://` before opening the socket, because browsers older than 2024 refuse an `https://` WebSocket URL outright (and `http://` into `ws://`, which only a page served over http can use). Unset → the Buzzer Mode toggle is hidden. |
 | `NEXT_PUBLIC_BASE_URL` | Optional | Defaults to `https://www.guessong.app`. |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | Optional | Injects GA4 when set. Events no-op outside production regardless. |
 | `SPOTIFY_MAX_LOADS_PER_MINUTE` | Optional | Global ceiling on uncached Spotify playlist loads, per minute. Default `40`. |
@@ -195,7 +195,7 @@ components/                  Buzzer button + host panel, room panel, mixed colle
                              / and /quiz share), service notice, crash screen, ui/ (shadcn primitives)
 lib/                         All shared logic — see "Architecture" below
 worker/                      Cloudflare Worker + BuzzerRoom Durable Object
-tests/                       46 Vitest files, 925 cases
+tests/                       46 Vitest files, 936 cases
 types/                       Track, room, quiz, preview, and service-status wire types
 ```
 
@@ -284,7 +284,7 @@ Two hand-written changelogs, and a release updates both: [`CHANGELOG.md`](./CHAN
 ## Testing
 
 ```bash
-npm test              # 46 files, 925 cases — vitest, jsdom
+npm test              # 46 files, 936 cases — vitest, jsdom
 cd worker && npm test # Durable Object tests inside workerd
 ```
 

@@ -177,7 +177,10 @@ SPOTIFY_MAX_LOADS_PER_MINUTE                # Optional — global upstream burst
 SPOTIFY_MAX_LOADS_PER_DAY                   # Optional — global ceiling per rolling 24h, default 2000
 SPOTIFY_BUDGET_WARN_RATIO                   # Optional — fraction of the daily ceiling that triggers the heads-up notice, default 0.8
 PREVIEW_MAX_LOOKUPS_PER_MINUTE              # Optional — global iTunes/Deezer ceiling, default 120
+NEXT_PUBLIC_BUZZER_WS_URL                   # Optional — the buzzer Worker; unset hides Buzzer Mode
 ```
+
+**`socketUrl` folds `http(s)://` into `ws(s)://`, and that fold must stay.** Production's `NEXT_PUBLIC_BUZZER_WS_URL` is `https://`, the README says `wss://`, and only browsers newer than early 2024 accept the first inside `new WebSocket()`; everything older throws from the constructor, inside the connect effect, and a phone that taps Join Room lands on the crash screen while the host reads "Nobody has scanned yet". `docs/operations.md` "The host opened the room and nobody joined".
 
 Without the Upstash pair, `lib/kv.ts` falls back to an in-process `Map`. That is fine for `next dev` and tests, but **not** for multi-instance serverless deploys: rooms created by one lambda would be invisible to another, rate limit counters would reset per instance, and the preview cache would lose most of its hit rate.
 

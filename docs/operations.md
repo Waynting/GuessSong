@@ -35,7 +35,7 @@ No `.github/workflows`. Nothing runs the suite before a merge. Before opening a
 pull request:
 
 ```bash
-npm test              # 46 files, 925 tests, ~2s
+npm test              # 46 files, 936 tests, ~2s
 npx tsc --noEmit
 npx eslint app lib components
 npm run build         # see the warning below
@@ -281,6 +281,30 @@ client can never receive an app-level error — there is no socket to send one
 over. `lib/use-buzzer-socket.ts` therefore counts consecutive never-opened
 attempts and gives up at three. The threshold cannot be one: a phone waking on a
 flaky network legitimately fails the first attempt or two.
+
+### "The host opened the room and nobody joined"
+
+The room opens, the QR renders, every player who scans it taps Join Room and
+lands on **"The game stopped"**; the host's screen keeps reading "Nobody has
+scanned yet". Seen only on phones that have not had a browser update since early
+2024 — an iPhone 8 or X on iOS 16, Samsung Internet below 27, an Android
+WebView below 125 inside LINE — and never on the developer's machine.
+
+The cause was the scheme. Production's `NEXT_PUBLIC_BUZZER_WS_URL` is
+`https://guesssong-buzzer.<subdomain>.workers.dev`, not the `wss://` the docs
+name. Browsers newer than the ones above fold `https` into `wss` inside the
+`WebSocket` constructor themselves, so the join worked from every machine it was
+tested on; older ones throw `SyntaxError: The URL's scheme must be either 'ws'
+or 'wss'` from the constructor, inside the connect effect, and the route error
+boundary turns that into the crash screen. `socketUrl()` in
+`lib/use-buzzer-socket.ts` now folds the scheme itself, and `httpOrigin()` in
+`lib/buzzer-client.ts` folds the other way with the same anchored,
+case-insensitive rule; both read the value through one trimmed
+`buzzerWorkerUrl()`, so either spelling of the env var works on every browser
+that has a `WebSocket` at all.
+`tests/buzzer.test.ts` pins it against the production value. Do not "tidy" the
+env var to `wss://` as the fix and drop the fold: the next deploy that sets it
+the other way brings this back for the same phones, silently.
 
 ### "The room disappeared mid-game"
 
