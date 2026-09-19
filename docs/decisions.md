@@ -301,6 +301,55 @@ whether a pill becoming a link costs creations at all, which is `created` in
 
 ---
 
+## D10 — The host's phone is a remote control, not a small desktop
+
+**Decided:** 2026-09-19 (1.13.0), the first time the game page was measured on
+a phone viewport.
+
+Most games are hosted from a phone, and until this release the game page had
+only ever been looked at on a laptop. On 390×844 the grid ran 45px past the
+right edge, the reveal ran to 807px in a 648px area so Next Track was below
+the fold every round, and the first tap on the setup page zoomed it to 107%.
+Under `@media (max-width: 768px)` the page is now laid out around the round
+rather than around the card: the art is sized by the viewport's height and
+collapses at the reveal, the scoreboard is one row of chips ranked left to
+right, and every control tapped once a round is at least 40px tall
+(`app/game/page.tsx`). The rules that hold it together, and why each fails with
+the desktop looking fine, are `CLAUDE.md`'s "Phones are the host's screen";
+this entry is the alternatives.
+
+**Rejected:**
+
+- *A scaled-down desktop* — the same grid, narrowed. That is what the page
+  had: a 140px sidebar under the card that showed two of four players and cost
+  the reveal its last button on every phone measured.
+- *Animating the art's collapse.* It is a cut, not a transition: animating
+  width reflows the whole card for every frame, on top of the un-blur that is
+  already running, and a phone GPU drops frames on both.
+- *Padding for the safe area per page.* `viewportFit: "cover"` is what makes
+  `env(safe-area-inset-*)` non-zero at all, and it lets every page run under
+  the landscape notch, so the side insets are padded once, on `body` in
+  `app/globals.css`, outside `@layer`; a surface pads for itself only when it
+  is `position: fixed`. The quiz shell had padded by the insets for a release
+  while they computed to 0px, which is the failure per-page handling invites.
+- *Persisting progress so a reload is not round one.* The sessionStorage
+  payload is the setup, not the score (architecture.md §2). Pull-to-refresh is
+  refused instead (`overscroll-behavior-y: none`); a webview evicting the tab
+  or a mis-swiped back gesture still lands on round one, and persisting
+  `currentIndex` and the scores is its own change.
+
+**Cost accepted:** a landscape phone gets the desktop grid, because every
+notched phone is over 768px wide in landscape; the chip strip gives no sign
+that a fifth player is off screen; and a wake lock the platform drops while the
+page stays visible is not re-requested until the next hide and show. All three
+are in 1.13.0's known gaps.
+
+**Would reopen if:** one of those gaps draws a report — a landscape host, or a
+game lost to a reload the refusal does not cover. The second is the point to
+persist progress, not to loosen the refusal.
+
+---
+
 ## Rejected and still rejected
 
 Short entries, so they are not re-proposed as new ideas.

@@ -35,7 +35,7 @@ No `.github/workflows`. Nothing runs the suite before a merge. Before opening a
 pull request:
 
 ```bash
-npm test              # 46 files, 936 tests, ~2s
+npm test              # 48 files, 994 tests, ~2s
 npx tsc --noEmit
 npx eslint app lib components
 npm run build         # see the warning below
@@ -363,6 +363,56 @@ Spotify's own spellings. Two causes remain, told apart by the playlist's size:
   (`GET /v1/search?type=track`), make the entry's `name` the spelling Spotify
   returns, move the old one to `aka`, and add the pair to that test. Not by
   editing `lib/cjk-fold.ts`, which is generated.
+
+### "The game runs off the right edge of my phone"
+
+Fixed in 1.13.0, and worth knowing the shape of because it never reproduces on
+a laptop. `.game-layout`'s column was a bare `1fr`, which is `minmax(auto, 1fr)`,
+and `auto` let the column grow to the top bar's one-line contents — round badge,
+playlist name, End Game. On a 390px phone that came to 435px, and
+`html, body { overflow: hidden }` meant nothing could be scrolled into view: End
+Game was half a button and the scoreboard's numbers were off screen. The column
+is `minmax(0, 1fr)` now, with `min-width: 0` on `.top-bar` and `.playlist-name`
+so a long name ellipsizes instead of widening the row (`app/game/page.tsx`);
+`tests/mobile.test.ts` pins all three, and a long playlist name is the quickest
+reproduction if it ever comes back.
+
+Two phone-only symptoms that shipped alongside it are told apart by what the
+host describes. **The page zooms in on the first tap and stays zoomed:** a
+focusable field under 16px — iOS Safari zooms into it and never zooms back out.
+The floor lives in `components/setup-chrome.tsx`, and the game's
+clipboard-fallback `<textarea>` counts as a field because it selects itself on
+focus. **The layout sits under the notch in landscape, or a safe-area padding
+computes to 0px:** `viewportFit: "cover"` is missing from `app/layout.tsx`; it
+is the only thing that makes `env(safe-area-inset-*)` non-zero, and the quiz
+shell padded by the insets for a whole release before that was noticed. The
+side insets are padded once, on `body` in `app/globals.css`, so a page that adds
+them again doubles them.
+
+Reproduce on a 390×844 viewport (headless Chrome, or a real phone via
+`DEV_ORIGINS`), not by narrowing a desktop window: desktop Chrome does not zoom
+into inputs and has no insets, which is how all three shipped. The rules, and
+why each fails with the desktop looking fine, are in CLAUDE.md under "Phones
+are the host's screen".
+
+### "The phone locked mid-clip and the music stopped"
+
+Since 1.13.0 the game page holds a screen wake lock for the whole game, final
+scores included (`useScreenWakeLock` in `lib/wake-lock.ts`, mounted from
+`app/game/page.tsx`), so on a browser that grants one the phone stays awake
+through a long guess. Every refusal is silent by design: the API is absent on
+older browsers, refused on low battery, and blocked inside some webviews, and
+in each case the game plays exactly as it did before the hook existed — the
+host's fix is the phone's own auto-lock setting. `'wakeLock' in navigator` from
+the console on that phone is the whole diagnostic; there is nothing to log
+because there is nothing to act on.
+
+One case the hook does not cover, and it is a known gap rather than a bug: a
+lock the platform drops while the page stays visible is not re-requested until
+the tab is next hidden and shown, because the hook listens to `visibilitychange`
+and not to the sentinel's `release` event. A `release` listener that re-asks
+needs a backoff or it loops under battery saver — add that before adding the
+listener. `tests/wake-lock.test.ts` drives every branch the hook does have.
 
 ### "A clip plays but the answer card disagrees"
 

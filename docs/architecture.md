@@ -81,7 +81,10 @@ GAME  app/game/page.tsx
 The state machine lives entirely in React state. A reload loses the game, which
 is why `sessionStorage` holds the payload but not the score: recovering a
 half-played party would need a server-side game record, and that is the first
-step towards accounts.
+step towards accounts. It is also why the game page refuses Android's
+pull-to-refresh (`overscroll-behavior-y: none` in `app/game/page.tsx`): on a
+phone the ordinary gesture for scrolling back up is a reload, and a reload is
+round one with the scores wiped.
 
 ---
 
