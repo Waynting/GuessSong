@@ -5,6 +5,81 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.2] - 2026-09-19
+
+A host reported that the game "can't be played at all — I loaded a compatible
+playlist but no players join", and that retrying changed nothing. The room
+opened, the QR rendered, and every phone that scanned it crashed to "The game
+stopped" the moment the player tapped Join Room — on phones that have not had
+a browser update since early 2024, and never on the machine the feature was
+tested from.
+
+### Fixed
+
+- **Join Room crashed every pre-2024 browser.** Production's
+  `NEXT_PUBLIC_BUZZER_WS_URL` is `https://guesssong-buzzer.<subdomain>.workers.dev`
+  (read out of the deployed chunk; the README, `.env.example` and the local
+  `.env` comment all say `wss://`). `socketUrl()` in `lib/use-buzzer-socket.ts`
+  handed that `https://…/rooms/<code>/ws` string straight to `new WebSocket()`.
+  Chrome/Edge 125, Firefox 124 and Safari 17.3 fold `https` into `wss`
+  inside the constructor themselves; everything older — an iPhone 8 or X on
+  iOS 16, Samsung Internet below 27, an Android WebView below 125 inside
+  LINE — throws `SyntaxError: The URL's scheme must be either 'ws' or 'wss'`
+  from the constructor, inside the connect effect, and the route error
+  boundary turns that into the crash screen. The host's own `POST …/rooms`
+  went through `fetch`, which accepts `https://` everywhere, so the room
+  opened and the QR rendered: the host read "Nobody has scanned yet" while
+  every phone read "The game stopped". `socketUrl()` now folds `http(s)://`
+  into `ws(s)://` (anchored on `://`, case-insensitive), and `httpOrigin()` in
+  `lib/buzzer-client.ts` folds the other way with the same rule, so either
+  spelling of the env var works on every browser that has a `WebSocket` at
+  all. Verified against the live Worker: the exact URL the fold builds opens
+  and returns a `state` snapshot.
+- **The env var is read once, trimmed.** `buzzerWorkerUrl()` in
+  `lib/buzzer-client.ts` is the one reader — `isBuzzerConfigured`,
+  `httpOrigin` and `socketUrl` all go through it — and it trims and drops the
+  trailing slash. A leading space pasted into the dashboard field defeated the
+  scheme anchor without failing anything visible: the URL parser strips it, so
+  a new browser connected and the host's POST succeeded, while the old
+  constructor threw on it — the same crash back from one character. A blank
+  value now hides the Buzzer Mode toggle instead of opening a room whose POST
+  resolved to the page's own `/rooms`.
+
+### Changed
+
+- **Tests: 925 → 936.** `tests/buzzer.test.ts` pins `socketUrl()` against the
+  production value, both README spellings in both cases, whitespace, the code's
+  URL-encoding, and — through a stubbed `fetch` — that `createBuzzerRoom()`'s
+  POST and `socketUrl()` name the same host for every spelling, secure and
+  insecure. The new block's `afterEach` deletes the env var when it was unset
+  rather than assigning `undefined`, which Node stores as the string
+  `"undefined"` and `isBuzzerConfigured()` reads as configured.
+- `docs/operations.md` gains "The host opened the room and nobody joined";
+  README and `.env.example` say `https://` is accepted, and why the fold must
+  stay even after the env var is tidied to `wss://`.
+
+### Known gaps
+
+- **`getPersistentPlayerId()` and `app/buzz/[code]/page.tsx` touch
+  `window.localStorage` bare**, and the hook calls `crypto.randomUUID()`.
+  Safari with "Block All Cookies" and some embedded webviews *throw* on the
+  property access (the hazard `lib/game-storage.ts` exists for), and
+  `crypto.randomUUID` is undefined on a non-secure LAN origin — both land a
+  phone on the same crash screen at Join Room, and the host's room panel reads
+  `localStorage` bare too. Pre-existing, outside this fix; the storage access
+  should go through a guarded helper with an in-memory fallback.
+- **A protocol-relative `//host` or backslashed `https:\\host` value** passes
+  the host's `fetch` (the URL parser tolerates both) but misses the `://`
+  anchor, so it reaches the old constructor un-folded. Nobody pastes those;
+  documented rather than handled.
+- **`new WebSocket(url)` is still unguarded** for a value with a fragment or
+  an inner space, deliberately: every such value fails the host's own
+  `fetch(…/rooms)` first (`room_open_failed` on the setup page), so no phone
+  ever receives a code, and the boundary stays for the throw nobody predicted.
+- `worker/src/index.ts` compares the `Upgrade` header case-sensitively;
+  browsers send `websocket` lower-case, a proxy canonicalising to `WebSocket`
+  would get a 426. Not seen in production.
+
 ## [1.12.1] - 2026-09-16
 
 A player reported the Taste Quiz "listing a song as not in the playlist when

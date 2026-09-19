@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { buildGamePayload, parseGamePayload, mergeRoomRoster } from "@/lib/game-session";
-import { reduce, type BuzzerSocketState } from "@/lib/use-buzzer-socket";
-import { buzzerJoinUrl } from "@/lib/buzzer-client";
+import { reduce, socketUrl, type BuzzerSocketState } from "@/lib/use-buzzer-socket";
+import { buzzerJoinUrl, createBuzzerRoom, isBuzzerConfigured } from "@/lib/buzzer-client";
 import {
   parseClientMessage,
   type BuzzEntry,
@@ -117,6 +117,168 @@ describe("buzzerJoinUrl", () => {
 
   it("carries no host token", () => {
     expect(buzzerJoinUrl("AB7K")).not.toMatch(/token/i);
+  });
+});
+
+describe("socketUrl (regression: Join Room crashed every phone older than 2024)", () => {
+  const saved = process.env.NEXT_PUBLIC_BUZZER_WS_URL;
+  afterEach(() => {
+    // `= undefined` would leave the string "undefined" behind, which reads as
+    // configured. Same idiom as tests/loop-links.test.ts.
+    if (saved === undefined) delete process.env.NEXT_PUBLIC_BUZZER_WS_URL;
+    else process.env.NEXT_PUBLIC_BUZZER_WS_URL = saved;
+  });
+
+  /**
+   * What `new WebSocket(url)` did in every browser before Chrome 125, Firefox
+   * 124 and Safari 17.3: refuse any scheme but ws/wss, at the constructor.
+   * Newer engines fold http(s) into ws(s) themselves, which is exactly why a
+   * developer's machine never sees this and a nine-year-old iPhone always does.
+   */
+  function legacyWebSocketAccepts(url: string): boolean {
+    return /^wss?:\/\//.test(url);
+  }
+
+  it("folds an https:// Worker URL into wss:// — the value production was set to", () => {
+    // README says wss://; the deployed bundle carried https://. Both name the
+    // same Worker, and the join has to work on whichever the deploy used.
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "https://guesssong-buzzer.example.workers.dev";
+    const url = socketUrl("ab7k");
+    expect(url).toBe("wss://guesssong-buzzer.example.workers.dev/rooms/AB7K/ws");
+    expect(legacyWebSocketAccepts(url!)).toBe(true);
+  });
+
+  it("folds http:// into ws:// for a local wrangler dev Worker", () => {
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "http://127.0.0.1:8787/";
+    expect(socketUrl("ab7k")).toBe("ws://127.0.0.1:8787/rooms/AB7K/ws");
+  });
+
+  it("leaves a wss:// value alone, trailing slash included", () => {
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "wss://guesssong-buzzer.example.workers.dev/";
+    expect(socketUrl("ab7k")).toBe("wss://guesssong-buzzer.example.workers.dev/rooms/AB7K/ws");
+  });
+
+  it("is null when the deployment has no Worker at all", () => {
+    delete process.env.NEXT_PUBLIC_BUZZER_WS_URL;
+    expect(socketUrl("AB7K")).toBeNull();
+  });
+
+  it("reads an empty value as unset, the same way the setup page does", () => {
+    // A dashboard can save the variable with no value. `isBuzzerConfigured`
+    // hides the toggle on `/` for that, but `/buzz/[code]` is reachable by URL
+    // regardless, and a hook that disagreed would hand `new WebSocket()` the
+    // bare path "/rooms/AB7K/ws" — a relative URL, a SyntaxError, the crash
+    // screen. The two readings of the env var must stay the same reading.
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "";
+    expect(socketUrl("AB7K")).toBeNull();
+    expect(isBuzzerConfigured()).toBe(false);
+  });
+
+  it("trims the value, because a leading space defeats the scheme fold silently", () => {
+    // Pasted into a dashboard with a stray space. Unfolded, the URL parser
+    // strips the space and a new browser connects — the host's POST too — so
+    // nothing on a developer's machine notices, while the old constructor
+    // throws on it: the crash this module fixes, back from one character.
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = " https://guesssong-buzzer.example.workers.dev \n";
+    expect(socketUrl("ab7k")).toBe("wss://guesssong-buzzer.example.workers.dev/rooms/AB7K/ws");
+
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "   ";
+    expect(socketUrl("AB7K")).toBeNull();
+    expect(isBuzzerConfigured()).toBe(false);
+  });
+
+  it("leaves ws:// alone and folds only the leading scheme", () => {
+    // ws:// is the documented local wrangler value and must not be touched —
+    // the existing cases only ever fed the fold http(s) or wss. And the fold
+    // matches a scheme, not the word: a hostname that carries "https" in it
+    // reaches the constructor as typed.
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "ws://127.0.0.1:8787";
+    expect(socketUrl("ab7k")).toBe("ws://127.0.0.1:8787/rooms/AB7K/ws");
+
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "wss://https-gateway.example.com";
+    expect(socketUrl("ab7k")).toBe("wss://https-gateway.example.com/rooms/AB7K/ws");
+  });
+
+  it("accepts an upper-case scheme, which the URL parser lowercases before the constructor checks it", () => {
+    // Pasted from a dashboard. The fold is case-insensitive on purpose; the
+    // assertion goes through `new URL()` because that is what `new WebSocket()`
+    // applies to the string before it looks at the scheme, in every engine —
+    // so it stays true whether or not the fold ever normalises the case itself.
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "HTTPS://guesssong-buzzer.example.workers.dev";
+    const secure = socketUrl("ab7k");
+    expect(secure).toMatch(/^wss:\/\//i);
+    expect(new URL(secure!).protocol).toBe("wss:");
+    expect(new URL(secure!).pathname).toBe("/rooms/AB7K/ws");
+
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "Http://127.0.0.1:8787/";
+    expect(new URL(socketUrl("ab7k")!).protocol).toBe("ws:");
+  });
+
+  it("URL-encodes the code so a segment that is not a code cannot rewrite the path", () => {
+    // The code is the `/buzz/[code]` URL segment, which Next has already
+    // decoded by the time the page sees it. A "/" or "?" inside it must reach
+    // the Worker as one opaque segment, not as a second path element or a
+    // query string on its router. The old line had this; the rewrite kept it.
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "https://guesssong-buzzer.example.workers.dev";
+    expect(socketUrl("ab/7k")).toBe("wss://guesssong-buzzer.example.workers.dev/rooms/AB%2F7K/ws");
+    expect(socketUrl("ab 7k")).toBe("wss://guesssong-buzzer.example.workers.dev/rooms/AB%207K/ws");
+    expect(socketUrl("ab?7k#x")).toBe(
+      "wss://guesssong-buzzer.example.workers.dev/rooms/AB%3F7K%23X/ws"
+    );
+  });
+
+  it("keeps a path prefix under the origin and strips only the one trailing slash", () => {
+    // The fold touches the scheme and nothing after it; the slash strip removes
+    // the final "/" and never collapses the path. Pinned as a property of the
+    // string, not of the deployment: worker/src/index.ts routes exactly /rooms
+    // and /rooms/<code>/ws, so a prefixed Worker would need its routes changed
+    // before this shape works end to end.
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "https://example.com/buzzer/";
+    expect(socketUrl("ab7k")).toBe("wss://example.com/buzzer/rooms/AB7K/ws");
+
+    process.env.NEXT_PUBLIC_BUZZER_WS_URL = "https://example.com/buzzer";
+    expect(socketUrl("ab7k")).toBe("wss://example.com/buzzer/rooms/AB7K/ws");
+  });
+
+  it("derives the socket and the room POST from one value, whichever spelling the deploy used", async () => {
+    // The docstring's claim: each side accepts either spelling, so the env var
+    // is one value rather than two that can disagree. Pinned by driving both
+    // consumers from the same value and checking they name the same Worker —
+    // an https:// deploy (production's) and a wss:// deploy (the README's).
+    const posted: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        posted.push(String(url));
+        return { ok: true, status: 200, json: async () => ({ code: "AB7K", hostToken: "t" }) };
+      })
+    );
+    try {
+      // Secure spellings, either scheme, either case — and the insecure pair a
+      // `wrangler dev` Worker is reached on, which is the one cell where the
+      // fold must produce http:, not https:.
+      const cases: Array<[base: string, post: string, socket: string]> = [
+        ["https://guesssong-buzzer.example.workers.dev", "https:", "wss:"],
+        ["wss://guesssong-buzzer.example.workers.dev", "https:", "wss:"],
+        ["HTTPS://guesssong-buzzer.example.workers.dev", "https:", "wss:"],
+        ["WSS://guesssong-buzzer.example.workers.dev", "https:", "wss:"],
+        ["http://127.0.0.1:8787", "http:", "ws:"],
+        ["ws://127.0.0.1:8787", "http:", "ws:"],
+      ];
+      for (const [base, postProtocol, socketProtocol] of cases) {
+        process.env.NEXT_PUBLIC_BUZZER_WS_URL = base;
+        posted.length = 0;
+        await createBuzzerRoom();
+        const post = new URL(posted[0]);
+        const socket = new URL(socketUrl("AB7K")!);
+        expect(post.protocol).toBe(postProtocol);
+        expect(socket.protocol).toBe(socketProtocol);
+        expect(socket.host).toBe(post.host);
+        expect(post.pathname).toBe("/rooms");
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

@@ -25,6 +25,7 @@ import type {
   RoomSnapshot,
   ServerMessage,
 } from "@/lib/buzzer-protocol";
+import { buzzerWorkerUrl } from "@/lib/buzzer-client";
 
 const PLAYER_ID_STORAGE_KEY = "guesssong_player_id";
 const INITIAL_RECONNECT_MS = 1000;
@@ -51,10 +52,30 @@ export function getPersistentPlayerId(): string {
   return id;
 }
 
-function socketUrl(code: string): string | null {
-  const base = process.env.NEXT_PUBLIC_BUZZER_WS_URL;
+/**
+ * The URL a room's socket opens on, in the scheme every browser's WebSocket
+ * constructor accepts.
+ *
+ * `NEXT_PUBLIC_BUZZER_WS_URL` is documented as `wss://`, and production was
+ * set to `https://`. Both name the same Worker — a WebSocket upgrade is an
+ * HTTPS request — and every browser since Chrome 125, Firefox 124 and Safari
+ * 17.3 normalises the scheme itself, which is why nothing on a developer's
+ * machine ever noticed. Anything older throws `SyntaxError: The URL's scheme
+ * must be either 'ws' or 'wss'` from the constructor, inside the connect
+ * effect below, and the route error boundary turns that into "The game
+ * stopped" on the phone the moment the player taps Join Room. The host sees
+ * nobody arrive. An iPhone 8 or X cannot run iOS 17, so this is not a
+ * hypothetical population.
+ *
+ * The rule is the mirror of `httpOrigin()` in lib/buzzer-client.ts, which
+ * folds `ws` into `http` for the one POST; each side accepts either spelling,
+ * so the env var is one value rather than two that can disagree.
+ */
+export function socketUrl(code: string): string | null {
+  const base = buzzerWorkerUrl();
   if (!base) return null;
-  return `${base.replace(/\/$/, "")}/rooms/${encodeURIComponent(code.toUpperCase())}/ws`;
+  const origin = base.replace(/^http(s?):\/\//i, (_, s: string) => `ws${s.toLowerCase()}://`);
+  return `${origin}/rooms/${encodeURIComponent(code.toUpperCase())}/ws`;
 }
 
 export interface BuzzerSocketState {

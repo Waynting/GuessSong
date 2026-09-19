@@ -22,20 +22,43 @@ export class BuzzerUnavailableError extends Error {
   }
 }
 
+/**
+ * The one place the Worker's address is read.
+ *
+ * Trimmed, because the value is pasted into a dashboard field, and a leading
+ * space defeats the scheme anchor of both folds — `^ws` in `httpOrigin()`
+ * below, `^http` in `socketUrl()` (lib/use-buzzer-socket.ts) — without failing
+ * anything a developer would see: the URL parser strips it, so a new browser
+ * connects and the host's POST succeeds, while the old constructor throws on
+ * it — the exact crash `socketUrl()` exists to prevent, from one stray
+ * character. The trailing slash comes off here too, so neither consumer has
+ * to. Null when unset or blank, so the three readers of this variable agree
+ * on what "no Worker" means.
+ */
+export function buzzerWorkerUrl(): string | null {
+  const raw = process.env.NEXT_PUBLIC_BUZZER_WS_URL?.trim().replace(/\/$/, "");
+  return raw ? raw : null;
+}
+
 /** True when the deployment is configured for Buzzer Mode at all. */
 export function isBuzzerConfigured(): boolean {
-  return Boolean(process.env.NEXT_PUBLIC_BUZZER_WS_URL);
+  return buzzerWorkerUrl() !== null;
 }
 
 /**
  * The Worker is reached over ws:// for sockets and http:// for this one POST.
  * Deriving the HTTP origin from the socket URL keeps deployments to a single
  * env var instead of two that can drift apart.
+ *
+ * The same fold as `socketUrl()` in lib/use-buzzer-socket.ts, in the other
+ * direction: anchored on `://` and case-insensitive, so the two consumers of
+ * this env var agree on every spelling a dashboard might hand over rather than
+ * only the two the README names.
  */
 function httpOrigin(): string | null {
-  const ws = process.env.NEXT_PUBLIC_BUZZER_WS_URL;
+  const ws = buzzerWorkerUrl();
   if (!ws) return null;
-  return ws.replace(/^ws/, "http").replace(/\/$/, "");
+  return ws.replace(/^ws(s?):\/\//i, (_, s: string) => `http${s.toLowerCase()}://`);
 }
 
 export async function createBuzzerRoom(): Promise<Omit<BuzzerRoomHandle, "hostName">> {
