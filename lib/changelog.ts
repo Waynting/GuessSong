@@ -54,6 +54,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.12.2",
+    date: "2026-09-19",
+    headline:
+      "Buzzer Mode works on older phones again: scanning the QR and tapping Join no longer ends on \"The game stopped\".",
+    headlineZh:
+      "搶答器模式在舊手機上又能用了：掃了 QR code、按下加入，不會再跳出「遊戲中斷了」。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "On phones that have not had a browser update since early 2024 — an iPhone 8 or X, an older Samsung, a link opened inside LINE on an older Android — tapping Join Room crashed the page, while the host's screen kept saying nobody had scanned. The address the phone used to reach the room was written in a form those browsers refuse; it is now written in the form every browser accepts.",
+        textZh: "2024 年初以後沒更新過瀏覽器的手機——iPhone 8、iPhone X、比較舊的三星、在舊版 Android 的 LINE 裡打開的連結——按下加入房間就會整頁當掉，主持人的畫面卻一直顯示還沒有人掃碼。手機連進房間用的網址，寫法是這些瀏覽器不接受的；現在改成每一種瀏覽器都接受的寫法。",
+      },
+    ],
+  },
+  {
     version: "1.12.1",
     date: "2026-09-16",
     headline:
