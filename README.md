@@ -4,7 +4,7 @@ A local party music guessing game powered by Spotify playlists. Live at **[guess
 
 No login, no accounts. The host pastes a public Spotify playlist URL, everyone guesses out loud, and the host awards points.
 
-Current version: **1.12.0** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **1.13.0** — see [CHANGELOG.md](./CHANGELOG.md).
 
 ## How It Works
 
@@ -68,7 +68,7 @@ It is built as the first **link-shaped loop surface** rather than as a game mode
 - In-app "What's new" release notes overlay
 - Installable as a PWA, with Android Web Share Target support — share a Spotify playlist link straight into the app
 - GA4 analytics behind a typed event union (opt-in via env var)
-- Mobile-first layout
+- Built to be hosted from a phone — under 768px the game page is a remote control (the art collapses at the reveal, the scoreboard is one row of chips, Next Track lands on screen without a scroll), the screen stays on for the whole game where the browser grants a wake lock (`lib/wake-lock.ts`), and pull-to-refresh is refused because a reload is round one with the scores wiped
 
 ## Stack
 
@@ -175,7 +175,7 @@ ipconfig getifaddr en0            # macOS Wi-Fi — e.g. 10.107.0.98
 app/
   page.tsx                   Setup — playlist, players, a folded settings row, Mixed mode
   quiz/                      Taste Quiz creation page (page.tsx + quiz-create.tsx)
-  game/page.tsx              The game — phase machine, playback, scoring, result images
+  game/page.tsx              The game — phase machine, playback, scoring, result images, the phone layout
   about/                     "How to play" page
   zh/                        Traditional-Chinese landing page (written natively, not translated)
   guides/                    Guides index + eight articles (metadata declared in lib/guides.ts)
@@ -195,7 +195,7 @@ components/                  Buzzer button + host panel, room panel, mixed colle
                              / and /quiz share), service notice, crash screen, ui/ (shadcn primitives)
 lib/                         All shared logic — see "Architecture" below
 worker/                      Cloudflare Worker + BuzzerRoom Durable Object
-tests/                       46 Vitest files, 936 cases
+tests/                       48 Vitest files, 994 cases
 types/                       Track, room, quiz, preview, and service-status wire types
 ```
 
@@ -284,11 +284,11 @@ Two hand-written changelogs, and a release updates both: [`CHANGELOG.md`](./CHAN
 ## Testing
 
 ```bash
-npm test              # 46 files, 936 cases — vitest, jsdom
+npm test              # 48 files, 994 cases — vitest, jsdom
 cd worker && npm test # Durable Object tests inside workerd
 ```
 
-The root suite covers the pure logic (pooling, taste card, share-target parsing, game-session round-trips) and the parts most likely to regress expensively: `tests/playlist-cache.test.ts` asserts upstream **call counts** for cache hits, coalescing, cooldowns and budgets, and `tests/preview.test.ts` drives the real route handlers to pin found/absent/unavailable classification. There's no CI workflow in this repo — run both suites before shipping.
+The root suite covers the pure logic (pooling, taste card, share-target parsing, game-session round-trips) and the parts most likely to regress expensively: `tests/playlist-cache.test.ts` asserts upstream **call counts** for cache hits, coalescing, cooldowns and budgets, and `tests/preview.test.ts` drives the real route handlers to pin found/absent/unavailable classification. Two files are shaped differently: `tests/mobile.test.ts` reads the phone rules back out of `app/game/page.tsx`'s stylesheet, since vitest cannot import the page itself, and `tests/wake-lock.test.ts` renders `useScreenWakeLock` under jsdom with the wake lock stubbed. There's no CI workflow in this repo — run both suites before shipping.
 
 ## Gameplay Notes
 

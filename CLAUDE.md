@@ -354,6 +354,59 @@ Three things in that path are easy to undo by accident:
 
 Every surface name is declared once in `lib/loop-links.ts` and derived from there by the link, the analytics param, and the server-side validator. Hand-syncing those three fails silently: a stale validator still redirects, the counter just stops, and that arm reads as "nobody clicked it".
 
+## Phones are the host's screen
+
+Most games are hosted from a phone, and `app/game/page.tsx` has a phone
+layout under `@media (max-width: 768px)` that treats it as a remote control:
+the art is sized by the viewport's height and collapses at the reveal
+(`.album-wrap.revealed`), the scoreboard is one row of chips, and Next Track
+lands on screen without a scroll on a 390×844 viewport — measured, because
+before it the reveal ran to 807px in a 648px area and the host scrolled every
+round. `tests/mobile.test.ts` pins the rules below; each one fails with the
+desktop looking fine.
+
+- **The game column is `minmax(0, 1fr)`, never `1fr`.** A bare `1fr` is
+  `minmax(auto, 1fr)`, and `auto` lets the column grow to the top bar's
+  one-line contents. On a 390px phone that was 435px: End Game half a button,
+  the scoreboard's numbers off screen, and `html, body { overflow: hidden }`
+  meaning nothing could be scrolled into view. `.top-bar` and
+  `.playlist-name` carry `min-width: 0` for the same reason.
+- **No focusable field is smaller than 16px.** iOS Safari zooms the page into
+  a focused input with a smaller computed font-size and does not zoom back
+  out. Every field on `/`, `/quiz` and the room panels draws `.url-input`,
+  `.player-input` or `.count-input` from `components/setup-chrome.tsx`; the
+  join and quiz pages draw the shadcn `Input`, whose `text-base` is the same
+  floor below `md`; and the game's clipboard-fallback `<textarea>` is a
+  field too, because it selects itself on focus.
+- **`viewportFit: "cover"` in `app/layout.tsx` is what makes
+  `env(safe-area-inset-*)` non-zero.** Without it every safe-area padding on
+  the site computes to 0px, silently — the quiz shell shipped a release that
+  way. It also lets every page run under the landscape notch, so the side
+  insets are padded once, on `body` in `app/globals.css`, outside `@layer`
+  (the game page's unlayered `* { padding: 0 }` would beat a layered rule);
+  a page pads for them itself only when it is `position: fixed`. `themeColor`
+  there matches `public/manifest.json`; the two disagreeing is a site that
+  changes colour when it is installed.
+- **A refresh is round one with the scores wiped**, because the sessionStorage
+  payload is the setup, not the progress. `overscroll-behavior-y: none` on
+  the game page refuses Android's pull-to-refresh, which is otherwise the
+  ordinary gesture for scrolling back up.
+- **Every `:hover` on the setup and game surfaces sits behind
+  `@media (hover: hover)`, and every control there has a `:active`.** A tap
+  applies `:hover` and leaves it applied until the next tap lands elsewhere;
+  the pressed state a finger sees is `:active`, and every one carries
+  `transition: none` so it lands on touchstart rather than at the end of
+  the base rule's ease (`tests/mobile.test.ts` checks both). The
+  two sheets strip the platform's tap highlight from every `button` and `a`
+  on that basis, which is why the footer, the outage notice and the install
+  banner — rendered under them — carry the same pair. `.album-img` takes no
+  pointer events and no touch callout — the blur is CSS, and iOS's long-press
+  preview shows the file as stored.
+- **`useScreenWakeLock` (`lib/wake-lock.ts`) holds the screen for the whole
+  game.** A locked iPhone pauses the clip. The browser releases the lock every
+  time the tab is hidden and never hands it back, so the hook re-requests on
+  `visibilitychange`; every failure is silent by design.
+
 ## Styling Conventions
 
 - Dark aesthetic: background `#111`, cards `#1a1a1a`, Spotify green `#1DB954` accents

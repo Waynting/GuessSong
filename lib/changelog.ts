@@ -54,6 +54,46 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.13.0",
+    date: "2026-09-19",
+    headline:
+      "Hosting from a phone works properly now: the whole round fits on one screen, the screen stays on, and nothing zooms or gets cut off.",
+    headlineZh:
+      "用手機主持終於順了：一整回合放得進一個畫面、螢幕不會自己暗掉、也不會再放大或被切掉。",
+    changes: [
+      {
+        kind: "new",
+        text: "On a phone the game page is laid out like a remote control. The album art shrinks when the answer is shown so the song, the players and Next Track are all on screen without scrolling, and the scoreboard is one row you can swipe sideways instead of a list that showed two names.",
+        textZh: "在手機上，遊戲頁面改成像遙控器一樣的排法。揭曉答案時專輯封面會縮小，歌名、玩家和「下一首」都放得進畫面、不用捲動；計分板也從只看得到兩個人的清單，改成一排可以左右滑的名牌。",
+      },
+      {
+        kind: "new",
+        text: "On phones that allow it, the screen stays on for the whole game, final scores included. Before, a phone left alone through a long guess would lock and pause the clip.",
+        textZh: "在允許的手機上，整場遊戲螢幕都會保持亮著，最後的計分畫面也一樣。以前大家猜太久沒碰手機，螢幕一鎖，音樂就停了。",
+      },
+      {
+        kind: "fixed",
+        text: "On phones the right edge of the game was cut off: End Game was half a button and the scores on the scoreboard were off screen. The playlist name now shortens to fit instead of pushing everything wider than the screen.",
+        textZh: "手機上遊戲畫面的右邊會被切掉：「結束遊戲」只剩半顆按鈕、計分板的分數整個看不到。現在歌單名稱太長會自動縮短，不會再把畫面撐到比螢幕還寬。",
+      },
+      {
+        kind: "fixed",
+        text: "Tapping the playlist link or a player name on an iPhone no longer zooms the page in and leaves it there.",
+        textZh: "在 iPhone 上點歌單網址或玩家名字的欄位，頁面不會再自己放大、然後卡在放大的狀態。",
+      },
+      {
+        kind: "fixed",
+        text: "Long-pressing the blurred album cover on an iPhone used to pop up a sharp preview of it — the answer, in a sheet, mid-guess. It no longer does.",
+        textZh: "在 iPhone 上長按模糊的專輯封面，會跳出一張清楚的預覽——等於在大家還在猜的時候把答案端出來。現在不會了。",
+      },
+      {
+        kind: "better",
+        text: "Buttons respond to a tap the moment your finger lands, and pulling down on the game page no longer reloads it — a reload restarts the game from round one.",
+        textZh: "按鈕在手指碰到的那一刻就有反應；在遊戲頁面往下拉也不會再重新整理——重新整理會讓遊戲從第一回合重來。",
+      },
+    ],
+  },
+  {
     version: "1.12.2",
     date: "2026-09-19",
     headline:

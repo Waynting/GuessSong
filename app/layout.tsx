@@ -35,6 +35,15 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "GuessSong" }],
   manifest: "/manifest.json",
+  // The home-screen app's name and status bar on iOS. `display: standalone`
+  // in manifest.json is what makes it an app (iOS has read that since 11.3);
+  // these two are the tags iOS still takes only from meta. The status bar
+  // is opaque black rather than translucent so no page has to pad for it.
+  appleWebApp: { capable: true, title: "GuessSong", statusBarStyle: "black" },
+  // Next renders `capable` as the standard mobile-web-app-capable only; the
+  // Apple-prefixed twin is what iOS before the manifest read, and Chrome's
+  // deprecation notice asks for both rather than for the Apple one to go.
+  other: { "apple-mobile-web-app-capable": "yes" },
   robots: { index: true, follow: true },
   // The homepage is a client component and can't export its own metadata, so
   // the canonical lives here. /about and /zh override it; the ephemeral room
@@ -62,7 +71,14 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#1DB954",
+  // The page's own background, matching manifest.json's theme_color. The two
+  // disagreed (this was Spotify green): Android painted the address bar green
+  // on a #111 page, then dark once installed.
+  themeColor: "#111111",
+  // Without this every env(safe-area-inset-*) on the site is zero, on every
+  // phone. The quiz shell had been padding by them for a release before
+  // anything noticed, because the padding it added was 0px.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

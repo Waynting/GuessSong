@@ -37,6 +37,17 @@ export function SetupStyles() {
 
         body { background: var(--bg); font-family: 'Outfit', sans-serif; color: var(--text); }
 
+        /* Phones. Every control below has a :active rule, so the grey
+           flash iOS and Android lay over a tapped element is noise on top
+           of it; and touch-action: manipulation is what stops a second
+           quick tap on a pill or the Start button from being read as
+           double-tap-to-zoom.
+           Hover rules throughout are behind (hover: hover): a touch screen
+           has no hover, only a tap that leaves the rule stuck on until the
+           next tap lands somewhere else. */
+        button, a, input { -webkit-tap-highlight-color: transparent; }
+        button { touch-action: manipulation; }
+
         .hero-title {
           font-family: 'Bebas Neue', sans-serif;
           font-size: clamp(2.8rem, 8vw, 6rem);
@@ -66,7 +77,8 @@ export function SetupStyles() {
           border-radius: 6px;
           transition: color 0.15s, background 0.15s;
         }
-        .lang-switch:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+        @media (hover: hover) { .lang-switch:hover { color: var(--text); background: rgba(255,255,255,0.05); } }
+        .lang-switch:active { color: var(--text); background: rgba(255,255,255,0.08); transition: none; }
         .lang-switch:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
         /* A link that is a button: mode switches and the settings toggle.
@@ -90,7 +102,8 @@ export function SetupStyles() {
           text-decoration: none;
           transition: color 0.15s;
         }
-        .text-link:hover { color: #1ed760; text-decoration: underline; text-underline-offset: 3px; }
+        @media (hover: hover) { .text-link:hover { color: #1ed760; text-decoration: underline; text-underline-offset: 3px; } }
+        .text-link:active { opacity: 0.6; transition: none; }
         .text-link:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
         .settings-row {
@@ -124,7 +137,7 @@ export function SetupStyles() {
           margin-top: 18px;
         }
         .mode-links .text-link { color: #999; }
-        .mode-links .text-link:hover { color: var(--green); }
+        @media (hover: hover) { .mode-links .text-link:hover { color: var(--green); } }
         .mode-links-sep { color: #444; font-size: 12px; }
 
         .card {
@@ -139,7 +152,12 @@ export function SetupStyles() {
           border: 1.5px solid var(--border);
           border-radius: 10px;
           padding: 14px 48px 14px 16px;
-          font-size: 15px;
+          /* 16px is the floor for every field on this site, and it is not a
+             taste call: iOS Safari zooms the page into a focused input with
+             a smaller computed font-size and leaves it zoomed. The playlist
+             field was 15px, the name fields 14px, so the first tap on the
+             page scaled it to 107%. */
+          font-size: 16px;
           font-family: 'Outfit', sans-serif;
           color: var(--text);
           transition: border-color 0.2s, box-shadow 0.2s;
@@ -158,7 +176,7 @@ export function SetupStyles() {
           border: 1.5px solid var(--border);
           border-radius: 8px;
           padding: 11px 14px;
-          font-size: 14px;
+          font-size: 16px; /* the iOS floor, see .url-input */
           font-family: 'Outfit', sans-serif;
           color: var(--text);
           outline: none;
@@ -169,6 +187,7 @@ export function SetupStyles() {
 
         .pill {
           padding: 8px 12px;
+          min-height: 40px;
           border-radius: 999px;
           font-size: 14px;
           font-weight: 600;
@@ -179,7 +198,12 @@ export function SetupStyles() {
           transition: all 0.15s;
           font-family: 'Outfit', sans-serif;
         }
-        .pill:hover { border-color: #444; color: var(--text); }
+        @media (hover: hover) { .pill:hover { border-color: #444; color: var(--text); } }
+        /* Pressed states land on touchstart — transition: none here, so
+           the eased transition on the base rule only runs on release; with
+           it on both ends an 80ms tap let go before the 150ms ease arrived
+           and the press read as a flicker. */
+        .pill:not(.count-input):active { transform: scale(0.96); transition: none; }
         .pill.active {
           background: var(--green);
           border-color: var(--green);
@@ -193,6 +217,10 @@ export function SetupStyles() {
           width: 92px;
           text-align: center;
           color: var(--text);
+          /* The iOS floor again (see .url-input). The width is fixed, so
+             the count row measured below is unchanged; "Custom" at 16px
+             still clears the padding in the narrow variant. */
+          font-size: 16px;
           -moz-appearance: textfield;
         }
         .count-input::-webkit-outer-spin-button,
@@ -243,11 +271,14 @@ export function SetupStyles() {
           line-height: 1.2;
           transition: border-color 0.15s, background 0.15s, transform 0.1s;
         }
-        .link-btn:hover {
-          border-color: var(--green);
-          background: rgba(29,185,84,0.12);
-          transform: translateY(-1px);
+        @media (hover: hover) {
+          .link-btn:hover {
+            border-color: var(--green);
+            background: rgba(29,185,84,0.12);
+            transform: translateY(-1px);
+          }
         }
+        .link-btn:active { border-color: var(--green); background: rgba(29,185,84,0.16); transform: scale(0.97); transition: none; }
 
         .start-btn {
           width: 100%;
@@ -264,12 +295,14 @@ export function SetupStyles() {
           transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
           box-shadow: 0 4px 24px rgba(29,185,84,0.3);
         }
-        .start-btn:hover:not(:disabled) {
-          background: #1ed760;
-          box-shadow: 0 4px 32px rgba(29,185,84,0.5);
-          transform: translateY(-1px);
+        @media (hover: hover) {
+          .start-btn:hover:not(:disabled) {
+            background: #1ed760;
+            box-shadow: 0 4px 32px rgba(29,185,84,0.5);
+            transform: translateY(-1px);
+          }
         }
-        .start-btn:active:not(:disabled) { transform: translateY(0); }
+        .start-btn:active:not(:disabled) { transform: scale(0.985); transition: none; }
         .start-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
         .add-player-btn {
@@ -289,14 +322,17 @@ export function SetupStyles() {
           width: 100%;
           justify-content: center;
         }
-        .add-player-btn:hover {
-          border-color: var(--green);
-          background: rgba(29,185,84,0.05);
+        @media (hover: hover) {
+          .add-player-btn:hover {
+            border-color: var(--green);
+            background: rgba(29,185,84,0.05);
+          }
         }
+        .add-player-btn:active { background: rgba(29,185,84,0.1); transition: none; }
 
         .remove-btn {
-          width: 32px;
-          height: 32px;
+          width: 36px;
+          height: 36px;
           border-radius: 50%;
           background: var(--surface2);
           border: 1px solid var(--border);
@@ -310,7 +346,8 @@ export function SetupStyles() {
           justify-content: center;
           flex-shrink: 0;
         }
-        .remove-btn:hover { background: #3a1a1a; border-color: #662222; color: #ef4444; }
+        @media (hover: hover) { .remove-btn:hover { background: #3a1a1a; border-color: #662222; color: #ef4444; } }
+        .remove-btn:active { background: #3a1a1a; border-color: #662222; color: #ef4444; transform: scale(0.94); transition: none; }
 
         .section-label {
           font-size: 11px;
@@ -353,7 +390,8 @@ export function SetupStyles() {
           text-decoration: none;
           transition: border-color 0.15s ease;
         }
-        .guide-link:hover { border-color: #1DB954; }
+        @media (hover: hover) { .guide-link:hover { border-color: #1DB954; } }
+        .guide-link:active { border-color: #1DB954; background: #1f1f1f; transition: none; }
         .guide-link-title {
           color: #f0f0f0;
           font-size: 14.5px;
@@ -381,7 +419,8 @@ export function SetupStyles() {
           color: #666;
         }
         .faq-a a { color: #1DB954; }
-        .faq-a a:hover { text-decoration: underline; }
+        @media (hover: hover) { .faq-a a:hover { text-decoration: underline; } }
+        .faq-a a:active { text-decoration: underline; opacity: 0.6; transition: none; }
 
         .waveform-bar {
           animation: waveform 2.4s ease-in-out infinite alternate;
