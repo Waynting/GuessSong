@@ -5,6 +5,113 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The first `npm run stats` read after the quiz's counters had a fortnight of
+traffic under them, and the first with 60.7% repeat hosts. Five things it
+could not answer, or answered plainly, are fixed here. The reading that
+prompted them, for the record: 6,252 games in seven days; every loop arm
+under 5% except the two link-shaped ones (`join_submitted` 31%,
+`quiz_result` 13%); `share` at 0 followed of 44 shown, 0 of 94 since it
+existed; 107 quizzes made and 59 opened; ten-question quizzes finished at
+four times the rate of twenty; 952 replays of a cached 404 and no record of
+what was dead; and 1,033 tabs on the Game Over screen against 6,252 starts,
+with nothing in KV to say where the rest went. No new feature — every
+change is either an instrument for a question the stats could not answer,
+or the one-line answer the stats already gave.
+
+### Changed
+
+- **The Taste Quiz defaults to ten questions, not twenty.** `quiz_len` had a
+  week of finishers per quiz by length: 0.4 at ten, 0.1 at twenty, 0.1 at
+  fifty. A friend in a group chat finishes ten taps and drops out of twenty.
+  The three presets and the typed field are unchanged
+  (`QUIZ_DEFAULT_QUESTION_COUNT` in `types/quiz.ts`, mirrored in
+  `scripts/loop-stats.mjs` for the length table's `default` tag).
+  `docs/viral-loop.md` §7's own rule for this reading, applied once; the
+  same row now says what to read if the ten-row's rate does not rise.
+- **The result card prints the address as text; its QR is gone.** The
+  `share` arm — a QR into the image, scanned out of whatever chat the
+  picture landed in — was shown on 94 parties' cards over eleven weeks and
+  followed 0 times, while the surfaces reached by tapping a link converted
+  at 13–30%. D9's question is answered: the carrier, not the audience.
+  `drawCardFooter` in `lib/result-image.ts` is synchronous now and draws no
+  image; `loopQrDataUrl` takes its surface as a required argument, because
+  the old `= "share"` default is exactly how the code would grow back.
+  `share` stays in `LOOP_SURFACES` so a card saved before this still
+  redirects and still counts a click — it is now the one arm allowed to
+  show `followed` with no `shown`, and `docs/viral-loop.md` §6–7 say so.
+  Nothing calls `reportLoopImpression("share")` any more; `recordCardImpression`
+  and its comment block are gone from `app/game/page.tsx`.
+
+### Added — three counters, all in KV, all in `npm run stats`
+
+- **Where the games went.** `game_end:<played_out|ended_early>` and
+  `game_end_round:<n>` (early ends only, capped at `GAME_ROUND_CEILING`
+  = 20, the default song count), beaconed by `reportGameEnd` from the same
+  once-per-game guard that fires GA4's `game_finished`. The stats print
+  `Reached Game Over N xx% of games — played out · ended early` under
+  `Repeat hosts`, then `the other N closed the tab mid-game`, then a round
+  histogram for the early ends. The Game Over screen is where every
+  host-side loop surface lives — the QR, the card, the install banner — so
+  the difference between `Games started` and this line is the share of
+  games the loop never had a chance at. Three floors and a subtraction;
+  read the direction.
+- **What the share sheet said.** `quiz_share:<owner|taker>:<outcome>`, the
+  outcome being `lib/quiz-share.ts`'s verbatim (`shared` / `copied` /
+  `dismissed` / `failed`). `reportQuizShare` in `lib/loop-client.ts` sends
+  both the GA4 event and the beacon, and `components/quiz-panel.tsx` and the
+  taker's result screen go through it rather than calling `trackEvent`
+  themselves. The quiz block prints `owner share N xx% of quizzes tapped
+  it — shared · copied · dismissed · failed`, and a `taker share` line when
+  there is one. `opened ÷ created` read 0.6 with the only explanation in
+  GA4's `quiz_share_tapped`; this splits "never tapped" from "sheet
+  dismissed" from "sent and nobody opened it", which are three different
+  fixes.
+- **Why a playlist link was refused.** `playlist_refused:<code>` for the
+  four refusals that will never change — `playlist_not_found`,
+  `playlist_editorial`, `playlist_empty`, `invalid_playlist_url` — written
+  by `loadPlaylist` in `lib/playlist-cache.ts` on the way out, so the party
+  form, a Mixed room's submit and the quiz all count, and every replay from
+  the negative cache counts too. Found while wiring it: **an editorial
+  playlist is refused before the cache is read, so it was in no statistic
+  at all** — the 952 replayed 404s never included a single one. The stats
+  print `Playlist links refused — N that will never work: private or
+  deleted · Spotify's own (editorial) · empty · not a playlist URL` under
+  the cache table, with a line when editorial is a quarter or more. Which
+  code dominates is a product question the hit rate could not ask.
+
+`/api/pulse` accepts the two new event shapes (`game_finished`,
+`quiz_shared`); every field is a key tail from a closed set and
+`tests/pulse.test.ts` pins the rejections. `loopStatsKeys` names every new
+key and `tests/loop-stats.test.ts` reads the script's source for a renderer
+per prefix, so a counter added to the writer and not the script is a red
+test rather than a number printed nowhere. `tests/playlist-cache.test.ts`
+reads the refusal keys back from the in-process KV after driving each code.
+
+### Known gaps
+
+- **The two new beacons start at this deploy and do not backfill.**
+  `Reached Game Over` and `owner share` read from zero on deploy day; a
+  window straddling it reads low against `Games started` and `created`,
+  which do not. Two weeks of both — about 2026-10-06 — before reading either
+  against the numbers above. The ten-question default is the same: the
+  length table's ten-row is honest from the same date.
+- **Spotify-backed decoys are still deferred, though the trigger fired.**
+  Verdicts piled at `soulmate` (10 of 15), which is D9's stated reopen
+  condition. Not done, for two reasons written into `docs/viral-loop.md`
+  §7: hints ran at 2.3 heard per completed quiz against an allowance of
+  1.7, and at two options a hint is a whole point, so that bucket is
+  flattered; and a harder quiz that is never sent (0.6 opens per quiz) is
+  the wrong end to work on. Reopen once `per quiz` is above 1.
+- **The closed-tab remainder has no round to read.** A game whose tab
+  closed mid-party sends no end beacon by definition, so the round
+  histogram describes only the hosts who pressed End Game. If the
+  remainder stays the majority, the answer is to move what the loop wants
+  to say into the game, not to instrument the exit further.
+- **Nothing here changes `lib/analytics.ts`.** `quiz_share_tapped` and
+  `game_finished` keep their GA4 shapes; the KV copies are additive.
+
 ## [1.14.0] - 2026-09-22
 
 A host wrote in: "I can't start the game, it always gives an error and asks
@@ -518,11 +625,15 @@ asks one question; everything with a default goes behind one line.
 
 ### Known gaps
 
-- **Quiz creation may drop.** The quiz went from a pill to a text link and
+- ~~**Quiz creation may drop.**~~ The quiz went from a pill to a text link and
   its own page; read `created` in `npm run stats` two weeks after this
   deploy before deciding whether it needs more prominence. Its conversion
   now reads on `quiz_created.arrived_from` in GA4; `game_started.arrived_from
-  = "quiz_result"` is the same person weeks later.
+  = "quiz_result"` is the same person weeks later. **Answered 2026-09-22, the
+  other way:** `created` read 107 in the week after this deploy against 3 in
+  the fortnight before it. A page of its own was worth eight pills. What did
+  not follow was the sending — 0.6 opens per quiz — which is what the
+  Unreleased entry above instruments.
 - **Two GA4 series break at this deploy:** `game_finished` now includes
   abandoned games (`ended_early` separates them) and the footer surfaces'
   copy changed (the KV click counters keep their names).
