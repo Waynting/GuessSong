@@ -5,7 +5,6 @@
  * to draw its own content rows.
  */
 
-import { LOOP_QR_CAPTION } from "@/lib/loop-links";
 
 export interface ResultCanvas {
   canvas: HTMLCanvasElement;
@@ -79,82 +78,47 @@ export function drawCardHeader(ctx: CanvasRenderingContext2D, opts: HeaderOption
  *
  * Exported so the two callers that size their canvas cannot drift from what
  * the footer actually draws — a footer taller than its band gets silently
- * clipped, and the thing that would get clipped is the QR.
+ * clipped. Kept at the height the QR footer had (below) so every card keeps
+ * its proportions; the space is margin now.
  */
 export const CARD_FOOTER_HEIGHT = 112;
 
-const QR_SIZE = 60;
-
-/** Loads a data URL into something `drawImage` accepts. */
-async function loadImage(src: string): Promise<HTMLImageElement> {
-  const img = new Image();
-  img.src = src;
-  if (typeof img.decode === "function") {
-    await img.decode();
-    return img;
-  }
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => resolve();
-    img.onerror = () => reject(new Error("qr image failed to load"));
-  });
-  return img;
-}
-
 /**
- * Draws the footer: a divider, a QR back to the site, and the credit.
+ * Draws the footer: a divider, the name, and the address.
  *
- * ## Why a QR and not the address in text
+ * ## Why the address in text, and no longer a QR
  *
  * This card is the only artifact the product makes that leaves the party. It
- * used to read "Played with GuessSong" — a brand with no address — so anyone
- * who saw it in a group chat had to already know the name to act on it, which
- * is exactly the audience it does not need to reach. Printing the URL as text
- * is barely better: nobody retypes a URL off a screenshot.
+ * first read "Played with GuessSong" — a brand with no address — and from
+ * 1.3.0 carried a QR back to `/r/share`, on the reasoning that nobody
+ * retypes a URL off a screenshot. Nobody scans one out of a group-chat
+ * image either: the `share` arm was shown on 94 parties' cards and followed
+ * 0 times, over eleven weeks, while the link-shaped surfaces converted at
+ * 13–30%. A QR that is never scanned still costs the card a corner and
+ * makes it read as an advert, so the address is text again — the thing a
+ * human can at least read aloud — and the surface is retired in
+ * `lib/loop-links.ts`. Old cards still redirect.
  *
  * The URL is deliberately *not* also put in the `navigator.share` payload. iOS
  * drops `url` when a file is attached, and several Android targets drop the
  * *file* when a `url` is present — risking the image, which is the entire
  * payload, to add a link one platform throws away is a bad trade. The pixels
  * are the carrier.
- *
- * Async because generating the QR is. Fails soft: a QR that will not render
- * leaves the credit line in place rather than failing the save, since the
- * player asked for a picture of their scores and is owed one either way.
  */
-export async function drawCardFooter(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  y: number,
-  qrDataUrl?: string | null
-) {
+export function drawCardFooter(ctx: CanvasRenderingContext2D, width: number, y: number) {
   ctx.strokeStyle = "#222";
   ctx.beginPath();
   ctx.moveTo(40, y);
   ctx.lineTo(width - 40, y);
   ctx.stroke();
 
-  let textX = 40;
-  if (qrDataUrl) {
-    try {
-      const img = await loadImage(qrDataUrl);
-      ctx.drawImage(img, 40, y + 14, QR_SIZE, QR_SIZE);
-      textX = 40 + QR_SIZE + 16;
-    } catch {
-      // Keep the credit at the left margin; the card still saves.
-    }
-  }
-
   ctx.font = "bold 20px sans-serif";
   ctx.fillStyle = "#1DB954";
-  ctx.fillText("GuessSong", textX, y + 42);
+  ctx.fillText("GuessSong", 40, y + 42);
 
   ctx.font = "13px sans-serif";
   ctx.fillStyle = "#666";
-  ctx.fillText(
-    qrDataUrl ? LOOP_QR_CAPTION : "guessong.app",
-    textX,
-    y + 64
-  );
+  ctx.fillText("guessong.app", 40, y + 64);
 }
 
 /**

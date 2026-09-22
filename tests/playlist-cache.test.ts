@@ -201,6 +201,61 @@ describe("playlist cache", () => {
   });
 });
 
+describe("refusals are counted by reason", () => {
+  // `playlist_refused:<code>` in lib/loop-stats.ts, read by `npm run stats`.
+  // The hit-rate line could say one load in eight was a dead link and
+  // nothing could say why; an editorial playlist, refused before the cache
+  // is read, was in no count at all.
+  const day = new Date().toISOString().slice(0, 10);
+  const refused = (code: string) =>
+    (kv.mem.get(`loop:stats:${day}:playlist_refused:${code}`)?.value as number | undefined) ?? 0;
+
+  it("counts an editorial playlist, which no cache statistic sees", async () => {
+    await expect(
+      loadPlaylist("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M")
+    ).rejects.toMatchObject({ code: "playlist_editorial" });
+    expect(refused("playlist_editorial")).toBe(1);
+    expect(refused("playlist_not_found")).toBe(0);
+  });
+
+  it("counts a 404 on the cold load and on every replay from the negative cache", async () => {
+    upstream().mockRejectedValue(new spotify.SpotifyApiError("playlist_not_found", 404));
+    await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ code: "playlist_not_found" });
+    await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ code: "playlist_not_found" });
+    await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ code: "playlist_not_found" });
+    // Every one is a host told their link is dead; the retry is the point.
+    expect(refused("playlist_not_found")).toBe(3);
+    expect(upstreamCalls()).toBe(1);
+  });
+
+  it("counts an unparseable URL and an empty playlist under their own codes", async () => {
+    await expect(loadPlaylist("https://open.spotify.com/album/aaaaaaaaaaaa")).rejects.toMatchObject({
+      code: "invalid_playlist_url",
+    });
+    expect(refused("invalid_playlist_url")).toBe(1);
+
+    upstream().mockResolvedValue(upstreamResult([]));
+    await loadPlaylist(URL_A);
+    expect(refused("playlist_empty")).toBe(1);
+  });
+
+  it("does not count a throttling refusal — that is the budget's number, and it clears", async () => {
+    upstream().mockRejectedValue(
+      new spotify.SpotifyApiError("spotify_rate_limited", 429, { retryAfterSeconds: 60 })
+    );
+    await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ status: 429 });
+    for (const code of ["playlist_not_found", "playlist_editorial", "playlist_empty", "invalid_playlist_url"]) {
+      expect(refused(code)).toBe(0);
+    }
+    expect([...kv.mem.keys()].some((k) => k.includes("playlist_refused:"))).toBe(false);
+  });
+
+  it("does not count a successful load", async () => {
+    await loadPlaylist(URL_A);
+    expect([...kv.mem.keys()].some((k) => k.includes("playlist_refused:"))).toBe(false);
+  });
+});
+
 describe("in-flight coalescing", () => {
   it("collapses concurrent loads of the same playlist into one upstream fetch", async () => {
     let release!: () => void;

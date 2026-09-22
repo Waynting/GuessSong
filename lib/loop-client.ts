@@ -20,7 +20,7 @@
 
 import { trackEvent } from "@/lib/analytics";
 import type { LoopSurface } from "@/lib/loop-links";
-import type { MixedSubMode } from "@/lib/loop-stats";
+import type { GameEnd, MixedSubMode, QuizShareBy, QuizShareOutcome } from "@/lib/loop-stats";
 import { sendPulse } from "@/lib/pulse-client";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
@@ -85,4 +85,28 @@ export function reportLoopClick(surface: LoopSurface): void {
  */
 export function reportGameStart(hostGameIndex: number, mixed?: MixedSubMode): void {
   sendPulse(mixed ? { kind: "game_started", hostGameIndex, mixed } : { kind: "game_started", hostGameIndex });
+}
+
+/**
+ * Call once as a game reaches its Game Over screen — from the same guard
+ * that fires GA4's `game_finished`, so the two cannot disagree about whether
+ * a game ended. GA4 keeps the richer params (duration, mode, phones); this
+ * is the copy `npm run stats` can subtract from `Games started`.
+ *
+ * `roundsPlayed` is `countRoundsPlayed`'s figure, the one GA4 gets.
+ */
+export function reportGameEnd(end: GameEnd, roundsPlayed: number): void {
+  sendPulse({ kind: "game_finished", end, roundsPlayed });
+}
+
+/**
+ * Call from a quiz's share button once the sheet has answered. Both
+ * destinations, behind one function, for the reason at the top of this file:
+ * `quiz_share_tapped` had been GA4-only, and a 0.6-opens-per-quiz reading sat
+ * unexplained for a week because the number that explained it was on the
+ * side nobody opens.
+ */
+export function reportQuizShare(by: QuizShareBy, outcome: QuizShareOutcome): void {
+  trackEvent("quiz_share_tapped", { by, outcome });
+  sendPulse({ kind: "quiz_shared", by, outcome });
 }

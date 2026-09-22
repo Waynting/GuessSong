@@ -37,6 +37,7 @@ import {
 } from "@/lib/spotify";
 import { stripTrackForStorage } from "@/lib/game-session";
 import type { AppErrorCode } from "@/lib/error-messages";
+import { isPlaylistRefusalCode, recordPlaylistRefused } from "@/lib/loop-stats";
 import type { SpotifyServiceStatus } from "@/types/service-status";
 import type { Track } from "@/types";
 
@@ -774,10 +775,39 @@ async function fetchAndCache(
  * Drop-in replacement for calling getPlaylistWithTracks directly — every
  * caller should use this instead, since a single uncached path is enough to
  * put the shared quota back at risk.
+ *
+ * This wrapper also counts the refusals that will never change —
+ * `PLAYLIST_REFUSAL_CODES` in `lib/loop-stats.ts` — on the way out. It sits
+ * here and not in the routes because this is the one function all three
+ * callers share, and because an editorial playlist is refused before the
+ * cache is read and so appeared in no cache statistic at all: the hit rate
+ * could say one load in eight was a dead link and nothing could say why.
+ * A throttling code is not counted here; the budget block already does.
  */
 export async function loadPlaylist(
   playlistUrl: string,
   source: PlaylistLoadSource = "unknown"
+): Promise<LoadedPlaylist> {
+  let loaded: LoadedPlaylist;
+  try {
+    loaded = await loadPlaylistUncounted(playlistUrl, source);
+  } catch (err) {
+    if (err instanceof SpotifyApiError && isPlaylistRefusalCode(err.code)) {
+      await recordPlaylistRefused(err.code);
+    }
+    throw err;
+  }
+  // Not thrown here — `app/api/playlist/route.ts` and `lib/room.ts` each
+  // raise `playlist_empty` in their own vocabulary — but it is the same
+  // refusal, and counting it where the other three are counted keeps the
+  // four reasons on one line in `npm run stats`.
+  if (loaded.tracks.length === 0) await recordPlaylistRefused("playlist_empty");
+  return loaded;
+}
+
+async function loadPlaylistUncounted(
+  playlistUrl: string,
+  source: PlaylistLoadSource
 ): Promise<LoadedPlaylist> {
   const playlistId = parsePlaylistUrl(playlistUrl);
   if (!playlistId) {

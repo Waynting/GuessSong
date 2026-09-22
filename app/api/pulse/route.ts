@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getClientIp, rateLimit } from "@/lib/rate-limit";
 import { parsePulse } from "@/lib/pulse";
-import { recordGameStart, recordLoopImpression } from "@/lib/loop-stats";
+import {
+  recordGameEnd,
+  recordGameStart,
+  recordLoopImpression,
+  recordQuizShare,
+} from "@/lib/loop-stats";
 
 /**
  * Fire-and-forget counters from the browser. See `lib/pulse.ts` for what the
@@ -53,11 +58,20 @@ export async function POST(req: NextRequest) {
   const event = parsePulse(body);
   if (!event) return new NextResponse(null, { status: 400 });
 
-  // Both recorders are fail-soft, so nothing below can throw.
-  if (event.kind === "loop_impression") {
-    await recordLoopImpression(event.surface);
-  } else {
-    await recordGameStart(event.hostGameIndex, event.mixed);
+  // Every recorder is fail-soft, so nothing below can throw.
+  switch (event.kind) {
+    case "loop_impression":
+      await recordLoopImpression(event.surface);
+      break;
+    case "game_started":
+      await recordGameStart(event.hostGameIndex, event.mixed);
+      break;
+    case "game_finished":
+      await recordGameEnd(event.end, event.roundsPlayed);
+      break;
+    case "quiz_shared":
+      await recordQuizShare(event.by, event.outcome);
+      break;
   }
 
   return new NextResponse(null, { status: 204 });

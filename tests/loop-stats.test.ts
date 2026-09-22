@@ -23,15 +23,23 @@ vi.mock("@/lib/kv", () => ({
 }));
 
 const {
+  GAME_ENDS,
+  GAME_ROUND_CEILING,
   HOST_INDEX_CEILING,
   LOOP_STATS_TTL_SECONDS,
   MIXED_SUB_MODES,
+  PLAYLIST_REFUSAL_CODES,
   QUIZ_STAGES,
   QUIZ_LENGTH_STAGES,
   QUIZ_HINT_OUTCOMES,
+  QUIZ_SHARE_BYS,
+  QUIZ_SHARE_OUTCOMES,
   QUIZ_THROTTLED_ROUTES,
   loopStatsKeys,
+  recordGameEnd,
   recordGameStart,
+  recordPlaylistRefused,
+  recordQuizShare,
   recordQuizStage,
   recordQuizVerdict,
   recordQuizLength,
@@ -125,6 +133,29 @@ describe("the key format is the contract between writer and reader", () => {
       await recordQuizThrottled(route);
       expect(keysWritten()).toContain(expected.quizThrottled[route]);
     }
+
+    for (const by of QUIZ_SHARE_BYS) {
+      for (const outcome of QUIZ_SHARE_OUTCOMES) {
+        kv.incrs = [];
+        await recordQuizShare(by, outcome);
+        expect(keysWritten()).toContain(expected.quizShare[by][outcome]);
+      }
+    }
+
+    for (const end of GAME_ENDS) {
+      kv.incrs = [];
+      await recordGameEnd(end, 5);
+      expect(keysWritten()).toContain(expected.gameEnd[end]);
+    }
+    kv.incrs = [];
+    await recordGameEnd("ended_early", 5);
+    expect(keysWritten()).toContain(expected.gameEndRound[4]); // game_end_round:5
+
+    for (const code of PLAYLIST_REFUSAL_CODES) {
+      kv.incrs = [];
+      await recordPlaylistRefused(code);
+      expect(keysWritten()).toContain(expected.playlistRefused[code]);
+    }
   });
 
   it("refuses to key a verdict that is not one of the declared buckets", async () => {
@@ -196,6 +227,74 @@ describe("the key format is the contract between writer and reader", () => {
       expect(keys.quizThrottled[route]).toBe(`loop:stats:2026-08-09:quiz_throttled:${route}`);
     }
     expect(Object.keys(keys.quizThrottled)).toHaveLength(QUIZ_THROTTLED_ROUTES.length);
+  });
+
+  it("names a key for every share pair, every game end, every early round and every refusal code", () => {
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    for (const by of QUIZ_SHARE_BYS) {
+      expect(Object.keys(keys.quizShare[by])).toHaveLength(QUIZ_SHARE_OUTCOMES.length);
+      for (const outcome of QUIZ_SHARE_OUTCOMES) {
+        expect(keys.quizShare[by][outcome]).toBe(`loop:stats:2026-08-09:quiz_share:${by}:${outcome}`);
+      }
+    }
+    expect(Object.keys(keys.quizShare)).toHaveLength(QUIZ_SHARE_BYS.length);
+    for (const end of GAME_ENDS) {
+      expect(keys.gameEnd[end]).toBe(`loop:stats:2026-08-09:game_end:${end}`);
+    }
+    expect(Object.keys(keys.gameEnd)).toHaveLength(GAME_ENDS.length);
+    expect(keys.gameEndRound).toHaveLength(GAME_ROUND_CEILING);
+    expect(keys.gameEndRound[0]).toBe("loop:stats:2026-08-09:game_end_round:1");
+    for (const code of PLAYLIST_REFUSAL_CODES) {
+      expect(keys.playlistRefused[code]).toBe(`loop:stats:2026-08-09:playlist_refused:${code}`);
+    }
+    expect(Object.keys(keys.playlistRefused)).toHaveLength(PLAYLIST_REFUSAL_CODES.length);
+  });
+});
+
+describe("game ends", () => {
+  const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+
+  it("keys the round only for an early end — a played-out game's round is its song count", async () => {
+    await recordGameEnd("played_out", 20);
+    expect(keysWritten()).toContain(keys.gameEnd.played_out);
+    expect(keysWritten().some((k) => k.includes("game_end_round:"))).toBe(false);
+
+    kv.incrs = [];
+    await recordGameEnd("ended_early", 3);
+    expect(keysWritten()).toContain(keys.gameEnd.ended_early);
+    expect(keysWritten()).toContain(keys.gameEndRound[2]);
+  });
+
+  it("caps the round key space, so a scripted counter cannot fill KV", async () => {
+    await recordGameEnd("ended_early", 9_999);
+    expect(keysWritten()).toContain(`loop:stats:2026-08-09:game_end_round:${GAME_ROUND_CEILING}`);
+  });
+
+  it("clamps nonsense to round one and refuses an end it does not know", async () => {
+    for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, 0.4]) {
+      kv.incrs = [];
+      await recordGameEnd("ended_early", bad);
+      expect(keysWritten()).toContain("loop:stats:2026-08-09:game_end_round:1");
+    }
+    kv.incrs = [];
+    await recordGameEnd("abandoned" as never, 3);
+    expect(kv.incrs).toEqual([]);
+  });
+});
+
+describe("playlist refusals and quiz shares", () => {
+  it("refuses a code outside the closed set — a throttling code is not a dead link", async () => {
+    for (const code of ["spotify_rate_limited", "spotify_quota_exhausted", "playlist_load_failed", "", "__proto__"]) {
+      kv.incrs = [];
+      await recordPlaylistRefused(code as never);
+      expect(kv.incrs).toEqual([]);
+    }
+  });
+
+  it("refuses a share whose by or outcome is undeclared — both are key tails", async () => {
+    await recordQuizShare("host" as never, "shared");
+    await recordQuizShare("owner", "downloaded" as never);
+    expect(kv.incrs).toEqual([]);
   });
 });
 
@@ -392,6 +491,9 @@ describe("fail-soft", () => {
     ).resolves.toBeUndefined();
     await expect(recordQuizHint("found", true)).resolves.toBeUndefined();
     await expect(recordQuizThrottled("answer")).resolves.toBeUndefined();
+    await expect(recordGameEnd("ended_early", 2)).resolves.toBeUndefined();
+    await expect(recordPlaylistRefused("playlist_editorial")).resolves.toBeUndefined();
+    await expect(recordQuizShare("owner", "dismissed")).resolves.toBeUndefined();
   });
 });
 
@@ -435,7 +537,18 @@ describe("the digest prints what the recorders write", () => {
     // The mirror image: a prefix the script renders in its own block but
     // forgot to list here would print again under "Other counters".
     const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
-    for (const prefix of ["quiz:", "quiz_verdict:", "quiz_len:", "quiz_locale:", "quiz_hint:", "quiz_throttled:"]) {
+    for (const prefix of [
+      "quiz:",
+      "quiz_verdict:",
+      "quiz_len:",
+      "quiz_locale:",
+      "quiz_hint:",
+      "quiz_throttled:",
+      "quiz_share:",
+      "game_end:",
+      "game_end_round:",
+      "playlist_refused:",
+    ]) {
       expect(rendered).toContain(`"${prefix}"`);
     }
     // Throttled routes are rendered by prefix, so `check` needs no line of its own.
@@ -443,5 +556,22 @@ describe("the digest prints what the recorders write", () => {
       expect(script).not.toMatch(new RegExp(`get\\("quiz_throttled:${route}"\\)`));
     }
     expect(script).toMatch(/m\.startsWith\("quiz_throttled:"\)/);
+  });
+
+  it("reads both game ends, every share pair, and the refusal prefix", () => {
+    // Each of these is under a prefix RENDERED_PREFIXES now claims, so a
+    // key the script does not actually read is consumed and printed nowhere.
+    for (const end of GAME_ENDS) {
+      expect(script, `${end} is never read`).toMatch(new RegExp(`get\\("game_end:${end}"\\)`));
+    }
+    expect(script).toMatch(/m\.startsWith\("game_end_round:"\)/);
+    // Shares are read by template over the two lists the script mirrors.
+    const bys = script.match(/for \(const by of \[([^\]]*)\]\)/)?.[1] ?? "";
+    for (const by of QUIZ_SHARE_BYS) expect(bys).toContain(`"${by}"`);
+    const outcomes = script.match(/const shareOutcomes = \[([^\]]*)\]/)?.[1] ?? "";
+    for (const outcome of QUIZ_SHARE_OUTCOMES) expect(outcomes).toContain(`"${outcome}"`);
+    expect(script).toMatch(/m\.startsWith\("playlist_refused:"\)/);
+    // And the ceiling label agrees with the writer's cap.
+    expect(script).toContain(`const GAME_ROUND_CEILING = ${GAME_ROUND_CEILING};`);
   });
 });

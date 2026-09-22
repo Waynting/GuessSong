@@ -20,7 +20,7 @@
 
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { trackEvent } from "@/lib/analytics";
+import { reportQuizShare } from "@/lib/loop-client";
 import type { ErrorLocale } from "@/lib/error-messages";
 import { QUIZ_COPY, fillCopy, formatQuizDate, ownerShareText } from "@/lib/quiz-copy";
 import { quizUrl } from "@/lib/quiz-session";
@@ -71,7 +71,7 @@ export function QuizPanel({
     if (outcome === "copied") flashCopied();
     else if (outcome === "failed") setFeedback("failed");
     else if (outcome === "shared") setFeedback(null);
-    trackEvent("quiz_share_tapped", { by: "owner", outcome });
+    reportQuizShare("owner", outcome);
   }
 
   async function handleShare() {

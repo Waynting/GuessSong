@@ -1,13 +1,17 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { LOOP_QR_CAPTION } from "@/lib/loop-links";
-import { drawCardFooter } from "@/lib/result-image";
+import { drawCardFooter, CARD_FOOTER_HEIGHT } from "@/lib/result-image";
 
 /**
  * The footer of the result card: the one piece of the product that leaves
- * the party, drawn onto a canvas the suite does not have. jsdom gives us
- * `Image` without `decode` and never fires `onload`, so `loadImage` would
- * wait forever; the stub below decides whether the QR "loads". The context
- * is a recorder — what matters is which strings land at which x, not pixels.
+ * the party, drawn onto a canvas the suite does not have. The context is a
+ * recorder — what matters is which strings land at which x, not pixels.
+ *
+ * The card carried a QR back to `/r/share` from 1.3.0 to 1.14.0, and the arm
+ * read 0 followed of 94 shown over eleven weeks. This suite now pins the
+ * opposite of what it used to: no image is drawn, and the "Scan to …" caption
+ * never appears, because a scan line with nothing to scan is a lie printed
+ * into a picture.
  */
 
 interface Call {
@@ -23,64 +27,47 @@ function recordingContext() {
     strokeStyle: "",
     fillStyle: "",
     font: "",
-    beginPath: vi.fn(),
-    moveTo: vi.fn(),
-    lineTo: vi.fn(),
-    stroke: vi.fn(),
+    beginPath: () => {},
+    moveTo: () => {},
+    lineTo: () => {},
+    stroke: () => {},
     drawImage: (...args: unknown[]) => void drawn.push(args),
     fillText: (text: string, x: number, y: number) => void fills.push({ text, x, y }),
   };
   return { ctx: ctx as unknown as CanvasRenderingContext2D, fills, drawn };
 }
 
-function stubImage(decode: () => Promise<void>) {
-  class FakeImage {
-    src = "";
-    decode = decode;
-  }
-  vi.stubGlobal("Image", FakeImage);
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 describe("drawCardFooter", () => {
-  it("prints the loop's QR caption, from lib/loop-links.ts, when a QR is on the card", async () => {
-    stubImage(() => Promise.resolve());
+  it("prints the name and the bare address, both at the left margin, and draws no image", () => {
     const { ctx, fills, drawn } = recordingContext();
-    await drawCardFooter(ctx, 600, 100, "data:image/png;base64,QR");
-
-    expect(drawn).toHaveLength(1);
-    const caption = fills.find((f) => f.text === LOOP_QR_CAPTION);
-    expect(caption).toBeDefined();
-    // Beside the code, not under it: the text column starts past the QR.
-    expect(caption!.x).toBeGreaterThan(40);
-    expect(fills.find((f) => f.text === "GuessSong")!.x).toBe(caption!.x);
-  });
-
-  it("falls back to the bare address when there is no QR to scan", async () => {
-    const { ctx, fills, drawn } = recordingContext();
-    await drawCardFooter(ctx, 600, 100, null);
+    drawCardFooter(ctx, 600, 100);
 
     expect(drawn).toHaveLength(0);
     expect(fills.map((f) => f.text)).toEqual(["GuessSong", "guessong.app"]);
-    // "Scan to …" with nothing to scan would be a lie printed into a picture.
-    expect(fills.some((f) => f.text === LOOP_QR_CAPTION)).toBe(false);
     for (const f of fills) expect(f.x).toBe(40);
   });
 
-  it("keeps the credit and still saves when the QR image will not load", async () => {
-    // The player asked for a picture of their scores and is owed one; a QR
-    // that fails leaves the caption in place at the left margin. The caption
-    // is still the scan line, because the caller believed it had a QR — the
-    // failure is in the image, and the card is not the place to explain it.
-    stubImage(() => Promise.reject(new Error("decode failed")));
-    const { ctx, fills, drawn } = recordingContext();
-    await expect(drawCardFooter(ctx, 600, 100, "data:image/png;base64,QR")).resolves.toBeUndefined();
+  it("never prints the QR caption — there is nothing on the card to scan", () => {
+    const { ctx, fills } = recordingContext();
+    drawCardFooter(ctx, 600, 100);
+    expect(fills.some((f) => f.text === LOOP_QR_CAPTION)).toBe(false);
+  });
 
-    expect(drawn).toHaveLength(0);
-    expect(fills.map((f) => f.text)).toEqual(["GuessSong", LOOP_QR_CAPTION]);
-    for (const f of fills) expect(f.x).toBe(40);
+  it("is synchronous, so a card save cannot stall on a decoration", () => {
+    // The QR footer was async because generating the code was; a caller
+    // that forgets to await a sync function loses nothing, and one that
+    // awaits it still works. Pinning the return type is what keeps a QR
+    // from creeping back in behind an `await`.
+    const { ctx } = recordingContext();
+    expect(drawCardFooter(ctx, 600, 100)).toBeUndefined();
+  });
+
+  it("fits inside the band the callers reserve for it", () => {
+    // Both card drawers size their canvas from CARD_FOOTER_HEIGHT and draw
+    // the footer at the top of that band; the lowest baseline is the address.
+    const { ctx, fills } = recordingContext();
+    drawCardFooter(ctx, 600, 0);
+    const lowest = Math.max(...fills.map((f) => f.y));
+    expect(lowest).toBeLessThan(CARD_FOOTER_HEIGHT);
   });
 });

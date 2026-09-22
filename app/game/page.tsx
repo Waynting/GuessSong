@@ -32,10 +32,8 @@ import {
   drawCardHeader,
   drawCardFooter,
   shareOrDownloadCanvas,
-  type ShareOutcome,
 } from "@/lib/result-image";
-import { loopQrDataUrl } from "@/lib/loop-qr";
-import { reportLoopImpression } from "@/lib/loop-client";
+import { reportGameEnd } from "@/lib/loop-client";
 
 type Phase = "waiting" | "playing" | "guessing" | "revealed" | "finished";
 
@@ -61,37 +59,6 @@ function InstallCta({ onInstall }: { onInstall: () => void }) {
       </button>
     </div>
   );
-}
-
-/**
- * The `share` surface's denominator, which it went without until now.
- *
- * Every other surface is a DOM node, so `components/loop-cta.tsx` and
- * `components/loop-qr.tsx` can report an impression when it renders. This one
- * is a QR painted into a canvas by `drawCardFooter`, so nothing ever fired and
- * `npm run stats` printed `shown=0` against a non-zero `followed` — a rate of
- * `—` for the one arm that reaches people who have never seen a page of ours.
- * `lib/analytics.ts` is explicit that a funnel without a denominator cannot be
- * read; this is that rule applied to the loop's weakest and least visible arm.
- *
- * **Only the outcomes that leave an artifact count.** `dismissed` means the
- * share sheet was opened and backed out of and `failed` means there was never
- * a blob — in both cases no image exists, so no QR entered the world and an
- * impression would be a denominator for a card nobody has. `downloaded` counts
- * alongside `shared` even though `lib/result-image.ts` notes that only the
- * latter can spread on its own: a file in the camera roll still gets forwarded
- * later, and over-counting the denominator understates the rate, which is the
- * safe direction (same reasoning as `lib/loop-client.ts`'s storage fallback).
- *
- * The unit is therefore **a party that produced at least one card**, not a
- * card: `reportLoopImpression` dedupes per tab session, so saving both the
- * scores card and the taste card counts once. That matches how `game_over` is
- * counted and keeps the two QR arms comparable to each other.
- */
-function recordCardImpression(outcome: ShareOutcome): void {
-  if (outcome === "shared" || outcome === "downloaded") {
-    reportLoopImpression("share");
-  }
 }
 
 export default function GamePage() {
@@ -660,8 +627,12 @@ export default function GamePage() {
   function trackGameFinished(endedEarly: boolean) {
     if (finishedTrackedRef.current) return;
     finishedTrackedRef.current = true;
+    const roundsPlayed = countRoundsPlayed(currentIndex, phase);
+    // The KV copy, under the same once-per-game guard so the two cannot
+    // disagree. `Games started` minus this is the tab that closed mid-party.
+    reportGameEnd(endedEarly ? "ended_early" : "played_out", roundsPlayed);
     trackEvent("game_finished", {
-      rounds_played: countRoundsPlayed(currentIndex, phase),
+      rounds_played: roundsPlayed,
       total_tracks: tracks.length,
       duration_seconds: Math.round((Date.now() - gameStartTimeRef.current) / 1000),
       playlist_source: playlistSource,
@@ -764,7 +735,6 @@ export default function GamePage() {
     const headerH = 200;
     const footerH = CARD_FOOTER_HEIGHT;
     const H = headerH + sortedPlayers.length * rowH + footerH;
-    const qr = await loopQrDataUrl();
     const { canvas, ctx } = createResultCanvas(W, H);
 
     drawCardBackground(ctx, W, H);
@@ -817,13 +787,12 @@ export default function GamePage() {
     });
 
     const footerY = headerH + sortedPlayers.length * rowH + 20;
-    await drawCardFooter(ctx, W, footerY, qr);
+    drawCardFooter(ctx, W, footerY);
     const outcome = await shareOrDownloadCanvas(
       canvas,
       `guesssong-results-${Date.now()}.png`,
       "GuessSong results"
     );
-    recordCardImpression(outcome);
     trackEvent("result_shared", {
       card_type: "scores",
       outcome,
@@ -848,7 +817,6 @@ export default function GamePage() {
     // is most likely to be saved from.
     const awardsSectionH = awardCount > 0 ? 40 + awardCount * 70 + 20 : 0;
     const footerH = CARD_FOOTER_HEIGHT;
-    const qr = await loopQrDataUrl();
     const H = headerH + sharedSectionH + awardsSectionH + footerH;
     const { canvas, ctx } = createResultCanvas(W, H);
 
@@ -927,13 +895,12 @@ export default function GamePage() {
       y += 70;
     }
 
-    await drawCardFooter(ctx, W, y + 20, qr);
+    drawCardFooter(ctx, W, y + 20);
     const outcome = await shareOrDownloadCanvas(
       canvas,
       `guesssong-taste-card-${Date.now()}.png`,
       "GuessSong taste card"
     );
-    recordCardImpression(outcome);
     trackEvent("result_shared", {
       card_type: "taste",
       outcome,
