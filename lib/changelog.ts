@@ -54,6 +54,36 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.14.0",
+    date: "2026-09-22",
+    headline:
+      "Buzzer Mode no longer crashes on older phones or in private browsing, and a phone that drops out of a room gets its seat back.",
+    headlineZh:
+      "搶答器模式在舊手機和無痕模式下不會再當掉；手機斷線後重新進來，位子還在。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "On phones that have not had a browser update since 2022, and in browsers set to block all site data, switching Buzzer Mode on ended in \"The game stopped\" every time — on the setup page, on the game, and for players scanning in. The one thing the buzzer needed from the browser is now asked for in a way every browser can answer.",
+        textZh: "2022 年以後沒更新過瀏覽器的手機，以及封鎖所有網站資料的瀏覽器，一開搶答器模式就會跳出「遊戲中斷了」——設定頁、遊戲頁、掃碼進來的玩家都一樣。現在搶答器向瀏覽器要的那個東西，改成每種瀏覽器都答得出來的方式。",
+      },
+      {
+        kind: "new",
+        text: "If your phone drops out of a buzzer room — a reload, a lost connection, a browser that forgets — rejoining with the same name puts you back in your seat, with your place in the queue and your score. The phone that had the seat first always wins it back, and only the host can take the host's seat.",
+        textZh: "手機從搶答房間掉出去——重新整理、斷線、瀏覽器什麼都不記——用同一個名字回來就會回到原本的位子，排隊順序和分數都還在。先來的那支手機永遠拿得回位子；主持人的位子只有主持人拿得走。",
+      },
+      {
+        kind: "fixed",
+        text: "The host's screen used to say \"Connecting…\" forever when the room had actually refused it. It now says what happened, in words meant for the host — and a player who can't reach the room gets a Try again instead of being told the room has ended.",
+        textZh: "房間其實已經拒絕了，主持人的畫面卻一直顯示「連線中…」。現在會用主持人看得懂的話說清楚發生什麼事；連不上房間的玩家也會看到「再試一次」，而不是被告知房間已經結束。",
+      },
+      {
+        kind: "better",
+        text: "On a shared-playlist room, a phone that reloads before kickoff no longer gets stuck on the form it already filled in — it carries on to the buzzer.",
+        textZh: "在混合歌單的房間裡，開賽前重新整理的手機不會再卡在已經填過的表單上，會直接進到搶答器。",
+      },
+    ],
+  },
+  {
     version: "1.13.0",
     date: "2026-09-19",
     headline:

@@ -5,6 +5,146 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-09-22
+
+A host wrote in: "I can't start the game, it always gives an error and asks
+me to restart." That is the crash screen — "The game stopped", "Start over" —
+and it turned up on every attempt because the first thing Buzzer Mode did on
+their phone was call a browser API their browser did not have. The setup page
+became the crash screen the moment Buzzer Mode was switched on, `/game` did
+the same in a buzzer game, and a player landing on `/buzz/<code>` never saw
+the Join form. Party mode was untouched, which is why the funnel looked
+healthy while the report said "always". Reproduced against production by
+deleting the API from a headless Chrome; the same run showed a second cause
+on the same screens (a browser that refuses storage), and the review that
+followed found the third unguarded browser call on that path and rebuilt how
+the buzzer room handles a phone that comes back under a new identity.
+
+### Fixed
+
+- **Buzzer Mode crashed every phone older than 2022, and every locked-down
+  browser.** `getPersistentPlayerId()` in `lib/use-buzzer-socket.ts` called
+  `crypto.randomUUID()` unguarded — absent on Safari/iOS before 15.4, Chrome
+  before 92, Firefox before 95, Samsung Internet before 16 — inside the
+  `useMemo` that runs on the hook's first render, so the `TypeError` reached
+  `app/error.tsx`. The same function and the mount effects of the room panel
+  and the join page read `window.localStorage` raw, which throws on the
+  property access under Safari's "Block All Cookies" and in some webviews.
+  `mintPlayerId()` now falls back to a v4 UUID from `getRandomValues` and
+  then from `Math.random`, both the shape the Worker is handed, and every
+  storage call on the buzzer surfaces goes through `lib/host-session.ts`
+  (`readStored` / `writeStored` / `removeStored`); on such a device the seat
+  lasts the page rather than the device, and the game plays.
+- **A Worker URL the page may not open crashed the same way.** `new
+  WebSocket(url)` was the third synchronously-throwing browser call on the
+  connect path: a `ws://` from an https page is refused as mixed content, an
+  unparseable value the same. `socketUrl()` upgrades `ws://` to `wss://` on
+  an https page and the constructor sits in a `try` that reports the page's
+  own `unreachable` code, with the operator's half (`NEXT_PUBLIC_BUZZER_WS_URL`)
+  on the console.
+- **The host's panels were silent when the room refused them.** Neither the
+  room panel on `/` nor the game's host panel read the hook's error, so an
+  expired room, a rejected token or an unreachable Worker was "Connecting…"
+  or a connected count forever, every phone waiting for a clip that never
+  opened. Both render it now, in the host's language and addressed to the
+  host (`buzzerErrorMessage(…, "host")`), because the player's sentence for
+  an ended room tells the host to ask the host.
+- **A player refused after three failed connections had no way out.** The
+  hook's give-up used to borrow the Worker's `room_expired` ("ask the host
+  for a new one") for what is as often a captive portal or a dropped
+  network; it is the page's own `no_answer` now, the hook keeps trying at
+  its 30s ceiling instead of stopping (stopping ended the host's buzzer for
+  the party after a seven-second blip, a reload being round one with the
+  scores wiped), both host panels carry a Reconnect and the join page a Try
+  again (`reconnect()`, a clean socket), and a refusal no longer flickers
+  into a live buzzer for the round trip before the room answers.
+- **The host's queue numbered two players "2." after a wrong answer.** The
+  Worker numbered a buzz by the queue's length and did not renumber after a
+  verdict shifted it; `order` is a per-round counter now (`buzzCount`), the
+  arrival order the protocol promises, so the host's list and the
+  `buzz_received.buzz_order` figure are honest.
+- **A stored player id is validated before it is handed to the room.** A
+  value that is not the v4 shape every id was ever minted in is minted over,
+  and the Worker refuses an id that is a property of `Object.prototype` —
+  `players["__proto__"]` was a truthy record for a player nothing could list,
+  count or evict, whose buzz still locked the round.
+
+### Added
+
+- **A phone that comes back under a new identity gets its seat back.** A
+  browser that keeps no storage mints a new player id on every page load, so
+  a reload mid-room used to be refused by its own empty seat until the room's
+  idle alarm, and every retry under a new name burned one of the room's
+  twelve. `worker/src/buzzer-room.ts` hands a seat whose owner has no socket
+  to a join under the same name — queue place and, on the host's screen,
+  score included — under three rules: a connected owner is never displaced
+  by a name; the seat remembers the id that opened it (`adoptedFrom`) and
+  that id takes it back from any taker, the taker being told the name is
+  taken, so two Alexes at one party sort themselves out in favour of the
+  phone that was there first; and the host's seat (`hostPlayerId`) is taken
+  by nothing but a join carrying the token, which takes it from anyone and
+  leaves no opener behind — a guest who joined as "Host" while the host's
+  socket was closed for the `/` → `/game` navigation locked the token holder
+  out of their own room, and a reclaim that outranked the host's seat brought
+  that back one reconnect later as an eviction ping-pong. A takeover that
+  re-keys a queued buzz replays the whole queue to the room, because the
+  host's screen advances its queue by matching the promoted entry.
+  **The Worker deploy is manual (`docs/operations.md` §1) and must go out
+  with this release**: a Next deploy without it leaves the reload refused as
+  before.
+- **On a Mixed·QR room, a re-submit after the "already submitted" flag is
+  lost carries on to the buzzer.** The mailbox's 409 `room_name_taken` is,
+  most often, its memory of this phone; the join page treats it as the 410 it
+  already tolerated, counts it as `room_submission_failed:already_in`, and
+  writes nothing — a genuine second Ann who is then refused at the socket
+  gets the form back with her playlist still in it.
+- **An honest error vocabulary for the buzzer.** `BUZZER_CLIENT_ERROR_CODES`
+  (`not_configured`, `unreachable`, `no_answer`) for failures the page has
+  before the Worker is reached, `BUZZER_HOST_ERROR_CODES` for the host's
+  reading of a refusal whose player sentence is wrong on the host's screen,
+  one `buzzerErrorMessage(error, locale, audience)` for every render site,
+  all in `lib/error-messages.ts` with en and zh, pinned by
+  `tests/error-messages.test.ts` so nothing the host's chair renders says
+  "ask the host".
+
+### Changed
+
+- **`tests/helpers/storage.ts` is the one jsdom `localStorage` stub.** Four
+  suites carried their own copy; the helper returns the backing map and
+  offers `installThrowingStorage` and `installQuotaStorage` for the two ways
+  a browser refuses. Each suite keeps its canary.
+- **`tests/buzzer.test.ts` reads the source for the rules vitest cannot
+  render**: no bare `localStorage` access anywhere under `app/`,
+  `components/` or `lib/` (with a canary that the walk reaches the files it
+  claims to), the `WebSocket` constructor inside its `try`, and the fallback
+  chain, the storage degradation and the stored-id validation of
+  `getPersistentPlayerId`. `worker/test/buzzer-room.test.ts` pins seat
+  adoption, reclaim, chains of takeovers, the token's authority, the cap,
+  and the queue replay.
+
+### Known gaps
+
+- **Liveness is a socket, not a heartbeat.** A phone that loses Wi-Fi
+  without a close frame stays "connected" to the room until the TCP timeout,
+  so the reload-into-your-own-seat repair is refused as taken in the most
+  common way a phone drops. A client `ping` on an interval and a per-seat
+  last-seen would let a same-name join take a seat whose holder has been
+  silent longer than the interval.
+- **A player id is still a broadcast identity, not a credential.** Anyone in
+  the room can present another player's id and share their seat (rename it,
+  buzz as them); the token protects the host and the rules above protect a
+  seat from being *taken*, but not from being ridden. An opaque per-seat
+  handle in the broadcast, with the join id kept server-side, is the fix.
+- **A manual Reconnect is unpaced.** Each tap is three fresh attempts a
+  second or two apart, against a join limiter shared by every phone on the
+  venue's Wi-Fi; a player tapping as soon as the button reappears can keep
+  the window spent. Carrying the backoff forward across manual attempts is
+  the fix.
+- **A reload is still round one with the scores wiped**, a landscape phone
+  gets the desktop grid, `/j/[code]` and `/buzz/[code]` are in the system
+  font, a dropped wake lock is not re-requested until the next hide/show,
+  and the chip strip gives no sign of a fifth player — all as in 1.13.0.
+
 ## [1.13.0] - 2026-09-19
 
 Most games are hosted from a phone, and the game page had never been measured
