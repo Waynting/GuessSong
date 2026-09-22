@@ -279,6 +279,39 @@ console.log(
   `Repeat hosts        ${repeatHost}   ${pct(repeatHost, games)} of games`
 );
 
+/**
+ * Where the games went. `Games started` is a beacon from the setup page;
+ * these two are beacons from the Game Over screen, so the difference is the
+ * tab that closed mid-party — and the Game Over screen is where every
+ * host-side loop surface lives, so that difference is the share of games
+ * the loop never had a chance at. It was five thousand of six in the week
+ * this was added, and nothing in KV could say so.
+ *
+ * Three floors and a subtraction: a lost end beacon reads as a closed tab,
+ * a lost start beacon makes the gap read smaller, and neither can make it
+ * read as zero. Direction, not level. The round histogram is early ends
+ * only — round one or two is a game that could not play, round fifteen is
+ * a room that had enough — capped where the round stops being a question
+ * (`GAME_ROUND_CEILING` in lib/loop-stats.ts, mirrored here for the label).
+ */
+const GAME_ROUND_CEILING = 20;
+const playedOut = get("game_end:played_out");
+const endedEarly = get("game_end:ended_early");
+const reachedEnd = playedOut + endedEarly;
+
+if (reachedEnd > 0) {
+  console.log(
+    `Reached Game Over   ${reachedEnd}   ${pct(reachedEnd, games)} of games — ` +
+      `${playedOut} played out · ${endedEarly} ended early`
+  );
+  if (games > reachedEnd) {
+    console.log(
+      `                    the other ${games - reachedEnd} closed the tab mid-game ` +
+        "(a floor: a lost beacon lands here too)"
+    );
+  }
+}
+
 const indices = [...totals.keys()]
   .filter((m) => m.startsWith("host_index:"))
   .map((m) => Number(m.slice("host_index:".length)))
@@ -291,6 +324,23 @@ if (indices.length > 0) {
     const count = get(`host_index:${n}`);
     const bar = "█".repeat(Math.min(40, Math.round((count / games) * 40)));
     console.log(`  ${String(n).padStart(2)}${n === 10 ? "+" : " "} ${String(count).padStart(5)}  ${bar}`);
+  }
+}
+
+const earlyRounds = [...totals.keys()]
+  .filter((m) => m.startsWith("game_end_round:"))
+  .map((m) => Number(m.slice("game_end_round:".length)))
+  .filter(Number.isFinite)
+  .sort((a, b) => a - b);
+
+if (earlyRounds.length > 0 && endedEarly > 0) {
+  console.log("\nEnded early at round");
+  for (const n of earlyRounds) {
+    const count = get(`game_end_round:${n}`);
+    const bar = "█".repeat(Math.min(40, Math.round((count / endedEarly) * 40)));
+    console.log(
+      `  ${String(n).padStart(2)}${n === GAME_ROUND_CEILING ? "+" : " "} ${String(count).padStart(5)}  ${bar}`
+    );
   }
 }
 
@@ -336,7 +386,7 @@ const verdicts = [...totals.keys()]
  * it never changes a number.
  */
 const QUIZ_PRESETS = new Set([10, 20, 30, 50]);
-const QUIZ_DEFAULT = 20;
+const QUIZ_DEFAULT = 10;
 
 /** `quiz_len:<stage>:<n>` → { n: count } for one stage. */
 function lengthsFor(stage) {
@@ -365,6 +415,23 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard > 0) {
   console.log(
     `  opened      ${String(quizOpened).padStart(6)}   ${(quizCreated ? quizOpened / quizCreated : 0).toFixed(1)} per quiz`
   );
+
+  // The step between the two lines above. `quiz_share:<by>:<outcome>` is
+  // every tap on a share button and what the sheet said, so `owner` against
+  // `created` is a ceiling (one owner sending twice is two) — but the
+  // outcome split is the reading: many `dismissed` is a sheet nobody
+  // finishes, `shared` with few opens is a link sent to nobody, and no taps
+  // at all is a panel the owner never got to. Printed only once recorded,
+  // and each `by` on its own line.
+  const shareOutcomes = ["shared", "copied", "dismissed", "failed"];
+  for (const by of ["owner", "taker"]) {
+    const counts = shareOutcomes.map((o) => get(`quiz_share:${by}:${o}`));
+    const taps = counts.reduce((t, c) => t + c, 0);
+    if (taps === 0) continue;
+    const parts = shareOutcomes.map((o, i) => `${o} ${counts[i]}`).join(" · ");
+    const against = by === "owner" ? `${pct(taps, quizCreated)} of quizzes` : `${pct(taps, quizCompleted)} of finishes`;
+    console.log(`  ${`${by} share`.padEnd(12)}${String(taps).padStart(6)}   ${against} tapped it — ${parts}`);
+  }
   console.log(`  started     ${String(quizStarted).padStart(6)}   ${pct(quizStarted, quizOpened)} of opens answered a question`);
   console.log(
     `  completed   ${String(quizCompleted).padStart(6)}   ${pct(quizCompleted, quizOpened)} of opens · ${pct(quizCompleted, quizStarted)} of starts`
@@ -466,7 +533,11 @@ const RENDERED_PREFIXES = [
   "impression:",
   "click:",
   "host_index:",
+  "game_end:",
+  "game_end_round:",
+  "playlist_refused:",
   "quiz:",
+  "quiz_share:",
   "quiz_verdict:",
   "quiz_len:",
   "quiz_locale:",
@@ -599,6 +670,40 @@ if (cacheRows.length > 0) {
           "(throttled or out of budget)"
       );
     }
+  }
+}
+
+/**
+ * Why a link was refused, for the refusals that are permanent.
+ *
+ * The replayed-404 line above says how often a dead link is retried; this
+ * says what was dead, from `playlist_refused:<code>` in lib/loop-stats.ts —
+ * and it is the only place an editorial playlist is counted at all, since
+ * those are refused before the cache is read. Labels are the reader's, not
+ * the code's: a code this script does not know prints as itself.
+ */
+const REFUSAL_LABELS = {
+  playlist_not_found: "private or deleted",
+  playlist_editorial: "Spotify's own (editorial)",
+  playlist_empty: "empty",
+  invalid_playlist_url: "not a playlist URL",
+};
+const refusals = [...totals.keys()]
+  .filter((m) => m.startsWith("playlist_refused:"))
+  .map((m) => m.slice("playlist_refused:".length))
+  .sort((a, b) => get(`playlist_refused:${b}`) - get(`playlist_refused:${a}`));
+if (refusals.length > 0) {
+  const total = refusals.reduce((t, c) => t + get(`playlist_refused:${c}`), 0);
+  const parts = refusals
+    .map((c) => `${REFUSAL_LABELS[c] ?? c} ${get(`playlist_refused:${c}`)}`)
+    .join(" · ");
+  console.log(`\nPlaylist links refused — ${total} that will never work: ${parts}`);
+  const editorial = get("playlist_refused:playlist_editorial");
+  if (editorial > 0 && editorial >= total / 4) {
+    console.log(
+      "  a quarter or more are Spotify's own playlists: hosts want the charts,\n" +
+        "  and the app cannot serve them (37i9… returns 404 to new apps)"
+    );
   }
 }
 

@@ -4,7 +4,9 @@
  * Its own module rather than a helper on `lib/loop-client.ts` because that one
  * is imported by the setup page, and `qrcode` has no business in the bundle of
  * the page that takes essentially all of this site's search traffic. Only the
- * two places that actually draw a code pull this in.
+ * one place that actually draws a code (`components/loop-qr.tsx`, the Game
+ * Over screen) pulls this in; the result card drew one too until the
+ * `share` arm read 0 of 94 and was retired (`lib/result-image.ts`).
  */
 
 import QRCode from "qrcode";
@@ -13,12 +15,13 @@ import { loopUrl, type LoopSurface } from "@/lib/loop-links";
 /**
  * Returns null rather than throwing.
  *
- * Both callers are in the middle of giving someone something they asked for —
- * a picture of their scores, a celebration screen — and neither should fail
- * over a decoration. The caller falls back to printing the address as text.
+ * The caller is in the middle of giving someone a celebration screen and
+ * should not fail over a decoration; it falls back to printing the address
+ * as text. The surface is required — a default of `"share"` is how a card
+ * would quietly grow its retired QR back.
  */
 export async function loopQrDataUrl(
-  surface: LoopSurface = "share",
+  surface: LoopSurface,
   pixels = 240
 ): Promise<string | null> {
   try {

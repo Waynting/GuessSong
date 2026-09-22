@@ -93,6 +93,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { QUIZ_SETUP_HREF } from "@/lib/setup-arrival";
 import { trackEvent } from "@/lib/analytics";
+import { reportQuizShare } from "@/lib/loop-client";
 import { AppError, apiError, describeError, errorMessage, type AppErrorCode } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { foldQuizName, rankOf, type QuizVerdict } from "@/lib/quiz";
@@ -955,7 +956,7 @@ export function QuizClient({ code }: { code: string }) {
     } else if (outcome === "failed") {
       setShareFailedUrl(url);
     }
-    trackEvent("quiz_share_tapped", { by: "taker", outcome });
+    reportQuizShare("taker", outcome);
   }
 
   const title = quizTitle(copy, view?.ownerName);

@@ -31,9 +31,10 @@
  */
 
 import { dayBucket, getKvStore } from "@/lib/kv";
-import { ERROR_LOCALES, type ErrorLocale } from "@/lib/error-messages";
+import { ERROR_LOCALES, type AppErrorCode, type ErrorLocale } from "@/lib/error-messages";
 import type { LoopSurface } from "@/lib/loop-links";
 import { QUIZ_VERDICTS, isQuizVerdict, type QuizVerdict } from "@/lib/quiz";
+import type { ShareLinkOutcome } from "@/lib/quiz-share";
 import type { PreviewStatus } from "@/types/preview";
 import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
 
@@ -57,6 +58,117 @@ export const LOOP_STATS_TTL_SECONDS = 30 * 24 * 60 * 60;
  * been answered.
  */
 export const HOST_INDEX_CEILING = 10;
+
+/**
+ * How a game reached its Game Over screen, if it did.
+ *
+ *   played_out   the last track was played or skipped
+ *   ended_early  the host pressed End Game with tracks left
+ *
+ * Neither is the number that matters on its own; the number is the gap. In
+ * the week to 2026-09-22 `games` read 6,252 and `impression:game_over` — the
+ * QR on that screen, once per tab — read 1,033, and nothing in KV could say
+ * where the other five thousand went. The Game Over screen is where every
+ * host-side loop surface lives (the QR, the result card, the install
+ * banner), so a game that never reaches it is a game the loop never saw.
+ * `games − (played_out + ended_early)` is the tab that closed mid-party, and
+ * GA4's `game_finished.ended_early` — the only record before this — is on
+ * the side nobody opens.
+ *
+ * Both are beacons from the page (`reportGameEnd` in `lib/loop-client.ts`),
+ * fired once per game by the same guard as GA4's event, so they are floors:
+ * a closed tab sends nothing, which is the point, and a beacon the browser
+ * dropped reads as a closed tab. Read the gap as a direction.
+ */
+export type GameEnd = "played_out" | "ended_early";
+
+export const GAME_ENDS: readonly GameEnd[] = ["played_out", "ended_early"];
+
+/**
+ * Above this, an early end's round stops getting its own key.
+ *
+ * Same shape and reason as `HOST_INDEX_CEILING`: the round comes from a
+ * client counter. Twenty because that is the setup page's default song
+ * count — an early end past it is a host who chose a long game and then
+ * did not want one, and every such game answers the same way. Below it, the
+ * exact round is the question: round one or two is a game that could not
+ * play (no clip, wrong playlist, a phone that would not stay on); round
+ * fifteen is a room that had enough.
+ */
+export const GAME_ROUND_CEILING = 20;
+
+/**
+ * Who tapped a quiz's share button, and what came of it.
+ *
+ * `owner` is the panel on `/quiz` after a quiz is made — the step between
+ * `quiz:created` and `quiz:opened`. `taker` is the result screen on
+ * `/q/[code]`, a friend passing the link on. The outcome is `lib/quiz-share.ts`'s
+ * verbatim: `shared` left the device through the share sheet, `copied` is the
+ * clipboard fallback whose reach is unknowable, `dismissed` is the sheet
+ * opened and backed out of, `failed` is neither path working.
+ *
+ * Exists because `opened ÷ created` read 0.6 in the week to 2026-09-22 —
+ * 107 quizzes made, 59 opens, so most were never sent — and the only record
+ * of *why* was GA4's `quiz_share_tapped`, on the side nobody opens. These
+ * split "the owner never tapped share" from "the owner tapped it and the
+ * sheet was dismissed" from "the sheet said shared and no friend opened it",
+ * which are three different fixes. Every tap counts, so `owner` tallied
+ * against `created` is a ceiling: one owner sending twice is two.
+ */
+export type QuizShareBy = "owner" | "taker";
+
+export const QUIZ_SHARE_BYS: readonly QuizShareBy[] = ["owner", "taker"];
+
+export type QuizShareOutcome = ShareLinkOutcome;
+
+export const QUIZ_SHARE_OUTCOMES: readonly QuizShareOutcome[] = [
+  "shared",
+  "copied",
+  "dismissed",
+  "failed",
+];
+
+/**
+ * Why a playlist link was refused, for the links that will never work.
+ *
+ * `lib/playlist-cache.ts` counts a replayed 404 as a hit and reports it
+ * beside the rate — 952 of them in the week to 2026-09-22, one load in
+ * eight against a link already known to be dead — but a 404 is a 404, and
+ * an editorial playlist is refused before the cache is even read, so it was
+ * in no count at all. This is the *reason*, from the closed set of codes
+ * `isDeterministicPlaylistFailure` names, minus the two the route raises
+ * for an empty field before `loadPlaylist` is called:
+ *
+ *   playlist_not_found     private, deleted, or never a playlist
+ *   playlist_editorial     one of Spotify's own — refused, not broken
+ *   playlist_empty         loaded, and had nothing playable
+ *   invalid_playlist_url   parsed as nothing — an album or track link,
+ *                          usually
+ *
+ * Which of these dominates is a product question the hit rate could not
+ * ask: a wall of editorial refusals is a room that wants "Today's Top Hits"
+ * and is told no, a wall of invalid URLs is a room pasting albums. Guarded
+ * like every other key tail here, because `SpotifyApiError.code` is typed
+ * but the rule does not care.
+ */
+export type PlaylistRefusalCode = Extract<
+  AppErrorCode,
+  "playlist_not_found" | "playlist_editorial" | "playlist_empty" | "invalid_playlist_url"
+>;
+
+export const PLAYLIST_REFUSAL_CODES: readonly PlaylistRefusalCode[] = [
+  "playlist_not_found",
+  "playlist_editorial",
+  "playlist_empty",
+  "invalid_playlist_url",
+];
+
+const PLAYLIST_REFUSAL_SET: ReadonlySet<string> = new Set(PLAYLIST_REFUSAL_CODES);
+
+/** Narrows an error code to the ones `recordPlaylistRefused` will key. */
+export function isPlaylistRefusalCode(value: unknown): value is PlaylistRefusalCode {
+  return typeof value === "string" && PLAYLIST_REFUSAL_SET.has(value);
+}
 
 /**
  * Which of Mixed Playlist Mode's two collection routes built a game's pool.
@@ -244,6 +356,10 @@ export function loopStatsKeys(
   quizLocale: Record<ErrorLocale, string>;
   quizHint: Record<QuizHintOutcome, string>;
   quizThrottled: Record<QuizThrottledRoute, string>;
+  quizShare: Record<QuizShareBy, Record<QuizShareOutcome, string>>;
+  gameEnd: Record<GameEnd, string>;
+  gameEndRound: string[];
+  playlistRefused: Record<PlaylistRefusalCode, string>;
 } {
   const impressions: Record<string, string> = {};
   const clicks: Record<string, string> = {};
@@ -255,6 +371,10 @@ export function loopStatsKeys(
   for (let n = 1; n <= HOST_INDEX_CEILING; n += 1) {
     hostIndex.push(key(day, `host_index:${n}`));
   }
+  const gameEndRound: string[] = [];
+  for (let n = 1; n <= GAME_ROUND_CEILING; n += 1) {
+    gameEndRound.push(key(day, `game_end_round:${n}`));
+  }
   return {
     live: key(day, "live"),
     throttled: key(day, "throttled"),
@@ -263,6 +383,14 @@ export function loopStatsKeys(
     impressions,
     clicks,
     hostIndex,
+    gameEnd: {
+      played_out: key(day, "game_end:played_out"),
+      ended_early: key(day, "game_end:ended_early"),
+    },
+    gameEndRound,
+    playlistRefused: Object.fromEntries(
+      PLAYLIST_REFUSAL_CODES.map((c) => [c, key(day, `playlist_refused:${c}`)])
+    ) as Record<PlaylistRefusalCode, string>,
     mixedPool: {
       room: key(day, "mixed_pool:room"),
       phone: key(day, "mixed_pool:phone"),
@@ -296,6 +424,14 @@ export function loopStatsKeys(
     quizThrottled: Object.fromEntries(
       QUIZ_THROTTLED_ROUTES.map((r) => [r, key(day, `quiz_throttled:${r}`)])
     ) as Record<QuizThrottledRoute, string>,
+    quizShare: Object.fromEntries(
+      QUIZ_SHARE_BYS.map((by) => [
+        by,
+        Object.fromEntries(
+          QUIZ_SHARE_OUTCOMES.map((o) => [o, key(day, `quiz_share:${by}:${o}`)])
+        ),
+      ])
+    ) as Record<QuizShareBy, Record<QuizShareOutcome, string>>,
   };
 }
 
@@ -406,6 +542,48 @@ export async function recordGameStart(
   // considered was a second pulse event, which would have carried its own
   // liveness marker and cost a mixed game eight commands where this costs five.
   if (mixed) await bump(`mixed_pool:${mixed}`);
+}
+
+/**
+ * A game reached its Game Over screen, and how.
+ *
+ * `roundsPlayed` is keyed only for an early end — for a game that played out
+ * it is the song count the host chose, which is a different question and
+ * already a GA4 param. Clamped to `GAME_ROUND_CEILING` for the reason the
+ * host index is: it arrives from a page.
+ */
+export async function recordGameEnd(end: GameEnd, roundsPlayed: number): Promise<void> {
+  if (!GAME_ENDS.includes(end)) return;
+  await bump(`game_end:${end}`);
+  if (end !== "ended_early") return;
+  const round = Number.isFinite(roundsPlayed)
+    ? Math.max(1, Math.min(Math.trunc(roundsPlayed), GAME_ROUND_CEILING))
+    : 1;
+  await bump(`game_end_round:${round}`);
+}
+
+/**
+ * A playlist link was refused for a reason that will not change. Written by
+ * `loadPlaylist` in `lib/playlist-cache.ts` on the way out, for every caller
+ * — the party form, a Mixed room's submit, the quiz — so a contributor's dead
+ * link counts the same as a host's.
+ */
+export function recordPlaylistRefused(code: PlaylistRefusalCode): Promise<void> {
+  if (!isPlaylistRefusalCode(code)) return Promise.resolve();
+  return bump(`playlist_refused:${code}`);
+}
+
+/**
+ * Someone tapped a quiz's share button. `reportQuizShare` in
+ * `lib/loop-client.ts` sends it; both halves are key tails and both are
+ * checked against their lists, because the body reached `/api/pulse` from
+ * the open internet.
+ */
+export function recordQuizShare(by: QuizShareBy, outcome: QuizShareOutcome): Promise<void> {
+  if (!QUIZ_SHARE_BYS.includes(by) || !QUIZ_SHARE_OUTCOMES.includes(outcome)) {
+    return Promise.resolve();
+  }
+  return bump(`quiz_share:${by}:${outcome}`);
 }
 
 /** One quiz moved a stage down its funnel. */

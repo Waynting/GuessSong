@@ -36,9 +36,17 @@ export const QUIZ_TTL_SECONDS = 7 * 24 * 60 * 60;
  * 500 only because a party plays through them. The typed field reuses
  * `lib/song-count.ts`'s state machine (`QUIZ_COUNT_CONTROL` in `lib/quiz.ts`),
  * for the same two rules that module exists for.
+ *
+ * The default is the floor, not the middle. Twenty was the first default and
+ * `npm run stats` read, over the week to 2026-09-22: ten-question quizzes
+ * finished at 0.4 takers per quiz, twenty at 0.1, fifty at 0.1 — a friend
+ * in a group chat finishes ten taps and drops out of twenty. A host who wants
+ * more still has three presets and the typed field; the default is for the
+ * one who does not think about it, and that one's friends were not finishing.
+ * `scripts/loop-stats.mjs` mirrors this value to tag the length table.
  */
 export const QUIZ_QUESTION_COUNTS = [10, 20, 30, 50] as const;
-export const QUIZ_DEFAULT_QUESTION_COUNT = 20;
+export const QUIZ_DEFAULT_QUESTION_COUNT = 10;
 export const QUIZ_MIN_QUESTIONS = 10;
 export const QUIZ_MAX_QUESTIONS = 50;
 

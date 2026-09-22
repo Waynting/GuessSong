@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { parsePulse } from "@/lib/pulse";
-import { HOST_INDEX_CEILING } from "@/lib/loop-stats";
+import {
+  GAME_ENDS,
+  GAME_ROUND_CEILING,
+  HOST_INDEX_CEILING,
+  QUIZ_SHARE_BYS,
+  QUIZ_SHARE_OUTCOMES,
+} from "@/lib/loop-stats";
 import { LOOP_SURFACES } from "@/lib/loop-links";
 
 describe("parsePulse — impressions", () => {
@@ -81,6 +87,79 @@ describe("parsePulse — the mixed sub-mode", () => {
     // Same trade as the index clamp above: the game is real either way, and
     // losing one row of detail beats losing the number anyone reads.
     expect(parsePulse({ kind: "game_started", hostGameIndex: 4, mixed: "nonsense" })).not.toBeNull();
+  });
+});
+
+describe("parsePulse — game ends", () => {
+  it("accepts both declared ends with a round", () => {
+    for (const end of GAME_ENDS) {
+      expect(parsePulse({ kind: "game_finished", end, roundsPlayed: 7 })).toEqual({
+        kind: "game_finished",
+        end,
+        roundsPlayed: 7,
+      });
+    }
+  });
+
+  it("rejects an end it did not declare, which would become a KV key", () => {
+    for (const end of ["", "abandoned", "PLAYED_OUT", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "game_finished", end, roundsPlayed: 3 })).toBeNull();
+    }
+  });
+
+  it("clamps the round like the host index, so a corrupted counter keeps the game", () => {
+    const cases: Array<[number, number]> = [
+      [0, 1],
+      [-3, 1],
+      [4.8, 4],
+      [GAME_ROUND_CEILING + 1, GAME_ROUND_CEILING],
+      [1e9, GAME_ROUND_CEILING],
+    ];
+    for (const [input, expected] of cases) {
+      expect(parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: input })).toEqual({
+        kind: "game_finished",
+        end: "ended_early",
+        roundsPlayed: expected,
+      });
+    }
+  });
+
+  it("rejects a non-finite or non-numeric round", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, "3", null, undefined, {}]) {
+      expect(parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: bad })).toBeNull();
+    }
+  });
+});
+
+describe("parsePulse — quiz shares", () => {
+  it("accepts every declared by × outcome pair", () => {
+    for (const by of QUIZ_SHARE_BYS) {
+      for (const outcome of QUIZ_SHARE_OUTCOMES) {
+        expect(parsePulse({ kind: "quiz_shared", by, outcome })).toEqual({
+          kind: "quiz_shared",
+          by,
+          outcome,
+        });
+      }
+    }
+  });
+
+  it("rejects the event when either half is undeclared — both are key tails", () => {
+    for (const by of ["host", "", "OWNER", "__proto__", 1, null]) {
+      expect(parsePulse({ kind: "quiz_shared", by, outcome: "shared" })).toBeNull();
+    }
+    for (const outcome of ["sent", "", "SHARED", "downloaded", "__proto__", 1, null]) {
+      expect(parsePulse({ kind: "quiz_shared", by: "owner", outcome })).toBeNull();
+    }
+  });
+
+  it("strips unknown fields from the new shapes too", () => {
+    expect(
+      parsePulse({ kind: "quiz_shared", by: "taker", outcome: "copied", surface: "share", evil: 1 })
+    ).toEqual({ kind: "quiz_shared", by: "taker", outcome: "copied" });
+    expect(
+      parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 2, hostGameIndex: 9 })
+    ).toEqual({ kind: "game_finished", end: "played_out", roundsPlayed: 2 });
   });
 });
 

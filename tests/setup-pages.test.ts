@@ -292,8 +292,14 @@ describe("the loop says one thing", () => {
     expect(cta).toMatch(/LOOP_FOOTER_LABEL\.split\("GuessSong"\)/);
     const qr = code(read("components/loop-qr.tsx"));
     expect(qr).toMatch(/\{LOOP_QR_CAPTION\}/);
+    // The result card printed the caption beside its QR until the `share`
+    // arm read 0 of 94 and the code came off (1.15.0). What it prints now is
+    // the bare address, and nothing scan-shaped: a "Scan to …" line with no
+    // code under it would be the one place the loop's copy lied.
     const card = code(read("lib/result-image.ts"));
-    expect(card).toMatch(/qrDataUrl \? LOOP_QR_CAPTION : "guessong\.app"/);
+    expect(card).not.toMatch(/LOOP_QR_CAPTION/);
+    expect(card).toMatch(/fillText\("guessong\.app"/);
+    expect(card).not.toMatch(/drawImage/);
   });
 
   it("lets the party pages inherit the button's label, and only the quiz name its own", () => {

@@ -55,10 +55,18 @@ export const LOOP_SURFACES = [
    */
   "game_over",
   /**
-   * The result card. Reached by scanning the QR printed into the image, so
-   * unlike the others this hit does not come from a page of ours at all — it
-   * arrives from whatever app the picture was forwarded into, possibly days
-   * later.
+   * **Retired 2026-09-22; kept so old cards still count.** The result card
+   * carried a QR back to `/r/share` from 1.3.0 — the one hit that did not
+   * start on a page of ours, arriving from whatever app the picture was
+   * forwarded into. Over eleven weeks it was shown on 94 parties' cards and
+   * followed 0 times, against 13–30% on the link-shaped arms, so the card
+   * prints the address as text now (`lib/result-image.ts`) and nothing
+   * reports an impression for this surface. The name stays in the union
+   * because cards already saved carry the QR for as long as they exist:
+   * `/r/share` must keep redirecting, and a scan of one is still worth a
+   * `click:share` — which is why a `share` row with no `shown` is expected
+   * here and not the "impression missing" plumbing fault `docs/viral-loop.md`
+   * §7 describes for every other arm.
    */
   "share",
   /**
@@ -67,9 +75,10 @@ export const LOOP_SURFACES = [
    *
    * The first surface whose carrier is a URL tapped in a group chat rather
    * than a QR scanned off a screen or out of an image. Kept apart from `share`
-   * even though both leave the party, because `share` has never converted
-   * (0 of 50) and the question this one exists to answer is whether that was
-   * the audience or the carrier — merging them would bury the answer.
+   * even though both leave the party, because `share` had never converted
+   * and the question this one exists to answer was whether that was the
+   * audience or the carrier. Answered: the carrier. This arm converts
+   * (13% in its first full week); the QR out of an image never did.
    */
   "quiz_result",
 ] as const;
@@ -90,7 +99,7 @@ export type LoopSurface = (typeof LOOP_SURFACES)[number];
 export const LOOP_CTA_LABEL = "Host your own game →";
 /** The quiet one: a line of text at the bottom of a player page. */
 export const LOOP_FOOTER_LABEL = "Made with GuessSong — host your own";
-/** Under a QR code, on a screen or printed into the result card. */
+/** Under the QR code on the Game Over screen. */
 export const LOOP_QR_CAPTION = "Scan to host your own game";
 
 /**
@@ -125,15 +134,16 @@ export function loopHref(surface: LoopSurface): string {
 }
 
 /**
- * The absolute form, for the one carrier that leaves this device.
+ * The absolute form, for a QR code.
  *
  * This is the inverse of the rule in `lib/buzzer-client.ts:78`: a room QR uses
  * `window.location.origin` because the people scanning it are in the same room
  * on the same build, and sending them to production would point them at a room
- * that does not exist there. A *result card* is the opposite — it gets
- * forwarded into a group chat and scanned days later by someone who has never
- * heard of this app, so it must always point at production, never at a preview
- * URL that will be gone by then.
+ * that does not exist there. A loop QR is the opposite — the person scanning
+ * it will open the link on their own phone, keep it, and host from it weeks
+ * later, so it must always point at production, never at a preview URL that
+ * will be gone by then. (The result card, which carried one until 2026-09-22,
+ * was the extreme case: forwarded into a group chat and scanned days later.)
  */
 export function loopUrl(surface: LoopSurface): string {
   const base = process.env.NEXT_PUBLIC_BASE_URL ?? "https://www.guessong.app";
