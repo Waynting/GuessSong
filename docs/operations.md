@@ -306,6 +306,79 @@ that has a `WebSocket` at all.
 env var to `wss://` as the fix and drop the fold: the next deploy that sets it
 the other way brings this back for the same phones, silently.
 
+### "I can't start the game, it always gives an error and asks me to restart"
+
+The host switches Buzzer Mode on (or picks Mixed·QR) and the whole setup page
+becomes **"The game stopped"** with a "Start over" button; pressing it reloads
+the form and the next attempt does the same. A buzzer game that did reach
+`/game` dies there instead, and a player landing on `/buzz/<code>` never sees
+the Join form. Party mode is untouched, which is why the funnel in
+`npm run stats` looks healthy while the report says "always".
+
+Three causes, same shape, same screens, all only on someone else's phone:
+
+- **No `crypto.randomUUID`.** Safari and iOS before 15.4, Chrome before 92,
+  Firefox before 95, Samsung Internet before 16 — 2021 to 2022 — and every
+  WebView on those engines. `getPersistentPlayerId()` called it unguarded,
+  inside the `useMemo` that runs on `useBuzzerSocket`'s first render, so the
+  `TypeError` reached `app/error.tsx` before anything else on the page ran.
+  `mintPlayerId()` in `lib/use-buzzer-socket.ts` now falls back to a v4 UUID
+  built from `getRandomValues` (every engine since 2012), and below that to a
+  `Math.random` v4 shape, so the Worker is handed the same-shaped identity
+  either way.
+- **`localStorage` that throws on the property access.** Safari with "Block
+  All Cookies", some embedded webviews. The same function, the room panel's
+  mount effect and the join page's mount effect all read it raw; the
+  `withStorage` guard in `lib/host-session.ts` existed for exactly this and
+  they did not use it. They do now, through `readStored` / `writeStored` /
+  `removeStored`; on such a device the seat lasts the page rather than the
+  device, and the game plays. A reload on that phone is a new player id, so
+  the Worker now hands a seat whose owner has no socket to a join under the
+  same name — queue place and, on the host's screen, score included — instead
+  of refusing it as taken until the idle alarm (`takeSeat` in
+  `worker/src/buzzer-room.ts`). Three rules keep that from being a way to
+  steal a seat: a name whose owner *is* connected is still refused; the seat
+  remembers the id that opened it (`adoptedFrom`), and that id takes the seat
+  back whenever it returns, the taker being told the name is taken — so two
+  Alexes at one party sort themselves out in favour of the phone that was
+  there first; and the host's seat (`hostPlayerId`) is taken by nothing but a
+  join carrying the token, which in turn takes it from anyone and leaves no
+  opener behind — the host's socket closes on the `/` → `/game` navigation,
+  a guest who joined as "Host" in that gap used to lock the token holder out
+  of their own room, and a reclaim that outranked the host's seat brought
+  that back one reconnect later as an eviction ping-pong. A takeover that
+  re-keys a queued buzz replays the whole queue to the room, because the
+  host's screen advances its queue by matching the promoted entry.
+  On a Mixed·QR room the lost "already submitted" flag makes the re-submit
+  hit the mailbox's 409 `room_name_taken`; the join page carries on to the
+  buzzer as on the 410 it already tolerated — the playlist is in the pool —
+  counts it as `room_submission_failed:already_in`, and writes nothing, so a
+  genuine second Ann who is then refused at the socket gets the form back
+  with her playlist still in it. **Both halves ship together: the Worker
+  deploy is manual (§1), and a Next deploy without it leaves the reload
+  refused as before.**
+- **A Worker URL the page may not open.** The third throw on the same path:
+  `new WebSocket(url)` refuses a `ws://` URL from an https page synchronously
+  (mixed content), and an unparseable value the same way. `socketUrl()` now
+  upgrades `ws://` to `wss://` on an https page, and the constructor sits in a
+  `try` whose catch reports `unreachable` — one of the three codes the page
+  mints for itself (`BUZZER_CLIENT_ERROR_CODES`; `no_answer` is a room that
+  never answered three times running, with a Try again that opens a clean
+  socket), with the operator's half (`NEXT_PUBLIC_BUZZER_WS_URL`) on the
+  console. Both host panels — the room panel on `/` and the game's — render
+  the hook's error at all now, through `buzzerErrorMessage(…, "host")`,
+  because the player's sentence for an ended room tells the host to ask the
+  host.
+
+Reproduce any of them on a laptop without an old phone: headless Chrome with a
+`Page.addScriptToEvaluateOnNewDocument` of `delete Crypto.prototype.randomUUID`
+(and/or a throwing `localStorage` getter), then open `/game` with a buzzer
+payload in `sessionStorage`. `tests/buzzer.test.ts` pins the fallback chain and
+the storage degradation. With the socket URL's scheme above, that is three
+unguarded browser calls in that file in a week: the rule is that nothing in the
+buzzer client may hand the browser a call it might not have, or trust storage
+to be there, without a fallback.
+
 ### "The room disappeared mid-game"
 
 Mixed Playlist rooms use `ROOM_TTL_SECONDS = 30 * 60`, counted from **creation**
