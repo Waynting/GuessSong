@@ -26,6 +26,8 @@ import type {
   ServerMessage,
 } from "@/lib/buzzer-protocol";
 import { buzzerWorkerUrl } from "@/lib/buzzer-client";
+import { readStored, writeStored } from "@/lib/host-session";
+import type { BuzzerClientErrorCode } from "@/lib/error-messages";
 
 const PLAYER_ID_STORAGE_KEY = "guesssong_player_id";
 const INITIAL_RECONNECT_MS = 1000;
@@ -39,16 +41,87 @@ const MAX_RECONNECT_MS = 30_000;
 const MAX_FAILED_OPENS = 3;
 
 /**
+ * A fresh v4 UUID, on every browser that can open a socket.
+ *
+ * `crypto.randomUUID` alone is what this used to be, and it is the second
+ * browser API in this file to have taken a whole surface down on an older
+ * phone (the first was the socket URL's scheme, see `socketUrl`). It arrived
+ * in Safari 15.4, Chrome 92 and Firefox 95 — 2021 to 2022 — and every engine
+ * before that throws `TypeError: crypto.randomUUID is not a function`. The
+ * call runs inside `useMemo` during the first render of `useBuzzerSocket`, so
+ * the throw reached app/error.tsx: the setup page became "The game stopped"
+ * the moment Buzzer Mode was switched on, `/game` did the same in a buzzer
+ * game, and a player landing on `/buzz/[code]` never saw the form. Every
+ * attempt repeated it, because nothing had been written to try again with.
+ * Reported as "I can't start the game, it always gives an error and asks me
+ * to restart". It never reproduces on a developer's machine, for the same
+ * reason the scheme bug never did.
+ *
+ * `getRandomValues` has been in every engine since 2012 and gives the same
+ * RFC 4122 v4 shape, so the Worker is handed an identity it cannot tell from
+ * the fast path's. The `Math.random` tier is for a context with no `crypto`
+ * at all; it keeps the shape and gives up the entropy, which a party buzzer
+ * does not need.
+ */
+export function mintPlayerId(): string {
+  const c = typeof crypto !== "undefined" ? crypto : undefined;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (c && typeof c.getRandomValues === "function") {
+    c.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * The shape every id this module has ever minted has: RFC 4122 v4. The stored
+ * value is read back through this before it is handed to the Worker, so a
+ * corrupted or hand-edited key is minted over rather than sent as the hash key
+ * the room persists under — and a player with a broken key loses one seat,
+ * which is the recovery.
+ */
+const PLAYER_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * The last id this page presented to a room, whichever branch handed it out.
+ * The setup page's room panel and the game page's host panel each mount their
+ * own `useBuzzerSocket`, and the room has to see one host across that
+ * navigation, not a second player arriving as the first leaves. Recorded on
+ * the storage-hit branch too, so a read that succeeds on `/` and is refused
+ * on `/game` (quota, a private-mode transition) still presents the same id.
+ */
+let pageScopedPlayerId: string | null = null;
+
+/** Test seam, in the shape of `__resetLivenessForTests` in lib/loop-stats.ts. */
+export function __resetPlayerIdForTests(): void {
+  pageScopedPlayerId = null;
+}
+
+/**
  * Stable per-device id. Generated once and reused for every room this browser
  * ever joins, which is what makes reconnect-into-the-same-seat work.
+ *
+ * Storage goes through lib/host-session.ts's guard for the reason it and
+ * lib/game-storage.ts give: a locked-down browser throws on the property
+ * access itself, and this ran unguarded during render. On such a device the
+ * seat lasts the page rather than the device, and the game still plays — a
+ * reload on that device is a new player to the room, see docs/operations.md.
  */
 export function getPersistentPlayerId(): string {
   if (typeof window === "undefined") return "";
-  let id = window.localStorage.getItem(PLAYER_ID_STORAGE_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    window.localStorage.setItem(PLAYER_ID_STORAGE_KEY, id);
+  const stored = readStored(PLAYER_ID_STORAGE_KEY);
+  if (stored && PLAYER_ID_SHAPE.test(stored)) {
+    pageScopedPlayerId = stored;
+    return stored;
   }
+  const id = pageScopedPlayerId ?? mintPlayerId();
+  pageScopedPlayerId = id;
+  writeStored(PLAYER_ID_STORAGE_KEY, id);
   return id;
 }
 
@@ -74,8 +147,19 @@ export function getPersistentPlayerId(): string {
 export function socketUrl(code: string): string | null {
   const base = buzzerWorkerUrl();
   if (!base) return null;
-  const origin = base.replace(/^http(s?):\/\//i, (_, s: string) => `ws${s.toLowerCase()}://`);
+  let origin = base.replace(/^http(s?):\/\//i, (_, s: string) => `ws${s.toLowerCase()}://`);
+  // A plain ws:// from an https page is mixed content, and Chrome and Firefox
+  // refuse it *synchronously*, from the constructor — the same throw-in-the-
+  // connect-effect shape as the scheme bug above, reachable by pasting the
+  // Worker's URL as http:// (which is how wrangler prints a dev Worker). The
+  // Worker is always TLS on workers.dev, so an https page can only ever mean
+  // wss://; a dev page on http keeps whatever it was given.
+  if (isSecurePage()) origin = origin.replace(/^ws:\/\//i, "wss://");
   return `${origin}/rooms/${encodeURIComponent(code.toUpperCase())}/ws`;
+}
+
+function isSecurePage(): boolean {
+  return typeof window !== "undefined" && window.location?.protocol === "https:";
 }
 
 export interface BuzzerSocketState {
@@ -83,15 +167,24 @@ export interface BuzzerSocketState {
   isHost: boolean;
   connected: boolean;
   /**
-   * `code` is what gets rendered — through BUZZER_ERROR_CODES, in whatever
-   * language the phone reads. `message` is English and is a fallback for a
-   * Worker newer than this page, so nothing should print it directly.
+   * `code` is what gets rendered — through `buzzerErrorMessage`, in whatever
+   * language the phone reads and for whichever chair is reading it. The two
+   * client codes are the page's own: the socket was never opened. `message`
+   * is English and is a fallback for a Worker newer than this page, so
+   * nothing should print it directly.
    */
-  error: { code: BuzzerErrorCode; message: string } | null;
+  error: { code: BuzzerErrorCode | BuzzerClientErrorCode; message: string } | null;
 }
 
 export interface BuzzerSocketApi extends BuzzerSocketState {
   playerId: string;
+  /**
+   * Start over: a fresh socket, the give-up counter and the last refusal
+   * cleared. The way out of `no_answer` — the room could not be reached
+   * three times running, which a captive portal or a dropped connection
+   * produces as readily as a room that has ended — without a reload.
+   */
+  reconnect: () => void;
   buzz: () => void;
   hostOpen: () => void;
   hostVerdict: (verdict: "correct" | "wrong") => void;
@@ -151,14 +244,31 @@ export function useBuzzerSocket({
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }, []);
 
+  // Bumped by `reconnect()`; a dependency of the connect effect, so bumping
+  // it tears the current socket down and opens a fresh one.
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
+    // Every run starts clean, the null-code run included. The refusal and
+    // the give-up counter belong to the socket that earned them: carried
+    // over, "Try a different name" showed the old refusal until the new
+    // socket answered, and a fresh attempt after a give-up was refused on
+    // its first close. The snapshot belongs to the room that sent it: a new
+    // room on `/` showed the old one's roster until its own state landed.
+    failedOpensRef.current = 0;
+    delayRef.current = INITIAL_RECONNECT_MS;
+    setState((s) =>
+      s.snapshot || s.connected || s.isHost || s.error
+        ? { snapshot: null, isHost: false, connected: false, error: null }
+        : s
+    );
     if (!code || !playerId) return;
     const url = socketUrl(code);
     if (!url) {
       setState((s) => ({
         ...s,
         error: {
-          code: "bad_message",
+          code: "not_configured",
           message: "NEXT_PUBLIC_BUZZER_WS_URL is not set — buzzer rooms are unavailable",
         },
       }));
@@ -181,7 +291,24 @@ export function useBuzzerSocket({
 
     const connect = () => {
       if (cancelled) return;
-      const ws = new WebSocket(url);
+      // The constructor throws synchronously — a fragment in the URL, a
+      // scheme the page may not open, no WebSocket at all — and this runs
+      // from the effect body, so an unguarded throw is app/error.tsx in
+      // place of the page: the third such call on this path, after the id
+      // and the storage above. Deterministic, so there is nothing to retry;
+      // the page says so, and the console carries the operator's half.
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(url);
+      } catch (e) {
+        console.error("[buzzer] the browser refused to open the room's socket — check NEXT_PUBLIC_BUZZER_WS_URL", url, e);
+        setState((s) => ({
+          ...s,
+          connected: false,
+          error: { code: "unreachable", message: "The buzzer room can't be opened from this page" },
+        }));
+        return;
+      }
       socketRef.current = ws;
       // Per-attempt, not a ref: distinguishes "the room refused us" from "we
       // were connected and the connection dropped", which need opposite
@@ -192,7 +319,11 @@ export function useBuzzerSocket({
         openedThisAttempt = true;
         delayRef.current = INITIAL_RECONNECT_MS;
         failedOpensRef.current = 0;
-        setState((s) => ({ ...s, connected: true, error: null }));
+        // `error` is not cleared here: the join is not answered yet. An
+        // evicted taker's own reconnect opens fine and is then refused, and
+        // clearing on open flipped its screen to a live buzzer for the
+        // round trip in between. The reducer clears it on `state`.
+        setState((s) => ({ ...s, connected: true }));
         ws.send(
           JSON.stringify({
             type: "join",
@@ -224,17 +355,23 @@ export function useBuzzerSocket({
         if (ws.readyState === WebSocket.CLOSED && !openedThisAttempt) {
           failedOpensRef.current += 1;
           if (failedOpensRef.current >= MAX_FAILED_OPENS) {
-            // Give up and say so. Retrying past this point cannot succeed —
-            // the room was refused at the upgrade, which is what a wrong or
-            // expired code looks like from here.
+            // Say so, and keep trying slowly. From here a room refused at
+            // the upgrade (a wrong or expired code) and a connection that
+            // never got through (a captive portal, a dropped network, three
+            // 429s from the shared join limiter) look identical, so the code
+            // is the page's own `no_answer` rather than the Worker's
+            // `room_expired`, and the screen offers `reconnect()`. Stopping
+            // here used to end the host's buzzer for the rest of the party
+            // after a Wi-Fi blip of seven seconds — a reload is round one
+            // with the scores wiped — so the retry goes on at the ceiling.
             setState((s) => ({
               ...s,
               error: {
-                code: "room_expired",
-                message: "Room not found — check the code, or it may have ended",
+                code: "no_answer",
+                message: "Couldn't reach the room — check the code and the connection",
               },
             }));
-            return;
+            delayRef.current = MAX_RECONNECT_MS;
           }
         }
 
@@ -257,7 +394,9 @@ export function useBuzzerSocket({
       socketRef.current?.close();
       socketRef.current = null;
     };
-  }, [code, playerId]);
+  }, [code, playerId, attempt]);
+
+  const reconnect = useCallback(() => setAttempt((n) => n + 1), []);
 
   const buzz = useCallback(() => {
     const roundIndex = state.snapshot?.roundIndex;
@@ -276,6 +415,7 @@ export function useBuzzerSocket({
   return {
     ...state,
     playerId,
+    reconnect,
     buzz,
     hostOpen: useCallback(
       () => hostSend({ type: "host:open", hostToken: hostTokenRef.current ?? "" }),
@@ -338,6 +478,14 @@ export function reduce(state: BuzzerSocketState, msg: ServerMessage): BuzzerSock
       // eliminated player at the head of the queue for the rest of the round.
       // A reconnecting client replaying the current head lands on index 0 and
       // changes nothing, which is still what we want.
+      //
+      // Matched on the id only. A seat taken over mid-round re-keys its
+      // queued buzz (worker/src/buzzer-room.ts `takeSeat`), and the room
+      // answers that with a full `state` replay, which is what keeps this
+      // queue in step — not `order`: the room numbers a buzz by the queue's
+      // length and does not renumber after a wrong verdict shifts it, so
+      // two entries in one round can share an `order`, and matching on it
+      // dropped a real buzz on the floor.
       const known = state.snapshot.buzzes.findIndex((b) => b.playerId === msg.entry.playerId);
       const buzzes =
         known === -1

@@ -3,39 +3,16 @@ import {
   LOOP_REF_TTL_MS,
   bumpHostGameCount,
   getHostGameCount,
+  readStored,
   recallLoopRef,
   rememberLoopRef,
+  removeStored,
+  writeStored,
 } from "@/lib/host-session";
+import { installQuotaStorage, installStorage, installThrowingStorage } from "./helpers/storage";
 
 const NOW = new Date("2026-08-09T12:00:00.000Z").getTime();
 const DAY = 24 * 60 * 60 * 1000;
-
-/**
- * jsdom gives us `window` but NOT `window.localStorage` — verified against
- * this project's jsdom 29 / vitest 4 setup. Without a stub, every call in
- * `lib/host-session.ts` takes its "storage unavailable" branch and the whole
- * suite passes while testing nothing. So the stub is load-bearing: it is what
- * makes these assertions mean anything.
- */
-function installStorage(): Storage {
-  const map = new Map<string, string>();
-  const storage: Storage = {
-    get length() {
-      return map.size;
-    },
-    clear: () => map.clear(),
-    getItem: (key) => map.get(key) ?? null,
-    key: (index) => [...map.keys()][index] ?? null,
-    removeItem: (key) => void map.delete(key),
-    setItem: (key, value) => void map.set(key, String(value)),
-  };
-  Object.defineProperty(window, "localStorage", {
-    value: storage,
-    configurable: true,
-    writable: true,
-  });
-  return storage;
-}
 
 beforeEach(() => {
   installStorage();
@@ -165,5 +142,31 @@ describe("remembered loop attribution", () => {
     // gate to audit rather than two that can disagree.
     rememberLoopRef("something_else", NOW);
     expect(recallLoopRef(NOW)).toBe("something_else");
+  });
+});
+
+describe("readStored / writeStored / removeStored", () => {
+  it("round-trip one key through the guard", () => {
+    expect(readStored("k")).toBeNull();
+    writeStored("k", "v");
+    expect(readStored("k")).toBe("v");
+    removeStored("k");
+    expect(readStored("k")).toBeNull();
+  });
+
+  it("answer null or nothing, never a throw, when the property access itself throws", () => {
+    // Safari with "Block All Cookies": the getter throws before any method
+    // is called. The buzzer surfaces read these in mount effects, where a
+    // throw is app/error.tsx in place of the page.
+    installThrowingStorage();
+    expect(() => writeStored("k", "v")).not.toThrow();
+    expect(readStored("k")).toBeNull();
+    expect(() => removeStored("k")).not.toThrow();
+  });
+
+  it("answer null or nothing when only the method throws (quota)", () => {
+    installQuotaStorage();
+    expect(() => writeStored("k", "v")).not.toThrow();
+    expect(readStored("k")).toBeNull();
   });
 });

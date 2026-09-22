@@ -117,7 +117,17 @@ export type AppErrorCode =
   | "buzzer_open_failed"
   | "buzzer_bad_response"
   | "buzzer_bad_message"
-  | "buzzer_not_joined";
+  | "buzzer_not_joined"
+  // The page could not open the socket at all — see BUZZER_CLIENT_ERROR_CODES
+  | "buzzer_unreachable"
+  | "buzzer_no_answer"
+  // What the *host's* screen says for a refusal a player's screen says
+  // differently — see BUZZER_HOST_ERROR_CODES
+  | "buzzer_host_unreachable"
+  | "buzzer_host_no_answer"
+  | "buzzer_host_room_expired"
+  | "buzzer_host_rejected"
+  | "buzzer_host_name_taken";
 
 export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> = {
   unknown: {
@@ -500,6 +510,37 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
     en: "You're not in this room yet.",
     zh: "你還沒有加入這個房間。",
   },
+  buzzer_unreachable: {
+    en: "Your phone can't reach the buzzer. Shout your answers — the host still scores by hand.",
+    zh: "你的手機連不上搶答器。用喊的吧，主持人一樣會計分。",
+  },
+  buzzer_no_answer: {
+    en: "Couldn't reach the room. Check the code and your connection, then try again.",
+    zh: "連不上房間。請確認代碼和網路，然後再試一次。",
+  },
+  // Host-facing. The player's sentence for an ended room says "ask the host
+  // for a new one", which on the host's own screen is nobody; these name the
+  // one thing the host can do.
+  buzzer_host_unreachable: {
+    en: "The buzzer can't be reached from this page — the site's buzzer address needs fixing. The game still plays without Buzzer Mode.",
+    zh: "這個頁面連不上搶答器，網站的搶答器位址需要修正。沒有搶答模式，遊戲一樣可以玩。",
+  },
+  buzzer_host_no_answer: {
+    en: "Couldn't reach the room. It keeps trying — check the connection, or tap Reconnect.",
+    zh: "連不上房間。會持續嘗試——請確認網路，或按「重新連線」。",
+  },
+  buzzer_host_room_expired: {
+    en: "This room has ended. End the game and open a new room from setup.",
+    zh: "這個房間已經結束。請結束遊戲，回到設定頁重新開一個房間。",
+  },
+  buzzer_host_rejected: {
+    en: "The room didn't recognise you as its host. Open a new room from setup.",
+    zh: "房間認不出你是主持人。請回到設定頁重新開一個房間。",
+  },
+  buzzer_host_name_taken: {
+    en: "A player took the host's name while you were reconnecting. Open a new room from setup.",
+    zh: "重新連線時有玩家用了主持人的名字。請回到設定頁重新開一個房間。",
+  },
 };
 
 /**
@@ -520,6 +561,67 @@ export const BUZZER_ERROR_CODES: Record<BuzzerErrorCode, AppErrorCode> = {
   not_joined: "buzzer_not_joined",
   room_expired: "room_expired",
 };
+
+/**
+ * Failures the page has before the Worker is ever reached, and so no wire
+ * code describes: the Worker URL is unset, or the browser refused to open a
+ * socket to it (a `ws://` from an https page, an unparseable value). They
+ * used to ride on `bad_message`, whose sentence tells everyone to reload a
+ * failure that reloading cannot fix. Kept apart from `BuzzerErrorCode` so
+ * lib/buzzer-protocol.ts stays the Worker's own vocabulary and nothing else.
+ */
+export type BuzzerClientErrorCode = "not_configured" | "unreachable" | "no_answer";
+
+/** The player's reading of the page's own failures. */
+export const BUZZER_CLIENT_ERROR_CODES: Record<BuzzerClientErrorCode, AppErrorCode> = {
+  not_configured: "buzzer_not_configured",
+  unreachable: "buzzer_unreachable",
+  no_answer: "buzzer_no_answer",
+};
+
+/**
+ * The same refusal read from the host's chair. A room that has ended tells a
+ * player to ask the host for a new code; the host's own panel saying that is
+ * nobody telling anyone anything. Only the codes whose player sentence is
+ * wrong for the host are listed — the rest fall through to the player's.
+ */
+export const BUZZER_HOST_ERROR_CODES: Partial<Record<BuzzerErrorCode | BuzzerClientErrorCode, AppErrorCode>> = {
+  room_expired: "buzzer_host_room_expired",
+  not_host: "buzzer_host_rejected",
+  name_taken: "buzzer_host_name_taken",
+  // The player is told to shout; the host is told what to fix.
+  unreachable: "buzzer_host_unreachable",
+  // The player is told to check the code; the host has no code to check.
+  no_answer: "buzzer_host_no_answer",
+};
+
+export type BuzzerErrorAudience = "player" | "host";
+
+/** The app code a buzzer refusal renders as, for the screen that is showing it. */
+export function buzzerErrorCode(
+  code: BuzzerErrorCode | BuzzerClientErrorCode,
+  audience: BuzzerErrorAudience
+): AppErrorCode {
+  const host = audience === "host" ? BUZZER_HOST_ERROR_CODES[code] : undefined;
+  if (host) return host;
+  if (code in BUZZER_CLIENT_ERROR_CODES) {
+    return BUZZER_CLIENT_ERROR_CODES[code as BuzzerClientErrorCode];
+  }
+  return BUZZER_ERROR_CODES[code as BuzzerErrorCode];
+}
+
+/**
+ * The one render path for a socket error, on both the phone and the host's
+ * panel. `message` is the Worker's English and is only ever a fallback for a
+ * code this page is too old to know.
+ */
+export function buzzerErrorMessage(
+  error: { code: BuzzerErrorCode | BuzzerClientErrorCode; message: string },
+  locale: ErrorLocale,
+  audience: BuzzerErrorAudience
+): string {
+  return errorMessage(buzzerErrorCode(error.code, audience), locale, { fallback: error.message });
+}
 
 export function isAppErrorCode(value: unknown): value is AppErrorCode {
   return typeof value === "string" && value in ERROR_MESSAGES;

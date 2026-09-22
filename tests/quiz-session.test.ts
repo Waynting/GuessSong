@@ -12,6 +12,7 @@ import {
 } from "@/lib/quiz-session";
 import { QUIZ_TTL_SECONDS } from "@/types/quiz";
 import { ROOM_CODE_ALPHABET } from "@/types/room";
+import { installStorage } from "./helpers/storage";
 
 /** A real six-character code: `0`, `O`, `1`, `I`, `L` are not in the alphabet. */
 function letterCode(i: number): string {
@@ -20,30 +21,17 @@ function letterCode(i: number): string {
 
 const NOW = 1_800_000_000_000;
 
-/**
- * jsdom gives us `window` but not `window.localStorage` here (see
- * tests/host-session.test.ts). Without the stub every `remember*` call takes
- * the "storage unavailable" branch and these tests would pass while testing
- * nothing, so the stub is what makes them mean anything.
- */
-function installStorage(): Storage {
-  const map = new Map<string, string>();
-  const storage: Storage = {
-    get length() {
-      return map.size;
-    },
-    clear: () => map.clear(),
-    getItem: (key) => map.get(key) ?? null,
-    key: (index) => [...map.keys()][index] ?? null,
-    removeItem: (key) => void map.delete(key),
-    setItem: (key, value) => void map.set(key, String(value)),
-  };
-  Object.defineProperty(window, "localStorage", { value: storage, configurable: true, writable: true });
-  return storage;
-}
-
 beforeEach(() => {
   installStorage();
+});
+
+describe("the test environment itself", () => {
+  it("really has storage, so the assertions below are not vacuous", () => {
+    // jsdom supplies no localStorage here; every guarded call would take
+    // its unavailable branch and pass. See tests/helpers/storage.ts.
+    window.localStorage.setItem("canary", "1");
+    expect(window.localStorage.getItem("canary")).toBe("1");
+  });
 });
 
 afterEach(() => {

@@ -19,27 +19,12 @@ import {
   type QuizSubmission,
 } from "@/lib/quiz-progress";
 import { QUIZ_TTL_SECONDS } from "@/types/quiz";
+import { installStorage } from "./helpers/storage";
 
 const NOW = 1_800_000_000_000;
 const PROGRESS_KEY = "guesssong_quiz_progress";
 const SUBMISSIONS_KEY = "guesssong_quiz_submissions";
 
-/** Same stub as tests/quiz-session.test.ts, for the same reason: jsdom has no localStorage here. */
-function installStorage(): Storage {
-  const map = new Map<string, string>();
-  const storage: Storage = {
-    get length() {
-      return map.size;
-    },
-    clear: () => map.clear(),
-    getItem: (key) => map.get(key) ?? null,
-    key: (index) => [...map.keys()][index] ?? null,
-    removeItem: (key) => void map.delete(key),
-    setItem: (key, value) => void map.set(key, String(value)),
-  };
-  Object.defineProperty(window, "localStorage", { value: storage, configurable: true, writable: true });
-  return storage;
-}
 
 const quiz = {
   questionCount: 4,
@@ -72,6 +57,15 @@ const submission: QuizSubmission = {
 
 beforeEach(() => {
   installStorage();
+});
+
+describe("the test environment itself", () => {
+  it("really has storage, so the assertions below are not vacuous", () => {
+    // jsdom supplies no localStorage here; every guarded call would take
+    // its unavailable branch and pass. See tests/helpers/storage.ts.
+    window.localStorage.setItem("canary", "1");
+    expect(window.localStorage.getItem("canary")).toBe("1");
+  });
 });
 
 afterEach(() => {

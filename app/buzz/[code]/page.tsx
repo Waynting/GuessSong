@@ -22,13 +22,9 @@ import { BuzzerButton } from "@/components/buzzer-button";
 import { useBuzzerSocket } from "@/lib/use-buzzer-socket";
 import { JOIN_WANTS_PLAYLIST_PARAM } from "@/lib/room-client";
 import { trackEvent } from "@/lib/analytics";
-import {
-  apiError,
-  describeError,
-  errorMessage,
-  BUZZER_ERROR_CODES,
-} from "@/lib/error-messages";
+import { apiError, buzzerErrorMessage, describeError } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
+import { readStored, removeStored, writeStored } from "@/lib/host-session";
 import { LoopCtaButton, LoopFooter } from "@/components/loop-cta";
 
 const NAME_STORAGE_KEY = "guesssong_player_name";
@@ -68,15 +64,19 @@ export default function BuzzPlayerPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    // Both reads guarded: a locked-down browser throws on the property access,
+    // and this effect runs on landing, before the form has rendered — an
+    // unguarded read was "The game stopped" in place of Join Room. See
+    // lib/host-session.ts.
     const needsPlaylist =
       params.get(JOIN_WANTS_PLAYLIST_PARAM) === "1" &&
-      window.localStorage.getItem(submittedKey(code)) !== "1";
+      readStored(submittedKey(code)) !== "1";
     setWantsPlaylist(needsPlaylist);
 
     // Remember the name so a reconnect (or a locked phone coming back) doesn't
     // dump the player onto a form mid-round. A room still owed a playlist is
     // the one case where we stop anyway — there is a second field to fill.
-    const saved = window.localStorage.getItem(NAME_STORAGE_KEY);
+    const saved = readStored(NAME_STORAGE_KEY);
     if (saved) {
       setDraft(saved);
       if (!needsPlaylist) {
@@ -96,7 +96,7 @@ export default function BuzzPlayerPage() {
   }, [code]);
 
   const joinedRef = useRef(false);
-  const { snapshot, connected, error, playerId, buzz } = useBuzzerSocket({
+  const { snapshot, connected, error, playerId, buzz, reconnect } = useBuzzerSocket({
     code: ready ? code : null,
     name,
   });
@@ -124,9 +124,20 @@ export default function BuzzPlayerPage() {
         // 410 means the host already built the pool. The playlist half of this
         // room is over, but the buzzers run all game — so a latecomer scanning
         // the same code still gets a buzzer instead of a dead end.
-        if (!res.ok && res.status !== 410) {
-          throw apiError(data, "room_submit_failed");
-        }
+        //
+        // 409 `room_name_taken` is, most often, the mailbox's own memory of
+        // this phone: it submitted once, then lost the flag below (a browser
+        // that refuses storage keeps nothing across a reload) and asked
+        // again. The playlist is in the pool, so the player carries on to the
+        // buzzer as on a 410 rather than into the dead end the flag exists to
+        // prevent. The mailbox cannot tell that apart from a second guest
+        // with the same name, so nothing is written on this path: the flag
+        // and the form's playlist stay as they are, and if the room refuses
+        // the socket join as `name_taken` the form re-asks for name *and*
+        // playlist, with the URL still in it.
+        const failure = res.ok ? null : apiError(data, "room_submit_failed");
+        const alreadyIn = res.status === 409 && failure?.code === "room_name_taken";
+        if (failure && res.status !== 410 && !alreadyIn) throw failure;
         if (res.ok) {
           trackEvent("room_submission_sent", {
             submitted_by: "player",
@@ -137,11 +148,13 @@ export default function BuzzPlayerPage() {
           // a working buzzer and sees no error.
           trackEvent("room_submission_failed", {
             submitted_by: "player",
-            reason: "too_late",
+            reason: alreadyIn ? "already_in" : "too_late",
           });
         }
-        window.localStorage.setItem(submittedKey(code), "1");
-        setWantsPlaylist(false);
+        if (!alreadyIn) {
+          writeStored(submittedKey(code), "1");
+          setWantsPlaylist(false);
+        }
       } catch (e: unknown) {
         trackEvent("room_submission_failed", { submitted_by: "player", reason: "other" });
         setJoinError(describeError(e, locale, "room_submit_failed"));
@@ -151,7 +164,7 @@ export default function BuzzPlayerPage() {
       }
     }
 
-    window.localStorage.setItem(NAME_STORAGE_KEY, trimmed);
+    writeStored(NAME_STORAGE_KEY, trimmed);
     setName(trimmed);
     setReady(true);
   }
@@ -213,10 +226,19 @@ export default function BuzzPlayerPage() {
     );
   }
 
-  // name_taken and room_expired are dead ends — retrying the same socket will
-  // fail the same way, so send the player back to the form rather than leaving
-  // them staring at a button that will never work.
-  const fatal = error && (error.code === "name_taken" || error.code === "room_expired");
+  // Dead ends — retrying the same socket will fail the same way, so say so
+  // rather than leaving the player staring at a button that will never work.
+  // A taken name has a way out (another name) and a room that never
+  // answered has one (try again, from a clean socket); the rest are the
+  // room's or the site's to fix.
+  const fatal =
+    error &&
+    (error.code === "name_taken" ||
+      error.code === "room_expired" ||
+      error.code === "room_full" ||
+      error.code === "unreachable" ||
+      error.code === "not_configured" ||
+      error.code === "no_answer");
   if (fatal) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
@@ -224,22 +246,28 @@ export default function BuzzPlayerPage() {
           {/* The Worker's own `message` is English and only a fallback — the
               code is what this phone renders in its own language. */}
           <p className="text-lg font-semibold text-destructive">
-            {errorMessage(BUZZER_ERROR_CODES[error.code], locale, {
-              fallback: error.message,
-            })}
+            {buzzerErrorMessage(error, locale, "player")}
           </p>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              window.localStorage.removeItem(NAME_STORAGE_KEY);
-              setReady(false);
-              joinedRef.current = false;
-            }}
-          >
-            Try a different name
-          </Button>
-          {/* A dead end by definition — the room is gone or the name is taken.
-              Somewhere to go is worth more here than on any working screen. */}
+          {error.code === "name_taken" && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                removeStored(NAME_STORAGE_KEY);
+                setReady(false);
+                joinedRef.current = false;
+              }}
+            >
+              Try a different name
+            </Button>
+          )}
+          {error.code === "no_answer" && (
+            <Button variant="secondary" onClick={reconnect}>
+              Try again
+            </Button>
+          )}
+          {/* A dead end by definition — the room is gone, full or out of
+              reach, or the name is taken. Somewhere to go is worth more here
+              than on any working screen. */}
           <LoopFooter surface="buzz_footer" />
         </div>
       </main>

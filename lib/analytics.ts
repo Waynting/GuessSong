@@ -209,9 +209,13 @@ export type AnalyticsEvent =
          * "too_late" is a 410 — the host already built the pool, so this phone
          * scanned after kickoff. Worth separating from a real error: it says the
          * mailbox closes before people finish arriving, which is a design
-         * question, not a bug.
+         * question, not a bug. "already_in" is a 409 on a name the mailbox
+         * already holds: this phone submitted once, lost the flag that says so
+         * (a browser that refuses storage, a reload) and asked again — no
+         * playlist was lost, and the player goes on to the buzzer. Counted so
+         * a rise in it reads as "phones are losing their flag", not as noise.
          */
-        reason: "too_late" | "other";
+        reason: "too_late" | "already_in" | "other";
       };
     }
   | {

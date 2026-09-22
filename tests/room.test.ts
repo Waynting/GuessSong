@@ -156,7 +156,14 @@ describe("room lifecycle", () => {
     vi.mocked(playlistCache.loadPlaylist).mockResolvedValue(loaded([makeTrack()]));
     const { roomCode } = await createRoom();
     await submitToRoom(roomCode, "Alice", "url1");
-    await expect(submitToRoom(roomCode, "alice", "url2")).rejects.toMatchObject({ status: 409 });
+    // The code, not only the status: `room_full` shares the 409, and
+    // app/buzz/[code]/page.tsx reads exactly `room_name_taken` as "this phone
+    // already submitted — carry on to the buzzer". Renaming it would compile
+    // and silently reopen that dead end.
+    await expect(submitToRoom(roomCode, "alice", "url2")).rejects.toMatchObject({
+      status: 409,
+      code: "room_name_taken",
+    });
   });
 
   it("rejects submission to an unknown room", async () => {
