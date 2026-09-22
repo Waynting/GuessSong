@@ -11,6 +11,10 @@ import {
   isDeterministicPlaylistFailure,
   shouldRememberAllRejections,
   shouldRememberRejection,
+  BUZZER_CLIENT_ERROR_CODES,
+  BUZZER_HOST_ERROR_CODES,
+  buzzerErrorCode,
+  buzzerErrorMessage,
   type AppErrorCode,
   type ErrorLocale,
 } from "@/lib/error-messages";
@@ -171,6 +175,80 @@ describe("the message table", () => {
     for (const [wire, code] of Object.entries(BUZZER_ERROR_CODES)) {
       expect(isAppErrorCode(code), `${wire} maps to a code that doesn't exist`).toBe(true);
     }
+  });
+
+  it("covers the page's own buzzer failures and the host's readings of the Worker's", () => {
+    for (const [client, code] of Object.entries(BUZZER_CLIENT_ERROR_CODES)) {
+      expect(isAppErrorCode(code), `${client} maps to a code that doesn't exist`).toBe(true);
+    }
+    for (const [wire, code] of Object.entries(BUZZER_HOST_ERROR_CODES)) {
+      expect(isAppErrorCode(code), `host ${wire} maps to a code that doesn't exist`).toBe(true);
+      expect(
+        wire in BUZZER_ERROR_CODES || wire in BUZZER_CLIENT_ERROR_CODES,
+        `host reading of a code that doesn't exist: ${wire}`
+      ).toBe(true);
+    }
+  });
+
+  it("never tells the host to ask the host, in either language", () => {
+    // The player's sentence for an ended room says "ask the host for a new
+    // one"; on the host panel that used to be the sentence shown. Every code
+    // the host's chair can render is checked, the pass-throughs included.
+    const hostCodes = [
+      ...(Object.keys(BUZZER_ERROR_CODES) as (keyof typeof BUZZER_ERROR_CODES)[]),
+      ...(Object.keys(BUZZER_CLIENT_ERROR_CODES) as (keyof typeof BUZZER_CLIENT_ERROR_CODES)[]),
+    ].map((code) => buzzerErrorCode(code, "host"));
+    for (const code of hostCodes) {
+      for (const locale of ["en", "zh"] as const) {
+        const text = ERROR_MESSAGES[code][locale];
+        expect(text, `${code}.${locale}`).not.toMatch(/ask the host|only the room's host/i);
+        expect(text, `${code}.${locale}`).not.toMatch(/跟主持人|只有主持人/);
+      }
+    }
+  });
+
+  it("reads the same refusal differently from each chair where the chairs differ", () => {
+    expect(buzzerErrorCode("room_expired", "player")).toBe("room_expired");
+    expect(buzzerErrorCode("room_expired", "host")).toBe("buzzer_host_room_expired");
+    expect(buzzerErrorCode("not_host", "host")).toBe("buzzer_host_rejected");
+    expect(buzzerErrorCode("room_full", "host")).toBe(buzzerErrorCode("room_full", "player"));
+    // The player is told to shout; the host is told what to fix.
+    expect(buzzerErrorCode("unreachable", "player")).toBe("buzzer_unreachable");
+    expect(buzzerErrorCode("unreachable", "host")).toBe("buzzer_host_unreachable");
+    expect(buzzerErrorCode("not_configured", "host")).toBe("buzzer_not_configured");
+    expect(buzzerErrorCode("no_answer", "player")).toBe("buzzer_no_answer");
+    // The player is told to check the code; the host has no code to check.
+    expect(buzzerErrorCode("no_answer", "host")).toBe("buzzer_host_no_answer");
+    for (const locale of ["en", "zh"] as const) {
+      expect(ERROR_MESSAGES.buzzer_host_no_answer[locale]).not.toMatch(/code|代碼/);
+    }
+  });
+
+  it("addresses the player's sentences to the player, never to whoever runs the site", () => {
+    for (const locale of ["en", "zh"] as const) {
+      expect(ERROR_MESSAGES.buzzer_unreachable[locale]).not.toMatch(/address|位址|needs fixing|修正/);
+      expect(ERROR_MESSAGES.buzzer_host_rejected[locale]).not.toMatch(/token|憑證/);
+    }
+  });
+
+  it("renders a known code from the table and keeps the Worker's English only for an unknown one", () => {
+    const expired = { code: "room_expired" as const, message: "This room has expired" };
+    expect(buzzerErrorMessage(expired, "en", "host")).toBe(ERROR_MESSAGES.buzzer_host_room_expired.en);
+    expect(buzzerErrorMessage(expired, "zh", "player")).toBe(ERROR_MESSAGES.room_expired.zh);
+    // The socket guard's message is operator-facing and must never reach the
+    // screen while its code is one the table knows.
+    const unreachable = { code: "unreachable" as const, message: "The buzzer room can't be opened from this page" };
+    expect(buzzerErrorMessage(unreachable, "en", "player")).toBe(ERROR_MESSAGES.buzzer_unreachable.en);
+    expect(buzzerErrorMessage(unreachable, "en", "player")).not.toBe(unreachable.message);
+    // A Worker newer than this page: its own sentence is all there is, on
+    // either chair, and an empty one falls to the generic message rather
+    // than to a blank line. Pinned because the lookup falls through to
+    // `undefined` and a "helpful" `?? "buzzer_bad_message"` would silently
+    // replace the Worker's sentence with the wrong one.
+    const future = { code: "code_from_the_future" as never, message: "Upstream said no" };
+    expect(buzzerErrorMessage(future, "en", "host")).toBe("Upstream said no");
+    expect(buzzerErrorMessage(future, "zh", "player")).toBe("Upstream said no");
+    expect(buzzerErrorMessage({ ...future, message: "" }, "zh", "player")).toBe(ERROR_MESSAGES.unknown.zh);
   });
 });
 

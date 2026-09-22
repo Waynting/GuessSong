@@ -29,8 +29,9 @@ import { buildRoster, openRoom, roomJoinUrl, type OpenRoom } from "@/lib/room-cl
 import { useBuzzerSocket } from "@/lib/use-buzzer-socket";
 import { roomJobs, trackEvent } from "@/lib/analytics";
 import { DEFAULT_HOST_NAME } from "@/lib/game-session";
-import { apiError, describeError, errorMessage } from "@/lib/error-messages";
+import { apiError, buzzerErrorMessage, describeError, errorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
+import { readStored, writeStored } from "@/lib/host-session";
 import { canPollAgainAfter, pollIntervalMs, pollTickAction } from "@/lib/room-poll";
 import { ROOM_TTL_SECONDS, type RoomSubmissionSummary } from "@/types/room";
 
@@ -83,13 +84,16 @@ export function RoomPanel({
   const locale = useErrorLocale();
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(HOST_NAME_STORAGE_KEY);
+    // Guarded: a locked-down browser throws on the property access, and this
+    // effect runs the moment the panel mounts, so an unguarded read put the
+    // whole setup page on the crash screen. See lib/host-session.ts.
+    const saved = readStored(HOST_NAME_STORAGE_KEY);
     if (saved) setHostName(saved);
   }, []);
 
   // Null code means "don't connect", which is exactly right for a room that
   // has no buzzer half — the hook is still called unconditionally.
-  const { snapshot, connected } = useBuzzerSocket({
+  const { snapshot, connected, error: socketError, reconnect } = useBuzzerSocket({
     code: room?.buzzer ? room.code : null,
     name: room?.buzzer?.hostName ?? hostName,
     hostToken: room?.buzzer?.hostToken,
@@ -246,7 +250,7 @@ export function RoomPanel({
     setError(null);
     try {
       const trimmed = hostName.trim() || DEFAULT_HOST_NAME;
-      if (buzzer) window.localStorage.setItem(HOST_NAME_STORAGE_KEY, trimmed);
+      if (buzzer) writeStored(HOST_NAME_STORAGE_KEY, trimmed);
       submissionTotalRef.current = 0;
       setSubmissions([]);
       // A fresh room has a fresh mailbox — the host has submitted nothing to it
@@ -306,7 +310,7 @@ export function RoomPanel({
         tooLate = res.status === 410;
         throw apiError(data, "room_host_submit_failed");
       }
-      window.localStorage.setItem(HOST_NAME_STORAGE_KEY, trimmed);
+      writeStored(HOST_NAME_STORAGE_KEY, trimmed);
       setHostTrackCount(data.trackCount);
       trackEvent("room_submission_sent", {
         submitted_by: "host",
@@ -413,13 +417,31 @@ export function RoomPanel({
         Or send the link.
       </p>
 
-      <p style={{ fontSize: "12px", color: "#666", marginBottom: roster.length ? "10px" : "0" }}>
-        {/* "in the room", not "joined": once the host adds their own playlist
-            they show up in this list too, and they didn't scan anything. */}
-        {room.buzzer && !connected
-          ? "Connecting to room…"
-          : `${roster.length} in the room`}
-      </p>
+      {/* The hook's refusal used to be discarded here, so a socket the
+          browser could not open, a Worker that never answered or a room
+          that ended read as "Connecting to room…" for as long as the host
+          waited — the dead lobby the game panel stopped showing. It names
+          itself now, addressed to the host. */}
+      {room.buzzer && socketError ? (
+        <p role="alert" style={{ fontSize: "12px", color: "#fca5a5", marginBottom: roster.length ? "10px" : "0" }}>
+          {buzzerErrorMessage(socketError, locale, "host")}{" "}
+          <button
+            type="button"
+            onClick={reconnect}
+            style={{ background: "none", border: 0, padding: 0, color: "#f0f0f0", textDecoration: "underline", cursor: "pointer", font: "inherit" }}
+          >
+            Reconnect
+          </button>
+        </p>
+      ) : (
+        <p style={{ fontSize: "12px", color: "#666", marginBottom: roster.length ? "10px" : "0" }}>
+          {/* "in the room", not "joined": once the host adds their own playlist
+              they show up in this list too, and they didn't scan anything. */}
+          {room.buzzer && !connected
+            ? "Connecting to room…"
+            : `${roster.length} in the room`}
+        </p>
+      )}
 
       {roster.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", justifyContent: "center" }}>

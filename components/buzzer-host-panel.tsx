@@ -19,6 +19,8 @@ import { useBuzzerSocket } from "@/lib/use-buzzer-socket";
 import { buzzerJoinUrl } from "@/lib/buzzer-client";
 import { trackEvent } from "@/lib/analytics";
 import type { BuzzEntry, ServerMessage } from "@/lib/buzzer-protocol";
+import { buzzerErrorMessage } from "@/lib/error-messages";
+import { useErrorLocale } from "@/lib/use-error-locale";
 
 export interface BuzzerHostPanelProps {
   roomCode: string;
@@ -106,13 +108,14 @@ export function BuzzerHostPanel({
     [roundIndex, onPlayersChange, onPeakPlayers, onBuzz]
   );
 
-  const { snapshot, connected, buzz, hostOpen, hostVerdict, hostReveal, hostNext } =
+  const { snapshot, connected, error, reconnect, buzz, hostOpen, hostVerdict, hostReveal, hostNext } =
     useBuzzerSocket({
       code: roomCode,
       name: hostName,
       hostToken,
       onServerMessage: handleServerMessage,
     });
+  const locale = useErrorLocale();
 
   useEffect(() => {
     QRCode.toDataURL(joinUrl, { margin: 1, width: 220 })
@@ -197,19 +200,40 @@ export function BuzzerHostPanel({
   return (
     <div className="rounded-xl bg-[#1a1a1a] p-4 text-white">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        {/* min-w-0 / shrink-0: the error line below is a sentence, and
+            without them it pushed the toggle onto two lines at phone width. */}
+        <div className="min-w-0">
           <p className="text-xs uppercase tracking-widest text-[#888]">Room</p>
           <p className="text-2xl font-bold tracking-[0.2em] text-[#1DB954]">{roomCode}</p>
-          <p className="mt-1 text-xs text-[#888]">
-            {connected
-              ? `${(snapshot?.players ?? []).filter((p) => p.connected).length} connected`
-              : "Connecting…"}
-          </p>
+          {/* The hook's error used to go unread here, so a refused host join
+              — the room expired, the name clashing after a reload, a Worker
+              URL the page cannot open — was a silent dead room: "Connecting…"
+              or a connected count on this screen, every phone waiting for a
+              clip that never opens. The refusal now names itself, in the
+              host's language and addressed to the host, in place of the
+              count. */}
+          {error ? (
+            <p role="alert" className="mt-1 text-xs text-[#fca5a5]">
+              {buzzerErrorMessage(error, locale, "host")}{" "}
+              {/* The hook keeps trying on its own; this is the impatient
+                  host's way to try now, without the reload that is round
+                  one with the scores wiped. */}
+              <button type="button" onClick={reconnect} className="underline text-[#f0f0f0] active:text-[#bbb]">
+                Reconnect
+              </button>
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-[#888]">
+              {connected
+                ? `${(snapshot?.players ?? []).filter((p) => p.connected).length} connected`
+                : "Connecting…"}
+            </p>
+          )}
         </div>
         <button
           type="button"
           onClick={() => setShowJoin((v) => !v)}
-          className="rounded-xl bg-[#222] px-3 py-1.5 text-xs text-[#bbb] active:bg-[#333]"
+          className="shrink-0 rounded-xl bg-[#222] px-3 py-1.5 text-xs text-[#bbb] active:bg-[#333]"
         >
           {showJoin ? "Hide QR" : "Show QR"}
         </button>

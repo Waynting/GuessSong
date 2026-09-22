@@ -32,8 +32,8 @@ codes, and last the one surface whose carrier is a URL rather than a QR.
 
 | Surface | Where | When |
 |---|---|---|
-| `buzz_footer` | buzzer page, all three return paths (`app/buzz/[code]/page.tsx:210`, `:243`) | always, including the pre-join form |
-| `buzz_cta` | buzzer page, full-width button (`app/buzz/[code]/page.tsx:289`) | between rounds, after the first resolves |
+| `buzz_footer` | buzzer page, all three return paths (`app/buzz/[code]/page.tsx:223`, `:271`) | always, including the pre-join form |
+| `buzz_cta` | buzzer page, full-width button (`app/buzz/[code]/page.tsx:316`) | between rounds, after the first resolves |
 | `join_footer` | Mixed Playlist submit page (`app/j/[code]/page.tsx:146`) | always |
 | `join_submitted` | Mixed Playlist confirmation screen (`app/j/[code]/page.tsx:103`) | after a playlist is submitted |
 | `game_over` | QR on the host's Game Over screen (`app/game/page.tsx`, `<LoopQr />`) | party mode, end of game |

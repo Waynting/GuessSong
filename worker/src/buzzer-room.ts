@@ -26,16 +26,44 @@ export interface Env {
 
 interface PlayerRecord {
   name: string;
+  /**
+   * The id this seat was first taken under, once another id has taken it
+   * over (a phone that lost its own id — a browser that keeps no storage
+   * mints one per page load). That id, and only that id, reclaims the seat
+   * on return; an adopter holds it only while the first owner is away. Kept
+   * as the *first* owner through a chain of adoptions, so it is the device
+   * that opened the seat which wins, never the latest squatter.
+   */
+  adoptedFrom?: string;
 }
 
 interface RoomState {
   code: string;
   /** Null until a host claims the room. An unclaimed room refuses connections. */
   hostToken: string | null;
+  /**
+   * The id the host's seat is under, set on every join that carries the
+   * token. Nothing but a join with the token may take that seat: the host's
+   * socket closes on the `/` → `/game` navigation, and a guest who joined
+   * as "Host" in that gap used to take the seat and lock the token holder
+   * out of their own room. Null until the host's first join — nothing to
+   * protect yet — and absent on rooms persisted before this field, which is
+   * read as "unknown": no empty seat is taken by name there until a token
+   * join has said which one is the host's.
+   */
+  hostPlayerId?: string | null;
   phase: BuzzerPhase;
   roundIndex: number;
   roundOpenedAt: number | null;
   buzzes: BuzzEntry[];
+  /**
+   * Buzzes handed out this round, so `order` is the arrival order the
+   * protocol promises and not the queue's length: after a wrong verdict
+   * shifts the queue, the next buzz used to take the surviving head's
+   * number, and the host's list read "2. Bob / 2. Cat". Absent on rooms
+   * persisted before the field; read as 0.
+   */
+  buzzCount?: number;
   players: Record<string, PlayerRecord>;
   createdAt: number;
   expiresAt: number;
@@ -54,10 +82,12 @@ function emptyState(code: string, now: number): RoomState {
   return {
     code,
     hostToken: null,
+    hostPlayerId: null,
     phase: "idle",
     roundIndex: 0,
     roundOpenedAt: null,
     buzzes: [],
+    buzzCount: 0,
     players: {},
     createdAt: now,
     expiresAt: now + BUZZER_IDLE_TIMEOUT_MS,
@@ -229,26 +259,80 @@ export class BuzzerRoom extends DurableObject<Env> {
     rawName: string,
     hostToken?: string
   ): Promise<void> {
-    const name = rawName.trim().slice(0, 24);
-    if (!playerId || !name) {
+    // The id is a hash key the room persists under and a value it broadcasts,
+    // and `parseClientMessage` checks nothing past `type`. A bare object
+    // read of `players["__proto__"]` is truthy, so an unchecked id joined as
+    // a player nothing could list, count or evict, whose buzz still locked
+    // the round. Bounded and own-key only, before it is used for anything.
+    const name = typeof rawName === "string" ? rawName.trim().slice(0, 24) : "";
+    if (typeof playerId !== "string" || !playerId || playerId.length > 64 || !name) {
       return this.sendError(ws, "bad_message", "playerId and name are required");
+    }
+    if (Object.hasOwn(Object.prototype, playerId)) {
+      return this.sendError(ws, "bad_message", "playerId is not a valid id");
     }
 
     const isHost = this.isHostToken(hostToken);
-    const known = this.room.players[playerId];
+    const known = Object.hasOwn(this.room.players, playerId) ? this.room.players[playerId] : undefined;
+    const lower = name.toLowerCase();
+    let rekeyedBuzz = false;
 
     if (!known) {
-      if (Object.keys(this.room.players).length >= BUZZER_MAX_PLAYERS) {
-        return this.sendError(ws, "room_full", "This room is full");
+      const ids = Object.keys(this.room.players);
+      const sameName = (id: string) => id !== playerId && this.room.players[id].name.toLowerCase() === lower;
+      // The seat this id opened and then lost to another id — see
+      // `adoptedFrom`. A reclaim is refused by nothing but the host's seat.
+      const reclaimId = ids.find((id) => this.room.players[id].adoptedFrom === playerId);
+      const clashId = reclaimId ?? ids.find(sameName);
+      if (clashId !== undefined) {
+        const holderConnected = this.connectedIds().has(clashId);
+        // Unknown on a room persisted before the field: then every seat is
+        // treated as possibly the host's until a token join says otherwise.
+        const holderIsHost = this.room.hostPlayerId === undefined || clashId === this.room.hostPlayerId;
+        // Who may take a seat that is already somebody's, in order:
+        //  - the token, always — it is the authority, and nothing else may
+        //    ever take the seat it holds: a guest who joined as "Host" while
+        //    the host was between sockets used to lock the token holder out,
+        //    and a reclaim that outranked the host's seat brought that back
+        //    one reconnect later;
+        //  - the id that opened the seat, from anyone but the token;
+        //  - anyone with the name, only if the seat is empty (no socket) and
+        //    not the host's. A phone that lost its playerId — a browser that
+        //    refuses storage mints one per page load — reloads into its own
+        //    empty seat this way; before this it was refused by that seat
+        //    until the room's idle alarm, and every retry under a new name
+        //    burned another of the room's twelve. Taking the seat keeps its
+        //    name, its place in the queue and, on the host's screen, its
+        //    score, which is awarded by name.
+        const mayTake = isHost || (!holderIsHost && (reclaimId !== undefined || !holderConnected));
+        if (!mayTake) return this.sendError(ws, "name_taken", "That name is already taken");
+        // A reclaim presenting a name a third seat holds would be two seats
+        // under one name, which the scoreboard keys by.
+        if (reclaimId !== undefined && ids.some((id) => id !== reclaimId && sameName(id))) {
+          return this.sendError(ws, "name_taken", "That name is already taken");
+        }
+        rekeyedBuzz = this.takeSeat(clashId, playerId, holderConnected, isHost);
+        this.room.players[playerId].name = name;
+      } else {
+        if (ids.length >= BUZZER_MAX_PLAYERS) {
+          return this.sendError(ws, "room_full", "This room is full");
+        }
+        this.room.players[playerId] = { name };
       }
-      const clash = Object.entries(this.room.players).some(
-        ([id, p]) => id !== playerId && p.name.toLowerCase() === name.toLowerCase()
-      );
-      if (clash) return this.sendError(ws, "name_taken", "That name is already taken");
-      this.room.players[playerId] = { name };
     } else {
+      // A known id is broadcast to every phone in the room, so it is not a
+      // credential either: the same two rules as a new id, or a join with
+      // someone's id could rename their seat to a name that blocks a third
+      // player's return, or ride the host's seat without the token.
+      if (!isHost && playerId === this.room.hostPlayerId) {
+        return this.sendError(ws, "name_taken", "That name is already taken");
+      }
+      if (Object.keys(this.room.players).some((id) => id !== playerId && this.room.players[id].name.toLowerCase() === lower)) {
+        return this.sendError(ws, "name_taken", "That name is already taken");
+      }
       known.name = name;
     }
+    if (isHost) this.room.hostPlayerId = playerId;
 
     ws.serializeAttachment({ playerId, name, isHost } satisfies SocketAttachment);
     await this.persist();
@@ -256,7 +340,16 @@ export class BuzzerRoom extends DurableObject<Env> {
     // Full-state replay. Reconnects are indistinguishable from first joins on
     // purpose: the client throws away whatever it had and adopts this.
     this.send(ws, { type: "state", snapshot: this.snapshot(), you: { playerId, isHost } });
-    this.broadcastPlayers();
+    if (rekeyedBuzz) {
+      // Everyone else's queue still names the old id, and the client
+      // advances its queue by matching the entry the host's verdict moves
+      // to the head — an id nobody knows is appended instead, and the
+      // round goes to the wrong name on the host's screen. The same replay
+      // handleNext sends, for the same reason.
+      this.broadcast({ type: "state", snapshot: this.snapshot(), you: { playerId: "", isHost: false } });
+    } else {
+      this.broadcastPlayers();
+    }
   }
 
   private async handleBuzz(
@@ -284,7 +377,7 @@ export class BuzzerRoom extends DurableObject<Env> {
     const entry: BuzzEntry = {
       playerId: att.playerId,
       name: player.name,
-      order: this.room.buzzes.length + 1,
+      order: (this.room.buzzCount = (this.room.buzzCount ?? 0) + 1),
       msSinceOpen: this.room.roundOpenedAt ? now - this.room.roundOpenedAt : 0,
     };
     this.room.buzzes.push(entry);
@@ -304,6 +397,7 @@ export class BuzzerRoom extends DurableObject<Env> {
     this.room.phase = "open";
     this.room.roundOpenedAt = now;
     this.room.buzzes = [];
+    this.room.buzzCount = 0;
     await this.touch();
     this.broadcast({ type: "round:open", roundIndex: this.room.roundIndex, openedAt: now });
   }
@@ -344,6 +438,7 @@ export class BuzzerRoom extends DurableObject<Env> {
     this.room.phase = "idle";
     this.room.roundOpenedAt = null;
     this.room.buzzes = [];
+    this.room.buzzCount = 0;
     await this.touch();
     this.broadcast({ type: "state", snapshot: this.snapshot(), you: { playerId: "", isHost: false } });
   }
@@ -390,12 +485,59 @@ export class BuzzerRoom extends DurableObject<Env> {
     };
   }
 
-  private playerSummaries(): PlayerSummary[] {
+  /**
+   * Re-key a seat, and every buzz standing on it, to the id that took it
+   * over. The seat remembers its first owner unless that owner is the one
+   * taking it back — or the token is: a seat the token holds has no owner
+   * but the token, so an evicted squatter is never recorded as its opener
+   * (its client re-joins on its own a second later, and a reclaim there was
+   * the host locked out of the room again). A holder still on a socket is
+   * told the name is taken and closed, so its phone shows a real screen
+   * rather than a buzzer that answers `not_joined` from then on. Returns
+   * whether a queued buzz was re-keyed, which the caller has to tell the
+   * room about.
+   */
+  private takeSeat(fromId: string, toId: string, evictHolder: boolean, byToken: boolean): boolean {
+    const record = this.room.players[fromId];
+    delete this.room.players[fromId];
+    const firstOwner = record.adoptedFrom ?? fromId;
+    this.room.players[toId] =
+      byToken || firstOwner === toId ? { name: record.name } : { name: record.name, adoptedFrom: firstOwner };
+    // The host's seat is only ever taken with the token, and handleJoin
+    // then writes `hostPlayerId = playerId` itself — no repoint here, so
+    // the suite's coverage of that invariant is the line that holds it.
+    let rekeyed = false;
+    for (const entry of this.room.buzzes) {
+      if (entry.playerId === fromId) {
+        entry.playerId = toId;
+        rekeyed = true;
+      }
+    }
+    if (!evictHolder) return rekeyed;
+    for (const ws of this.ctx.getWebSockets()) {
+      if (this.attachment(ws)?.playerId !== fromId) continue;
+      this.sendError(ws, "name_taken", "That name is already taken");
+      try {
+        ws.close(1000, "seat taken");
+      } catch {
+        // Already gone; webSocketClose reconciles.
+      }
+    }
+    return rekeyed;
+  }
+
+  /** The ids with a live socket right now. */
+  private connectedIds(): Set<string> {
     const connected = new Set<string>();
     for (const ws of this.ctx.getWebSockets()) {
       const att = this.attachment(ws);
       if (att) connected.add(att.playerId);
     }
+    return connected;
+  }
+
+  private playerSummaries(): PlayerSummary[] {
+    const connected = this.connectedIds();
     return Object.entries(this.room.players).map(([playerId, p]) => ({
       playerId,
       name: p.name,
@@ -410,6 +552,10 @@ export class BuzzerRoom extends DurableObject<Env> {
   private broadcast(msg: ServerMessage): void {
     const payload = JSON.stringify(msg);
     for (const ws of this.ctx.getWebSockets()) {
+      // Joined sockets only. A socket that was refused at join stays open
+      // showing its refusal, and a `state` frame would blank that screen
+      // into a live buzzer for a seat it does not hold.
+      if (!this.attachment(ws)) continue;
       try {
         ws.send(payload);
       } catch {

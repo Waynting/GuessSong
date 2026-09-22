@@ -52,6 +52,25 @@ export function withStorage<T>(fn: (storage: Storage) => T, fallback: T): T {
   }
 }
 
+/**
+ * The one-key shapes, so a call site reads as what it does rather than as a
+ * lambda plus the fallback it hands back. Multi-step reads (parse, prune,
+ * write back) still use `withStorage` directly; these are for the flag and
+ * the remembered name. Same guarantees as `withStorage`: null or nothing
+ * when the browser refuses, never a throw.
+ */
+export function readStored(key: string): string | null {
+  return withStorage((storage) => storage.getItem(key), null);
+}
+
+export function writeStored(key: string, value: string): void {
+  withStorage((storage) => storage.setItem(key, value), undefined);
+}
+
+export function removeStored(key: string): void {
+  withStorage((storage) => storage.removeItem(key), undefined);
+}
+
 /** Games this device has hosted so far. 0 before the first one. */
 export function getHostGameCount(): number {
   return withStorage((storage) => {
