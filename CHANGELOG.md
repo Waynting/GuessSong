@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.15.0] - 2026-09-22
 
 The first `npm run stats` read after the quiz's counters had a fortnight of
 traffic under them, and the first with 60.7% repeat hosts. Five things it
@@ -632,8 +632,8 @@ asks one question; everything with a default goes behind one line.
   = "quiz_result"` is the same person weeks later. **Answered 2026-09-22, the
   other way:** `created` read 107 in the week after this deploy against 3 in
   the fortnight before it. A page of its own was worth eight pills. What did
-  not follow was the sending — 0.6 opens per quiz — which is what the
-  Unreleased entry above instruments.
+  not follow was the sending — 0.6 opens per quiz — which is what 1.15.0
+  instruments.
 - **Two GA4 series break at this deploy:** `game_finished` now includes
   abandoned games (`ended_early` separates them) and the footer surfaces'
   copy changed (the KV click counters keep their names).

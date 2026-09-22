@@ -54,6 +54,31 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.15.0",
+    date: "2026-09-22",
+    headline:
+      "Quizzes start at ten questions, the score card has a cleaner footer, and the app now counts a few more things about itself.",
+    headlineZh:
+      "品味測驗預設改成十題、分數卡的底部更乾淨，app 也多數了幾件關於自己的事。",
+    changes: [
+      {
+        kind: "better",
+        text: "A Taste Quiz now starts at ten questions instead of twenty. Ten is what a friend in a group chat actually finishes — twenty-question quizzes were being finished a quarter as often. Twenty, thirty and fifty are still one tap away.",
+        textZh: "品味測驗的預設題數從二十題改成十題。群組裡的朋友真的會做完的是十題——二十題的測驗，做完的人只有四分之一。想要二十、三十、五十題，還是一鍵就能選。",
+      },
+      {
+        kind: "better",
+        text: "The score card you save at the end of a game no longer carries a QR code in its corner. It prints the site's address instead, so the card is all scores and names. Nobody scanned one in the eleven weeks it was there.",
+        textZh: "遊戲結束時存下來的分數卡，角落不再有 QR code，改成直接寫上網址，整張卡就只有分數和名字。它在那裡的十一週裡，沒有人掃過。",
+      },
+      {
+        kind: "new",
+        text: "Behind the scenes, the app now counts a few more things about itself — how games end, whether a quiz link actually gets sent, and why a playlist link was refused — so the next changes are made from numbers rather than guesses.",
+        textZh: "幕後，app 多數了幾件關於自己的事——遊戲是怎麼結束的、測驗連結有沒有真的送出去、歌單連結是為什麼被拒絕——這樣下一次的改動是看數字決定，不是用猜的。",
+      },
+    ],
+  },
+  {
     version: "1.14.0",
     date: "2026-09-22",
     headline:
