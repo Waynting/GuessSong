@@ -22,8 +22,9 @@ import { BuzzerButton } from "@/components/buzzer-button";
 import { useBuzzerSocket } from "@/lib/use-buzzer-socket";
 import { JOIN_WANTS_PLAYLIST_PARAM } from "@/lib/room-client";
 import { trackEvent } from "@/lib/analytics";
-import { apiError, buzzerErrorMessage, describeError } from "@/lib/error-messages";
+import { apiError, buzzerErrorMessage, describeError, errorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
+import { usePlaylistLinkCheck } from "@/lib/use-playlist-link";
 import { readStored, removeStored, writeStored } from "@/lib/host-session";
 import { LoopCtaButton, LoopFooter } from "@/components/loop-cta";
 
@@ -54,6 +55,9 @@ export default function BuzzPlayerPage() {
   // The player's phone, not the host's screen, decides what language this page
   // fails in — they scanned a QR and may not share a language with the host.
   const locale = useErrorLocale();
+  // Up here with the other hooks rather than beside the form that reads it:
+  // that form renders after an early return, where a hook cannot be called.
+  const playlistLink = usePlaylistLinkCheck(playlistUrl, "buzz");
   // Read from the URL rather than rendered from it, so the form doesn't flash
   // its short version before the query string is known.
   const [hydrated, setHydrated] = useState(false);
@@ -172,10 +176,8 @@ export default function BuzzPlayerPage() {
   if (!hydrated) return null;
 
   if (!ready) {
-    const isValidUrl =
-      playlistUrl.includes("spotify.com/playlist") ||
-      playlistUrl.includes("spotify:playlist:");
-    const canJoin = draft.trim().length > 0 && (!wantsPlaylist || isValidUrl) && !submitting;
+    const canJoin =
+      draft.trim().length > 0 && (!wantsPlaylist || playlistLink.submittable) && !submitting;
 
     return (
       <main className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
@@ -210,7 +212,13 @@ export default function BuzzPlayerPage() {
                 value={playlistUrl}
                 onChange={(e) => setPlaylistUrl(e.target.value)}
                 spellCheck={false}
+                aria-describedby={playlistLink.problem ? "playlist-problem" : undefined}
               />
+              {playlistLink.problem && (
+                <p id="playlist-problem" className="text-sm text-destructive">
+                  {errorMessage(playlistLink.problem, locale)}
+                </p>
+              )}
             </div>
           )}
           <Button onClick={handleJoin} disabled={!canJoin}>

@@ -300,6 +300,29 @@ export type AnalyticsEvent =
       params: { share_type: ShareType };
     }
   | {
+      /**
+       * A form was shown a real Spotify link to the wrong thing — an album, a
+       * track, an artist page — and said so under the field instead of
+       * greying its button out in silence.
+       *
+       * This is the only record of those, and it is the weaker kind. The four
+       * forms that block a submission never send the link, so
+       * `playlist_invalid:<kind>` in lib/loop-stats.ts — the KV count, the
+       * one decisions are made from — sees only the forms that do send:
+       * the party form and the quiz. What is pasted into a room is here or
+       * nowhere.
+       *
+       * Fired when the field's reading *becomes* one of the three, not per
+       * keystroke. Bucketed by kind and by form; the link itself never
+       * travels, for the reason every failure param in this file is an enum.
+       */
+      name: "playlist_link_named";
+      params: {
+        surface: "join" | "buzz" | "collector" | "room_panel";
+        link_kind: "album" | "track" | "artist";
+      };
+    }
+  | {
       /** Footer "What's new" overlay. `version` is the newest entry shown, so a
        *  release can be checked against how many people actually read it. */
       name: "changelog_opened";
