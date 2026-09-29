@@ -4,22 +4,42 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trackEvent, type ShareType } from "@/lib/analytics";
 
+/**
+ * What was shared, and what to share instead — and the instead is always a
+ * playlist *somebody made*.
+ *
+ * Every entry here used to send people to a playlist they would then be
+ * refused for. The artist one said "like a This Is playlist you saved", and
+ * "This Is …" playlists are Spotify's own: their ids begin `37i9` and the
+ * server turns every one of them away (`playlist_editorial`). "The playlist
+ * that song lives in" and "any playlist you like" are the same trap with
+ * less signposting — the playlists Spotify shows beside a song, an album or
+ * an artist are mostly its own. A page whose whole job is the next step
+ * must not make the next step a second refusal.
+ *
+ * The album entry also promised support ("on the roadmap", "yet"). Whether
+ * albums are worth building is what `playlist_invalid:album` is measuring;
+ * until that is read there is nothing to promise, so this says what works
+ * today. The same rule as `playlist_link_album` in lib/error-messages.ts,
+ * which is this sentence on the paste path. `tests/playlist-link-copy.test.ts`
+ * reads this table for all of it.
+ */
 const COPY: Record<ShareType, { title: string; body: string }> = {
   track: {
     title: "That's a single track",
-    body: "GuessSong needs a playlist to build a game. Open the playlist that song lives in (or any playlist you like) and share that instead.",
+    body: "GuessSong needs a whole playlist to build a game. Share a public playlist you made yourself — add this song to it first if you like.",
   },
   album: {
-    title: "Albums aren't supported yet",
-    body: "Album support is on the roadmap. For now, open a playlist the album's songs live in (or any playlist you like) and share that instead.",
+    title: "That's an album",
+    body: "GuessSong plays playlists. Add the album's songs to a playlist of your own, make it public, and share that playlist.",
   },
   artist: {
     title: "That's an artist page",
-    body: "GuessSong needs a playlist to build a game. Open one of the artist's playlists (like a This Is playlist you saved) and share that instead.",
+    body: "GuessSong plays playlists. Add the artist's songs to a playlist of your own, make it public, and share that playlist.",
   },
   unknown: {
     title: "Couldn't find a playlist link",
-    body: "We couldn't spot a Spotify playlist URL in what you shared. In Spotify, open a playlist → tap ⋯ → Share → GuessSong. The playlist must be public.",
+    body: "We couldn't spot a Spotify playlist link in what you shared. In Spotify, open a playlist you made → tap ⋯ → Share → GuessSong.",
   },
 };
 
@@ -64,7 +84,10 @@ export default function ShareUnsupportedPage() {
           box-shadow: 0 4px 24px rgba(29,185,84,0.3);
           transition: background 0.15s, transform 0.1s;
         }
-        .home-btn:hover { background: #1ed760; transform: translateY(-1px); }
+        @media (hover: hover) {
+          .home-btn:hover { background: #1ed760; transform: translateY(-1px); }
+        }
+        .home-btn:active { background: #1aa34a; transform: none; transition: none; }
       `}</style>
       <main
         style={{
@@ -93,8 +116,10 @@ export default function ShareUnsupportedPage() {
             {copy.body}
           </p>
           <p style={{ color: "#666", fontSize: "13px", lineHeight: 1.6, marginTop: "12px" }}>
-            Tip: private playlists can&apos;t be loaded — set the playlist to
-            public in Spotify first.
+            Tip: the playlist has to be public, and made by a person. Private
+            playlists can&apos;t be loaded, and neither can Spotify&apos;s own —
+            Today&apos;s Top Hits, Discover Weekly, anything called &ldquo;This
+            Is&rdquo;.
           </p>
           <div style={{ marginTop: "32px" }}>
             <Link className="home-btn" href="/?utm_source=share_unsupported">
