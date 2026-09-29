@@ -8,6 +8,7 @@
 
 import type { ErrorLocale } from "@/lib/error-messages";
 import type { QuizVerdict } from "@/lib/quiz";
+import type { QuizSource } from "@/lib/quiz-source";
 
 /**
  * Six characters, not the room's four. A room lives thirty minutes and is
@@ -68,6 +69,32 @@ export const QUIZ_MAX_ENTRIES = 50;
 /** Same ceiling the room roster applies to a player name. */
 export const QUIZ_NAME_MAX = 24;
 
+/**
+ * The header the host token rides in, on every quiz route that reads one.
+ *
+ * A header and never the query string, for two reasons that are both about
+ * where a URL ends up. Vercel's access logs record it verbatim. And the
+ * taker page's URL is the thing the owner sends: a token, or an `?owner=1`,
+ * in that address travels with the link into the group chat and makes every
+ * friend who taps it the owner. The token stays in the creating device's
+ * localStorage (`lib/quiz-session.ts`) and is attached per request.
+ */
+export const QUIZ_HOST_TOKEN_HEADER = "x-host-token";
+
+/**
+ * `GET /api/quiz/[code]?refetch=1` — the same read, not counted as an open.
+ *
+ * The page asks for the view again when a taker taps Refresh on the result
+ * screen's board, and until 2026-09-30 every one of those was a
+ * `quiz:opened`. Spelled once, here, because the two halves failing to agree
+ * is silent in the expensive direction: the route compares against exactly
+ * `"1"` and treats everything else — absent, misspelt, a value a later build
+ * invents — as a real open, so a page from before this shipped keeps counting
+ * the way it always did. The flag changes what is counted and nothing about
+ * what is returned.
+ */
+export const QUIZ_REFETCH_PARAM = "refetch";
+
 /** One answer option as the friend sees it. Never carries which one is right. */
 export interface QuizOption {
   title: string;
@@ -106,6 +133,15 @@ export interface QuizView {
   questions: QuizQuestionView[];
   /** Public rows: `right` is stripped, see `publicScore`. */
   scoreboard: QuizScore[];
+  /**
+   * Present, and `true`, only when the request carried this quiz's host
+   * token: the server's word that the reader is the person who made it. The
+   * page shows the preview from this and not from the token it holds — a
+   * page that called itself the owner on its own say-so would tell someone
+   * "your answers are not saved" while the server saved them. Absent for
+   * everyone else, so a friend's view is exactly what it was.
+   */
+  owner?: true;
 }
 
 export interface CreateQuizRequest {
@@ -113,6 +149,12 @@ export interface CreateQuizRequest {
   ownerName?: string;
   questionCount: number;
   locale?: ErrorLocale;
+  /**
+   * Where this visitor came from, for `quiz_from:<source>`. One of a closed
+   * set (`lib/quiz-source.ts`) and never the referrer itself. Optional, and
+   * the route creates the same quiz without it.
+   */
+  from?: QuizSource;
 }
 
 export interface CreateQuizResponse {
@@ -129,6 +171,7 @@ export interface CreateQuizResponse {
 }
 
 export interface AnswerQuizRequest {
+  /** Empty only from the owner's preview, which writes no row to name. */
   name: string;
   /** Option index per question, in question order. */
   answers: number[];
@@ -195,4 +238,10 @@ export interface AnswerQuizResponse {
   /** 1-based position on the board, or null when not recorded. */
   rank: number | null;
   scoreboard: QuizScore[];
+  /**
+   * Present, and `true`, only for the owner's own run: graded and shown,
+   * never written. `recorded` is false then too, but for a different reason
+   * than a full board, and the page has to say which.
+   */
+  preview?: true;
 }

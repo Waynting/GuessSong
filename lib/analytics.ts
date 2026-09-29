@@ -13,6 +13,7 @@ import type { ShareOutcome } from "@/lib/result-image";
 import type { GameMode } from "@/lib/game-session";
 import type { ArrivedFrom, LoopSurface } from "@/lib/loop-links";
 import type { QuizVerdict } from "@/lib/quiz";
+import type { QuizSource } from "@/lib/quiz-source";
 
 export type PlaylistSource = "own" | "mixed";
 export type ShareType = "track" | "album" | "artist" | "unknown";
@@ -49,6 +50,12 @@ export function roomJobs(collectsPlaylists: boolean, buzzer: boolean): RoomJobs 
 export type SubmittedBy = "player" | "host";
 /** The join page a scanned phone actually landed on. See roomJoinUrl(). */
 export type JoinPage = "buzz" | "j";
+/**
+ * Who is holding the phone on `/q/[code]`: the person who made the quiz, as
+ * the server recognised them, or anyone else. `taker` is the word the rest of
+ * the quiz code uses for a friend answering.
+ */
+export type QuizViewer = "owner" | "taker";
 
 declare global {
   interface Window {
@@ -369,12 +376,33 @@ export type AnalyticsEvent =
    */
   | {
       name: "quiz_created";
-      params: { question_count: number; arrived_from?: ArrivedFrom };
+      params: {
+        question_count: number;
+        arrived_from?: ArrivedFrom;
+        /**
+         * `arrived_from` with its `organic` split three ways — `internal`,
+         * `external`, `none` — and the KV twin's exact value
+         * (`quiz_from:<source>`, lib/quiz-source.ts). One of a closed set;
+         * the referrer it was derived from never reaches a param.
+         */
+        quiz_from?: QuizSource;
+      };
     }
   | {
       /** A friend's phone loaded a quiz. The denominator for `quiz_completed`. */
       name: "quiz_opened";
-      params: { question_count: number };
+      params: {
+        question_count: number;
+        /**
+         * `owner` when the server recognised this device's host token, and
+         * the run is a preview that writes nothing. The KV twins are
+         * `quiz:owner_opened` / `quiz:owner_completed`, which are counted
+         * *instead of* the friend-side stages; here it is one event with a
+         * param, so a report that does not filter on it is friends and
+         * owners together. Absent on events from before 2026-09-30.
+         */
+        viewer?: QuizViewer;
+      };
     }
   | {
       name: "quiz_completed";
@@ -384,6 +412,8 @@ export type AnalyticsEvent =
         hints_used: number;
         /** Bucketed by lib/quiz.ts, never a raw score string. */
         verdict: QuizVerdict;
+        /** See `quiz_opened`. */
+        viewer?: QuizViewer;
       };
     }
   | {
@@ -415,14 +445,31 @@ export type AnalyticsEvent =
     }
   | {
       /**
-       * The host's share button on the setup page, or the taker's on the
-       * result screen. `outcome` follows `result_shared`: only "shared" left
-       * the device through the share sheet, and "copied" is the clipboard
-       * fallback whose reach is unknowable.
+       * An explicit "Copy link" button — the panel's on `/quiz`, the board's
+       * on `/q/[code]/board`. Split from `quiz_share_tapped` on 2026-09-30:
+       * until then a Copy tap was filed there as `copied`, beside the share
+       * button's clipboard fallback, and the two could not be told apart.
+       * KV twin: `quiz_copy:<by>:<outcome>`.
+       */
+      name: "quiz_copy_tapped";
+      params: {
+        by: "owner" | "taker" | "board";
+        outcome: "copied" | "failed";
+      };
+    }
+  | {
+      /**
+       * The host's share button on the setup page, the taker's on the
+       * result screen, or the owner's on their results page (`board`, which
+       * was filed as `owner` until 2026-09-30). `outcome` follows
+       * `result_shared`: only "shared" left the device through the share
+       * sheet, and "copied" is the clipboard fallback whose reach is
+       * unknowable — the fallback *only*, since the same date; a Copy button
+       * is `quiz_copy_tapped`.
        */
       name: "quiz_share_tapped";
       params: {
-        by: "owner" | "taker";
+        by: "owner" | "taker" | "board";
         outcome: "shared" | "copied" | "dismissed" | "failed";
       };
     };

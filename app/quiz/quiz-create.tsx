@@ -5,11 +5,13 @@ import Link from "next/link";
 import { trackEvent } from "@/lib/analytics";
 import { recallLoopRef, rememberLoopRef } from "@/lib/host-session";
 import { arrivedFrom } from "@/lib/loop-links";
-import { apiError, describeError, errorMessage, shouldRememberRejection } from "@/lib/error-messages";
+import { apiError, describeError, errorMessage, shouldRememberRejection, type ErrorLocale } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import dynamic from "next/dynamic";
 import { CheckIcon, SpotifyIcon } from "@/components/setup-chrome";
+import { QUIZ_COPY, fillCopy } from "@/lib/quiz-copy";
 import { quizUrl, recallLastQuiz, rememberLastQuiz, rememberQuizToken, type LastQuiz } from "@/lib/quiz-session";
+import { currentQuizSource } from "@/lib/quiz-source";
 import {
   QUIZ_MAX_QUESTIONS,
   QUIZ_MIN_QUESTIONS,
@@ -33,10 +35,18 @@ import { selectPreset, typeCustom, commitCustom, isCustomSelected } from "@/lib/
 type CreatedQuiz = CreateQuizResponse & { ownerName: string | null };
 
 /**
+ * What the panel is drawn from: a quiz made on this visit, or the one this
+ * device remembers from an earlier one. The count is null only on the second
+ * kind, and only for an entry written before it was kept.
+ */
+type PanelQuiz = Pick<LastQuiz, "code" | "ownerName" | "playlistName" | "questionCount" | "expiresAt">;
+
+/**
  * The panel — and the QR library it draws with — is only ever shown after
- * `/api/quiz` answers, so it stays out of the page's first load: `handleCreate`
- * warms the chunk the moment the request goes out, and the panel mounts when
- * the response lands. Never server-rendered — `createdQuiz` starts null.
+ * `/api/quiz` answers or a remembered quiz is read back, so it stays out of
+ * the page's first load: `handleCreate` warms the chunk the moment the
+ * request goes out, and the panel mounts when the response lands. Never
+ * server-rendered — both of its sources start null.
  *
  * Two things a lazy chunk owes the host. While it is still arriving there is
  * a placeholder where the link will be, because a re-enabled button reading
@@ -53,19 +63,22 @@ const QuizPanel = dynamic(
   { ssr: false, loading: () => <QuizPanelPlaceholder /> }
 );
 
+/** Resolves its own language: `dynamic`'s `loading` slot is handed no props. */
 function QuizPanelPlaceholder() {
+  const copy = QUIZ_COPY[useErrorLocale()];
   return (
     <p style={{ fontSize: "13px", color: "#999", textAlign: "center", padding: "12px 0" }}>
-      Making your link…
+      {copy.createMakingLink}
     </p>
   );
 }
 
-function QuizPanelFallback({ code }: { code: string }) {
+/** Stands in for the panel, so it is handed the panel's props — `locale` among them. */
+function QuizPanelFallback({ code, locale }: { code: string; locale: ErrorLocale }) {
   const url = quizUrl(code);
   return (
     <p style={{ fontSize: "13px", color: "#ccc", textAlign: "center", lineHeight: 1.6 }}>
-      Your quiz link:{" "}
+      {QUIZ_COPY[locale].createLinkFallback}{" "}
       <a href={url} style={{ color: "#1DB954", wordBreak: "break-all" }}>
         {url}
       </a>
@@ -80,6 +93,17 @@ function QuizPanelFallback({ code }: { code: string }) {
  * deliberately never `recordHostedStart`: a quiz is one person making
  * something, not a room being hosted, and counting it would inflate the one
  * number the whole loop is judged on.
+ *
+ * ## In the visitor's language, under English metadata
+ *
+ * Every sentence here comes from `QUIZ_COPY[locale]` (lib/quiz-copy.ts). The
+ * form was hardcoded English around a panel that was not: a Taiwanese host
+ * filled in an English form and was handed a Chinese panel whose share
+ * sentence went into a Chinese chat. `locale` starts at `en` and moves in an
+ * effect (`useErrorLocale`), so the prerendered page — the one a crawler
+ * reads, under `app/quiz/page.tsx`'s English `metadata` and an English-only
+ * sitemap entry — is English, and that is deliberate. The playlist box's
+ * placeholder is an address, not a sentence, and stays as it is.
  */
 export function QuizCreate() {
   const [playlistUrl, setPlaylistUrl] = useState("");
@@ -89,13 +113,14 @@ export function QuizCreate() {
   // party form, so a half-typed "4" on the way to "45" never becomes the count.
   const [count, setCount] = useState(DEFAULT_QUIZ_COUNT_STATE);
   const [createdQuiz, setCreatedQuiz] = useState<CreatedQuiz | null>(null);
-  // What this device made last time, offered back as the way to the board —
-  // see lib/quiz-session.ts.
+  // What this device made last time, given back as the panel it was — see
+  // lib/quiz-session.ts.
   const [lastQuiz, setLastQuiz] = useState<LastQuiz | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const locale = useErrorLocale();
+  const copy = QUIZ_COPY[locale];
 
   /**
    * The last submission that failed in a way the submission itself
@@ -116,12 +141,24 @@ export function QuizCreate() {
     // unsuspended `useSearchParams` would opt the page out of prerendering.
     const ref = new URLSearchParams(window.location.search).get("ref");
     if (ref) rememberLoopRef(ref);
-    setLastQuiz(recallLastQuiz());
+    const last = recallLastQuiz();
+    setLastQuiz(last);
+    // The remembered quiz is drawn with the panel, so its chunk is wanted
+    // now rather than at the first Create.
+    if (last) void loadQuizPanel().catch(() => {});
   }, []);
 
   const isValidSpotifyUrl =
     playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
   const isEditorial = playlistUrl.includes("37i9");
+
+  /**
+   * One panel, from whichever source has a quiz: the one just made, else the
+   * one remembered. A reload used to swap the panel for a grey line linking
+   * to the board — so the QR and both buttons were lost on the first
+   * pull-to-refresh, for a quiz that had usually not been sent yet.
+   */
+  const shown: PanelQuiz | null = createdQuiz ?? lastQuiz;
 
   async function handleCreate() {
     setError(null);
@@ -139,11 +176,18 @@ export function QuizCreate() {
     setLoading(true);
     // Warm the panel's chunk now, so it is in hand when the response is.
     void loadQuizPanel().catch(() => {});
+    // One read, for both copies: GA4's `arrived_from` and KV's `quiz_from`
+    // describe the same arrival and must not be able to disagree about the
+    // loop credit. `from` is a word from a closed set — the referrer it was
+    // worked out from stays in `lib/quiz-source.ts`.
+    const loopRef = recallLoopRef();
+    const from = currentQuizSource(loopRef);
     const body: CreateQuizRequest = {
       url: playlistUrl,
       ownerName: ownerName.trim() || undefined,
       questionCount,
       locale,
+      from,
     };
     try {
       const res = await fetch("/api/quiz", {
@@ -160,6 +204,7 @@ export function QuizCreate() {
         code: created.code,
         ownerName: owner,
         playlistName: created.playlistName,
+        questionCount: created.questionCount,
         createdAt: Date.now(),
         expiresAt: created.expiresAt,
       };
@@ -168,7 +213,8 @@ export function QuizCreate() {
       setLastQuiz(remembered);
       trackEvent("quiz_created", {
         question_count: created.questionCount,
-        arrived_from: arrivedFrom(recallLoopRef()),
+        arrived_from: arrivedFrom(loopRef),
+        quiz_from: from,
       });
     } catch (e: unknown) {
       const message = describeError(e, locale, "quiz_create_failed");
@@ -189,9 +235,9 @@ export function QuizCreate() {
         <div style={{ color: "#1DB954", display: "flex", justifyContent: "center", marginBottom: "10px" }}>
           <SpotifyIcon />
         </div>
-        <h1 className="hero-title">Taste Quiz</h1>
+        <h1 className="hero-title">{copy.createTitle}</h1>
         <h2 style={{ color: "#666", fontSize: "15px", marginTop: "12px", fontWeight: 300 }}>
-          A link your friends open to guess your taste — and find out who knows you best.
+          {copy.createSubtitle}
         </h2>
       </div>
 
@@ -200,7 +246,7 @@ export function QuizCreate() {
         style={{ padding: "28px", display: "flex", flexDirection: "column", gap: "24px" }}
       >
         <div>
-          <p className="section-label">Spotify Playlist</p>
+          <p className="section-label">{copy.createPlaylistLabel}</p>
           <div style={{ position: "relative" }}>
             <input
               type="url"
@@ -235,32 +281,36 @@ export function QuizCreate() {
                 gap: "6px",
               }}
             >
-              <span>⚠</span> Editorial playlists (Discover Weekly, etc.) may not work
+              <span>⚠</span> {copy.createEditorialWarning}
             </p>
           )}
         </div>
 
         <div>
           <label className="section-label" htmlFor="quiz-owner-name" style={{ display: "block" }}>
-            Your Name
+            {copy.createNameLabel}
           </label>
           <input
             id="quiz-owner-name"
             type="text"
             className="player-input"
-            placeholder="Whose taste is this? (optional)"
+            placeholder={copy.createNamePlaceholder}
             value={ownerName}
             maxLength={QUIZ_NAME_MAX}
             style={{ width: "100%" }}
             onChange={(e) => setOwnerName(e.target.value)}
           />
+          {/* The title is the friend's page's own string, so what is shown
+              here is what will be read there, in the same language. */}
           <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-            Goes in the title: &ldquo;How well do you know {ownerName.trim() || "…"}&rsquo;s music taste?&rdquo;
+            {fillCopy(copy.createTitlePreview, {
+              title: fillCopy(copy.introTitleOwner, { owner: ownerName.trim() || "…" }),
+            })}
           </p>
         </div>
 
         <div>
-          <p className="section-label">Questions</p>
+          <p className="section-label">{copy.createQuestionsLabel}</p>
           {/* The pills and the field are two ways to set one number. */}
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
             {QUIZ_QUESTION_COUNTS.map((c) => (
@@ -279,7 +329,10 @@ export function QuizCreate() {
               max={QUIZ_MAX_QUESTIONS}
               className={`pill count-input${isCustomSelected(count, QUIZ_COUNT_CONTROL) ? " active" : ""}`}
               placeholder={`${QUIZ_MIN_QUESTIONS}–${QUIZ_MAX_QUESTIONS}`}
-              aria-label={`Custom number of questions, ${QUIZ_MIN_QUESTIONS} to ${QUIZ_MAX_QUESTIONS}`}
+              aria-label={fillCopy(copy.createCustomCountLabel, {
+                min: QUIZ_MIN_QUESTIONS,
+                max: QUIZ_MAX_QUESTIONS,
+              })}
               value={count.field}
               onChange={(e) => {
                 // Read the value before the updater React runs later.
@@ -289,30 +342,36 @@ export function QuizCreate() {
               onBlur={() => setCount((s) => commitCustom(s, QUIZ_COUNT_CONTROL))}
             />
           </div>
+          {/* This is the party form's "Number of Songs" control under another
+              label, and there the host is the one who sits through the count.
+              Here it is the friends, who were not asked: in the week to
+              2026-09-29 forty of seventy-seven owners picked something longer
+              than the default, and the thirties and fifties were finished by
+              nobody. The line says who answers and what happens to long ones;
+              the picker itself — presets, default, bounds — is untouched. */}
+          <p style={{ marginTop: "8px", fontSize: "12px", color: "#666", lineHeight: 1.5 }}>
+            {copy.createLengthNote}
+          </p>
         </div>
 
         {/* The link, with the button that makes another one below it. The
             panel stays up while the host edits the form — a tap on a count
             pill is not a decision to throw away a link that may already be
-            in a group chat — and is replaced only by the next quiz. */}
-        {createdQuiz && (
-          <QuizPanel
-            code={createdQuiz.code}
-            ownerName={createdQuiz.ownerName}
-            playlistName={createdQuiz.playlistName}
-            questionCount={createdQuiz.questionCount}
-            expiresAt={createdQuiz.expiresAt}
-            locale={locale}
-          />
-        )}
-        {!createdQuiz && lastQuiz && (
-          <p style={{ fontSize: "12px", color: "#666", textAlign: "center" }}>
-            Your last quiz{lastQuiz.playlistName ? ` (${lastQuiz.playlistName})` : ""} is still
-            open —{" "}
-            <a href={`/q/${lastQuiz.code.toUpperCase()}/board`} className="link-btn">
-              see who knows you best →
-            </a>
-          </p>
+            in a group chat — and is replaced only by the next quiz. A quiz
+            from an earlier visit gets a line saying so; one just made does
+            not need telling. */}
+        {shown && (
+          <div>
+            {!createdQuiz && <p className="section-label">{copy.createLastQuiz}</p>}
+            <QuizPanel
+              code={shown.code}
+              ownerName={shown.ownerName}
+              playlistName={shown.playlistName}
+              questionCount={shown.questionCount}
+              expiresAt={shown.expiresAt}
+              locale={locale}
+            />
+          </div>
         )}
 
         <div>
@@ -322,13 +381,13 @@ export function QuizCreate() {
             {loading ? (
               <>
                 <span className="spinner" />
-                Loading playlist
+                {copy.createLoading}
                 <span className="dot-pulse" />
               </>
-            ) : createdQuiz ? (
-              "Create a new link →"
+            ) : shown ? (
+              copy.createAgainButton
             ) : (
-              "Create quiz link →"
+              copy.createButton
             )}
           </button>
 
@@ -353,7 +412,7 @@ export function QuizCreate() {
 
           <div className="mode-links">
             <Link href="/" className="text-link">
-              ← Back to the party game
+              {copy.createBackToParty}
             </Link>
           </div>
         </div>

@@ -7,6 +7,7 @@ import {
   recordLoopImpression,
   recordQuizShare,
 } from "@/lib/loop-stats";
+import { recordQuizCopy } from "@/lib/loop-stats";
 
 /**
  * Fire-and-forget counters from the browser. See `lib/pulse.ts` for what the
@@ -71,6 +72,12 @@ export async function POST(req: NextRequest) {
       break;
     case "quiz_shared":
       await recordQuizShare(event.by, event.outcome);
+      break;
+    // A kind `parsePulse` accepts and this switch has no case for answers
+    // 204 and records nothing — the counter just never moves.
+    // `tests/pulse.test.ts` reads this file for a case per kind.
+    case "quiz_copied":
+      await recordQuizCopy(event.by, event.outcome);
       break;
   }
 

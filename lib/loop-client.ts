@@ -21,6 +21,7 @@
 import { trackEvent } from "@/lib/analytics";
 import type { LoopSurface } from "@/lib/loop-links";
 import type { GameEnd, MixedSubMode, QuizShareBy, QuizShareOutcome } from "@/lib/loop-stats";
+import type { QuizCopyOutcome } from "@/lib/loop-stats";
 import { sendPulse } from "@/lib/pulse-client";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
@@ -109,4 +110,19 @@ export function reportGameEnd(end: GameEnd, roundsPlayed: number): void {
 export function reportQuizShare(by: QuizShareBy, outcome: QuizShareOutcome): void {
   trackEvent("quiz_share_tapped", { by, outcome });
   sendPulse({ kind: "quiz_shared", by, outcome });
+}
+
+/**
+ * Call from an explicit "Copy link" button once the clipboard has answered.
+ *
+ * Its own function, event and key, and that separation is the point: until
+ * 2026-09-30 the panel's Copy button and its share button both ended in
+ * `reportQuizShare("owner", …)`, so `copied` was the share sheet's fallback
+ * and a deliberate Copy tap added together. A Copy handler that calls
+ * `reportQuizShare` again — it type-checks, `copied` and `failed` are both
+ * share outcomes — puts that back, silently.
+ */
+export function reportQuizCopy(by: QuizShareBy, outcome: QuizCopyOutcome): void {
+  trackEvent("quiz_copy_tapped", { by, outcome });
+  sendPulse({ kind: "quiz_copied", by, outcome });
 }

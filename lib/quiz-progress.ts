@@ -66,6 +66,16 @@ export interface QuizProgress {
   expiresAt: number;
   /** When it was last saved. What pruning orders by. */
   at: number;
+  /**
+   * Set on the owner's own run through their quiz, and the one case where
+   * `name` may be empty: a preview writes no row, so the intro never asked
+   * for one. Kept so that a reload mid-preview resumes like anyone's —
+   * `quiz:owner_completed` exists to find out whether owners play their own
+   * quiz, and a run lost to a reload reads as an owner who did not. Absent on
+   * every friend's entry, and resumed only while the server still says
+   * `owner` (`fitsQuizProgress`).
+   */
+  preview?: true;
 }
 
 /** A finished quiz: what the server needs to replay the row it wrote. */
@@ -84,6 +94,8 @@ export interface QuizShape {
   questionCount: number;
   hintAllowance: number;
   questions: ReadonlyArray<{ options: ReadonlyArray<unknown> }>;
+  /** The server's word that the reader made this quiz. See `QuizView.owner`. */
+  owner?: true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -148,7 +160,10 @@ export function parseQuizProgress(raw: string | null, now = Date.now()): QuizPro
     const v = item as Partial<QuizProgress>;
     if (!isCode(v.code)) return null;
     if (!isLiveExpiry(v.expiresAt, now)) return null;
-    if (typeof v.name !== "string" || !v.name.trim()) return null;
+    // Only `true` is a preview; anything else is a friend's entry and needs
+    // its name, as before.
+    const preview = v.preview === true;
+    if (typeof v.name !== "string" || (!preview && !v.name.trim())) return null;
     if (!isIntList(v.answers)) return null;
     if (!Number.isInteger(v.index) || (v.index as number) < 0) return null;
     if (!Number.isInteger(v.hintsLeft) || (v.hintsLeft as number) < 0) return null;
@@ -164,6 +179,7 @@ export function parseQuizProgress(raw: string | null, now = Date.now()): QuizPro
       submissionId: v.submissionId,
       expiresAt: v.expiresAt,
       at: readAt(v.at),
+      ...(preview ? { preview: true as const } : {}),
     };
   });
 }
@@ -202,8 +218,16 @@ export function clearQuizProgress(code: string, now = Date.now()): void {
  * not resumed. Answers are checked against each question's own option count
  * rather than the constant, because a record built before the two-option
  * shape lays out with however many it has.
+ *
+ * A preview is resumed only by the owner. Its entry may have no name, and a
+ * device that has since lost the token — ten are kept, storage is evicted —
+ * is a friend now: resuming would walk them to the last question with
+ * nothing to sign the sheet with. The other direction is fine and allowed:
+ * a friend's entry, name and all, resumes for an owner, because the server
+ * decides what the sheet is when it arrives.
  */
 export function fitsQuizProgress(progress: QuizProgress, quiz: QuizShape): boolean {
+  if (progress.preview && !quiz.owner) return false;
   if (progress.answers.length !== quiz.questionCount) return false;
   if (progress.index >= quiz.questionCount) return false;
   if (progress.hintsLeft > quiz.hintAllowance) return false;
