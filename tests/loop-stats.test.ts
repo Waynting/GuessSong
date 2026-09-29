@@ -29,6 +29,8 @@ const {
   LOOP_STATS_TTL_SECONDS,
   MIXED_SUB_MODES,
   PLAYLIST_REFUSAL_CODES,
+  PLAYLIST_INVALID_KINDS,
+  SHORTLINK_OUTCOMES,
   QUIZ_STAGES,
   QUIZ_LENGTH_STAGES,
   QUIZ_HINT_OUTCOMES,
@@ -39,6 +41,8 @@ const {
   recordGameEnd,
   recordGameStart,
   recordPlaylistRefused,
+  recordPlaylistInvalid,
+  recordShortlinkOutcome,
   recordQuizShare,
   recordQuizStage,
   recordQuizVerdict,
@@ -289,6 +293,57 @@ describe("playlist refusals and quiz shares", () => {
       await recordPlaylistRefused(code as never);
       expect(kv.incrs).toEqual([]);
     }
+  });
+
+  it("splits a 'not a playlist URL' refusal by what it was, and writes the total with it", async () => {
+    // The split is a second reading of `playlist_refused:invalid_playlist_url`,
+    // not a fifth refusal code. One call writes both, so the parts cannot
+    // drift from the total they are parts of — and the weekly series that
+    // read 748 before the split keeps counting exactly what it counted.
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    expect(PLAYLIST_INVALID_KINDS).toEqual(["album", "track", "artist", "shortlink", "other"]);
+    expect(Object.keys(keys.playlistInvalid)).toHaveLength(PLAYLIST_INVALID_KINDS.length);
+    expect(PLAYLIST_REFUSAL_CODES).toHaveLength(4);
+
+    for (const kind of PLAYLIST_INVALID_KINDS) {
+      kv.incrs = [];
+      __resetLivenessForTests();
+      await recordPlaylistInvalid(kind);
+      expect(keys.playlistInvalid[kind]).toBe(`loop:stats:2026-08-09:playlist_invalid:${kind}`);
+      expect(keysWritten()).toContain(keys.playlistInvalid[kind]);
+      expect(keysWritten()).toContain(keys.playlistRefused.invalid_playlist_url);
+      // The pair and the marker, once — not a marker each.
+      expect(kv.incrs).toHaveLength(3);
+      expect(kv.incrs.filter((i) => i.key === keys.live)).toHaveLength(1);
+    }
+  });
+
+  it("refuses an undeclared kind outright — no part, and no total without its part", async () => {
+    for (const kind of ["playlist", "episode", "", "album:x", "__proto__"]) {
+      kv.incrs = [];
+      await recordPlaylistInvalid(kind as never);
+      expect(kv.incrs).toEqual([]);
+    }
+  });
+
+  it("keys a followed short link by how it came out, from a closed set", async () => {
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    expect(Object.keys(keys.playlistShortlink)).toHaveLength(SHORTLINK_OUTCOMES.length);
+    for (const outcome of SHORTLINK_OUTCOMES) {
+      kv.incrs = [];
+      await recordShortlinkOutcome(outcome);
+      expect(keys.playlistShortlink[outcome]).toBe(
+        `loop:stats:2026-08-09:playlist_shortlink:${outcome}`
+      );
+      expect(keysWritten()).toContain(keys.playlistShortlink[outcome]);
+    }
+    kv.incrs = [];
+    await recordShortlinkOutcome("timeout" as never);
+    expect(kv.incrs).toEqual([]);
+
+    kv.failWrites = true;
+    await expect(recordPlaylistInvalid("album")).resolves.toBeUndefined();
+    await expect(recordShortlinkOutcome("unavailable")).resolves.toBeUndefined();
   });
 
   it("refuses a share whose by or outcome is undeclared — both are key tails", async () => {
@@ -556,6 +611,31 @@ describe("the digest prints what the recorders write", () => {
       expect(script).not.toMatch(new RegExp(`get\\("quiz_throttled:${route}"\\)`));
     }
     expect(script).toMatch(/m\.startsWith\("quiz_throttled:"\)/);
+  });
+
+  it("prints the split under the refusals, and the short links on their own", () => {
+    // Both are new prefixes, so without an entry in RENDERED_PREFIXES they
+    // would print twice — once here and once, raw, under "Other counters" —
+    // and with one but no reader they would be consumed and printed nowhere.
+    const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
+    expect(rendered).toContain('"playlist_invalid:"');
+    expect(rendered).toContain('"playlist_shortlink:"');
+
+    // Read by name over the writer's closed sets, every member of each.
+    const kinds = script.match(/const invalidKinds = \[([\s\S]*?)\n  \];/)?.[1] ?? "";
+    for (const kind of PLAYLIST_INVALID_KINDS) expect(kinds, kind).toContain(`["${kind}",`);
+    expect(script).toMatch(/get\(`playlist_invalid:\$\{k\}`\)/);
+    const outcomes = script.match(/const shortlinkOutcomes = \[([\s\S]*?)\n\];/)?.[1] ?? "";
+    for (const outcome of SHORTLINK_OUTCOMES) expect(outcomes, outcome).toContain(`["${outcome}",`);
+    expect(script).toMatch(/get\(`playlist_shortlink:\$\{o\}`\)/);
+
+    // Directly under the line it splits, inside the block that prints it.
+    const refused = script.indexOf("Playlist links refused —");
+    const split = script.indexOf("not a playlist URL, by what it was");
+    const editorial = script.indexOf("a quarter or more are Spotify's own playlists");
+    expect(refused).toBeGreaterThan(-1);
+    expect(split).toBeGreaterThan(refused);
+    expect(editorial).toBeGreaterThan(split);
   });
 
   it("reads both game ends, every share pair, and the refusal prefix", () => {

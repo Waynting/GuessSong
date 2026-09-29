@@ -8,7 +8,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 const TOKEN_URL = "https://accounts.spotify.com/api/token";
-const PLAYLIST_URL = "https://open.spotify.com/playlist/abc123";
+/**
+ * A real-shaped id. `parsePlaylistUrl` is lib/spotify-link.ts's classifier
+ * now and holds an id to 22 base62 characters, so the `abc123` this file
+ * used to load would be refused before a single request went out — which is
+ * the point of the rule, and would leave every test below measuring nothing.
+ */
+const PLAYLIST_ID = "3cEYpjA9oz9GiPac4AsH4n";
+const PLAYLIST_URL = `https://open.spotify.com/playlist/${PLAYLIST_ID}`;
 
 interface RouteBehaviour {
   /** HTTP status for the playlist/tracks calls. 200 unless overridden. */
@@ -122,7 +129,7 @@ function installFetchMock(behaviour: RouteBehaviour = {}) {
       total: totalTracks,
       next:
         allTracksNull || pageEnd < totalTracks
-          ? `https://api.spotify.com/v1/playlists/abc123/tracks?limit=${limit}&offset=${pageEnd}`
+          ? `https://api.spotify.com/v1/playlists/${PLAYLIST_ID}/tracks?limit=${limit}&offset=${pageEnd}`
           : null,
     };
   }
@@ -200,7 +207,7 @@ function installFetchMock(behaviour: RouteBehaviour = {}) {
       status: 200,
       statusText: "OK",
       headers: noHeaders(),
-      json: async () => ({ id: "abc123", name: "Test Playlist", tracks: embedded }),
+      json: async () => ({ id: PLAYLIST_ID, name: "Test Playlist", tracks: embedded }),
       text: async () => "",
     };
   });

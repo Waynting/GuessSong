@@ -1,5 +1,6 @@
 import { Track } from "@/types";
 import { errorMessage, type AppErrorCode } from "@/lib/error-messages";
+import { isEditorialPlaylistId, playlistIdFromLink } from "@/lib/spotify-link";
 
 const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
@@ -194,34 +195,28 @@ export interface SpotifyPlaylist {
 }
 
 /**
- * Check if playlist ID is a Spotify editorial/algorithm playlist
- * Spotify editorial playlists have IDs starting with "37i9"
- * These playlists return 404 for new/development apps after Nov 2024
+ * Whether a playlist id is one of Spotify's own. The rule is
+ * `isEditorialPlaylistId` in lib/spotify-link.ts; this is the name the server
+ * has always called it by.
  */
 export function isSpotifyEditorial(playlistId: string): boolean {
-  return playlistId.startsWith("37i9");
+  return isEditorialPlaylistId(playlistId);
 }
 
 /**
- * Parse Spotify playlist URL to extract playlist ID
+ * The playlist id in a pasted link, or null.
+ *
+ * A name for `classifySpotifyLink`, not a parser of its own. This used to be
+ * two unanchored regexes — `playlist/<anything>` — while the forms ran a second
+ * rule and the share target a third, so a link could be valid on one side of
+ * the wire and refused on the other. There is one reading now and it lives in
+ * lib/spotify-link.ts; a regex added here is that bug coming back.
+ *
+ * Never follows a short link: this module stays a pure Spotify client, and
+ * `loadPlaylist` has resolved one to an id before anything reaches here.
  */
 export function parsePlaylistUrl(url: string): string | null {
-  // Support formats:
-  // https://open.spotify.com/playlist/{id}
-  // spotify:playlist:{id}
-  const patterns = [
-    /playlist\/([a-zA-Z0-9]+)/,
-    /spotify:playlist:([a-zA-Z0-9]+)/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match) {
-      return match[1];
-    }
-  }
-
-  return null;
+  return playlistIdFromLink(url);
 }
 
 /**

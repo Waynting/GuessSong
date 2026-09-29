@@ -171,6 +171,70 @@ export function isPlaylistRefusalCode(value: unknown): value is PlaylistRefusalC
 }
 
 /**
+ * What a "not a playlist URL" refusal actually was.
+ *
+ * `playlist_refused:invalid_playlist_url` read 748 in the week to 2026-09-29
+ * — the second largest reason a link was turned away — and could not be read:
+ * an album link, a track link, an artist page, a mobile short link and a
+ * sentence typed into the field were one number. "Should the site play
+ * albums" depends on how much of it is albums, so the split is measured
+ * before anything is built.
+ *
+ *   album      a Spotify album link — the request the app cannot serve
+ *   track      one song
+ *   artist     an artist's page
+ *   shortlink  a `spotify.link` that was followed and led nowhere usable: a
+ *              dead slug, or a podcast, a profile, the home page
+ *   other      no Spotify link in it at all, or one too mangled to read
+ *
+ * A short link that leads to an album is `album`, not `shortlink` — the
+ * question is what people are trying to play, and how the link was spelled
+ * is not part of it. A short link that could not be followed *this time* is
+ * in neither: that is `playlist_shortlink:unavailable` below, it is
+ * retryable, and it is not a refusal.
+ *
+ * **Written in the same call as `playlist_refused:invalid_playlist_url`, one
+ * for one**, so the five sum to it exactly and that weekly series keeps its
+ * meaning against the 748. `PLAYLIST_REFUSAL_CODES` stays the set of four:
+ * this is a second reading of one of them, not a fifth.
+ */
+export type PlaylistInvalidKind = "album" | "track" | "artist" | "shortlink" | "other";
+
+export const PLAYLIST_INVALID_KINDS: readonly PlaylistInvalidKind[] = [
+  "album",
+  "track",
+  "artist",
+  "shortlink",
+  "other",
+];
+
+/**
+ * How following a short link came out, for every one the server was handed —
+ * through a form (`loadPlaylist`) or through Android's share sheet (`/share`).
+ *
+ *   resolved     it led to a playlist, an album, a track or an artist
+ *   unusable     it answered, and led to none of those
+ *   unavailable  it could not be followed: a timeout, a dropped connection,
+ *                a reply that was not a redirect
+ *
+ * This is the only health check the resolver has. `spotify.link` is somebody
+ * else's redirector answering a request from a shared datacentre address, and
+ * how it treats one cannot be known from a laptop — the same reason a
+ * throttled preview never reproduced locally. If `unavailable` is most of the
+ * line, short links do not work from production and the feature is a slower
+ * way of being refused.
+ *
+ * Counted on a cached answer too, so it is attempts, like the refusals.
+ */
+export type ShortlinkOutcome = "resolved" | "unusable" | "unavailable";
+
+export const SHORTLINK_OUTCOMES: readonly ShortlinkOutcome[] = [
+  "resolved",
+  "unusable",
+  "unavailable",
+];
+
+/**
  * Which of Mixed Playlist Mode's two collection routes built a game's pool.
  *
  * Lives here rather than in `lib/pulse.ts` for the same reason
@@ -359,6 +423,8 @@ export function loopStatsKeys(
   quizShare: Record<QuizShareBy, Record<QuizShareOutcome, string>>;
   gameEnd: Record<GameEnd, string>;
   gameEndRound: string[];
+  playlistInvalid: Record<PlaylistInvalidKind, string>;
+  playlistShortlink: Record<ShortlinkOutcome, string>;
   playlistRefused: Record<PlaylistRefusalCode, string>;
 } {
   const impressions: Record<string, string> = {};
@@ -391,6 +457,12 @@ export function loopStatsKeys(
     playlistRefused: Object.fromEntries(
       PLAYLIST_REFUSAL_CODES.map((c) => [c, key(day, `playlist_refused:${c}`)])
     ) as Record<PlaylistRefusalCode, string>,
+    playlistInvalid: Object.fromEntries(
+      PLAYLIST_INVALID_KINDS.map((k) => [k, key(day, `playlist_invalid:${k}`)])
+    ) as Record<PlaylistInvalidKind, string>,
+    playlistShortlink: Object.fromEntries(
+      SHORTLINK_OUTCOMES.map((o) => [o, key(day, `playlist_shortlink:${o}`)])
+    ) as Record<ShortlinkOutcome, string>,
     mixedPool: {
       room: key(day, "mixed_pool:room"),
       phone: key(day, "mixed_pool:phone"),
@@ -571,6 +643,36 @@ export async function recordGameEnd(end: GameEnd, roundsPlayed: number): Promise
 export function recordPlaylistRefused(code: PlaylistRefusalCode): Promise<void> {
   if (!isPlaylistRefusalCode(code)) return Promise.resolve();
   return bump(`playlist_refused:${code}`);
+}
+
+/**
+ * A link was refused as `invalid_playlist_url`, and this is what it was.
+ *
+ * One `Promise.all` with the refusal it splits, for the reason
+ * `recordQuizCreated` gives: the marker memo is claimed before its write, so
+ * the pair costs two commands and not three. Writing the two in one function
+ * is also what keeps them one for one — a caller cannot bump the split and
+ * forget the total, or the other way round.
+ *
+ * The kind is guarded before either write, so an undeclared one records
+ * nothing at all rather than a total with no part.
+ */
+export async function recordPlaylistInvalid(kind: PlaylistInvalidKind): Promise<void> {
+  if (!PLAYLIST_INVALID_KINDS.includes(kind)) return;
+  await Promise.all([
+    recordPlaylistRefused("invalid_playlist_url"),
+    bump(`playlist_invalid:${kind}`),
+  ]);
+}
+
+/**
+ * A short link was followed, or could not be. Written by `resolveShortlink`
+ * in `lib/spotify-shortlink.ts`, which is the one function both doors — the
+ * forms and the share sheet — go through.
+ */
+export function recordShortlinkOutcome(outcome: ShortlinkOutcome): Promise<void> {
+  if (!SHORTLINK_OUTCOMES.includes(outcome)) return Promise.resolve();
+  return bump(`playlist_shortlink:${outcome}`);
 }
 
 /**

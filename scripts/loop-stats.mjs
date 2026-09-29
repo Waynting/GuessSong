@@ -536,6 +536,8 @@ const RENDERED_PREFIXES = [
   "game_end:",
   "game_end_round:",
   "playlist_refused:",
+  "playlist_invalid:",
+  "playlist_shortlink:",
   "quiz:",
   "quiz_share:",
   "quiz_verdict:",
@@ -698,11 +700,66 @@ if (refusals.length > 0) {
     .map((c) => `${REFUSAL_LABELS[c] ?? c} ${get(`playlist_refused:${c}`)}`)
     .join(" · ");
   console.log(`\nPlaylist links refused — ${total} that will never work: ${parts}`);
+  // What "not a playlist URL" was, from `playlist_invalid:<kind>` — written
+  // in the same call as the total it splits, so the parts sum to it. Read by
+  // name over the closed set lib/loop-stats.ts declares (PLAYLIST_INVALID_KINDS)
+  // and in its order: a kind that was never pasted prints as 0, which is an
+  // answer here, where a missing word would be a question.
+  const invalidKinds = [
+    ["album", "album"],
+    ["track", "track"],
+    ["artist", "artist"],
+    ["shortlink", "dead short link"],
+    ["other", "anything else"],
+  ];
+  const invalidTotal = invalidKinds.reduce((t, [k]) => t + get(`playlist_invalid:${k}`), 0);
+  if (invalidTotal > 0) {
+    const split = invalidKinds.map(([k, label]) => `${label} ${get(`playlist_invalid:${k}`)}`).join(" · ");
+    console.log(`  not a playlist URL, by what it was: ${split}`);
+    console.log(
+      "  album is the one the app could choose to serve; the forms that block a\n" +
+        "  wrong link never send it, so this is the party form and the quiz only"
+    );
+    const unsplit = get("playlist_refused:invalid_playlist_url") - invalidTotal;
+    if (unsplit > 0) {
+      console.log(`  (${unsplit} more were refused before the split was counted)`);
+    }
+  }
   const editorial = get("playlist_refused:playlist_editorial");
   if (editorial > 0 && editorial >= total / 4) {
     console.log(
       "  a quarter or more are Spotify's own playlists: hosts want the charts,\n" +
         "  and the app cannot serve them (37i9… returns 404 to new apps)"
+    );
+  }
+}
+
+/**
+ * Short links, and whether following them works from where this runs.
+ *
+ * `playlist_shortlink:<outcome>`, written by `resolveShortlink` in
+ * lib/spotify-shortlink.ts for every short link the server was handed — a
+ * form or Android's share sheet, a cached answer included. It is printed on
+ * its own, outside the refusals above, because its best day has no refusal
+ * in it: every link resolved to a playlist and loaded.
+ */
+const shortlinkOutcomes = [
+  ["resolved", "followed"],
+  ["unusable", "led nowhere usable"],
+  ["unavailable", "could not be reached"],
+];
+const shortlinkTotal = shortlinkOutcomes.reduce((t, [o]) => t + get(`playlist_shortlink:${o}`), 0);
+if (shortlinkTotal > 0) {
+  const parts = shortlinkOutcomes
+    .map(([o, label]) => `${label} ${get(`playlist_shortlink:${o}`)}`)
+    .join(" · ");
+  console.log(`\nShort links (spotify.link) — ${shortlinkTotal} pasted or shared: ${parts}`);
+  const unreachable = get("playlist_shortlink:unavailable");
+  if (unreachable > 0 && unreachable >= shortlinkTotal / 4) {
+    console.log(
+      "  a quarter or more could not be reached: the redirector is refusing or\n" +
+        "  stalling this deployment's address, and those hosts were told to paste\n" +
+        "  the full link — lib/spotify-shortlink.ts, not the links"
     );
   }
 }

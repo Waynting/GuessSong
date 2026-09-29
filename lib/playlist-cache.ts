@@ -24,20 +24,34 @@
  * retries, and the retries keep the quota pinned. One 429 from Spotify parks
  * *all* uncached loads for the duration it asked for.
  *
+ * In front of all three sits the one step that is not about Spotify's quota
+ * at all: finding out what was pasted (`playlistIdFor`). A link that is an
+ * album, a track, an artist page or nothing is refused there, and a short
+ * link is followed there, before the cache is read and before any budget is
+ * claimed — none of it touches the Web API, so none of it may spend or wait
+ * on the API's allowance.
+ *
  * Every KV call is wrapped. A cache outage must degrade to "slower", never to
  * "broken" — same contract as app/api/preview/route.ts, which this follows.
  */
 
 import { dayBucket, getKvStore, hourBucket } from "@/lib/kv";
+import { getPlaylistWithTracks, isSpotifyEditorial, SpotifyApiError } from "@/lib/spotify";
 import {
-  getPlaylistWithTracks,
-  isSpotifyEditorial,
-  parsePlaylistUrl,
-  SpotifyApiError,
-} from "@/lib/spotify";
+  classifySpotifyLink,
+  isNamedLinkKind,
+  NAMED_LINK_CODES,
+  playlistUrlFromId,
+} from "@/lib/spotify-link";
+import { resolveShortlink } from "@/lib/spotify-shortlink";
 import { stripTrackForStorage } from "@/lib/game-session";
 import type { AppErrorCode } from "@/lib/error-messages";
-import { isPlaylistRefusalCode, recordPlaylistRefused } from "@/lib/loop-stats";
+import {
+  isPlaylistRefusalCode,
+  recordPlaylistInvalid,
+  recordPlaylistRefused,
+  type PlaylistInvalidKind,
+} from "@/lib/loop-stats";
 import type { SpotifyServiceStatus } from "@/types/service-status";
 import type { Track } from "@/types";
 
@@ -698,7 +712,6 @@ function toLoaded(entry: Extract<CacheEntry, { kind: "hit" }>): LoadedPlaylist {
 
 async function fetchAndCache(
   playlistId: string,
-  playlistUrl: string,
   source: PlaylistLoadSource
 ): Promise<LoadedPlaylist> {
   const cooldownUntil = await readCooldownUntil();
@@ -726,7 +739,12 @@ async function fetchAndCache(
   await recordMiss(playlistId, source);
 
   try {
-    const { playlist, tracks, truncated } = await getPlaylistWithTracks(playlistUrl);
+    // By the address built from the id, not by what was pasted. The paste may
+    // be a short link, which lib/spotify.ts cannot read and must not follow —
+    // and the id is the thing this function was already keyed on.
+    const { playlist, tracks, truncated } = await getPlaylistWithTracks(
+      playlistUrlFromId(playlistId)
+    );
 
     // rawJson is the entire Spotify track object and nothing reads it — every
     // consumer runs it through stripTrackForStorage before use. Dropping it
@@ -783,6 +801,13 @@ async function fetchAndCache(
  * cache is read and so appeared in no cache statistic at all: the hit rate
  * could say one load in eight was a dead link and nothing could say why.
  * A throttling code is not counted here; the budget block already does.
+ *
+ * A link that was never a playlist is counted twice over, on purpose: once
+ * as `playlist_refused:invalid_playlist_url`, whatever sentence the host was
+ * shown, so that series stays comparable with every week before the
+ * sentences were split — and once as `playlist_invalid:<kind>`, which is what
+ * the refusal actually was. `recordPlaylistInvalid` writes the pair together.
+ * A short link that could not be followed is in neither; it is not a refusal.
  */
 export async function loadPlaylist(
   playlistUrl: string,
@@ -792,7 +817,10 @@ export async function loadPlaylist(
   try {
     loaded = await loadPlaylistUncounted(playlistUrl, source);
   } catch (err) {
-    if (err instanceof SpotifyApiError && isPlaylistRefusalCode(err.code)) {
+    const invalid = invalidKindOf(err);
+    if (invalid) {
+      await recordPlaylistInvalid(invalid);
+    } else if (err instanceof SpotifyApiError && isPlaylistRefusalCode(err.code)) {
       await recordPlaylistRefused(err.code);
     }
     throw err;
@@ -805,14 +833,79 @@ export async function loadPlaylist(
   return loaded;
 }
 
+/**
+ * A link refused for what it *is*, before Spotify has been asked anything.
+ *
+ * A `SpotifyApiError` so that all three callers carry it to the client the
+ * way they carry every other refusal, with `invalid` riding along for the
+ * counter. The code is the sentence the host reads and the kind is the
+ * bucket it is filed under, and they are separate because they do not map
+ * one to one: a dead short link and a line of chat both read "that doesn't
+ * look like a playlist link", and are different findings.
+ */
+class PlaylistLinkError extends SpotifyApiError {
+  constructor(
+    code: AppErrorCode,
+    readonly invalid: PlaylistInvalidKind
+  ) {
+    super(code, 400);
+  }
+}
+
+/**
+ * Which `playlist_invalid` bucket a refusal belongs in, or null when it is
+ * not that kind of refusal. A bare `invalid_playlist_url` — one this file did
+ * not raise — is `other` rather than uncounted, so the buckets keep summing
+ * to the total whoever threw it.
+ */
+function invalidKindOf(err: unknown): PlaylistInvalidKind | null {
+  if (err instanceof PlaylistLinkError) return err.invalid;
+  if (err instanceof SpotifyApiError && err.code === "invalid_playlist_url") return "other";
+  return null;
+}
+
+/**
+ * What was pasted, as a playlist id — following a short link to find out
+ * when that is what it takes.
+ *
+ * Everything here happens before the cache is read and before any budget is
+ * claimed, and none of it touches the Web API, so a refusal from this
+ * function is as true during a cooldown as outside one. That is the rule the
+ * editorial check below follows, one step earlier: telling someone who
+ * pasted an album "we're rate limited, try again in 60s" sends them back
+ * with the same album.
+ */
+async function playlistIdFor(pasted: string): Promise<string> {
+  let link = classifySpotifyLink(pasted);
+
+  if (link.kind === "shortlink") {
+    const resolution = await resolveShortlink(link.url);
+    if (resolution.status === "unavailable") {
+      // Retryable, and it must stay so — see the code's entry in
+      // lib/error-messages.ts. Not a PlaylistLinkError: nothing is known
+      // about this link, so there is no refusal to count.
+      throw new SpotifyApiError("playlist_shortlink_unavailable", 503);
+    }
+    if (resolution.status === "unusable") {
+      throw new PlaylistLinkError("invalid_playlist_url", "shortlink");
+    }
+    link = resolution.link;
+  }
+
+  if (link.kind === "playlist") return link.id;
+  // An album reached through a short link is an album. The question the
+  // counter answers is what people are trying to play.
+  if (isNamedLinkKind(link.kind)) {
+    throw new PlaylistLinkError(NAMED_LINK_CODES[link.kind], link.kind);
+  }
+  throw new PlaylistLinkError("invalid_playlist_url", "other");
+}
+
 async function loadPlaylistUncounted(
   playlistUrl: string,
   source: PlaylistLoadSource
 ): Promise<LoadedPlaylist> {
-  const playlistId = parsePlaylistUrl(playlistUrl);
-  if (!playlistId) {
-    throw new SpotifyApiError("invalid_playlist_url", 400);
-  }
+  const playlistId = await playlistIdFor(playlistUrl);
 
   // Checked here as well as inside getPlaylistWithTracks so it stays true
   // during a cooldown: an editorial playlist is permanently unsupported, and
@@ -845,7 +938,7 @@ async function loadPlaylistUncounted(
   // The source recorded is the one that *started* the fetch — a coalesced
   // sibling joins a load already in progress and never reaches recordMiss,
   // which is correct: the line describes the upstream call, not the request.
-  const pending = fetchAndCache(playlistId, playlistUrl, source);
+  const pending = fetchAndCache(playlistId, source);
   inFlight.set(playlistId, pending);
   try {
     return await pending;
