@@ -155,7 +155,7 @@ describe("the host is matched before any request is made", () => {
       "https://evil.example/",
       "http://169.254.169.254/latest/meta-data",
       "http://spotify.link/AbCdEfG", // plain http is not followed either
-      "https://user:pass@spotify.link/AbCdEfG",
+      "https://someone@spotify.link/AbCdEfG", // any userinfo is refused
       "https://spotify.link:8443/AbCdEfG",
       "javascript:alert(1)",
     ]) {
