@@ -41,9 +41,14 @@ import {
   type QuizShareBy,
   type QuizShareOutcome,
 } from "@/lib/loop-stats";
+import { SETUP_SOURCES, type SetupSource } from "@/lib/loop-stats";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
+}
+
+function isSetupSource(value: unknown): value is SetupSource {
+  return typeof value === "string" && (SETUP_SOURCES as readonly string[]).includes(value);
 }
 
 function isGameEnd(value: unknown): value is GameEnd {
@@ -62,7 +67,7 @@ function isQuizShareOutcome(value: unknown): value is QuizShareOutcome {
 
 export type PulseEvent =
   | { kind: "loop_impression"; surface: LoopSurface }
-  | { kind: "game_started"; hostGameIndex: number; mixed?: MixedSubMode }
+  | { kind: "game_started"; hostGameIndex: number; mixed?: MixedSubMode; source?: SetupSource }
   | { kind: "game_finished"; end: GameEnd; roundsPlayed: number }
   | { kind: "quiz_shared"; by: QuizShareBy; outcome: QuizShareOutcome };
 
@@ -99,9 +104,14 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // while losing the game costs the only number anyone reads. An unrecognised
     // string must never survive to `mixed_pool:${value}` — that is the field
     // that becomes a KV key.
-    return isMixedSubMode(raw.mixed)
+    const started: Extract<PulseEvent, { kind: "game_started" }> = isMixedSubMode(raw.mixed)
       ? { kind: "game_started", hostGameIndex: clamped, mixed: raw.mixed }
       : { kind: "game_started", hostGameIndex: clamped };
+    // The same trade for how the playlist got into the field, and the same
+    // hazard: `host_setup:${value}` is a key. Absent is the ordinary case for
+    // a while — every page loaded before this shipped sends none — and must
+    // parse exactly as it always did.
+    return isSetupSource(raw.source) ? { ...started, source: raw.source } : started;
   }
 
   if (raw.kind === "game_finished") {

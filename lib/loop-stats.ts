@@ -196,6 +196,43 @@ export type MixedSubMode = "room" | "phone";
 export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
 
 /**
+ * How the playlist a game started with got into the field.
+ *
+ *   typed     typed or pasted by hand — the only way in there was, bar the
+ *             share target, before the form remembered anything
+ *   restored  the form came back filled in from the last game on this device,
+ *             and the host pressed Start without touching the link
+ *   recent    a recent-playlist chip under the field
+ *   starter   a starter chip (`lib/starter-playlists.ts`)
+ *   shared    Android's share target, `/share` → `/?playlist=…`
+ *   mixed     Mixed Playlist Mode, either route — there is no single link
+ *
+ * Exists because 56.5% of games in the week to 2026-09-29 came from a device
+ * that had hosted before, every one of them retyped from an empty form, and
+ * the form's memory was built on that number. This is what says whether the
+ * memory is *used*: `restored + recent` is a returning host who did not
+ * retype; `typed` from a repeat host is one whose storage was evicted (iOS,
+ * seven idle days) or who wanted a different playlist tonight.
+ *
+ * Rides on `game_started` for the reason `MixedSubMode` does — it is a
+ * property of the game that started, not a second thing that happened — and
+ * lives here for the same reason too: these strings become the tail of a key.
+ * A client that predates it sends none and is counted in `games` exactly as
+ * before, so the six sum to at most `games`, never to it, in any window that
+ * straddles the deploy.
+ */
+export type SetupSource = "typed" | "restored" | "recent" | "starter" | "shared" | "mixed";
+
+export const SETUP_SOURCES: readonly SetupSource[] = [
+  "typed",
+  "restored",
+  "recent",
+  "starter",
+  "shared",
+  "mixed",
+];
+
+/**
  * The playlist quiz's funnel, one counter per stage.
  *
  *   created    a host turned a playlist into a link       POST /api/quiz
@@ -349,6 +386,7 @@ export function loopStatsKeys(
   clicks: Record<string, string>;
   hostIndex: string[];
   mixedPool: Record<MixedSubMode, string>;
+  hostSetup: Record<SetupSource, string>;
   quiz: Record<QuizStage, string>;
   quizVerdict: Record<QuizVerdict, string>;
   quizLength: Record<QuizLengthStage, Record<number, string>>;
@@ -395,6 +433,9 @@ export function loopStatsKeys(
       room: key(day, "mixed_pool:room"),
       phone: key(day, "mixed_pool:phone"),
     },
+    hostSetup: Object.fromEntries(
+      SETUP_SOURCES.map((s) => [s, key(day, `host_setup:${s}`)])
+    ) as Record<SetupSource, string>,
     quiz: {
       created: key(day, "quiz:created"),
       opened: key(day, "quiz:opened"),
@@ -530,7 +571,8 @@ export function recordLoopThrottled(): Promise<void> {
  */
 export async function recordGameStart(
   hostGameIndex: number,
-  mixed?: MixedSubMode
+  mixed?: MixedSubMode,
+  source?: SetupSource
 ): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
@@ -542,6 +584,12 @@ export async function recordGameStart(
   // considered was a second pulse event, which would have carried its own
   // liveness marker and cost a mixed game eight commands where this costs five.
   if (mixed) await bump(`mixed_pool:${mixed}`);
+  // One more, on every game from a page new enough to say. Guarded here as
+  // well as in `parsePulse`, because this module owns the key space and the
+  // rule for a key tail does not care what it was already checked against. A
+  // game with no source — an older client, or a value outside the list — is
+  // still a game: everything above has already counted it.
+  if (source && SETUP_SOURCES.includes(source)) await bump(`host_setup:${source}`);
 }
 
 /**

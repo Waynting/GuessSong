@@ -12,6 +12,9 @@ import type { ShareOutcome } from "@/lib/result-image";
 // and never becomes a runtime import cycle.
 import type { GameMode } from "@/lib/game-session";
 import type { ArrivedFrom, LoopSurface } from "@/lib/loop-links";
+// Type-only for the same reason: lib/loop-stats.ts imports lib/kv.ts, and a
+// value import here would carry the Upstash client into the browser bundle.
+import type { SetupSource } from "@/lib/loop-stats";
 import type { QuizVerdict } from "@/lib/quiz";
 
 export type PlaylistSource = "own" | "mixed";
@@ -88,6 +91,18 @@ export type AnalyticsEvent =
          * — `/?ref=` is public and this is a GA4 param.
          */
         arrived_from?: ArrivedFrom;
+        /**
+         * How the playlist got into the field: typed, restored from the last
+         * game on this device, a recent or starter chip, the share target, or
+         * `mixed` when there is no single link. The KV twin is
+         * `host_setup:<source>`, and that is the one decisions are made from;
+         * this copy is here to be cut by `host_game_index`, which KV cannot do
+         * — "do returning hosts press Start on what was filled in" is a
+         * question about two params on one event.
+         *
+         * A closed union, never the link itself: a pasted URL is user input.
+         */
+        setup_source?: SetupSource;
         /**
          * How many games this device has hosted, this one included. 1 for a
          * first-time host.
