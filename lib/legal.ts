@@ -9,7 +9,7 @@
  * mean "the day the wording last changed", not "the day this was last
  * deployed". Bump it when the policy text actually changes.
  */
-export const POLICY_LAST_UPDATED = "21 August 2026";
+export const POLICY_LAST_UPDATED = "30 September 2026";
 
 /** The same date written for a Chinese reader. */
-export const POLICY_LAST_UPDATED_ZH = "2026 年 8 月 21 日";
+export const POLICY_LAST_UPDATED_ZH = "2026 年 9 月 30 日";

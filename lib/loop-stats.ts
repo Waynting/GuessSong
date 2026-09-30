@@ -35,6 +35,7 @@ import { ERROR_LOCALES, type AppErrorCode, type ErrorLocale } from "@/lib/error-
 import type { LoopSurface } from "@/lib/loop-links";
 import { QUIZ_VERDICTS, isQuizVerdict, type QuizVerdict } from "@/lib/quiz";
 import type { ShareLinkOutcome } from "@/lib/quiz-share";
+import { QUIZ_SOURCES, isQuizSource, type QuizSource } from "@/lib/quiz-source";
 import type { PreviewStatus } from "@/types/preview";
 import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
 
@@ -98,6 +99,129 @@ export const GAME_ENDS: readonly GameEnd[] = ["played_out", "ended_early"];
 export const GAME_ROUND_CEILING = 20;
 
 /**
+ * Round zero: the game ended, or the page went away, before any clip had
+ * started. Not a round — the bucket for a game that never played a note.
+ *
+ * `countRoundsPlayed` has always answered 0 for End Game pressed in the first
+ * round's waiting phase, and until 2026-09-30 both `parsePulse` and
+ * `recordGameEnd` clamped that up to 1. So "ended early at round 1" read 213
+ * of 676 in the week to 2026-09-29 and could not say how many of those hosts
+ * had heard a clip at all, which is the difference between "one song in, the
+ * room was not interested" and "the game could not play". The floor is a
+ * constant rather than a literal so the parser, the recorder and the key map
+ * cannot disagree about where the histogram starts.
+ */
+export const GAME_ROUND_FLOOR = 0;
+
+/**
+ * Whether the host of a game that ended (or was left) had hosted before.
+ *
+ *   first    this device's first hosted game
+ *   repeat   its second or later
+ *   unknown  the page could not read the count — storage refused, or the
+ *            start's write never landed
+ *
+ * The start counters (`host_index:<n>`) and the end counters were unjoined:
+ * both were day totals, so "is the pile at rounds 0–2 people trying the site
+ * once, or hosts who came back and whose game broke" had no answer, and the
+ * two call for opposite work. The game page reads the stored count on mount —
+ * the start on `/` has already bumped it, so the count *is* this game's index
+ * — and sends the bucket with the end. Three values, not the index: the
+ * question is binary, and an index here would multiply every key below by ten.
+ *
+ * Inherits the host count's floor (`lib/host-session.ts`): iOS evicts the
+ * count after seven idle days, so `first` contains returning hosts the device
+ * forgot. `repeat` is never wrong; `first` is a ceiling.
+ */
+export type GameHostKind = "first" | "repeat" | "unknown";
+
+export const GAME_HOST_KINDS: readonly GameHostKind[] = ["first", "repeat", "unknown"];
+
+/**
+ * Where an unfinished game stopped, in the three bands that call for
+ * different work: `r0` never played a clip, `r1_2` is the pile the reading
+ * rule calls "a game that could not play", `r3_plus` is a room that played
+ * and stopped. Banded only where it is crossed with the host kind — the
+ * plain histograms keep the exact round — because kind × exact round is
+ * sixty-three keys a day for a question three bands answer.
+ */
+export type EarlyEndBand = "r0" | "r1_2" | "r3_plus";
+
+export const EARLY_END_BANDS: readonly EarlyEndBand[] = ["r0", "r1_2", "r3_plus"];
+
+export function earlyEndBand(round: number): EarlyEndBand {
+  if (round <= GAME_ROUND_FLOOR) return "r0";
+  return round <= 2 ? "r1_2" : "r3_plus";
+}
+
+/**
+ * Which layout the Game Over screen was drawn in. The phone layout is the
+ * `max-width: 768px` one (`lib/game-over.ts`), and it is what decides
+ * whether that screen shows the QR or the Mixed link — so it is also the
+ * denominator `game_over_tap:mixed` needs, and the only record of how many
+ * hosts reach the end on a phone at all.
+ */
+export type GameScreen = "phone" | "desktop";
+
+export const GAME_SCREENS: readonly GameScreen[] = ["phone", "desktop"];
+
+/**
+ * How the first clip a host asked for came out, and whether its URL was
+ * already in hand when they pressed Play.
+ *
+ *   prefetched  the batch prefetch had settled this track before the press
+ *   lazy        it had not, so the press itself had to go and ask
+ *
+ *   played       the `<audio>` element reported sound
+ *   rejected     `play()` was refused and the host was asked to tap again.
+ *                The autoplay policy, all but always; an abort that nothing
+ *                of ours caused lands here too, and is path-blind
+ *   no_audio     nothing anywhere has a clip for the track (`absent`)
+ *   unavailable  we could not answer: throttled, out of budget, offline
+ *   error        the element failed to load the clip and the repair did too
+ *   abandoned    the host skipped, revealed, ended or left before any of
+ *                the above happened
+ *
+ * One per game page, for the first Play press only, because the hypothesis
+ * it tests is about the first press: on the lazy path `play()` runs after an
+ * `await`, outside the tap that asked for it, which is the classic way to be
+ * refused on iOS — and round one is when the prefetch is least likely to
+ * have landed. `lazy:rejected` well above `prefetched:rejected` confirms it;
+ * the two level kills it. Later rounds are GA4's (`clip_blocked`).
+ */
+export type FirstClipPath = "prefetched" | "lazy";
+
+export const FIRST_CLIP_PATHS: readonly FirstClipPath[] = ["prefetched", "lazy"];
+
+export type FirstClipOutcome =
+  | "played"
+  | "rejected"
+  | "no_audio"
+  | "unavailable"
+  | "error"
+  | "abandoned";
+
+export const FIRST_CLIP_OUTCOMES: readonly FirstClipOutcome[] = [
+  "played",
+  "rejected",
+  "no_audio",
+  "unavailable",
+  "error",
+  "abandoned",
+];
+
+/**
+ * What a host tapped on the Game Over screen: `play_again` is the primary
+ * button, `mixed` is the link to Mixed Playlist Mode that replaced the QR on
+ * phones (994 shown, 3 followed — nobody scans a code off the phone in their
+ * own hand). Both are client-side navigations, so unlike a loop link these
+ * can be beacons: the document survives the tap.
+ */
+export type GameOverTap = "play_again" | "mixed";
+
+export const GAME_OVER_TAPS: readonly GameOverTap[] = ["play_again", "mixed"];
+
+/**
  * Who tapped a quiz's share button, and what came of it.
  *
  * `owner` is the panel on `/quiz` after a quiz is made — the step between
@@ -114,10 +238,29 @@ export const GAME_ROUND_CEILING = 20;
  * sheet was dismissed" from "the sheet said shared and no friend opened it",
  * which are three different fixes. Every tap counts, so `owner` tallied
  * against `created` is a ceiling: one owner sending twice is two.
+ *
+ * `board` is the third place a share button lives: the owner's results page,
+ * `/q/[code]/board`. Its two buttons reported to GA4 alone until 2026-09-30,
+ * filed there as `owner`, so a second share arm was on the side nobody opens
+ * and indistinguishable from the first on the side somebody might. It is the
+ * same person as `owner` at a later moment — back for results, sending the
+ * link on to whoever has not played — and is kept apart because that moment
+ * is the one `docs/viral-loop.md` §7 calls "a second share arm going unused".
+ *
+ * **`quiz_share:<by>:copied` changed meaning on 2026-09-30, and a series that
+ * straddles that date is two series.** Before it, the panel's explicit "Copy
+ * link" button went through the same `settle()` as the share button, so
+ * `owner:copied` was the desktop fallback *plus* every deliberate Copy tap —
+ * 17 of the 19 owner taps in the week to 2026-09-29, with no way to say how
+ * many of the 17 were which. From that date `copied` here means one thing:
+ * the share button was tapped on a browser with no share sheet, and the
+ * clipboard is what it fell back to. The Copy button has its own key,
+ * `quiz_copy:<by>:<outcome>`, below. Expect `owner:copied` to step down on
+ * the day this deployed; the taps did not stop, they moved.
  */
-export type QuizShareBy = "owner" | "taker";
+export type QuizShareBy = "owner" | "taker" | "board";
 
-export const QUIZ_SHARE_BYS: readonly QuizShareBy[] = ["owner", "taker"];
+export const QUIZ_SHARE_BYS: readonly QuizShareBy[] = ["owner", "taker", "board"];
 
 export type QuizShareOutcome = ShareLinkOutcome;
 
@@ -127,6 +270,25 @@ export const QUIZ_SHARE_OUTCOMES: readonly QuizShareOutcome[] = [
   "dismissed",
   "failed",
 ];
+
+/**
+ * What came of a tap on an explicit "Copy link" button — the panel's and the
+ * board's. Keyed `quiz_copy:<by>:<outcome>`, by the same `QuizShareBy` the
+ * share button uses, so the two read side by side.
+ *
+ * Two outcomes because a clipboard has two: it took the text, or it refused
+ * (a locked-down webview, a page that lost focus). There is no `shared` and
+ * no `dismissed` — no sheet is involved — which is the whole reason this is
+ * not four more tails under `quiz_share:`: a `quiz_share:owner:copied` that
+ * could mean either button is the reading this key exists to end.
+ *
+ * What a copy is evidence of: intent to send, by someone about to paste the
+ * link somewhere this site cannot see. Whether they did is `opened`. Like a
+ * share tap it is a count of taps and a ceiling on people.
+ */
+export type QuizCopyOutcome = Extract<ShareLinkOutcome, "copied" | "failed">;
+
+export const QUIZ_COPY_OUTCOMES: readonly QuizCopyOutcome[] = ["copied", "failed"];
 
 /**
  * Why a playlist link was refused, for the links that will never work.
@@ -171,6 +333,70 @@ export function isPlaylistRefusalCode(value: unknown): value is PlaylistRefusalC
 }
 
 /**
+ * What a "not a playlist URL" refusal actually was.
+ *
+ * `playlist_refused:invalid_playlist_url` read 748 in the week to 2026-09-29
+ * — the second largest reason a link was turned away — and could not be read:
+ * an album link, a track link, an artist page, a mobile short link and a
+ * sentence typed into the field were one number. "Should the site play
+ * albums" depends on how much of it is albums, so the split is measured
+ * before anything is built.
+ *
+ *   album      a Spotify album link — the request the app cannot serve
+ *   track      one song
+ *   artist     an artist's page
+ *   shortlink  a `spotify.link` that was followed and led nowhere usable: a
+ *              dead slug, or a podcast, a profile, the home page
+ *   other      no Spotify link in it at all, or one too mangled to read
+ *
+ * A short link that leads to an album is `album`, not `shortlink` — the
+ * question is what people are trying to play, and how the link was spelled
+ * is not part of it. A short link that could not be followed *this time* is
+ * in neither: that is `playlist_shortlink:unavailable` below, it is
+ * retryable, and it is not a refusal.
+ *
+ * **Written in the same call as `playlist_refused:invalid_playlist_url`, one
+ * for one**, so the five sum to it exactly and that weekly series keeps its
+ * meaning against the 748. `PLAYLIST_REFUSAL_CODES` stays the set of four:
+ * this is a second reading of one of them, not a fifth.
+ */
+export type PlaylistInvalidKind = "album" | "track" | "artist" | "shortlink" | "other";
+
+export const PLAYLIST_INVALID_KINDS: readonly PlaylistInvalidKind[] = [
+  "album",
+  "track",
+  "artist",
+  "shortlink",
+  "other",
+];
+
+/**
+ * How following a short link came out, for every one the server was handed —
+ * through a form (`loadPlaylist`) or through Android's share sheet (`/share`).
+ *
+ *   resolved     it led to a playlist, an album, a track or an artist
+ *   unusable     it answered, and led to none of those
+ *   unavailable  it could not be followed: a timeout, a dropped connection,
+ *                a reply that was not a redirect
+ *
+ * This is the only health check the resolver has. `spotify.link` is somebody
+ * else's redirector answering a request from a shared datacentre address, and
+ * how it treats one cannot be known from a laptop — the same reason a
+ * throttled preview never reproduced locally. If `unavailable` is most of the
+ * line, short links do not work from production and the feature is a slower
+ * way of being refused.
+ *
+ * Counted on a cached answer too, so it is attempts, like the refusals.
+ */
+export type ShortlinkOutcome = "resolved" | "unusable" | "unavailable";
+
+export const SHORTLINK_OUTCOMES: readonly ShortlinkOutcome[] = [
+  "resolved",
+  "unusable",
+  "unavailable",
+];
+
+/**
  * Which of Mixed Playlist Mode's two collection routes built a game's pool.
  *
  * Lives here rather than in `lib/pulse.ts` for the same reason
@@ -194,6 +420,43 @@ export function isPlaylistRefusalCode(value: unknown): value is PlaylistRefusalC
 export type MixedSubMode = "room" | "phone";
 
 export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
+
+/**
+ * How the playlist a game started with got into the field.
+ *
+ *   typed     typed or pasted by hand — the only way in there was, bar the
+ *             share target, before the form remembered anything
+ *   restored  the form came back filled in from the last game on this device,
+ *             and the host pressed Start without touching the link
+ *   recent    a recent-playlist chip under the field
+ *   starter   a starter chip (`lib/starter-playlists.ts`)
+ *   shared    Android's share target, `/share` → `/?playlist=…`
+ *   mixed     Mixed Playlist Mode, either route — there is no single link
+ *
+ * Exists because 56.5% of games in the week to 2026-09-29 came from a device
+ * that had hosted before, every one of them retyped from an empty form, and
+ * the form's memory was built on that number. This is what says whether the
+ * memory is *used*: `restored + recent` is a returning host who did not
+ * retype; `typed` from a repeat host is one whose storage was evicted (iOS,
+ * seven idle days) or who wanted a different playlist tonight.
+ *
+ * Rides on `game_started` for the reason `MixedSubMode` does — it is a
+ * property of the game that started, not a second thing that happened — and
+ * lives here for the same reason too: these strings become the tail of a key.
+ * A client that predates it sends none and is counted in `games` exactly as
+ * before, so the six sum to at most `games`, never to it, in any window that
+ * straddles the deploy.
+ */
+export type SetupSource = "typed" | "restored" | "recent" | "starter" | "shared" | "mixed";
+
+export const SETUP_SOURCES: readonly SetupSource[] = [
+  "typed",
+  "restored",
+  "recent",
+  "starter",
+  "shared",
+  "mixed",
+];
 
 /**
  * The playlist quiz's funnel, one counter per stage.
@@ -226,6 +489,15 @@ export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
  * on `quiz_not_host` is not in it. Like `opened`, it is bumped per fetch and
  * the page fetches on every mount, so it is a ceiling.
  *
+ * `opened` lost two things on 2026-09-30, and a series across that date steps
+ * down without anything having changed on a phone. The result screen's
+ * Refresh re-reads the view with `?refetch=1` (`QUIZ_REFETCH_PARAM` in
+ * types/quiz.ts) and is no longer an open — it never was one. And a request
+ * carrying the quiz's own host token is the owner, counted under
+ * `QuizOwnerStage` below instead. What is left is one per page load by
+ * someone who is not provably the owner: still a ceiling on friends, since a
+ * reload is a second load, but no longer inflated by a button.
+ *
  * `quiz_result`'s impression and click ride the ordinary surface counters, so
  * `completed` ≈ `impression:quiz_result` is a plumbing check: a gap means the
  * result screen stopped rendering the call to action.
@@ -233,6 +505,50 @@ export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
 export type QuizStage = "created" | "opened" | "started" | "completed" | "board";
 
 export const QUIZ_STAGES: readonly QuizStage[] = ["created", "opened", "started", "completed", "board"];
+
+/**
+ * The owner taking their own quiz, counted apart from the friends it was
+ * made for.
+ *
+ *   owner_opened     the owner's device fetched the quiz   GET /api/quiz/[code]
+ *   owner_completed  the owner's sheet was graded          POST /api/quiz/[code]/answer
+ *
+ * Keyed `quiz:owner_opened` and `quiz:owner_completed` — under the funnel's
+ * prefix because they are the funnel's own stages seen from the other chair —
+ * but declared as their own union rather than as two more `QuizStage`s, for
+ * a reason that is about the numbers and not the types: each of these is
+ * written *instead of* its namesake, never as well as. A verified owner's
+ * open bumps `owner_opened` and not `opened`; their first check bumps nothing
+ * where a friend's bumps `started`; their sheet bumps `owner_completed` and
+ * not `completed`, not the verdict, not the length table — and writes no row.
+ * So the friend-side funnel is friends, and nothing downstream of it has to
+ * subtract.
+ *
+ * "Verified" is the host token, checked by the store the way the board's is
+ * (`isQuizOwner` in lib/quiz-store.ts). A missing or wrong token is an
+ * ordinary taker. That makes both of these **floors on owners, and `opened`
+ * still a ceiling on friends**: the token lives in the creating browser's
+ * localStorage, so an owner who opens their own link on another device, in a
+ * chat app's in-app browser, or after iOS has evicted the storage is counted
+ * as a friend, exactly as before.
+ *
+ * What each counts, exactly: `owner_opened` is page loads, like `opened` —
+ * an owner who reloads is two, and the page's own re-reads are none.
+ * `owner_completed` is sheets graded, and unlike `completed` it has no
+ * replay to inflate it: the page keeps no finished row for a preview, so
+ * there is no "see my result again" to re-POST. One owner who plays twice is
+ * two, which is the thing being asked about.
+ *
+ * They exist to test one hypothesis — that owners want to play the quiz
+ * themselves, which would make some of the quizzes "made and never sent" a
+ * quiz made to be played — so the reading is `owner_opened ÷ created`, and
+ * `owner_completed ÷ owner_opened` beside the friends' `completed ÷ opened`.
+ * Before 2026-09-30 every one of these was inside `opened`, `started`,
+ * `completed`, the verdicts and the length table, and on the public board.
+ */
+export type QuizOwnerStage = "owner_opened" | "owner_completed";
+
+export const QUIZ_OWNER_STAGES: readonly QuizOwnerStage[] = ["owner_opened", "owner_completed"];
 
 /**
  * The two ends of a quiz's length: how many questions it was built with, and
@@ -349,16 +665,31 @@ export function loopStatsKeys(
   clicks: Record<string, string>;
   hostIndex: string[];
   mixedPool: Record<MixedSubMode, string>;
+  hostSetup: Record<SetupSource, string>;
   quiz: Record<QuizStage, string>;
+  quizOwner: Record<QuizOwnerStage, string>;
   quizVerdict: Record<QuizVerdict, string>;
   quizLength: Record<QuizLengthStage, Record<number, string>>;
   quizClamped: string;
   quizLocale: Record<ErrorLocale, string>;
+  quizFrom: Record<QuizSource, string>;
   quizHint: Record<QuizHintOutcome, string>;
   quizThrottled: Record<QuizThrottledRoute, string>;
   quizShare: Record<QuizShareBy, Record<QuizShareOutcome, string>>;
+  quizCopy: Record<QuizShareBy, Record<QuizCopyOutcome, string>>;
   gameEnd: Record<GameEnd, string>;
+  /** Indexed by round: `[0]` is round zero, `[GAME_ROUND_CEILING]` is "20+". */
   gameEndRound: string[];
+  playlistInvalid: Record<PlaylistInvalidKind, string>;
+  playlistShortlink: Record<ShortlinkOutcome, string>;
+  gameEndHost: Record<GameHostKind, Record<GameEnd, string>>;
+  gameEndEarly: Record<GameHostKind, Record<EarlyEndBand, string>>;
+  gameEndScreen: Record<GameScreen, string>;
+  /** Indexed by round, like `gameEndRound`. */
+  gameLeftRound: string[];
+  gameLeftHost: Record<GameHostKind, Record<EarlyEndBand, string>>;
+  firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
+  gameOverTap: Record<GameOverTap, string>;
   playlistRefused: Record<PlaylistRefusalCode, string>;
 } {
   const impressions: Record<string, string> = {};
@@ -372,9 +703,19 @@ export function loopStatsKeys(
     hostIndex.push(key(day, `host_index:${n}`));
   }
   const gameEndRound: string[] = [];
-  for (let n = 1; n <= GAME_ROUND_CEILING; n += 1) {
+  const gameLeftRound: string[] = [];
+  for (let n = GAME_ROUND_FLOOR; n <= GAME_ROUND_CEILING; n += 1) {
     gameEndRound.push(key(day, `game_end_round:${n}`));
+    gameLeftRound.push(key(day, `game_left_round:${n}`));
   }
+  /** `<prefix>:<host kind>:<tail>` for every kind, over one closed list of tails. */
+  const byHost = <T extends string>(prefix: string, tails: readonly T[]) =>
+    Object.fromEntries(
+      GAME_HOST_KINDS.map((kind) => [
+        kind,
+        Object.fromEntries(tails.map((t) => [t, key(day, `${prefix}:${kind}:${t}`)])),
+      ])
+    ) as Record<GameHostKind, Record<T, string>>;
   return {
     live: key(day, "live"),
     throttled: key(day, "throttled"),
@@ -388,13 +729,42 @@ export function loopStatsKeys(
       ended_early: key(day, "game_end:ended_early"),
     },
     gameEndRound,
+    gameEndHost: byHost("game_end_host", GAME_ENDS),
+    gameEndEarly: byHost("game_end_early", EARLY_END_BANDS),
+    gameEndScreen: {
+      phone: key(day, "game_end_screen:phone"),
+      desktop: key(day, "game_end_screen:desktop"),
+    },
+    gameLeftRound,
+    gameLeftHost: byHost("game_left_host", EARLY_END_BANDS),
+    firstClip: Object.fromEntries(
+      FIRST_CLIP_PATHS.map((path) => [
+        path,
+        Object.fromEntries(
+          FIRST_CLIP_OUTCOMES.map((o) => [o, key(day, `first_clip:${path}:${o}`)])
+        ),
+      ])
+    ) as Record<FirstClipPath, Record<FirstClipOutcome, string>>,
+    gameOverTap: {
+      play_again: key(day, "game_over_tap:play_again"),
+      mixed: key(day, "game_over_tap:mixed"),
+    },
     playlistRefused: Object.fromEntries(
       PLAYLIST_REFUSAL_CODES.map((c) => [c, key(day, `playlist_refused:${c}`)])
     ) as Record<PlaylistRefusalCode, string>,
+    playlistInvalid: Object.fromEntries(
+      PLAYLIST_INVALID_KINDS.map((k) => [k, key(day, `playlist_invalid:${k}`)])
+    ) as Record<PlaylistInvalidKind, string>,
+    playlistShortlink: Object.fromEntries(
+      SHORTLINK_OUTCOMES.map((o) => [o, key(day, `playlist_shortlink:${o}`)])
+    ) as Record<ShortlinkOutcome, string>,
     mixedPool: {
       room: key(day, "mixed_pool:room"),
       phone: key(day, "mixed_pool:phone"),
     },
+    hostSetup: Object.fromEntries(
+      SETUP_SOURCES.map((s) => [s, key(day, `host_setup:${s}`)])
+    ) as Record<SetupSource, string>,
     quiz: {
       created: key(day, "quiz:created"),
       opened: key(day, "quiz:opened"),
@@ -402,6 +772,9 @@ export function loopStatsKeys(
       completed: key(day, "quiz:completed"),
       board: key(day, "quiz:board"),
     },
+    quizOwner: Object.fromEntries(
+      QUIZ_OWNER_STAGES.map((s) => [s, key(day, `quiz:${s}`)])
+    ) as Record<QuizOwnerStage, string>,
     quizVerdict: Object.fromEntries(
       QUIZ_VERDICTS.map((v) => [v, key(day, `quiz_verdict:${v}`)])
     ) as Record<QuizVerdict, string>,
@@ -418,6 +791,9 @@ export function loopStatsKeys(
     quizLocale: Object.fromEntries(
       ERROR_LOCALES.map((l) => [l, key(day, `quiz_locale:${l}`)])
     ) as Record<ErrorLocale, string>,
+    quizFrom: Object.fromEntries(
+      QUIZ_SOURCES.map((s) => [s, key(day, `quiz_from:${s}`)])
+    ) as Record<QuizSource, string>,
     quizHint: Object.fromEntries(
       QUIZ_HINT_OUTCOMES.map((o) => [o, key(day, `quiz_hint:${o}`)])
     ) as Record<QuizHintOutcome, string>,
@@ -432,6 +808,14 @@ export function loopStatsKeys(
         ),
       ])
     ) as Record<QuizShareBy, Record<QuizShareOutcome, string>>,
+    quizCopy: Object.fromEntries(
+      QUIZ_SHARE_BYS.map((by) => [
+        by,
+        Object.fromEntries(
+          QUIZ_COPY_OUTCOMES.map((o) => [o, key(day, `quiz_copy:${by}:${o}`)])
+        ),
+      ])
+    ) as Record<QuizShareBy, Record<QuizCopyOutcome, string>>,
   };
 }
 
@@ -530,7 +914,8 @@ export function recordLoopThrottled(): Promise<void> {
  */
 export async function recordGameStart(
   hostGameIndex: number,
-  mixed?: MixedSubMode
+  mixed?: MixedSubMode,
+  source?: SetupSource
 ): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
@@ -542,6 +927,12 @@ export async function recordGameStart(
   // considered was a second pulse event, which would have carried its own
   // liveness marker and cost a mixed game eight commands where this costs five.
   if (mixed) await bump(`mixed_pool:${mixed}`);
+  // One more, on every game from a page new enough to say. Guarded here as
+  // well as in `parsePulse`, because this module owns the key space and the
+  // rule for a key tail does not care what it was already checked against. A
+  // game with no source — an older client, or a value outside the list — is
+  // still a game: everything above has already counted it.
+  if (source && SETUP_SOURCES.includes(source)) await bump(`host_setup:${source}`);
 }
 
 /**
@@ -550,16 +941,93 @@ export async function recordGameStart(
  * `roundsPlayed` is keyed only for an early end — for a game that played out
  * it is the song count the host chose, which is a different question and
  * already a GA4 param. Clamped to `GAME_ROUND_CEILING` for the reason the
- * host index is: it arrives from a page.
+ * host index is: it arrives from a page. The floor is `GAME_ROUND_FLOOR`,
+ * zero, which is its own bucket and not a round.
+ *
+ * `details` is what a page from 2026-09-30 on adds, and both halves are
+ * optional for the page that does not: a tab opened before that deploy sends
+ * neither, and its end has to count exactly as it always did — the two
+ * original keys, nothing else, and nothing filed under `unknown`, which
+ * means "the page asked and storage would not say", not "the page was old".
  */
-export async function recordGameEnd(end: GameEnd, roundsPlayed: number): Promise<void> {
+export async function recordGameEnd(
+  end: GameEnd,
+  roundsPlayed: number,
+  details: { host?: GameHostKind; screen?: GameScreen } = {}
+): Promise<void> {
   if (!GAME_ENDS.includes(end)) return;
   await bump(`game_end:${end}`);
-  if (end !== "ended_early") return;
-  const round = Number.isFinite(roundsPlayed)
-    ? Math.max(1, Math.min(Math.trunc(roundsPlayed), GAME_ROUND_CEILING))
-    : 1;
+  const host = isGameHostKind(details.host) ? details.host : null;
+  const extras: Promise<void>[] = [];
+  if (host) extras.push(bump(`game_end_host:${host}:${end}`));
+  if (isGameScreen(details.screen)) extras.push(bump(`game_end_screen:${details.screen}`));
+  if (end !== "ended_early") {
+    await Promise.all(extras);
+    return;
+  }
+  const round = clampRound(roundsPlayed);
   await bump(`game_end_round:${round}`);
+  if (host) extras.push(bump(`game_end_early:${host}:${earlyEndBand(round)}`));
+  await Promise.all(extras);
+}
+
+/** Guards for the key tails above. Each value reaches here from a request body. */
+function isGameHostKind(value: unknown): value is GameHostKind {
+  return typeof value === "string" && (GAME_HOST_KINDS as readonly string[]).includes(value);
+}
+
+function isGameScreen(value: unknown): value is GameScreen {
+  return typeof value === "string" && (GAME_SCREENS as readonly string[]).includes(value);
+}
+
+/**
+ * A round as a key tail: an integer from the floor to the ceiling. Clamped
+ * rather than refused, like the host index beside it and for its reason — the
+ * event is real whatever the counter says, and the key space is bounded
+ * either way.
+ */
+function clampRound(round: number): number {
+  return Number.isFinite(round)
+    ? Math.max(GAME_ROUND_FLOOR, Math.min(Math.trunc(round), GAME_ROUND_CEILING))
+    : GAME_ROUND_FLOOR;
+}
+
+/**
+ * The first clip a host asked for, and how it came out. One per game page —
+ * `createFirstClipTracker` in `lib/first-clip.ts` is what makes it one — so
+ * the sum over every key is "games in which Play was pressed", and `games`
+ * minus that sum is a game nobody ever pressed Play in (or a lost beacon).
+ * Both halves are key tails and both are refused when unknown: a first clip
+ * with half its description missing says nothing.
+ */
+export function recordFirstClip(path: FirstClipPath, outcome: FirstClipOutcome): Promise<void> {
+  if (!FIRST_CLIP_PATHS.includes(path) || !FIRST_CLIP_OUTCOMES.includes(outcome)) {
+    return Promise.resolve();
+  }
+  return bump(`first_clip:${path}:${outcome}`);
+}
+
+/**
+ * The game page went away before the game reached Game Over: the tab was
+ * closed, reloaded or navigated off. The other half of `recordGameEnd` —
+ * between them they account for what `games` started, and what is left over
+ * is a page that could send nothing at all.
+ *
+ * The round is `countRoundsPlayed`'s figure at the moment of leaving, the
+ * same arithmetic as the end beacon, so the two histograms can be read
+ * against each other row for row. The host band is written only when the
+ * page sent a kind, for the reason `recordGameEnd` gives.
+ */
+export async function recordGameLeft(roundsPlayed: number, host?: GameHostKind): Promise<void> {
+  const round = clampRound(roundsPlayed);
+  await bump(`game_left_round:${round}`);
+  if (isGameHostKind(host)) await bump(`game_left_host:${host}:${earlyEndBand(round)}`);
+}
+
+/** A tap on the Game Over screen. See `GameOverTap`. */
+export function recordGameOverTap(target: GameOverTap): Promise<void> {
+  if (!GAME_OVER_TAPS.includes(target)) return Promise.resolve();
+  return bump(`game_over_tap:${target}`);
 }
 
 /**
@@ -571,6 +1039,36 @@ export async function recordGameEnd(end: GameEnd, roundsPlayed: number): Promise
 export function recordPlaylistRefused(code: PlaylistRefusalCode): Promise<void> {
   if (!isPlaylistRefusalCode(code)) return Promise.resolve();
   return bump(`playlist_refused:${code}`);
+}
+
+/**
+ * A link was refused as `invalid_playlist_url`, and this is what it was.
+ *
+ * One `Promise.all` with the refusal it splits, for the reason
+ * `recordQuizCreated` gives: the marker memo is claimed before its write, so
+ * the pair costs two commands and not three. Writing the two in one function
+ * is also what keeps them one for one — a caller cannot bump the split and
+ * forget the total, or the other way round.
+ *
+ * The kind is guarded before either write, so an undeclared one records
+ * nothing at all rather than a total with no part.
+ */
+export async function recordPlaylistInvalid(kind: PlaylistInvalidKind): Promise<void> {
+  if (!PLAYLIST_INVALID_KINDS.includes(kind)) return;
+  await Promise.all([
+    recordPlaylistRefused("invalid_playlist_url"),
+    bump(`playlist_invalid:${kind}`),
+  ]);
+}
+
+/**
+ * A short link was followed, or could not be. Written by `resolveShortlink`
+ * in `lib/spotify-shortlink.ts`, which is the one function both doors — the
+ * forms and the share sheet — go through.
+ */
+export function recordShortlinkOutcome(outcome: ShortlinkOutcome): Promise<void> {
+  if (!SHORTLINK_OUTCOMES.includes(outcome)) return Promise.resolve();
+  return bump(`playlist_shortlink:${outcome}`);
 }
 
 /**
@@ -586,8 +1084,34 @@ export function recordQuizShare(by: QuizShareBy, outcome: QuizShareOutcome): Pro
   return bump(`quiz_share:${by}:${outcome}`);
 }
 
+/**
+ * Someone tapped an explicit "Copy link" button. `reportQuizCopy` in
+ * `lib/loop-client.ts` sends it, through the same open endpoint a share
+ * arrives by, so both halves are checked against their lists for the same
+ * reason: each is the tail of a key.
+ */
+export function recordQuizCopy(by: QuizShareBy, outcome: QuizCopyOutcome): Promise<void> {
+  if (!QUIZ_SHARE_BYS.includes(by) || !QUIZ_COPY_OUTCOMES.includes(outcome)) {
+    return Promise.resolve();
+  }
+  return bump(`quiz_copy:${by}:${outcome}`);
+}
+
 /** One quiz moved a stage down its funnel. */
 export function recordQuizStage(stage: QuizStage): Promise<void> {
+  return bump(`quiz:${stage}`);
+}
+
+/**
+ * The owner's own open, or their own finished sheet — written by the route
+ * *in place of* `recordQuizStage("opened")` and `recordQuizCompleted`, never
+ * beside them. One command where a friend's completion is three: the verdict
+ * and the length table describe how the quiz lands on the people it was made
+ * for, and the person who picked the songs is not a reading of either.
+ * Guarded like every key tail here, whatever the type says.
+ */
+export function recordQuizOwnerStage(stage: QuizOwnerStage): Promise<void> {
+  if (!QUIZ_OWNER_STAGES.includes(stage)) return Promise.resolve();
   return bump(`quiz:${stage}`);
 }
 
@@ -630,6 +1154,16 @@ export function recordQuizLength(stage: QuizLengthStage, questionCount: number):
  * saying why. This counter is how often that happens; if it is a large share
  * of `created`, the panel should say so before the host shares the link.
  *
+ * And one about the person, since 2026-09-30:
+ *
+ *   quiz_from:<source>    where they came from — a loop surface, or one of
+ *                         `internal` / `external` / `none` (lib/quiz-source.ts)
+ *
+ * Written only when the page sent a source this build recognises, so
+ * `Σ quiz_from:* ≤ quiz:created` and the gap is quizzes made by a page from
+ * before this shipped, or by something that is not the page. A floor on each
+ * source and never a share of `created` without saying so.
+ *
  * One `Promise.all` rather than four awaits in series: the host has already
  * waited on Spotify for this response, and the marker memo is claimed before
  * its write precisely so that concurrent bumps do not each pay for it.
@@ -638,6 +1172,7 @@ export async function recordQuizCreated(details: {
   questionCount: number;
   requestedCount: number;
   locale: ErrorLocale;
+  from?: QuizSource;
 }): Promise<void> {
   const writes = [
     recordQuizStage("created"),
@@ -647,6 +1182,13 @@ export async function recordQuizCreated(details: {
   // locale reached the route from a request body.
   if ((ERROR_LOCALES as readonly string[]).includes(details.locale)) {
     writes.push(bump(`quiz_locale:${details.locale}`));
+  }
+  // The same guard, for the same reason, and it is the second one this value
+  // meets: the route narrows it before calling, and this module owns the key
+  // space whatever its callers did. Absent or unknown records nothing — not
+  // `none`, which is a fact about a referrer and would be a lie here.
+  if (isQuizSource(details.from)) {
+    writes.push(bump(`quiz_from:${details.from}`));
   }
   if (
     Number.isFinite(details.requestedCount) &&

@@ -31,6 +31,16 @@ import type { MixedSubMode } from "@/lib/loop-stats";
 export type SetupMode = "single" | "mixed";
 
 /**
+ * The allow-list a remembered mode is read back through
+ * (`lib/setup-memory.ts`). A guard over a list rather than a cast, for the
+ * reason `GAME_MODES` gives in `lib/game-session.ts`: what comes out of
+ * storage was written by an older deploy or edited by hand, and a mode this
+ * build does not know has to read back as the default instead of reaching
+ * `startState` as a third member nothing handles.
+ */
+export const SETUP_MODES: readonly SetupMode[] = ["single", "mixed"];
+
+/**
  * The fewest playlists a mix can be made from. Declared once, here, because
  * two things read it and must agree: the ladder below, which holds the button
  * until the roster reaches it, and `handleMixedStart` in `app/page.tsx`, which

@@ -243,6 +243,8 @@ describe("the game fits the phone it is played on", () => {
 const TOUCH_SHEETS = [
   GAME,
   CHROME,
+  // The chips, the recall note and the help link on `/`, drawn under CHROME.
+  "components/setup-assist.tsx",
   "components/site-footer.tsx",
   "components/service-notice.tsx",
   "components/install-banner.tsx",

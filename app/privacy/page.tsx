@@ -27,7 +27,10 @@ export default function PrivacyPage() {
         <p className="callout-title">The short version</p>
         <p>
           We never ask who you are. Your game — playlist, player names, scores — is held
-          by your own browser and disappears when you close the tab. The only things that
+          by your own browser and disappears when you close the tab. So that you do not
+          have to retype them next time, the setup page keeps your last playlist link and
+          player names on that same device, where &ldquo;Start fresh&rdquo; deletes them;
+          they are not sent to us. The only things that
           reach a server are a playlist link (to read its track list), a song title and
           artist (to find an audio clip), and, if you use Mixed Playlist Mode, a room that
           deletes itself within hours. Google AdSense and Google Analytics run on this
@@ -65,6 +68,18 @@ export default function PrivacyPage() {
         The site also uses <strong>local storage</strong> for small preferences, such as
         whether you have already seen the current release notes. Clearing your browser
         data for this site removes both.
+      </p>
+      <p>
+        The setup page keeps one more thing in local storage, so that a host who comes
+        back does not start from an empty form: <strong>the last setup</strong>. That is
+        the player names you typed, the link and name of the last playlist you played and
+        of up to five recent ones, and your settings — clip length, number of songs and
+        game mode. It is written on that device when a game starts and read there when
+        you open the setup page again. It is not sent to us, and we cannot see it; a
+        playlist link reaches our server only when you press Start with it, as described
+        below. The names and playlists other people contribute in Mixed Playlist Mode
+        are not kept this way. <strong>Start fresh</strong>, above the form, deletes all
+        of it, which is worth pressing on a device you share.
       </p>
 
       <h2>What reaches our servers</h2>

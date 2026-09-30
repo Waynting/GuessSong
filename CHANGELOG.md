@@ -5,6 +5,91 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-09-30
+
+From the `npm run stats` read of 2026-09-29: 5,027 games, 56.5% repeat
+hosts; 37.2% reached Game Over and 3,155 tabs closed mid-game; of 676 early
+ends, 213 at round one and 113 at round two; 2,535 playlist links refused
+(private 1,261, not a playlist 748, editorial 517); `game_over` 3 followed of
+994 shown; 77 quizzes made, 19 owner share taps (17 of them `copied`), 37
+opens. A code read the same day found that most of those could not be
+explained by the counters, and that several were caused by the code itself.
+Built as four parallel workstreams and merged here.
+
+### Added
+
+- **The setup page remembers the last game** (`lib/setup-memory.ts`, two
+  localStorage keys, `guesssong_last_setup` and `guesssong_recent_playlists`).
+  Restored in the mount effect, repaired field by field, written only at the
+  three hosted starts. "Start fresh" forgets both keys and nothing else.
+  Recent playlists are the last five that actually loaded, deduplicated by id.
+- **`?mode=mixed`** opens `/` on Mixed Playlist Mode (`MIXED_SETUP_HREF` in
+  `lib/setup-arrival.ts`, the one declaration). The phone Game Over screen
+  links there instead of rendering the `game_over` QR.
+- **Starter-playlist slot** (`lib/starter-playlists.ts`). Ships empty; nothing
+  renders until the owner adds public playlists of their own.
+- **Short links are followed on the server** (`lib/spotify-shortlink.ts`),
+  for every `loadPlaylist` caller and the share target.
+- **Three refusal codes that name the link**: `playlist_link_album`,
+  `playlist_link_track`, `playlist_link_artist`, all deterministic; and
+  `playlist_shortlink_unavailable`, which must never be.
+- **Quiz owner preview.** The taker page recognises the owner by the host
+  token in a header, grades the preview and writes nothing to the board.
+- Counters: `game_end_round:0`, `game_end_host:*`, `game_end_early:*`,
+  `game_end_screen:*`, `first_clip:*`, `game_left_round:*`,
+  `game_left_host:*`, `game_over_tap:*`, `host_setup:*`,
+  `playlist_invalid:*`, `playlist_shortlink:*`, `quiz:owner_opened`,
+  `quiz:owner_completed`, `quiz_copy:*`, `quiz_share:board:*`, `quiz_from:*`.
+  Reading rules in `docs/viral-loop.md` §5.
+
+### Changed
+
+- **One reading of a pasted link** (`lib/spotify-link.ts`). `parsePlaylistUrl`,
+  the share target, `loadPlaylist` and all six forms go through it. Ids must be
+  exactly 22 base62 characters on an `open.`/`play.spotify.com` host or a URI.
+  The four room forms now accept `/intl-xx/` and legacy `/user/…` links and
+  say why when they refuse; `/` and `/quiz` never gate on the link.
+- **A rejected `play()` is no longer a playing clip.** Timers start on the
+  element's `playing` event (`lib/clip-start.ts`, `lib/clip-clock.ts`); a
+  refusal returns the host to Play with one line to tap again.
+- **`unavailable` is not `absent` on screen**: its own copy and a Try again.
+- **Silent upcoming tracks are dropped** once the batch prefetch says nothing
+  has a clip (`dropSilentUpcoming`, `lib/track-queue.ts`), making the FAQ true.
+- A refused link shows the matching help and a guide link
+  (`lib/playlist-help.ts`); the editorial warning reads the id and is definite.
+- The quiz panel comes back on a return visit; Copy is counted apart from
+  Share; the clipboard gets the sentence; `/quiz`'s form is localized.
+- `quiz:opened` no longer counts the result screen's Refresh or the owner.
+- Privacy pages (both languages) describe the device-side setup memory.
+
+### Fixed
+
+- `/share/unsupported` sent artist sharers to "This Is" playlists, which are
+  editorial and always refused; the guide said `spotify:playlist:` links fail.
+- Zero-round games were filed under round one (`parsePulse` clamped to 1).
+
+### Series that broke on this date
+
+`quiz_share:owner:copied`, `quiz:opened`/`started`/`completed`, the verdict
+bars and `quiz_len:completed:<n>` lose owners or copy taps; the ten-question
+read planned for 2026-10-06 must compare days after 09-30 only.
+`game_end_round:1` loses its zeros. `docs/viral-loop.md` has the detail.
+
+### Known gaps
+
+- `spotify.link`'s behaviour towards a datacentre address was not observable
+  before deploy. Read `Short links` in `npm run stats`; a quarter or more
+  `could not be reached` means the feature does nothing from production.
+- The starter-playlist list is empty.
+- Phone layouts (Game Over link, Retry row, recent chips, quiz panel) were
+  checked by construction and by `tests/mobile.test.ts`, not on a device.
+- The guide's `<h2>`s have no ids, so help links land at the top of the page.
+- The four room forms' blocked links are in GA4 (`playlist_link_named`) only.
+- New GA4 params need registering as event-scoped custom dimensions:
+  `path`, `outcome`, `site`, `reason`, `host_kind`, `via`, `target`, `screen`,
+  `silent_skipped`, `setup_source`, `viewer`, `quiz_from`, `surface`,
+  `link_kind`, and `by` for `quiz_copy_tapped`.
+
 ## [1.15.0] - 2026-09-22
 
 The first `npm run stats` read after the quiz's counters had a fortnight of

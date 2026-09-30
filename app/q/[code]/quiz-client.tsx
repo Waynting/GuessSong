@@ -87,6 +87,27 @@
  * question is the intro. The result screen folds its own entries away with
  * one `history.go(-depth)`, so Back from there leaves the quiz rather than
  * resurrecting question nineteen under a graded card.
+ *
+ * ## The owner's preview
+ *
+ * The person who made the quiz can open their own link, and used to be
+ * counted — and written on the public board — as a friend. Now every request
+ * this page sends carries the host token when this device holds one for the
+ * code (`quizOwnerHeaders`), and the server says whether it is the quiz's:
+ * `view.owner` on the way in, `result.preview` on the way out. The page acts
+ * on those two and never on the token itself, because "your answers are not
+ * saved" is a statement about what the server did.
+ *
+ * Nothing about it is in the URL. This page's address is what the owner
+ * pastes into the group chat, so a `?owner=1` would arrive on every friend's
+ * phone with the link; the token stays in localStorage and rides in a header.
+ *
+ * For a verified owner the intro says it is a preview and asks for no name,
+ * the questions are the friends' questions — one `check` per tap, the key
+ * still handed over a question at a time — and the result is the verdict
+ * card with a note where the share button was. No finished row is stored on
+ * the phone, so there is no "see my result again" to re-POST; a run in
+ * progress is, so a reload resumes it.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -120,6 +141,7 @@ import {
   type QuizCopy,
 } from "@/lib/quiz-copy";
 import { createRoundToken } from "@/lib/round-token";
+import { quizOwnerHeaders } from "@/lib/quiz-session";
 import { COPIED_FLASH_MS, shareLink } from "@/lib/quiz-share";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -127,6 +149,7 @@ import { Label } from "@/components/ui/label";
 import { LoopCtaButton } from "@/components/loop-cta";
 import {
   QUIZ_NAME_MAX,
+  QUIZ_REFETCH_PARAM,
   type AnswerQuizRequest,
   type AnswerQuizResponse,
   type CheckQuizRequest,
@@ -212,6 +235,14 @@ const DUEL_CSS = `
   .q-field:focus-visible { border-color: #1DB954; box-shadow: 0 0 0 3px rgba(29,185,84,0.18); }
   .q-primary { height: 48px; font-size: 16px; font-weight: 600; }
   .q-error { color: #ff6b6b; font-size: 14px; }
+  /* The owner's preview note. A box, not a line of grey: it replaces the
+     name field on the intro and the share button on the result, and has to
+     read as the thing in that place rather than as small print under it. */
+  .q-preview {
+    border: 1px solid rgba(29,185,84,0.35); background: rgba(29,185,84,0.06);
+    border-radius: 12px; padding: 12px 14px;
+    color: #d0d0d0; font-size: 14px; line-height: 1.5;
+  }
 
   .q-progress {
     display: flex; align-items: center; gap: 10px;
@@ -447,7 +478,11 @@ export function QuizClient({ code }: { code: string }) {
     setError(null);
     setErrorCode(null);
     try {
-      const quiz = await fetchView(code);
+      // An open is counted once per page load. `openedRef` is false until a
+      // load has succeeded, so Retry after a load that never got the quiz is
+      // still this page's open — the server counted nothing for a refusal —
+      // and anything after a success is a re-read.
+      const quiz = await fetchView(code, { refetch: openedRef.current });
       setView(quiz);
       const done = recallQuizSubmissions(quiz.code).filter((s) => fitsQuizSubmission(s, quiz));
       setFinished(done);
@@ -478,7 +513,10 @@ export function QuizClient({ code }: { code: string }) {
       }
       if (!openedRef.current) {
         openedRef.current = true;
-        trackEvent("quiz_opened", { question_count: quiz.questionCount });
+        trackEvent("quiz_opened", {
+          question_count: quiz.questionCount,
+          viewer: quiz.owner ? "owner" : "taker",
+        });
       }
     } catch (e: unknown) {
       setErrorCode(e instanceof AppError ? e.code : "quiz_load_failed");
@@ -533,6 +571,9 @@ export function QuizClient({ code }: { code: string }) {
       submissionId: submissionId.current,
       expiresAt: view.expiresAt,
       at: Date.now(),
+      // What lets an entry with no name be read back, and what stops it
+      // being resumed by a device that is no longer the owner.
+      ...(view.owner ? { preview: true as const } : {}),
     });
   }, [view, phase, name, answers, revealed, index, hintsLeft]);
 
@@ -831,9 +872,17 @@ export function QuizClient({ code }: { code: string }) {
    * refused here rather than after every question is answered. The server's
    * check stays the authority — a race can still 409, and that path is
    * unchanged.
+   *
+   * Neither check applies to the owner's preview: it writes no row, so there
+   * is no name to have finished under and none to collide with.
    */
   function start() {
     if (!view) return;
+    if (view.owner) {
+      pushStep(view.code, index);
+      enterQuestion(index, "next");
+      return;
+    }
     const typed = name.trim();
     if (!typed) return;
     const mine = findQuizSubmission(finished, typed);
@@ -873,7 +922,7 @@ export function QuizClient({ code }: { code: string }) {
     try {
       const res = await fetch(`/api/quiz/${encodeURIComponent(code)}/answer`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...quizOwnerHeaders(code) },
         body: JSON.stringify(body),
       });
       const data = await res.json();
@@ -883,17 +932,23 @@ export function QuizClient({ code }: { code: string }) {
       // The finished row replaces the progress: it is the way back to this
       // screen, and the thing Start compares a typed name against.
       clearQuizProgress(view.code);
-      const stored: QuizSubmission = {
-        code: view.code,
-        name: body.name,
-        submissionId: sid,
-        answers: body.answers,
-        hintsUsed: graded.hintsUsed,
-        expiresAt: view.expiresAt,
-        at: Date.now(),
-      };
-      rememberQuizSubmission(stored);
-      setFinished((prev) => [stored, ...prev.filter((s) => foldQuizName(s.name) !== foldQuizName(stored.name))]);
+      // Not for a preview. The stored row is what "See my result again"
+      // re-POSTs so the server can replay the row it wrote, and a preview
+      // wrote none — every replay would be graded afresh and counted as
+      // another `quiz:owner_completed`, for an owner who played once.
+      if (!graded.preview) {
+        const stored: QuizSubmission = {
+          code: view.code,
+          name: body.name,
+          submissionId: sid,
+          answers: body.answers,
+          hintsUsed: graded.hintsUsed,
+          expiresAt: view.expiresAt,
+          at: Date.now(),
+        };
+        rememberQuizSubmission(stored);
+        setFinished((prev) => [stored, ...prev.filter((s) => foldQuizName(s.name) !== foldQuizName(stored.name))]);
+      }
       submissionId.current = sid;
       setName(body.name);
       setAnswers(body.answers);
@@ -907,6 +962,7 @@ export function QuizClient({ code }: { code: string }) {
           correct: graded.correct,
           hints_used: graded.hintsUsed,
           verdict: graded.verdict,
+          viewer: graded.preview ? "owner" : "taker",
         });
       }
     } catch (e: unknown) {
@@ -923,14 +979,16 @@ export function QuizClient({ code }: { code: string }) {
    * still looking at the board, and nothing else on this screen changes. No
    * polling: the read limit is sixty per ten minutes per address, and a
    * class is one address. Not an open — `quiz_opened` fired on the first
-   * load and `openedRef` keeps it there.
+   * load and `openedRef` keeps it there. That was true of GA4 only until
+   * 2026-09-30: the route bumped `quiz:opened` for every one of these, since
+   * it could not tell this fetch from the first. `refetch` is how it can.
    */
   async function refreshBoard() {
     if (!view || !result || refreshing) return;
     setRefreshing(true);
     setBoardError(null);
     try {
-      const fresh = await fetchView(code);
+      const fresh = await fetchView(code, { refetch: true });
       const scoreboard: QuizScore[] = fresh.scoreboard;
       setResult({
         ...result,
@@ -1010,13 +1068,18 @@ export function QuizClient({ code }: { code: string }) {
   }
 
   if (phase === "intro") {
-    const canStart = name.trim().length > 0;
-    const mine = finished[0] ?? null;
+    // The server's word, not the token's: see "The owner's preview".
+    const owner = view.owner === true;
+    const canStart = owner || name.trim().length > 0;
+    // A row this phone finished under a name, before it was recognised as
+    // the owner's, is not offered back in a preview: the replay would be
+    // graded as one and show a result the board never heard of.
+    const mine = owner ? null : finished[0] ?? null;
     return (
       <Shell>
         {styles}
         <section className="q-col" style={{ flex: 1, justifyContent: "center" }}>
-          <p className="q-kicker">GuessSong</p>
+          <p className="q-kicker">{owner ? `GuessSong · ${copy.previewKicker}` : "GuessSong"}</p>
           <h1 className="q-display q-title">{title}</h1>
           {!view.ownerName && <p className="q-playlist">{view.playlistName}</p>}
           <p className="q-body">
@@ -1026,25 +1089,33 @@ export function QuizClient({ code }: { code: string }) {
               hintWord: hintWord(locale, view.hintAllowance),
             })}
           </p>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="quiz-name">{copy.nameLabel}</Label>
-            <Input
-              id="quiz-name"
-              className="q-field"
-              placeholder={copy.namePlaceholder}
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                setError(null);
-              }}
-              maxLength={QUIZ_NAME_MAX}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && canStart) start();
-              }}
-            />
-          </div>
+          {owner ? (
+            // In the name field's place: the owner is asked for nothing,
+            // and told the two things they would otherwise have to guess.
+            <p className="q-preview" role="note">
+              {copy.previewIntro}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="quiz-name">{copy.nameLabel}</Label>
+              <Input
+                id="quiz-name"
+                className="q-field"
+                placeholder={copy.namePlaceholder}
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setError(null);
+                }}
+                maxLength={QUIZ_NAME_MAX}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && canStart) start();
+                }}
+              />
+            </div>
+          )}
           <Button className="q-primary" onClick={start} disabled={!canStart}>
-            {copy.startButton}
+            {owner ? copy.previewStart : copy.startButton}
           </Button>
           {mine && (
             <>
@@ -1280,28 +1351,46 @@ export function QuizClient({ code }: { code: string }) {
           )}
         </div>
 
-        <div className="flex flex-col gap-2">
-          <Button variant="secondary" className="q-primary" onClick={() => void handleShare()}>
-            {copied ? copy.copied : copy.shareButton}
-          </Button>
-          {shareFailedUrl && (
-            <>
-              <p className="q-muted" role="status">
-                {copy.shareFailed}
-              </p>
-              <p className="q-share-url">{shareFailedUrl}</p>
-            </>
-          )}
-          {/* This is the surface. See lib/loop-links.ts, `quiz_result`. */}
-          <LoopCtaButton surface="quiz_result">{copy.makeYourOwn}</LoopCtaButton>
-        </div>
+        {result.preview ? (
+          // The owner's run. No share button: "I got 9/10 on my own quiz" is
+          // not a sentence anyone sends. And no `quiz_result` call to action
+          // — that surface is a friend who has just finished, its impression
+          // is the denominator of the loop's one warm arm, and the person
+          // looking at this screen already made a quiz. What they have left
+          // to do is send it, and the results page is where that is: both
+          // share buttons, for this quiz whichever one the device made last.
+          <div className="flex flex-col gap-2">
+            <p className="q-preview" role="note">
+              {copy.previewResultNote}
+            </p>
+            <a href={`/q/${view.code}/board`} className="q-home">
+              {copy.panelBoardLink}
+            </a>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <Button variant="secondary" className="q-primary" onClick={() => void handleShare()}>
+              {copied ? copy.copied : copy.shareButton}
+            </Button>
+            {shareFailedUrl && (
+              <>
+                <p className="q-muted" role="status">
+                  {copy.shareFailed}
+                </p>
+                <p className="q-share-url">{shareFailedUrl}</p>
+              </>
+            )}
+            {/* This is the surface. See lib/loop-links.ts, `quiz_result`. */}
+            <LoopCtaButton surface="quiz_result">{copy.makeYourOwn}</LoopCtaButton>
+          </div>
+        )}
 
         {/* The board next — it is what the taker came to see and what the
             owner opens the link for. */}
         <Board
           view={{ ...view, scoreboard: result.scoreboard }}
           copy={copy}
-          youName={name}
+          youName={result.preview ? null : name}
           action={
             <button
               type="button"
@@ -1315,7 +1404,9 @@ export function QuizClient({ code }: { code: string }) {
           }
         />
         {boardError && <p className="q-error">{boardError}</p>}
-        {!result.recorded && <p className="q-muted">{copy.boardFull}</p>}
+        {/* A preview is not recorded either, for a reason the note above
+            has already given; "the board is full" would be a second, wrong one. */}
+        {!result.recorded && !result.preview && <p className="q-muted">{copy.boardFull}</p>}
 
         {/* No answer list here: every question said right or wrong as it
             was answered, and the score is the end. */}
@@ -1349,9 +1440,19 @@ function pushStep(quizCode: string, step: number) {
   window.history.pushState(quizHistoryState(quizCode, step, (current?.depth ?? 0) + 1), "");
 }
 
-/** One `GET /api/quiz/[code]`: the first load, a retry, and the board refresh share it. */
-async function fetchView(code: string): Promise<QuizView> {
-  const res = await fetch(`/api/quiz/${encodeURIComponent(code)}`, { cache: "no-store" });
+/**
+ * One `GET /api/quiz/[code]`: the first load, a retry, and the board refresh
+ * share it — and only the first of those that succeeds is an open. `refetch`
+ * tells the route this page has already been counted; it changes nothing
+ * about what comes back. The host token rides along when this device holds
+ * one, and is what turns the run into a preview.
+ */
+async function fetchView(code: string, options: { refetch?: boolean } = {}): Promise<QuizView> {
+  const query = options.refetch ? `?${QUIZ_REFETCH_PARAM}=1` : "";
+  const res = await fetch(`/api/quiz/${encodeURIComponent(code)}${query}`, {
+    cache: "no-store",
+    headers: quizOwnerHeaders(code),
+  });
   const data = await res.json();
   if (!res.ok) throw apiError(data, "quiz_load_failed");
   return data as QuizView;
@@ -1361,12 +1462,16 @@ async function fetchView(code: string): Promise<QuizView> {
  * One `POST /api/quiz/[code]/check`: the verdict on a question, against a
  * pick for it. Times out on its own so a phone on a bad radio is not left
  * on a filled half; every failure is the caller's "no verdict".
+ *
+ * The owner's token goes with it for one reason: question zero's check is
+ * the funnel's `started`, and the owner's is not a friend starting. The reply
+ * is the same either way.
  */
 async function fetchCheck(code: string, q: number, pick: number): Promise<CheckQuizResponse> {
   const body: CheckQuizRequest = { q, pick };
   const res = await fetch(`/api/quiz/${encodeURIComponent(code)}/check`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...quizOwnerHeaders(code) },
     body: JSON.stringify(body),
     signal: checkTimeout(),
   });

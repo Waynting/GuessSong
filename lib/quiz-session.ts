@@ -4,8 +4,15 @@
  * The link is the owner's only handle on the board — there is no account to
  * list "my quizzes" under (docs/decisions.md D1), and a host who closes the tab
  * has lost it unless the device kept it. So the setup page keeps the last one,
- * and offers it back as "see who knows you best". One entry, not a history:
- * the question this answers is "where did my link go", not "what have I made".
+ * and gives it back as the panel it was: QR, Send, Copy, results. One entry,
+ * not a history: the question this answers is "where did my link go", not
+ * "what have I made".
+ *
+ * It used to come back as one grey line linking to the board, which answered
+ * a different question — "where are my results" — for a quiz that, three
+ * times in four, had not been sent to anyone yet (77 made and 19 share taps
+ * in the week to 2026-09-29). A reload straight after creating was enough to
+ * lose the QR and both buttons for good.
  *
  * Same storage guard as `lib/host-session.ts`, for the same reasons: the setup
  * page is prerendered where `window` does not exist, and storage *throws* in a
@@ -14,7 +21,13 @@
 
 import { withStorage } from "@/lib/host-session";
 import { ROOM_CODE_ALPHABET } from "@/types/room";
-import { QUIZ_CODE_LENGTH, QUIZ_TTL_SECONDS } from "@/types/quiz";
+import {
+  QUIZ_CODE_LENGTH,
+  QUIZ_HOST_TOKEN_HEADER,
+  QUIZ_MAX_QUESTIONS,
+  QUIZ_MIN_QUESTIONS,
+  QUIZ_TTL_SECONDS,
+} from "@/types/quiz";
 
 const LAST_QUIZ_KEY = "guesssong_last_quiz";
 const TOKENS_KEY = "guesssong_quiz_tokens";
@@ -28,6 +41,15 @@ export interface LastQuiz {
   code: string;
   ownerName: string | null;
   playlistName: string;
+  /**
+   * How many questions the quiz was built with, for the panel's caption and
+   * the sentence that goes out with the link. `null` on an entry written
+   * before 2026-09-30, which did not keep it — those age out with their
+   * quizzes inside a week — and on one whose stored value is not a count a
+   * quiz can have. The panel and `ownerShareText` both say less rather than
+   * print a number nobody chose.
+   */
+  questionCount: number | null;
   createdAt: number;
   expiresAt: number;
 }
@@ -52,6 +74,12 @@ export function recallLastQuiz(now = Date.now()): LastQuiz | null {
  * might add and strict about the two it cannot do without: a code to link to
  * and an expiry to stop linking at. An expiry further out than the TTL allows
  * is corruption, not a longer quiz.
+ *
+ * The question count is repaired, not required: missing or out of a quiz's
+ * range reads as `null` and the entry is kept. Rejecting the entry instead
+ * would take the panel away from every owner whose quiz was made before the
+ * field existed, on the deploy that was meant to give it back — the rule
+ * `parseGamePayload` follows for a payload that has to survive a deploy.
  */
 export function parseLastQuiz(raw: string, now = Date.now()): LastQuiz | null {
   try {
@@ -67,12 +95,23 @@ export function parseLastQuiz(raw: string, now = Date.now()): LastQuiz | null {
       code,
       ownerName: typeof value.ownerName === "string" ? value.ownerName : null,
       playlistName: typeof value.playlistName === "string" ? value.playlistName : "",
+      questionCount: readQuestionCount(value.questionCount),
       createdAt: typeof value.createdAt === "number" ? value.createdAt : 0,
       expiresAt: value.expiresAt,
     };
   } catch {
     return null;
   }
+}
+
+/** A count a quiz can have, or null. The same bounds the create route enforces. */
+function readQuestionCount(value: unknown): number | null {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= QUIZ_MIN_QUESTIONS &&
+    value <= QUIZ_MAX_QUESTIONS
+    ? value
+    : null;
 }
 
 /**
@@ -112,6 +151,24 @@ export function recallQuizToken(code: string): string | null {
     (storage) => parseQuizTokens(storage.getItem(TOKENS_KEY)).find((e) => e.code === upper)?.token ?? null,
     null
   );
+}
+
+/**
+ * The headers that make a quiz request the owner's: the host token when this
+ * device made the quiz, and nothing when it did not.
+ *
+ * The taker page spreads this into every request it sends, so a friend's
+ * phone — which holds no token for the code — sends exactly what it always
+ * sent. It is the *only* way the page says "owner": read from storage per
+ * request, never from the URL, because the taker page's URL is what gets
+ * pasted into the group chat and anything in it arrives on every friend's
+ * phone. Holding a token is a claim, not a fact; the server checks it
+ * (`isQuizOwner` in lib/quiz-store.ts) and the page believes the reply, not
+ * this.
+ */
+export function quizOwnerHeaders(code: string): Record<string, string> {
+  const token = recallQuizToken(code);
+  return token ? { [QUIZ_HOST_TOKEN_HEADER]: token } : {};
 }
 
 /** Pure, so the shape rules have a test: well-formed entries only, in stored order. */

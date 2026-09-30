@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { LOOP_SURFACES, arrivedFrom } from "@/lib/loop-links";
-import { QUIZ_SETUP_HREF, isQuizSurface, quizArrivalHref, requestedSetupMode } from "@/lib/setup-arrival";
+import {
+  MIXED_SETUP_HREF,
+  QUIZ_SETUP_HREF,
+  isQuizSurface,
+  quizArrivalHref,
+  requestedSetupMode,
+} from "@/lib/setup-arrival";
 
 const query = (search: string) => new URLSearchParams(search);
 
@@ -26,7 +32,6 @@ describe("requestedSetupMode", () => {
       "?ref=nonsense",
       "?mode=",
       "?mode=single",
-      "?mode=mixed",
       "?mode=QUIZ",
       "?mode=quiz%20",
       "?modes=quiz",
@@ -51,6 +56,85 @@ describe("requestedSetupMode", () => {
   it("keeps the content-page link relative and on the quiz's own page", () => {
     // Same reason `loopHref` is relative: it has to work on a preview deploy.
     expect(QUIZ_SETUP_HREF).toBe("/quiz");
+  });
+});
+
+describe("requestedSetupMode — Mixed Playlist Mode", () => {
+  it("opens the form on Mixed for a link that asks for it", () => {
+    // What the Game Over screen links to: a room that has just finished a
+    // game being told the next one can be everybody's playlists.
+    expect(requestedSetupMode(query("?mode=mixed"))).toBe("mixed");
+  });
+
+  it("is exact about it, the way it is about the quiz", () => {
+    for (const search of [
+      "?mode=MIXED",
+      "?mode=Mixed",
+      "?mode=mixed%20",
+      "?mode=%20mixed",
+      "?mode=mixed/",
+      "?mode=mix",
+      "?mode=mixed-playlist",
+      "?modes=mixed",
+      "?Mode=mixed",
+      "?mixed",
+      "?mixed=1",
+      "?mode=",
+      "?mode",
+    ]) {
+      expect(requestedSetupMode(query(search)), search).toBeNull();
+    }
+  });
+
+  it("reads the first ?mode= when a link carries two, as URLSearchParams does", () => {
+    expect(requestedSetupMode(query("?mode=mixed&mode=quiz"))).toBe("mixed");
+    expect(requestedSetupMode(query("?mode=quiz&mode=mixed"))).toBe("quiz");
+    expect(requestedSetupMode(query("?mode=single&mode=mixed"))).toBeNull();
+  });
+
+  it("is not disturbed by whatever else is in the query", () => {
+    for (const search of [
+      "?mode=mixed&playlist=https://open.spotify.com/playlist/abc",
+      "?utm_source=x&mode=mixed",
+      "?ref=game_over&mode=mixed",
+      "?ref=nonsense&mode=mixed",
+      "?mode=mixed&ref=%3Cscript%3E",
+    ]) {
+      expect(requestedSetupMode(query(search)), search).toBe("mixed");
+    }
+  });
+
+  it("believes a spelled-out mode over what a ref implies", () => {
+    // The ref is attribution: it says where the visitor came from. The mode
+    // is the link saying where it wants to go. `/` remembers the ref either
+    // way, before it asks.
+    expect(requestedSetupMode(query("?mode=mixed&ref=quiz_result"))).toBe("mixed");
+    expect(requestedSetupMode(query("?ref=quiz_result&mode=mixed"))).toBe("mixed");
+    // A mode that is not one still does not get in the ref's way.
+    expect(requestedSetupMode(query("?ref=quiz_result&mode=MIXED"))).toBe("quiz");
+  });
+
+  it("is never implied by a loop surface — no party arm asks for Mixed on its own", () => {
+    for (const surface of LOOP_SURFACES) {
+      expect(requestedSetupMode(query(`?ref=${surface}`)), surface).not.toBe("mixed");
+    }
+  });
+
+  it("exports the address that asks for it, and the two agree", () => {
+    // The Game Over screen imports this rather than retyping it. Parsed the
+    // way the browser will, so a change to either half that the other does
+    // not follow fails here and not as a link that opens on the wrong form.
+    expect(MIXED_SETUP_HREF).toBe("/?mode=mixed");
+    const url = new URL(MIXED_SETUP_HREF, "https://www.guessong.app");
+    expect(url.pathname).toBe("/");
+    expect(url.origin).toBe("https://www.guessong.app");
+    expect(requestedSetupMode(url.searchParams)).toBe("mixed");
+  });
+
+  it("does not send a Mixed arrival to the quiz", () => {
+    // `/` redirects on "quiz" and stays put on everything else. A Mixed link
+    // that read as the quiz would leave the page it was written for.
+    expect(requestedSetupMode(query("?mode=mixed"))).not.toBe("quiz");
   });
 });
 

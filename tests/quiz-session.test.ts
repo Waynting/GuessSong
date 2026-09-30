@@ -3,6 +3,7 @@ import {
   parseLastQuiz,
   parseQuizTokens,
   pruneQuizTokens,
+  quizOwnerHeaders,
   quizUrl,
   recallLastQuiz,
   recallQuizToken,
@@ -10,7 +11,12 @@ import {
   rememberQuizToken,
   QUIZ_TOKENS_MAX,
 } from "@/lib/quiz-session";
-import { QUIZ_TTL_SECONDS } from "@/types/quiz";
+import {
+  QUIZ_HOST_TOKEN_HEADER,
+  QUIZ_MAX_QUESTIONS,
+  QUIZ_MIN_QUESTIONS,
+  QUIZ_TTL_SECONDS,
+} from "@/types/quiz";
 import { ROOM_CODE_ALPHABET } from "@/types/room";
 import { installStorage } from "./helpers/storage";
 
@@ -39,7 +45,14 @@ afterEach(() => {
 });
 
 describe("parseLastQuiz", () => {
-  const good = { code: "ABC234", ownerName: "Wayn", playlistName: "P", createdAt: NOW - 1000, expiresAt: NOW + 1000 };
+  const good = {
+    code: "ABC234",
+    ownerName: "Wayn",
+    playlistName: "P",
+    questionCount: 20,
+    createdAt: NOW - 1000,
+    expiresAt: NOW + 1000,
+  };
 
   it("reads a well-formed entry", () => {
     expect(parseLastQuiz(JSON.stringify(good), NOW)).toEqual(good);
@@ -55,7 +68,7 @@ describe("parseLastQuiz", () => {
 
   it("tolerates missing optional fields and rejects missing required ones", () => {
     expect(parseLastQuiz(JSON.stringify({ code: "ABC234", expiresAt: NOW + 1 }), NOW)).toEqual({
-      code: "ABC234", ownerName: null, playlistName: "", createdAt: 0, expiresAt: NOW + 1,
+      code: "ABC234", ownerName: null, playlistName: "", questionCount: null, createdAt: 0, expiresAt: NOW + 1,
     });
     expect(parseLastQuiz(JSON.stringify({ expiresAt: NOW + 1 }), NOW)).toBeNull();
     expect(parseLastQuiz(JSON.stringify({ code: "ABC234" }), NOW)).toBeNull();
@@ -74,6 +87,29 @@ describe("parseLastQuiz", () => {
   it("does not throw on garbage", () => {
     for (const raw of ["", "{", "null", "[]", "42", '"x"']) {
       expect(parseLastQuiz(raw, NOW)).toBeNull();
+    }
+  });
+
+  it("keeps an entry written before the question count was, with the count unknown", () => {
+    // The panel comes back from this entry. Every quiz made before
+    // 2026-09-30 is stored without a count, and rejecting those would take
+    // the panel away from exactly the owners the change was for, on the
+    // deploy that made it: repaired to null, never dropped.
+    const { questionCount: _questionCount, ...legacy } = good;
+    expect(parseLastQuiz(JSON.stringify(legacy), NOW)).toEqual({ ...good, questionCount: null });
+  });
+
+  it("reads only a count a quiz can have, and repairs anything else to unknown", () => {
+    // The value is printed in the caption and in the sentence the owner
+    // sends. "undefined questions", "NaN questions" and "9999 questions" are
+    // all worse than saying nothing about the length.
+    for (const n of [QUIZ_MIN_QUESTIONS, 23, QUIZ_MAX_QUESTIONS]) {
+      expect(parseLastQuiz(JSON.stringify({ ...good, questionCount: n }), NOW)?.questionCount).toBe(n);
+    }
+    for (const bad of [QUIZ_MIN_QUESTIONS - 1, QUIZ_MAX_QUESTIONS + 1, 0, -10, 20.5, "20", null, true, [20], {}]) {
+      const parsed = parseLastQuiz(JSON.stringify({ ...good, questionCount: bad }), NOW);
+      expect(parsed, JSON.stringify(bad)).not.toBeNull();
+      expect(parsed?.questionCount, JSON.stringify(bad)).toBeNull();
     }
   });
 });
@@ -130,7 +166,14 @@ describe("quiz tokens", () => {
 });
 
 describe("the last quiz, on this device", () => {
-  const quiz = { code: "ABC234", ownerName: "Wayn", playlistName: "P", createdAt: NOW - 1000, expiresAt: NOW + 60_000 };
+  const quiz = {
+    code: "ABC234",
+    ownerName: "Wayn",
+    playlistName: "P",
+    questionCount: 10,
+    createdAt: NOW - 1000,
+    expiresAt: NOW + 60_000,
+  };
 
   it("round-trips through storage and offers the entry back until it expires", () => {
     rememberLastQuiz(quiz);
@@ -194,8 +237,46 @@ describe("the host tokens, on this device", () => {
   });
 });
 
+describe("the owner's headers", () => {
+  it("carries the token for a quiz this device made, under the header the routes read", () => {
+    rememberQuizToken("ABC234", "tok-1");
+    expect(quizOwnerHeaders("ABC234")).toEqual({ [QUIZ_HOST_TOKEN_HEADER]: "tok-1" });
+    // The page is handed the route segment, which a retyped link lower-cases.
+    expect(quizOwnerHeaders("abc234")).toEqual({ [QUIZ_HOST_TOKEN_HEADER]: "tok-1" });
+    expect(QUIZ_HOST_TOKEN_HEADER).toBe("x-host-token");
+  });
+
+  it("is empty for every other quiz, so a friend's request is what it always was", () => {
+    // Spread into `headers`, an empty object adds nothing: no header at all,
+    // not an empty one. A friend's phone holds no token for the code.
+    rememberQuizToken("ABC234", "tok-1");
+    expect(quizOwnerHeaders("ZZZZZZ")).toEqual({});
+    expect(Object.keys({ "Content-Type": "application/json", ...quizOwnerHeaders("ZZZZZZ") })).toEqual([
+      "Content-Type",
+    ]);
+  });
+
+  it("is empty, and does not throw, when storage is blocked", () => {
+    vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
+      throw new Error("SecurityError");
+    });
+    expect(quizOwnerHeaders("ABC234")).toEqual({});
+  });
+});
+
 describe("quizUrl", () => {
   it("upper-cases the code and uses this origin", () => {
     expect(quizUrl("abc234")).toBe(`${window.location.origin}/q/ABC234`);
+  });
+
+  it("is the code and nothing else, so nothing about the sender travels with the link", () => {
+    // This is the address the owner pastes into the group chat. Whatever
+    // marks the owner as the owner must not be in it.
+    rememberQuizToken("ABC234", "tok-1");
+    const url = new URL(quizUrl("ABC234"));
+    expect(url.search).toBe("");
+    expect(url.hash).toBe("");
+    expect(url.pathname).toBe("/q/ABC234");
+    expect(url.href).not.toContain("tok-1");
   });
 });

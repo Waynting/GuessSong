@@ -118,7 +118,100 @@ describe("the quiz form on /quiz", () => {
     // back to it from this page.
     expect(body).toMatch(/rememberQuizToken\(created\.code, created\.hostToken\)/);
     expect(body).toMatch(/rememberLastQuiz\(/);
-    expect(body).toMatch(/href=\{`\/q\/\$\{lastQuiz\.code\.toUpperCase\(\)\}\/board`\}/);
+  });
+
+  it("gives a remembered quiz its panel back, not a line of text", () => {
+    // A reload used to swap the panel for one grey sentence linking to the
+    // board: the QR and both buttons gone, for a quiz that three times in
+    // four had not been sent yet. The panel is drawn from whichever source
+    // has a quiz, and the way to the board is the panel's own link.
+    expect(body).toMatch(/const shown: PanelQuiz \| null = createdQuiz \?\? lastQuiz;/);
+    expect(body).toMatch(/\{shown && \(/);
+    expect(body.match(/<QuizPanel\b/g) ?? []).toHaveLength(1);
+    for (const prop of ["code", "ownerName", "playlistName", "questionCount", "expiresAt"]) {
+      expect(body, prop).toContain(`${prop}={shown.${prop}}`);
+    }
+    // What it remembers has to include the count, or the panel that comes
+    // back has a caption with no number to put in it.
+    expect(body).toMatch(/const remembered: LastQuiz = \{[\s\S]*?questionCount: created\.questionCount,[\s\S]*?\};/);
+    // The grey line is gone, and nothing on the form links to the board itself.
+    expect(body).not.toMatch(/\/board/);
+    expect(body).not.toMatch(/lastQuiz\.playlistName/);
+    // And the button says "a new link" over either kind of panel: pressing
+    // it makes a second code, it does not change the one on screen.
+    expect(body).toMatch(/\) : shown \? \(\s*copy\.createAgainButton\s*\) : \(\s*copy\.createButton\s*\)/);
+  });
+
+  it("is written in the visitor's language: every sentence comes from QUIZ_COPY", () => {
+    // The form was hardcoded English around a panel that was not. Every
+    // string a visitor reads is a `copy.*` lookup now; what is left as a
+    // literal is an address or a number, neither of which is a sentence.
+    expect(body).toMatch(/const copy = QUIZ_COPY\[locale\];/);
+    for (const literal of [
+      "Taste Quiz",
+      "A link your friends open",
+      "Spotify Playlist",
+      "Editorial playlists",
+      "Your Name",
+      "Whose taste is this",
+      "Goes in the title",
+      "Custom number of questions",
+      "Your last quiz",
+      "Loading playlist",
+      "Create quiz link",
+      "Create a new link",
+      "Back to the party game",
+      "Making your link",
+      "Your quiz link",
+    ]) {
+      expect(body, `quiz-create.tsx still says "${literal}"`).not.toContain(literal);
+    }
+    // No text node and no quoted attribute holds a word: between a tag's
+    // `>` and the next `<` there is whitespace, an expression, or the one
+    // warning glyph. Read from each `return (` on, so a generic's angle
+    // brackets in the code above are not mistaken for a tag's.
+    const rendered = body.split(/\n\s*return \(\n/).slice(1);
+    expect(rendered.length, "the form and its two stand-ins").toBe(3);
+    for (const jsx of rendered) {
+      const markup = jsx.slice(0, jsx.indexOf("\n  );") + 1 || undefined);
+      const prose = [...markup.matchAll(/>([^<>{}]*[A-Za-z]{3,}[^<>{}]*)</g)].map((m) => m[1].trim());
+      expect(prose).toEqual([]);
+    }
+    expect(body).toMatch(/\{copy\.createMakingLink\}/);
+    expect(body).toMatch(/\{QUIZ_COPY\[locale\]\.createLinkFallback\}/);
+    for (const attribute of ["placeholder", "aria-label", "alt", "title"]) {
+      const quoted = [...body.matchAll(new RegExp(`${attribute}="([^"]*)"`, "g"))].map((m) => m[1]);
+      // The playlist box's placeholder is an address, not a sentence.
+      expect(quoted.filter((v) => !v.startsWith("https://")), attribute).toEqual([]);
+    }
+  });
+
+  it("says who answers the questions, under the picker, and leaves the picker alone", () => {
+    // Forty of seventy-seven owners picked something longer than the
+    // default and the long ones were finished by nobody. The line is the
+    // whole change: the presets, the default and the bounds are being
+    // measured until 2026-10-06 and must read exactly as they did.
+    expect(body).toMatch(/\{copy\.createLengthNote\}/);
+    expect(body.indexOf("copy.createLengthNote")).toBeGreaterThan(body.indexOf("commitCustom(s, QUIZ_COUNT_CONTROL)"));
+    expect(body).toMatch(/useState\(DEFAULT_QUIZ_COUNT_STATE\)/);
+    expect(body).toMatch(/\{QUIZ_QUESTION_COUNTS\.map\(\(c\) => \(/);
+    expect(body).toMatch(/min=\{QUIZ_MIN_QUESTIONS\}\s*max=\{QUIZ_MAX_QUESTIONS\}/);
+    const types = read("types/quiz.ts");
+    expect(types).toContain("export const QUIZ_QUESTION_COUNTS = [10, 20, 30, 50] as const;");
+    expect(types).toContain("export const QUIZ_DEFAULT_QUESTION_COUNT = 10;");
+    expect(types).toContain("export const QUIZ_MIN_QUESTIONS = 10;");
+    expect(types).toContain("export const QUIZ_MAX_QUESTIONS = 50;");
+  });
+
+  it("reads the playlist link through the one classifier, and never gates Create on it", () => {
+    // The form used to carry its own `includes("spotify.com/playlist")`,
+    // which disagreed with the server about `/intl-xx/` and short links.
+    // It must not block either: a wrong link sent here is what
+    // `playlist_invalid:*` counts.
+    const source = read(QUIZ_FORM);
+    expect(source).not.toMatch(/includes\(\s*["'`][^"'`]*(spotify|37i9)/);
+    expect(source).toMatch(/isSubmittablePlaylistLink\(playlistUrl\)/);
+    expect(source).toMatch(/isEditorialPlaylistLink\(playlistUrl\)/);
   });
 
   it("counts questions with the quiz's own bounds, not the party's", () => {
@@ -365,6 +458,104 @@ describe("the quiz panel and the board print the address only when the buttons c
     const panel = code(read("components/quiz-panel.tsx"));
     expect(panel).toMatch(/copy\.panelResultsUntil/);
     expect(panel).not.toMatch(/panelDeviceOnly|panelExpires\b/);
+  });
+
+  it("puts the sentence and the link on the owner's clipboard, from all four buttons", () => {
+    // The share sheet takes `text` and `url` apart; a clipboard has one
+    // field, and the owner's used to get the bare address. The taker's share
+    // has always copied both.
+    for (const file of ["components/quiz-panel.tsx", "app/q/[code]/board/page.tsx"]) {
+      const body = code(read(file));
+      const quiz = file.startsWith("components") ? "quiz" : "board";
+      // The fallback: `shareLink`'s second argument is what it writes when
+      // there is no share sheet.
+      expect(body, file).toMatch(
+        new RegExp(`await shareLink\\(\\s*\\{[^}]*\\},\\s*ownerClipboardText\\(copy, ${quiz}, url\\)\\s*\\)`)
+      );
+      expect(body, file).toMatch(new RegExp(`await copyLink\\(ownerClipboardText\\(copy, ${quiz}, url\\)\\)`));
+      expect(body, file).not.toMatch(/copyLink\(url\)/);
+    }
+  });
+
+  it("offers the owner their own quiz by its plain address, with nothing in it that marks them", () => {
+    // The preview is a link to the URL the friends get. What makes it a
+    // preview is this device's token, sent in a header by the page it lands
+    // on — a query string here would be pasted into the group chat with the
+    // link and make every friend the owner.
+    const panel = code(read("components/quiz-panel.tsx"));
+    expect(panel).toMatch(/<a href=\{`\/q\/\$\{code\.toUpperCase\(\)\}`\} className="link-btn">\s*\{copy\.panelPreviewLink\}/);
+    expect(panel).toMatch(/<a href=\{`\/q\/\$\{code\.toUpperCase\(\)\}\/board`\} className="link-btn">\s*\{copy\.panelBoardLink\}/);
+    for (const file of ["components/quiz-panel.tsx", "app/q/[code]/quiz-client.tsx", "lib/quiz-session.ts"]) {
+      const body = code(read(file));
+      expect(body, file).not.toMatch(/[?&](owner|token|host|preview)=/i);
+    }
+    // The token is read in one place and leaves in a header.
+    const client = code(read("app/q/[code]/quiz-client.tsx"));
+    expect(client).not.toMatch(/recallQuizToken|x-host-token|hostToken/);
+    expect(client.match(/quizOwnerHeaders\(code\)/g) ?? []).toHaveLength(3);
+    expect(client).not.toMatch(/URLSearchParams|location\.search/);
+  });
+});
+
+describe("the taker page, for the person who made the quiz", () => {
+  const body = code(read("app/q/[code]/quiz-client.tsx"));
+
+  it("believes the server about who is the owner, never the token it holds", () => {
+    // "Your answers are not saved" is a statement about what the server did
+    // with the sheet. The page reads `view.owner` on the way in and
+    // `result.preview` on the way out, both set only after the token was
+    // checked against the quiz's own.
+    expect(body).toMatch(/const owner = view\.owner === true;/);
+    expect(body).toMatch(/const canStart = owner \|\| name\.trim\(\)\.length > 0;/);
+    expect(body).toMatch(/\{owner \? copy\.previewStart : copy\.startButton\}/);
+    expect(body).toMatch(/\{copy\.previewIntro\}/);
+    expect(body).toMatch(/\{result\.preview \? \(/);
+    expect(body).toMatch(/\{copy\.previewResultNote\}/);
+    // A preview is not "the board is full".
+    expect(body).toMatch(/\{!result\.recorded && !result\.preview && <p className="q-muted">\{copy\.boardFull\}<\/p>\}/);
+  });
+
+  it("sends the token with the view, the check and the sheet, and with nothing else", () => {
+    expect(body).toMatch(/cache: "no-store",\s*headers: quizOwnerHeaders\(code\),/);
+    expect(body.match(/headers: \{ "Content-Type": "application\/json", \.\.\.quizOwnerHeaders\(code\) \}/g) ?? []).toHaveLength(2);
+    // The hint is upstream cost, counted whoever asked.
+    const hint = body.match(/const res = await fetch\(\s*`\/api\/quiz\/\$\{encodeURIComponent\(code\)\}\/hint[\s\S]*?\);/)?.[0] ?? "";
+    expect(hint).not.toBe("");
+    expect(hint).not.toContain("quizOwnerHeaders");
+  });
+
+  it("asks for a re-read, not an open, once the page has had its open", () => {
+    // Refresh on the result screen always; the loader only after a load has
+    // succeeded, so Retry after a refusal — which the server counted nothing
+    // for — is still this page's one open.
+    expect(body).toMatch(/const fresh = await fetchView\(code, \{ refetch: true \}\);/);
+    expect(body).toMatch(/const quiz = await fetchView\(code, \{ refetch: openedRef\.current \}\);/);
+    expect(body).toMatch(/const query = options\.refetch \? `\?\$\{QUIZ_REFETCH_PARAM\}=1` : "";/);
+    expect(body.match(/fetchView\(/g) ?? []).toHaveLength(3);
+    // Set only on success, after the fetch it guards.
+    expect(body.indexOf("openedRef.current = true;")).toBeGreaterThan(body.indexOf("refetch: openedRef.current"));
+  });
+
+  it("keeps no finished row for a preview, and no loop surface on its result", () => {
+    // The stored row is what "See my result again" re-POSTs; a preview wrote
+    // none, so every replay would be graded afresh and counted again. And
+    // `quiz_result` is a friend who has just finished — its impression is the
+    // denominator of the loop's one warm arm.
+    expect(body).toMatch(/if \(!graded\.preview\) \{\s*const stored: QuizSubmission = \{/);
+    const preview = body.match(/\{result\.preview \? \(([\s\S]*?)\) : \(/)?.[1] ?? "";
+    expect(preview).not.toBe("");
+    expect(preview).not.toContain("LoopCtaButton");
+    expect(preview).not.toContain("handleShare");
+    expect(preview).toMatch(/href=\{`\/q\/\$\{view\.code\}\/board`\}/);
+    expect(body).toMatch(/const mine = owner \? null : finished\[0\] \?\? null;/);
+    // And a run in progress is marked, so a reload resumes it for the owner
+    // and for nobody else.
+    expect(body).toMatch(/\.\.\.\(view\.owner \? \{ preview: true as const \} : \{\}\),/);
+  });
+
+  it("tells GA4 who was holding the phone, as a bucket", () => {
+    expect(body).toMatch(/viewer: quiz\.owner \? "owner" : "taker",/);
+    expect(body).toMatch(/viewer: graded\.preview \? "owner" : "taker",/);
   });
 });
 

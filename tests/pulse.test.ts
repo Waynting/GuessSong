@@ -1,9 +1,17 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parsePulse } from "@/lib/pulse";
 import {
+  FIRST_CLIP_OUTCOMES,
+  FIRST_CLIP_PATHS,
   GAME_ENDS,
+  GAME_HOST_KINDS,
+  GAME_OVER_TAPS,
   GAME_ROUND_CEILING,
+  GAME_SCREENS,
   HOST_INDEX_CEILING,
+  SETUP_SOURCES,
   QUIZ_SHARE_BYS,
   QUIZ_SHARE_OUTCOMES,
 } from "@/lib/loop-stats";
@@ -90,6 +98,76 @@ describe("parsePulse — the mixed sub-mode", () => {
   });
 });
 
+describe("parsePulse — the setup source", () => {
+  it("accepts every declared source", () => {
+    for (const source of SETUP_SOURCES) {
+      expect(parsePulse({ kind: "game_started", hostGameIndex: 2, source })).toEqual({
+        kind: "game_started",
+        hostGameIndex: 2,
+        source,
+      });
+    }
+  });
+
+  it("parses a body with no source exactly as it did before there was one", () => {
+    // Every page loaded before the deploy sends this. It is the ordinary
+    // case for a while, not a malformed one.
+    const parsed = parsePulse({ kind: "game_started", hostGameIndex: 1 });
+    expect(parsed).toEqual({ kind: "game_started", hostGameIndex: 1 });
+    expect(parsed && "source" in parsed).toBe(false);
+  });
+
+  it("carries the sub-mode and the source together on a mixed game", () => {
+    expect(
+      parsePulse({ kind: "game_started", hostGameIndex: 3, mixed: "phone", source: "mixed" })
+    ).toEqual({ kind: "game_started", hostGameIndex: 3, mixed: "phone", source: "mixed" });
+  });
+
+  it("drops an undeclared source rather than letting it reach a KV key, and keeps the game", () => {
+    // `host_setup:${value}` is a key.
+    for (const bad of ["Typed", "pasted", "", "typed ", "__proto__", "constructor", "a".repeat(500), 1, true, null, {}, ["typed"]]) {
+      const parsed = parsePulse({ kind: "game_started", hostGameIndex: 1, source: bad });
+      expect(parsed, String(bad)).toEqual({ kind: "game_started", hostGameIndex: 1 });
+      expect(parsed && "source" in parsed, String(bad)).toBe(false);
+    }
+  });
+
+  it("judges the two optional fields separately — a bad one does not cost the good one", () => {
+    expect(
+      parsePulse({ kind: "game_started", hostGameIndex: 1, mixed: "qr", source: "mixed" })
+    ).toEqual({ kind: "game_started", hostGameIndex: 1, source: "mixed" });
+    expect(
+      parsePulse({ kind: "game_started", hostGameIndex: 1, mixed: "room", source: "scanned" })
+    ).toEqual({ kind: "game_started", hostGameIndex: 1, mixed: "room" });
+  });
+
+  it("still rejects the event when the index is the thing that is wrong", () => {
+    expect(parsePulse({ kind: "game_started", hostGameIndex: "3", source: "typed" })).toBeNull();
+  });
+
+  it("does not let a source ride in on any other event", () => {
+    expect(parsePulse({ kind: "loop_impression", surface: "share", source: "typed" })).toEqual({
+      kind: "loop_impression",
+      surface: "share",
+    });
+    expect(
+      parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 2, source: "typed" })
+    ).toEqual({ kind: "game_finished", end: "played_out", roundsPlayed: 2 });
+  });
+
+  it("fits in the route's body limit with every field at its longest", () => {
+    // app/api/pulse/route.ts refuses anything over 512 bytes as not one of ours.
+    const longest = [...SETUP_SOURCES].sort((a, b) => b.length - a.length)[0];
+    const body = JSON.stringify({
+      kind: "game_started",
+      hostGameIndex: Number.MAX_SAFE_INTEGER,
+      mixed: "phone",
+      source: longest,
+    });
+    expect(body.length).toBeLessThan(512);
+  });
+});
+
 describe("parsePulse — game ends", () => {
   it("accepts both declared ends with a round", () => {
     for (const end of GAME_ENDS) {
@@ -107,10 +185,21 @@ describe("parsePulse — game ends", () => {
     }
   });
 
+  it("lets round zero through — a game that ended before any clip is not round one", () => {
+    // `countRoundsPlayed` answers 0 for End Game in the first round's waiting
+    // phase. Clamping that up to 1 filed every game that never played under
+    // "ended at round one", which was the tallest bar in the report.
+    expect(parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: 0 })).toEqual({
+      kind: "game_finished",
+      end: "ended_early",
+      roundsPlayed: 0,
+    });
+  });
+
   it("clamps the round like the host index, so a corrupted counter keeps the game", () => {
     const cases: Array<[number, number]> = [
-      [0, 1],
-      [-3, 1],
+      [-3, 0],
+      [0.9, 0],
       [4.8, 4],
       [GAME_ROUND_CEILING + 1, GAME_ROUND_CEILING],
       [1e9, GAME_ROUND_CEILING],
@@ -127,6 +216,125 @@ describe("parsePulse — game ends", () => {
   it("rejects a non-finite or non-numeric round", () => {
     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, "3", null, undefined, {}]) {
       expect(parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: bad })).toBeNull();
+    }
+  });
+
+  it("carries the host kind and the screen when the page sent them", () => {
+    for (const host of GAME_HOST_KINDS) {
+      for (const screen of GAME_SCREENS) {
+        expect(
+          parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: 2, host, screen })
+        ).toEqual({ kind: "game_finished", end: "ended_early", roundsPlayed: 2, host, screen });
+      }
+    }
+  });
+
+  it("parses an older page's end exactly as it always did — no host, no screen, no keys for either", () => {
+    // A tab opened before the deploy sends neither field. Its game ended all
+    // the same, and nothing may be invented for it: `unknown` means the page
+    // asked and storage would not say, not that the page was old.
+    const parsed = parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 12 });
+    expect(parsed).toEqual({ kind: "game_finished", end: "played_out", roundsPlayed: 12 });
+    expect(parsed && "host" in parsed).toBe(false);
+    expect(parsed && "screen" in parsed).toBe(false);
+  });
+
+  it("drops an undeclared host kind or screen rather than the game, and never lets one reach a key", () => {
+    for (const bad of ["First", "returning", "", "__proto__", 1, true, null, {}]) {
+      const parsed = parsePulse({
+        kind: "game_finished",
+        end: "ended_early",
+        roundsPlayed: 1,
+        host: bad,
+        screen: bad,
+      });
+      expect(parsed).toEqual({ kind: "game_finished", end: "ended_early", roundsPlayed: 1 });
+    }
+  });
+});
+
+describe("parsePulse — the first clip", () => {
+  it("accepts every declared path × outcome pair", () => {
+    for (const path of FIRST_CLIP_PATHS) {
+      for (const outcome of FIRST_CLIP_OUTCOMES) {
+        expect(parsePulse({ kind: "first_clip", path, outcome })).toEqual({
+          kind: "first_clip",
+          path,
+          outcome,
+        });
+      }
+    }
+  });
+
+  it("rejects the event when either half is undeclared — both are key tails", () => {
+    for (const path of ["cached", "", "LAZY", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "first_clip", path, outcome: "played" })).toBeNull();
+    }
+    for (const outcome of ["NotAllowedError", "blocked", "", "PLAYED", "__proto__", 1, null]) {
+      expect(parsePulse({ kind: "first_clip", path: "lazy", outcome })).toBeNull();
+    }
+  });
+
+  it("strips everything but the two fields", () => {
+    expect(
+      parsePulse({ kind: "first_clip", path: "lazy", outcome: "rejected", track: "Hello", evil: 1 })
+    ).toEqual({ kind: "first_clip", path: "lazy", outcome: "rejected" });
+  });
+});
+
+describe("parsePulse — a game left", () => {
+  it("accepts a round from zero to the ceiling, with or without a host kind", () => {
+    expect(parsePulse({ kind: "game_left", roundsPlayed: 0 })).toEqual({
+      kind: "game_left",
+      roundsPlayed: 0,
+    });
+    for (const host of GAME_HOST_KINDS) {
+      expect(parsePulse({ kind: "game_left", roundsPlayed: 6, host })).toEqual({
+        kind: "game_left",
+        roundsPlayed: 6,
+        host,
+      });
+    }
+  });
+
+  it("clamps the round with the end beacon's arithmetic, so the two histograms share their rows", () => {
+    const cases: Array<[number, number]> = [
+      [-1, 0],
+      [3.7, 3],
+      [GAME_ROUND_CEILING + 5, GAME_ROUND_CEILING],
+    ];
+    for (const [input, expected] of cases) {
+      expect(parsePulse({ kind: "game_left", roundsPlayed: input })).toEqual({
+        kind: "game_left",
+        roundsPlayed: expected,
+      });
+      expect(
+        parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: input })
+      ).toMatchObject({ roundsPlayed: expected });
+    }
+  });
+
+  it("rejects a round that is not a number, and drops a host kind it does not know", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, "3", null, undefined, {}]) {
+      expect(parsePulse({ kind: "game_left", roundsPlayed: bad })).toBeNull();
+    }
+    expect(parsePulse({ kind: "game_left", roundsPlayed: 2, host: "regular" })).toEqual({
+      kind: "game_left",
+      roundsPlayed: 2,
+    });
+  });
+});
+
+describe("parsePulse — taps on Game Over", () => {
+  it("accepts both declared targets and nothing else", () => {
+    for (const target of GAME_OVER_TAPS) {
+      expect(parsePulse({ kind: "game_over_tap", target })).toEqual({
+        kind: "game_over_tap",
+        target,
+      });
+    }
+    for (const target of ["save", "qr", "", "MIXED", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "game_over_tap", target })).toBeNull();
     }
   });
 });
@@ -160,6 +368,115 @@ describe("parsePulse — quiz shares", () => {
     expect(
       parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 2, hostGameIndex: 9 })
     ).toEqual({ kind: "game_finished", end: "played_out", roundsPlayed: 2 });
+  });
+});
+
+describe("parsePulse — quiz copies", () => {
+  // The clipboard's two outcomes, mirrored here rather than imported beside
+  // the list at the top of the file: that import is the one line every new
+  // event's tests have to touch.
+  const COPY_OUTCOMES = ["copied", "failed"] as const;
+
+  it("accepts every declared by × outcome pair, the results page included", () => {
+    expect(QUIZ_SHARE_BYS).toContain("board");
+    for (const by of QUIZ_SHARE_BYS) {
+      for (const outcome of COPY_OUTCOMES) {
+        expect(parsePulse({ kind: "quiz_copied", by, outcome })).toEqual({
+          kind: "quiz_copied",
+          by,
+          outcome,
+        });
+      }
+    }
+  });
+
+  it("refuses a sheet's outcome on a copy — that is the two-meanings problem one key over", () => {
+    // `shared` and `dismissed` are what a share sheet says. A clipboard
+    // cannot say either, and a copy event carrying one is a share filed
+    // under the wrong kind.
+    for (const outcome of ["shared", "dismissed", "COPIED", "", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "quiz_copied", by: "owner", outcome })).toBeNull();
+    }
+    for (const by of ["host", "", "OWNER", "Board", "__proto__", 1, null]) {
+      expect(parsePulse({ kind: "quiz_copied", by, outcome: "copied" })).toBeNull();
+    }
+  });
+
+  it("keeps the two kinds apart, and strips what neither declares", () => {
+    expect(parsePulse({ kind: "quiz_copied", by: "board", outcome: "failed", url: "https://x/q/ABC234", evil: 1 })).toEqual({
+      kind: "quiz_copied",
+      by: "board",
+      outcome: "failed",
+    });
+    // A share that fell back to the clipboard is still a share.
+    expect(parsePulse({ kind: "quiz_shared", by: "board", outcome: "copied" })).toEqual({
+      kind: "quiz_shared",
+      by: "board",
+      outcome: "copied",
+    });
+  });
+});
+
+describe("the route records every kind the parser accepts", () => {
+  // `app/api/pulse/route.ts` dispatches on `kind` with a switch that has no
+  // default, and the compiler does not ask for one. A kind added to
+  // `PulseEvent` and not to the switch parses, answers 204, and records
+  // nothing: the beacon is sent, the counter never moves, and the row in
+  // `npm run stats` reads as "nobody tapped it". Read both sources, the way
+  // the .tsx tests do.
+  const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+
+  it("has a case, and a recorder under it, for each kind in the union", () => {
+    const union = read("lib/pulse.ts").match(/export type PulseEvent =([\s\S]*?)\n\n/)?.[1] ?? "";
+    const kinds = [...union.matchAll(/kind: "(\w+)"/g)].map((m) => m[1]);
+    expect(kinds).toContain("quiz_copied");
+    expect(kinds).toContain("quiz_shared");
+    expect(kinds.length).toBeGreaterThanOrEqual(5);
+    const route = read("app/api/pulse/route.ts");
+    for (const kind of kinds) {
+      expect(route, `no case for ${kind}`).toMatch(
+        new RegExp(`case "${kind}":\\s*await record\\w+\\(event\\.`)
+      );
+    }
+  });
+
+  it("sends a copy to the copy recorder and a share to the share recorder", () => {
+    const route = read("app/api/pulse/route.ts");
+    expect(route).toMatch(/case "quiz_copied":\s*await recordQuizCopy\(event\.by, event\.outcome\);/);
+    expect(route).toMatch(/case "quiz_shared":\s*await recordQuizShare\(event\.by, event\.outcome\);/);
+  });
+
+  it("has each button on the panel and the board report through its own function", () => {
+    // Both reporters take `(by, outcome)` and `copied`/`failed` are valid
+    // share outcomes, so a Copy handler calling `reportQuizShare` compiles.
+    // That is how `owner:copied` came to mean two things.
+    const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+    for (const [file, by] of [
+      ["components/quiz-panel.tsx", "owner"],
+      ["app/q/[code]/board/page.tsx", "board"],
+    ] as const) {
+      const body = code(read(file));
+      const share = body.match(/async function handleShare\(\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+      const copy = body.match(/async function handleCopy\(\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+      expect(share, `${file} handleShare`).toContain(`reportQuizShare("${by}", outcome)`);
+      expect(share, `${file} handleShare`).not.toContain("reportQuizCopy");
+      expect(copy, `${file} handleCopy`).toContain(`reportQuizCopy("${by}", outcome)`);
+      expect(copy, `${file} handleCopy`).not.toContain("reportQuizShare");
+      // One call each in the whole file, and no third path to GA4 alone.
+      expect(body.match(/reportQuizShare\(/g) ?? [], file).toHaveLength(1);
+      expect(body.match(/reportQuizCopy\(/g) ?? [], file).toHaveLength(1);
+      expect(body, file).not.toMatch(/trackEvent\("quiz_(share|copy)_tapped"/);
+    }
+  });
+
+  it("sends both copies of each report, GA4 and KV, from the one function", () => {
+    const client = read("lib/loop-client.ts");
+    expect(client).toMatch(
+      /export function reportQuizCopy\([^)]*\): void \{\s*trackEvent\("quiz_copy_tapped", \{ by, outcome \}\);\s*sendPulse\(\{ kind: "quiz_copied", by, outcome \}\);\s*\}/
+    );
+    expect(client).toMatch(
+      /export function reportQuizShare\([^)]*\): void \{\s*trackEvent\("quiz_share_tapped", \{ by, outcome \}\);\s*sendPulse\(\{ kind: "quiz_shared", by, outcome \}\);\s*\}/
+    );
   });
 });
 

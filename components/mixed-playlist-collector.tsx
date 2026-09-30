@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { errorMessage } from "@/lib/error-messages";
+import { useErrorLocale } from "@/lib/use-error-locale";
+import { usePlaylistLinkCheck } from "@/lib/use-playlist-link";
 import { ROOM_MAX_SUBMISSIONS } from "@/types/room";
 
 export interface MixedContribution {
@@ -31,14 +34,19 @@ export function MixedPlaylistCollector({
   const [playlistUrl, setPlaylistUrl] = useState("");
   const [justAdded, setJustAdded] = useState<string | null>(null);
 
-  const isValidUrl =
-    playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
+  // The server's own reading (lib/spotify-link.ts). What passes here is
+  // loaded by `/api/playlist` at Start, one request per contributor, so a
+  // link this let through and the server refused would fail the whole mix
+  // after everyone had already handed the phone on.
+  const playlistLink = usePlaylistLinkCheck(playlistUrl, "collector");
+  const locale = useErrorLocale();
   const trimmedName = name.trim();
   const isDuplicateName = contributions.some(
     (c) => c.name.toLowerCase() === trimmedName.toLowerCase()
   );
   const isFull = contributions.length >= ROOM_MAX_SUBMISSIONS;
-  const canAdd = trimmedName.length > 0 && isValidUrl && !isDuplicateName && !isFull;
+  const canAdd =
+    trimmedName.length > 0 && playlistLink.submittable && !isDuplicateName && !isFull;
 
   function handleAdd() {
     if (!canAdd) return;
@@ -96,13 +104,18 @@ export function MixedPlaylistCollector({
           <div style={{ position: "relative" }}>
             <input
               type="url"
-              className={`url-input${isValidUrl ? " valid" : ""}`}
+              className={`url-input${playlistLink.submittable ? " valid" : ""}`}
               placeholder="https://open.spotify.com/playlist/..."
               value={playlistUrl}
               onChange={(e) => setPlaylistUrl(e.target.value)}
               spellCheck={false}
             />
           </div>
+          {playlistLink.problem && (
+            <p style={{ fontSize: "12px", color: "#e85555", marginTop: "6px", lineHeight: 1.5 }}>
+              {errorMessage(playlistLink.problem, locale)}
+            </p>
+          )}
         </div>
         <button className="start-btn" onClick={handleAdd} disabled={!canAdd}>
           Add &amp; Pass Phone →

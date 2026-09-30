@@ -280,6 +280,56 @@ console.log(
 );
 
 /**
+ * How the playlist got into the field, for the games that said.
+ *
+ * `host_setup:<source>` rides on the same beacon as `Games started` and is
+ * written by `recordGameStart` in lib/loop-stats.ts. The setup form began
+ * remembering the last game on a device because more than half of all games
+ * come from a host who has played before and every one of them was retyping
+ * an empty form; this line is whether that memory gets used.
+ *
+ * Reading it: `restored` and `recent` are a returning host who did not
+ * retype, and the second line is their share of the games that had a single
+ * link at all. Put it beside `Repeat hosts` — a repeat host who still
+ * `typed` is one whose storage was evicted (iOS, seven idle days), or who
+ * wanted a different playlist tonight, and the two cannot be told apart from
+ * here. `starter` is zero until lib/starter-playlists.ts has a list.
+ *
+ * The denominator is the games that *said*, not `Games started`: a page
+ * loaded before this shipped sends no source and is counted above exactly
+ * as it always was. So the six sum to at most `games`, and in a window that
+ * straddles the deploy the gap is old tabs, not a seventh source. Floors,
+ * like the line they hang off.
+ *
+ * The order mirrors `SETUP_SOURCES` — an .mjs has no path to a TypeScript
+ * constant — and only orders: a source this list does not know still prints,
+ * after the ones it does.
+ */
+const SETUP_SOURCE_ORDER = ["typed", "restored", "recent", "starter", "shared", "mixed"];
+const setupSources = [...totals.keys()]
+  .filter((m) => m.startsWith("host_setup:"))
+  .map((m) => m.slice("host_setup:".length))
+  .sort((a, b) => {
+    const [ia, ib] = [SETUP_SOURCE_ORDER.indexOf(a), SETUP_SOURCE_ORDER.indexOf(b)];
+    return (ia === -1 ? Infinity : ia) - (ib === -1 ? Infinity : ib) || a.localeCompare(b);
+  });
+const setupSaid = setupSources.reduce((t, s) => t + get(`host_setup:${s}`), 0);
+
+if (setupSaid > 0) {
+  const parts = setupSources.map((s) => `${s} ${get(`host_setup:${s}`)}`).join(" · ");
+  const remembered = get("host_setup:restored") + get("host_setup:recent");
+  // Over the games that had a link to remember. A mixed game has none, so
+  // leaving it in the denominator would read the memory as less used the
+  // more Mixed is played.
+  const withLink = setupSaid - get("host_setup:mixed");
+  console.log(`Playlist came from  ${parts}   (${setupSaid} of ${games} games said)`);
+  console.log(
+    `                    ${pct(remembered, withLink).trim()} of single-playlist games started on a link the form ` +
+      "remembered (restored + recent) — read it beside Repeat hosts"
+  );
+}
+
+/**
  * Where the games went. `Games started` is a beacon from the setup page;
  * these two are beacons from the Game Over screen, so the difference is the
  * tab that closed mid-party — and the Game Over screen is where every
@@ -299,17 +349,64 @@ const playedOut = get("game_end:played_out");
 const endedEarly = get("game_end:ended_early");
 const reachedEnd = playedOut + endedEarly;
 
+/**
+ * The games that did not reach Game Over and said so: `game_left_round:<n>`,
+ * a beacon from the game page's `pagehide` (and from its unmount, which is
+ * what the back gesture is). Until it existed the line under `Reached Game
+ * Over` called the whole remainder "closed the tab", which was a name for
+ * what nothing had counted. Now the remainder is only what sent neither
+ * beacon, and the line says so.
+ *
+ * Not a partition of `games`, and the subtraction can go negative: a reload
+ * is a leave *and* a game that may still reach Game Over, with one start
+ * between them. A window that begins before the leave beacon shipped has
+ * starts in it that could not have sent one, so the remainder reads high
+ * there; it is a direction, like the gap it replaced.
+ */
+const leftRounds = [...totals.keys()]
+  .filter((m) => m.startsWith("game_left_round:"))
+  .map((m) => Number(m.slice("game_left_round:".length)))
+  .filter(Number.isFinite)
+  .sort((a, b) => a - b);
+const leftMidGame = leftRounds.reduce((t, n) => t + get(`game_left_round:${n}`), 0);
+
 if (reachedEnd > 0) {
   console.log(
     `Reached Game Over   ${reachedEnd}   ${pct(reachedEnd, games)} of games — ` +
       `${playedOut} played out · ${endedEarly} ended early`
   );
-  if (games > reachedEnd) {
+  if (leftMidGame > 0) {
+    const unaccounted = games - reachedEnd - leftMidGame;
+    console.log(
+      `Left mid-game       ${leftMidGame}   ${pct(leftMidGame, games)} of games — ` +
+        "the page was closed, reloaded or navigated away before Game Over"
+    );
+    if (unaccounted > 0) {
+      console.log(
+        `                    the other ${unaccounted} sent neither beacon: a tab the phone killed, ` +
+          "a beacon that was lost, or a game from before the leave beacon shipped"
+      );
+    } else if (unaccounted < 0) {
+      console.log(
+        `                    ${-unaccounted} more ends and leaves than starts: a reloaded game ` +
+          "leaves once and can still reach Game Over"
+      );
+    }
+  } else if (games > reachedEnd) {
     console.log(
       `                    the other ${games - reachedEnd} closed the tab mid-game ` +
         "(a floor: a lost beacon lands here too)"
     );
   }
+}
+
+const screenPhone = get("game_end_screen:phone");
+const screenDesktop = get("game_end_screen:desktop");
+if (screenPhone + screenDesktop > 0) {
+  console.log(
+    `                    Game Over was drawn on a phone ${screenPhone} times ` +
+      `(${pct(screenPhone, screenPhone + screenDesktop).trim()}) and on a desktop ${screenDesktop}`
+  );
 }
 
 const indices = [...totals.keys()]
@@ -333,15 +430,157 @@ const earlyRounds = [...totals.keys()]
   .filter(Number.isFinite)
   .sort((a, b) => a - b);
 
+/**
+ * Row 0 is not a round. It is End Game (or a leave) before any clip had
+ * started, which the page has always reported as 0 and which was clamped up
+ * into row 1 until 2026-09-30 — so a window that straddles that date has
+ * some of its zeros in row 1. Labelled on the row itself, because a bare
+ * "0" at the top of a histogram of rounds reads as one.
+ */
+const ROUND_ZERO_NOTE = "  ← no clip had started";
+
 if (earlyRounds.length > 0 && endedEarly > 0) {
   console.log("\nEnded early at round");
   for (const n of earlyRounds) {
     const count = get(`game_end_round:${n}`);
     const bar = "█".repeat(Math.min(40, Math.round((count / endedEarly) * 40)));
     console.log(
-      `  ${String(n).padStart(2)}${n === GAME_ROUND_CEILING ? "+" : " "} ${String(count).padStart(5)}  ${bar}`
+      `  ${String(n).padStart(2)}${n === GAME_ROUND_CEILING ? "+" : " "} ${String(count).padStart(5)}  ${bar}` +
+        (n === 0 ? ROUND_ZERO_NOTE : "")
     );
   }
+  console.log(
+    "  how to read it: a pile at 0–2 is a game that could not play; a spread through\n" +
+      "  the teens is a room that had enough. Row 0 never heard a clip at all."
+  );
+}
+
+if (leftRounds.length > 0 && leftMidGame > 0) {
+  console.log("\nLeft mid-game at round");
+  for (const n of leftRounds) {
+    const count = get(`game_left_round:${n}`);
+    const bar = "█".repeat(Math.min(40, Math.round((count / leftMidGame) * 40)));
+    console.log(
+      `  ${String(n).padStart(2)}${n === GAME_ROUND_CEILING ? "+" : " "} ${String(count).padStart(5)}  ${bar}` +
+        (n === 0 ? ROUND_ZERO_NOTE : "")
+    );
+  }
+  console.log(
+    "  how to read it: same rows as the histogram above, for the hosts who left without\n" +
+      "  pressing End Game. Once per game — a reload counts where it happened, and the\n" +
+      "  restarted game sends no second leave."
+  );
+}
+
+/**
+ * The two histograms above, crossed with whether the device had hosted
+ * before — `game_end_host:<kind>:<end>`, `game_end_early:<kind>:<band>` and
+ * `game_left_host:<kind>:<band>`, the kind riding on the end and leave
+ * beacons. The question it answers is which audience the pile at rounds 0–2
+ * is: people trying the site once, or hosts who came back and whose game
+ * broke. Banded, because kind × exact round is sixty-three keys a day.
+ *
+ * `first` is a ceiling and `repeat` a floor, for the reason the repeat-host
+ * figure is one: iOS evicts the count after seven idle days, so a returning
+ * host can read as a first. `unknown` is a page that asked and was refused.
+ * Kinds and bands mirror GAME_HOST_KINDS / EARLY_END_BANDS in
+ * lib/loop-stats.ts; tests/loop-stats.test.ts holds the two together.
+ */
+const hostKinds = ["first", "repeat", "unknown"];
+const earlyBands = [
+  ["r0", "no clip started"],
+  ["r1_2", "rounds 1–2"],
+  ["r3_plus", "round 3 or later"],
+];
+const byHost = (prefix, tail) => hostKinds.map((k) => get(`${prefix}:${k}:${tail}`));
+const hostRow = (label, counts) =>
+  `  ${label.padEnd(26)}${counts.map((c) => String(c).padStart(9)).join("")}`;
+const hostPlayedOut = byHost("game_end_host", "played_out");
+const hostEndedEarly = byHost("game_end_host", "ended_early");
+const hostLeft = hostKinds.map((k) =>
+  earlyBands.reduce((t, [band]) => t + get(`game_left_host:${k}:${band}`), 0)
+);
+
+if ([...hostPlayedOut, ...hostEndedEarly, ...hostLeft].some((c) => c > 0)) {
+  console.log("\nHow games ended, by whether the device had hosted before");
+  console.log(hostRow("", hostKinds));
+  console.log(hostRow("played out", hostPlayedOut));
+  console.log(hostRow("ended early", hostEndedEarly));
+  for (const [band, label] of earlyBands) {
+    console.log(hostRow(`  ${label}`, byHost("game_end_early", band)));
+  }
+  console.log(hostRow("left mid-game", hostLeft));
+  for (const [band, label] of earlyBands) {
+    console.log(hostRow(`  ${label}`, byHost("game_left_host", band)));
+  }
+  console.log(
+    "  how to read it: compare the 0–2 rows across the first two columns. Heavier under\n" +
+      "  `first` is people trying the site; heavier under `repeat` is a game that broke\n" +
+      "  for someone who knew how it should go."
+  );
+}
+
+/**
+ * The first Play press of each game: `first_clip:<path>:<outcome>`.
+ *
+ * The hypothesis it was built to test is in the two `rejected` cells. On the
+ * lazy path the page has to look the clip up before it can play it, so
+ * `play()` runs after an await — outside the tap — and a browser may refuse
+ * it; round one is when the prefetch is least likely to have landed. Rates
+ * are per path, because the paths are different sizes and the comparison is
+ * between them. Paths and outcomes mirror FIRST_CLIP_PATHS /
+ * FIRST_CLIP_OUTCOMES in lib/loop-stats.ts.
+ */
+const clipPaths = ["prefetched", "lazy"];
+const clipOutcomes = [
+  ["played", "played"],
+  ["rejected", "refused by the browser"],
+  ["no_audio", "no clip anywhere"],
+  ["unavailable", "we could not answer"],
+  ["error", "would not load"],
+  ["abandoned", "host moved on first"],
+];
+const clipTotals = clipPaths.map((p) =>
+  clipOutcomes.reduce((t, [o]) => t + get(`first_clip:${p}:${o}`), 0)
+);
+const firstClips = clipTotals.reduce((t, c) => t + c, 0);
+
+if (firstClips > 0) {
+  console.log("\nFirst clip of the game");
+  console.log(`  ${"".padEnd(26)}${clipPaths.map((p) => p.padStart(18)).join("")}`);
+  for (const [outcome, label] of clipOutcomes) {
+    const cells = clipPaths.map((p, i) => {
+      const count = get(`first_clip:${p}:${outcome}`);
+      return `${String(count).padStart(9)}  ${pct(count, clipTotals[i])}`;
+    });
+    console.log(`  ${label.padEnd(26)}${cells.join("")}`);
+  }
+  console.log(
+    `  ${firstClips} games had Play pressed, ${pct(firstClips, games).trim()} of games started`
+  );
+  console.log(
+    "  how to read it: `refused` much higher under lazy than under prefetched is the\n" +
+      "  autoplay policy catching a play() that ran outside the tap. If the two rates are\n" +
+      "  level, that is not what is ending games at round one."
+  );
+}
+
+/**
+ * What a host who reached Game Over tapped next: `game_over_tap:<target>`.
+ * `play_again` is against every Game Over; `mixed` is the link phones get in
+ * place of the QR, so it is against the phone screens only.
+ */
+const tapAgain = get("game_over_tap:play_again");
+const tapMixed = get("game_over_tap:mixed");
+if (tapAgain + tapMixed > 0) {
+  console.log(
+    `\nTapped on Game Over  Play Again ${tapAgain} (${pct(tapAgain, reachedEnd).trim()} of Game Overs)` +
+      ` · Mixed link ${tapMixed} (${pct(tapMixed, screenPhone).trim()} of phone Game Overs)`
+  );
+  console.log(
+    "  how to read it: the Mixed link is where the QR used to be on a phone, so its rate\n" +
+      "  is the one to set beside the game_over row above."
+  );
 }
 
 /**
@@ -367,12 +606,34 @@ if (earlyRounds.length > 0 && endedEarly > 0) {
  * completed` next to the allowance says whether the ration holds;
  * `unavailable` is the quiz spending a throttled minute; `repaired` is the
  * year-long positive cache rotting under it.
+ *
+ * Four rows were added on 2026-09-30, for the step the funnel could not see
+ * into — a quiz made and never sent. `from` is who makes quizzes. `owner
+ * opened` / `owner played` are the maker on their own link, which until then
+ * were inside opened, started, completed, the verdicts and the length table;
+ * they are counted *instead of* those now, so every friend-side row stepped
+ * down that day and a window across it is two series. `… copy` is the Copy
+ * link button, which until then was filed as a share's `copied`. And `board
+ * share` is the results page's share button, which until then reached GA4
+ * alone. `opened` also stopped counting the result screen's Refresh.
  */
 const quizCreated = get("quiz:created");
 const quizOpened = get("quiz:opened");
 const quizStarted = get("quiz:started");
 const quizCompleted = get("quiz:completed");
 const quizBoard = get("quiz:board");
+// Under the `quiz:` prefix, which the fallback at the bottom treats as
+// rendered: without these two reads and their rows the counters move in KV
+// and no line here moves with them.
+const quizOwnerOpened = get("quiz:owner_opened");
+const quizOwnerCompleted = get("quiz:owner_completed");
+// Every tap on a quiz's share or Copy button in the window. In the guard
+// below so that a day whose only quiz activity is an owner coming back to
+// send a link made earlier still prints the block — the panel is drawn for a
+// remembered quiz now, so that day exists.
+const quizTaps = [...totals]
+  .filter(([m]) => m.startsWith("quiz_share:") || m.startsWith("quiz_copy:"))
+  .reduce((t, [, c]) => t + c, 0);
 const verdicts = [...totals.keys()]
   .filter((m) => m.startsWith("quiz_verdict:"))
   .map((m) => m.slice("quiz_verdict:".length))
@@ -400,7 +661,7 @@ function lengthsFor(stage) {
   return out;
 }
 
-if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard > 0) {
+if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwnerOpened + quizOwnerCompleted + quizTaps > 0) {
   console.log("\nPlaylist quiz — the link-shaped surface");
 
   const locales = [...totals.keys()]
@@ -412,9 +673,48 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard > 0) {
   console.log(
     `  created     ${String(quizCreated).padStart(6)}${locales ? `   ${locales}` : ""}`
   );
+
+  // Who makes quizzes. `quiz_from:<source>` is written with `created` when
+  // the page named a source, so the row's total is at most `created` and the
+  // difference is quizzes made by a page from before 2026-09-30 (or by
+  // something that is not the page). Discovered by prefix, biggest first: a
+  // loop surface added later prints under its own name with no edit here.
+  const sources = [...totals.keys()]
+    .filter((m) => m.startsWith("quiz_from:"))
+    .map((m) => m.slice("quiz_from:".length))
+    .sort((a, b) => get(`quiz_from:${b}`) - get(`quiz_from:${a}`) || a.localeCompare(b));
+  if (sources.length > 0) {
+    const named = sources.reduce((t, s) => t + get(`quiz_from:${s}`), 0);
+    console.log(
+      `  from        ${String(named).padStart(6)}   ${sources.map((s) => `${s} ${get(`quiz_from:${s}`)}`).join(" · ")}`
+    );
+    console.log(
+      "                       where the maker came from: a surface name followed one of our links, internal is\n" +
+        "                       this site, external someone else's, none no referrer (typed, bookmarked, installed)"
+    );
+    if (quizCreated > named) {
+      console.log(
+        `                       ${quizCreated - named} of ${quizCreated} quizzes named no source — made by a page from before this was sent`
+      );
+    }
+  }
+
   console.log(
     `  opened      ${String(quizOpened).padStart(6)}   ${(quizCreated ? quizOpened / quizCreated : 0).toFixed(1)} per quiz`
   );
+
+  // The maker on their own link, recognised by the host token and counted
+  // here *instead of* in opened, started, completed, the verdicts and the
+  // length table. Floors: the token is in the creating browser's storage, so
+  // the same person on another device is a friend in the rows around these.
+  if (quizOwnerOpened + quizOwnerCompleted > 0) {
+    console.log(
+      `  owner opened${String(quizOwnerOpened).padStart(6)}   ${pct(quizOwnerOpened, quizCreated)} of quizzes had their maker open the link — a preview, not in opened`
+    );
+    console.log(
+      `  owner played${String(quizOwnerCompleted).padStart(6)}   ${pct(quizOwnerCompleted, quizOwnerOpened)} of those previews were played to the end — graded, never on the board`
+    );
+  }
 
   // The step between the two lines above. `quiz_share:<by>:<outcome>` is
   // every tap on a share button and what the sheet said, so `owner` against
@@ -424,13 +724,45 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard > 0) {
   // at all is a panel the owner never got to. Printed only once recorded,
   // and each `by` on its own line.
   const shareOutcomes = ["shared", "copied", "dismissed", "failed"];
-  for (const by of ["owner", "taker"]) {
+  // What each `by` is read against: the panel against quizzes made, the
+  // result screen against sheets finished, the results page against the
+  // times it was opened. All three are taps over a count, so ceilings.
+  const tapsAgainst = (by, taps) =>
+    by === "owner"
+      ? `${pct(taps, quizCreated)} of quizzes`
+      : by === "board"
+        ? `${pct(taps, quizBoard)} of board opens`
+        : `${pct(taps, quizCompleted)} of finishes`;
+  for (const by of ["owner", "taker", "board"]) {
     const counts = shareOutcomes.map((o) => get(`quiz_share:${by}:${o}`));
     const taps = counts.reduce((t, c) => t + c, 0);
     if (taps === 0) continue;
     const parts = shareOutcomes.map((o, i) => `${o} ${counts[i]}`).join(" · ");
-    const against = by === "owner" ? `${pct(taps, quizCreated)} of quizzes` : `${pct(taps, quizCompleted)} of finishes`;
+    const against = tapsAgainst(by, taps);
     console.log(`  ${`${by} share`.padEnd(12)}${String(taps).padStart(6)}   ${against} tapped it — ${parts}`);
+  }
+
+  // The Copy link button, on its own key since 2026-09-30
+  // (`quiz_copy:<by>:<copied|failed>`). Read it beside the share row above
+  // it: together they are everyone who tried to send the link, and a quiz
+  // with neither is one its maker never tried to send.
+  const copyOutcomes = ["copied", "failed"];
+  let copyTaps = 0;
+  for (const by of ["owner", "taker", "board"]) {
+    const counts = copyOutcomes.map((o) => get(`quiz_copy:${by}:${o}`));
+    const taps = counts.reduce((t, c) => t + c, 0);
+    if (taps === 0) continue;
+    copyTaps += taps;
+    const parts = copyOutcomes.map((o, i) => `${o} ${counts[i]}`).join(" · ");
+    console.log(`  ${`${by} copy`.padEnd(12)}${String(taps).padStart(6)}   ${tapsAgainst(by, taps)} tapped Copy link — ${parts}`);
+  }
+  if (quizTaps > 0) {
+    console.log(
+      "                       on a share row, copied is the share button with no share sheet to open; a tap on\n" +
+        "                       Copy link is the copy row" +
+        (copyTaps > 0 ? "" : " (none yet)") +
+        ". Days before 2026-09-30 filed both as a share's copied"
+    );
   }
   console.log(`  started     ${String(quizStarted).padStart(6)}   ${pct(quizStarted, quizOpened)} of opens answered a question`);
   console.log(
@@ -533,11 +865,23 @@ const RENDERED_PREFIXES = [
   "impression:",
   "click:",
   "host_index:",
+  "host_setup:",
   "game_end:",
   "game_end_round:",
+  "game_end_host:",
+  "game_end_early:",
+  "game_end_screen:",
+  "game_left_round:",
+  "game_left_host:",
+  "first_clip:",
+  "game_over_tap:",
   "playlist_refused:",
+  "playlist_invalid:",
+  "playlist_shortlink:",
   "quiz:",
   "quiz_share:",
+  "quiz_copy:",
+  "quiz_from:",
   "quiz_verdict:",
   "quiz_len:",
   "quiz_locale:",
@@ -698,11 +1042,66 @@ if (refusals.length > 0) {
     .map((c) => `${REFUSAL_LABELS[c] ?? c} ${get(`playlist_refused:${c}`)}`)
     .join(" · ");
   console.log(`\nPlaylist links refused — ${total} that will never work: ${parts}`);
+  // What "not a playlist URL" was, from `playlist_invalid:<kind>` — written
+  // in the same call as the total it splits, so the parts sum to it. Read by
+  // name over the closed set lib/loop-stats.ts declares (PLAYLIST_INVALID_KINDS)
+  // and in its order: a kind that was never pasted prints as 0, which is an
+  // answer here, where a missing word would be a question.
+  const invalidKinds = [
+    ["album", "album"],
+    ["track", "track"],
+    ["artist", "artist"],
+    ["shortlink", "dead short link"],
+    ["other", "anything else"],
+  ];
+  const invalidTotal = invalidKinds.reduce((t, [k]) => t + get(`playlist_invalid:${k}`), 0);
+  if (invalidTotal > 0) {
+    const split = invalidKinds.map(([k, label]) => `${label} ${get(`playlist_invalid:${k}`)}`).join(" · ");
+    console.log(`  not a playlist URL, by what it was: ${split}`);
+    console.log(
+      "  album is the one the app could choose to serve; the forms that block a\n" +
+        "  wrong link never send it, so this is the party form and the quiz only"
+    );
+    const unsplit = get("playlist_refused:invalid_playlist_url") - invalidTotal;
+    if (unsplit > 0) {
+      console.log(`  (${unsplit} more were refused before the split was counted)`);
+    }
+  }
   const editorial = get("playlist_refused:playlist_editorial");
   if (editorial > 0 && editorial >= total / 4) {
     console.log(
       "  a quarter or more are Spotify's own playlists: hosts want the charts,\n" +
         "  and the app cannot serve them (37i9… returns 404 to new apps)"
+    );
+  }
+}
+
+/**
+ * Short links, and whether following them works from where this runs.
+ *
+ * `playlist_shortlink:<outcome>`, written by `resolveShortlink` in
+ * lib/spotify-shortlink.ts for every short link the server was handed — a
+ * form or Android's share sheet, a cached answer included. It is printed on
+ * its own, outside the refusals above, because its best day has no refusal
+ * in it: every link resolved to a playlist and loaded.
+ */
+const shortlinkOutcomes = [
+  ["resolved", "followed"],
+  ["unusable", "led nowhere usable"],
+  ["unavailable", "could not be reached"],
+];
+const shortlinkTotal = shortlinkOutcomes.reduce((t, [o]) => t + get(`playlist_shortlink:${o}`), 0);
+if (shortlinkTotal > 0) {
+  const parts = shortlinkOutcomes
+    .map(([o, label]) => `${label} ${get(`playlist_shortlink:${o}`)}`)
+    .join(" · ");
+  console.log(`\nShort links (spotify.link) — ${shortlinkTotal} pasted or shared: ${parts}`);
+  const unreachable = get("playlist_shortlink:unavailable");
+  if (unreachable > 0 && unreachable >= shortlinkTotal / 4) {
+    console.log(
+      "  a quarter or more could not be reached: the redirector is refusing or\n" +
+        "  stalling this deployment's address, and those hosts were told to paste\n" +
+        "  the full link — lib/spotify-shortlink.ts, not the links"
     );
   }
 }

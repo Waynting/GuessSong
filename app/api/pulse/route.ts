@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getClientIp, rateLimit } from "@/lib/rate-limit";
 import { parsePulse } from "@/lib/pulse";
 import {
+  recordFirstClip,
   recordGameEnd,
+  recordGameLeft,
+  recordGameOverTap,
   recordGameStart,
   recordLoopImpression,
   recordQuizShare,
 } from "@/lib/loop-stats";
+import { recordQuizCopy } from "@/lib/loop-stats";
 
 /**
  * Fire-and-forget counters from the browser. See `lib/pulse.ts` for what the
@@ -64,13 +68,31 @@ export async function POST(req: NextRequest) {
       await recordLoopImpression(event.surface);
       break;
     case "game_started":
-      await recordGameStart(event.hostGameIndex, event.mixed);
+      await recordGameStart(event.hostGameIndex, event.mixed, event.source);
       break;
     case "game_finished":
-      await recordGameEnd(event.end, event.roundsPlayed);
+      await recordGameEnd(event.end, event.roundsPlayed, {
+        host: event.host,
+        screen: event.screen,
+      });
+      break;
+    case "first_clip":
+      await recordFirstClip(event.path, event.outcome);
+      break;
+    case "game_left":
+      await recordGameLeft(event.roundsPlayed, event.host);
+      break;
+    case "game_over_tap":
+      await recordGameOverTap(event.target);
       break;
     case "quiz_shared":
       await recordQuizShare(event.by, event.outcome);
+      break;
+    // A kind `parsePulse` accepts and this switch has no case for answers
+    // 204 and records nothing — the counter just never moves.
+    // `tests/pulse.test.ts` reads this file for a case per kind.
+    case "quiz_copied":
+      await recordQuizCopy(event.by, event.outcome);
       break;
   }
 

@@ -407,3 +407,318 @@ describe("the taker's routes", () => {
     expect(await count(keys.quiz.completed)).toBe(before.completed + 60);
   });
 });
+
+describe("where the maker came from", () => {
+  const post = (body: Record<string, unknown>) =>
+    createQuiz(
+      request("/api/quiz", {
+        method: "POST",
+        body: JSON.stringify({ url: "https://open.spotify.com/playlist/x", questionCount: 10, ...body }),
+      })
+    );
+
+  /** Every `quiz_from:` count, so "nothing was counted" covers the whole prefix. */
+  const allSources = async () =>
+    Object.fromEntries(
+      await Promise.all(Object.entries(keys.quizFrom).map(async ([s, k]) => [s, await count(k)] as const))
+    );
+
+  it("counts the source the page named, once, beside the creation", async () => {
+    for (const from of [...LOOP_SURFACES, "internal", "external", "none"] as const) {
+      const before = await allSources();
+      const created = await count(keys.quiz.created);
+      const res = await post({ from });
+      expect(res.status, from).toBe(200);
+      expect(await count(keys.quiz.created), from).toBe(created + 1);
+      expect(await allSources(), from).toEqual({ ...before, [from]: before[from] + 1 });
+    }
+  });
+
+  it("makes the same quiz and counts no source when the page named none, or one this build does not know", async () => {
+    // A measurement riding on a request whose job is making a quiz: a value
+    // that is absent, misspelt, from a newer page, or hostile costs the
+    // count and never the link. And never a key — the tail is from a body.
+    const store = await getKvStore();
+    for (const from of [
+      undefined,
+      "",
+      "organic",
+      "Internal",
+      "https://www.google.com/search?q=secret",
+      "quiz_from:none",
+      "a".repeat(400),
+      7,
+      null,
+      true,
+      ["none"],
+      { source: "none" },
+    ]) {
+      const before = await allSources();
+      const created = await count(keys.quiz.created);
+      const incr = vi.spyOn(store, "incr");
+      try {
+        const res = await post(from === undefined ? {} : { from });
+        expect(res.status, JSON.stringify(from)).toBe(200);
+        const body = (await res.json()) as CreateQuizResponse;
+        expect(body.questionCount).toBe(10);
+        expect(body.hostToken).toBeTruthy();
+        expect(Object.keys(body).sort()).toEqual(["code", "expiresAt", "hostToken", "playlistName", "questionCount"]);
+        const written = incr.mock.calls.map(([key]) => String(key));
+        expect(written.filter((k) => k.includes("quiz_from")), JSON.stringify(from)).toEqual([]);
+      } finally {
+        incr.mockRestore();
+      }
+      expect(await count(keys.quiz.created)).toBe(created + 1);
+      expect(await allSources()).toEqual(before);
+    }
+  });
+});
+
+describe("a refetch is not an open", () => {
+  it("answers the same view for `?refetch=1` and counts nothing for it", async () => {
+    const quiz = await make(10);
+    const before = await count(keys.quiz.opened);
+    const ownerBefore = await count(keys.quizOwner.owner_opened);
+
+    const first = await readQuiz(request(`/api/quiz/${quiz.code}`), params(quiz.code));
+    expect(first.status).toBe(200);
+    const view = await first.json();
+    expect(await count(keys.quiz.opened)).toBe(before + 1);
+
+    // The result screen's Refresh, as often as it is tapped. Counted under
+    // no key at all — the store is watched, not just the two stages.
+    const store = await getKvStore();
+    const incr = vi.spyOn(store, "incr");
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        const again = await readQuiz(request(`/api/quiz/${quiz.code}?refetch=1`), params(quiz.code));
+        expect(again.status).toBe(200);
+        expect(again.headers.get("cache-control")).toBe("no-store");
+        expect(await again.json()).toEqual(view);
+      }
+      const counted = incr.mock.calls.map(([key]) => String(key)).filter((k) => k.startsWith("loop:stats:"));
+      expect(counted).toEqual([]);
+    } finally {
+      incr.mockRestore();
+    }
+    expect(await count(keys.quiz.opened)).toBe(before + 1);
+    expect(await count(keys.quizOwner.owner_opened)).toBe(ownerBefore);
+  });
+
+  it("counts anything it does not recognise as a real open, so an older page counts as before", async () => {
+    const quiz = await make(10);
+    const spellings = ["", "?refetch=", "?refetch=0", "?refetch=true", "?refetch=yes", "?refetch=11", "?refetch=1%20", "?Refetch=1", "?refresh=1", "?again=1"];
+    const before = await count(keys.quiz.opened);
+    for (const query of spellings) {
+      const res = await readQuiz(request(`/api/quiz/${quiz.code}${query}`), params(quiz.code));
+      expect(res.status, query).toBe(200);
+    }
+    expect(await count(keys.quiz.opened)).toBe(before + spellings.length);
+  });
+
+  it("still limits a refetch like any read, and still answers a gone quiz with its code", async () => {
+    // The flag is the caller's word; it buys no free `hgetall`.
+    const quiz = await make(10);
+    const ip = "10.6.6.6";
+    const refused = await count(keys.quizThrottled.read);
+    const opened = await count(keys.quiz.opened);
+    for (let i = 0; i < 60; i += 1) {
+      const res = await readQuiz(request(`/api/quiz/${quiz.code}?refetch=1`, { ip }), params(quiz.code));
+      expect(res.status).toBe(200);
+    }
+    const over = await readQuiz(request(`/api/quiz/${quiz.code}?refetch=1`, { ip }), params(quiz.code));
+    expect(over.status).toBe(429);
+    expect(await count(keys.quizThrottled.read)).toBe(refused + 1);
+    expect(await count(keys.quiz.opened)).toBe(opened);
+
+    const gone = await readQuiz(request("/api/quiz/ZZZZZZ?refetch=1"), params("ZZZZZZ"));
+    expect(gone.status).toBe(404);
+    expect(((await gone.json()) as { code: string }).code).toBe("quiz_not_found");
+  });
+});
+
+describe("the owner, on their own link", () => {
+  const asOwner = (quiz: CreateQuizResponse) => ({ "x-host-token": quiz.hostToken });
+
+  /** The friend-side funnel and the owner's two, read together. */
+  const funnel = async () => ({
+    opened: await count(keys.quiz.opened),
+    started: await count(keys.quiz.started),
+    completed: await count(keys.quiz.completed),
+    ownerOpened: await count(keys.quizOwner.owner_opened),
+    ownerCompleted: await count(keys.quizOwner.owner_completed),
+    soulmate: await count(keys.quizVerdict.soulmate),
+    stranger: await count(keys.quizVerdict.stranger),
+    done10: await count(keys.quizLength.completed[10]),
+  });
+
+  it("counts the open as the owner's and not as a friend's", async () => {
+    const quiz = await make(10);
+    const before = await funnel();
+    const res = await readQuiz(request(`/api/quiz/${quiz.code}`, { headers: asOwner(quiz) }), params(quiz.code));
+    expect(res.status).toBe(200);
+    const view = (await res.json()) as QuizView;
+    expect(view.owner).toBe(true);
+    expect(await funnel()).toEqual({ ...before, ownerOpened: before.ownerOpened + 1 });
+
+    // And the owner's refetch is nobody's open.
+    const again = await readQuiz(
+      request(`/api/quiz/${quiz.code}?refetch=1`, { headers: asOwner(quiz) }),
+      params(quiz.code)
+    );
+    expect(((await again.json()) as QuizView).owner).toBe(true);
+    expect(await funnel()).toEqual({ ...before, ownerOpened: before.ownerOpened + 1 });
+  });
+
+  it("counts a missing or wrong token as a friend, and answers it like one", async () => {
+    const quiz = await make(10);
+    const other = await make(10);
+    const before = await funnel();
+    const tokens = ["", "nope", other.hostToken];
+    for (const token of tokens) {
+      const res = await readQuiz(
+        request(`/api/quiz/${quiz.code}`, { headers: { "x-host-token": token } }),
+        params(quiz.code)
+      );
+      expect(res.status, token).toBe(200);
+      expect("owner" in ((await res.json()) as QuizView), token).toBe(false);
+    }
+    expect(await funnel()).toEqual({ ...before, opened: before.opened + tokens.length });
+  });
+
+  it("does not count the owner's first question as a friend starting, and answers it the same", async () => {
+    const quiz = await make(10);
+    const answers = await keyFor(quiz.code);
+    const before = await funnel();
+    for (let q = 0; q < answers.length; q += 1) {
+      const res = await checkQuiz(
+        request(`/api/quiz/${quiz.code}/check`, {
+          method: "POST",
+          headers: asOwner(quiz),
+          body: JSON.stringify({ q, pick: 0 }),
+        }),
+        params(quiz.code)
+      );
+      expect(res.status).toBe(200);
+      // `answer` alone: who asked is the route's business, not the wire's.
+      expect(await res.json()).toEqual({ answer: answers[q] });
+    }
+    expect(await funnel()).toEqual(before);
+
+    // The same question with a token that is not this quiz's is a friend.
+    const friend = await checkQuiz(
+      request(`/api/quiz/${quiz.code}/check`, {
+        method: "POST",
+        headers: { "x-host-token": "nope" },
+        body: JSON.stringify({ q: 0, pick: 0 }),
+      }),
+      params(quiz.code)
+    );
+    expect(await friend.json()).toEqual({ answer: answers[0] });
+    expect(await funnel()).toEqual({ ...before, started: before.started + 1 });
+  });
+
+  it("grades the owner's sheet, writes no row, and counts it as the owner's alone", async () => {
+    const quiz = await make(10);
+    const answers = await keyFor(quiz.code);
+    const before = await funnel();
+    const store = await getKvStore();
+    const fields = async () => Object.keys(await store.hgetall<unknown>(`quiz:v1:${quiz.code}`)).sort();
+    expect(await fields()).toEqual(["meta", "q"]);
+
+    // No name: the intro asked for none.
+    const res = await answerQuiz(
+      request(`/api/quiz/${quiz.code}/answer`, {
+        method: "POST",
+        headers: asOwner(quiz),
+        body: JSON.stringify({ name: "", answers, hintsUsed: 0, submissionId: "preview-1" }),
+      }),
+      params(quiz.code)
+    );
+    expect(res.status).toBe(200);
+    const graded = (await res.json()) as AnswerQuizResponse;
+    expect(graded).toMatchObject({ correct: 10, total: 10, verdict: "soulmate", recorded: false, rank: null, preview: true });
+    expect(graded.scoreboard).toEqual([]);
+
+    expect(await fields()).toEqual(["meta", "q"]);
+    // Not `completed`, not the verdict, not the length table.
+    expect(await funnel()).toEqual({ ...before, ownerCompleted: before.ownerCompleted + 1 });
+
+    // A friend's sheet on the same quiz is a friend's: three counters, one row.
+    const friend = await answerQuiz(
+      request(`/api/quiz/${quiz.code}/answer`, {
+        method: "POST",
+        body: JSON.stringify({ name: "Ann", answers: answers.map((a) => (a + 1) % 2) }),
+      }),
+      params(quiz.code)
+    );
+    expect(friend.status).toBe(200);
+    const theirs = (await friend.json()) as AnswerQuizResponse;
+    expect(theirs.recorded).toBe(true);
+    expect("preview" in theirs).toBe(false);
+    expect(await fields()).toEqual(["meta", "q", "s:ann"]);
+    expect(await funnel()).toEqual({
+      ...before,
+      ownerCompleted: before.ownerCompleted + 1,
+      completed: before.completed + 1,
+      stranger: before.stranger + 1,
+      done10: before.done10 + 1,
+    });
+  });
+
+  it("still asks everyone else for a name, with the reply each of them always got", async () => {
+    const quiz = await make(10);
+    const answers = await keyFor(quiz.code);
+    const before = await funnel();
+    const send = (headers: Record<string, string> | undefined, body: Record<string, unknown>) =>
+      answerQuiz(
+        request(`/api/quiz/${quiz.code}/answer`, { method: "POST", headers, body: JSON.stringify(body) }),
+        params(quiz.code)
+      );
+
+    // No token: the parser's 400, as before the name's floor left the schema.
+    for (const name of ["", "   "]) {
+      const res = await send(undefined, { name, answers });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { code: string }).code).toBe("quiz_missing_fields");
+    }
+    const missing = await send(undefined, { answers });
+    expect(missing.status).toBe(400);
+    expect(((await missing.json()) as { code: string }).code).toBe("quiz_missing_fields");
+
+    // A token that is not this quiz's: a friend, and the store's own code.
+    const wrong = await send({ "x-host-token": "nope" }, { name: "", answers });
+    expect(wrong.status).toBe(422);
+    expect(((await wrong.json()) as { code: string }).code).toBe("quiz_name_required");
+
+    // A name over the cap is still the parser's, owner or not.
+    const long = await send(asOwner(quiz), { name: "x".repeat(25), answers });
+    expect(long.status).toBe(400);
+
+    expect(await funnel()).toEqual(before);
+    const store = await getKvStore();
+    expect(Object.keys(await store.hgetall<unknown>(`quiz:v1:${quiz.code}`)).sort()).toEqual(["meta", "q"]);
+  });
+
+  it("keys the owner's requests off the canonical code too, and leaves no orphan", async () => {
+    // The rule `submitQuizAnswers` keeps for a friend's row, restated for the
+    // path that writes nothing: a padded, lower-cased segment reads the real
+    // quiz and creates no second hash beside it.
+    const quiz = await make(10);
+    const answers = await keyFor(quiz.code);
+    const segment = ` ${quiz.code.toLowerCase()} `;
+    const res = await answerQuiz(
+      request(`/api/quiz/${encodeURIComponent(segment)}/answer`, {
+        method: "POST",
+        headers: asOwner(quiz),
+        body: JSON.stringify({ name: "", answers }),
+      }),
+      params(segment)
+    );
+    expect(res.status).toBe(200);
+    const store = await getKvStore();
+    for (const stray of [`quiz:v1:${segment}`, `quiz:v1:${quiz.code.toLowerCase()}`, `quiz:v1:${segment.toUpperCase()}`]) {
+      expect(Object.keys(await store.hgetall<unknown>(stray)), stray).toEqual([]);
+    }
+  });
+});

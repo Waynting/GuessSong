@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { trackEvent } from "@/lib/analytics";
-import { apiError, describeError } from "@/lib/error-messages";
+import { apiError, describeError, errorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
+import { usePlaylistLinkCheck } from "@/lib/use-playlist-link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -33,9 +34,12 @@ export default function JoinRoomPage() {
   // usually their first and only one — so their phone decides.
   const locale = useErrorLocale();
 
-  const isValidUrl =
-    playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
-  const canSubmit = name.trim().length > 0 && isValidUrl && status !== "loading";
+  // The same reading the server makes (lib/spotify-link.ts), so a link it
+  // would load can always be sent. This page is the one loop surface that
+  // converts, and it used to turn away `/intl-ja/playlist/…` and short links
+  // with a greyed-out button and no sentence.
+  const playlistLink = usePlaylistLinkCheck(playlistUrl, "join");
+  const canSubmit = name.trim().length > 0 && playlistLink.submittable && status !== "loading";
 
   // The denominator for this page's only conversion. The host's poll counts
   // submissions that landed, so a phone that scanned in and then bounced off the
@@ -136,12 +140,25 @@ export default function JoinRoomPage() {
               value={playlistUrl}
               onChange={(e) => setPlaylistUrl(e.target.value)}
               spellCheck={false}
+              aria-describedby={playlistLink.problem ? "playlist-problem" : undefined}
             />
+            {/* Why the button is disabled, whenever it is for the link's
+                sake: an album, a track, an artist page, or not a link. */}
+            {playlistLink.problem && (
+              <p id="playlist-problem" className="text-sm text-destructive">
+                {errorMessage(playlistLink.problem, locale)}
+              </p>
+            )}
           </div>
           <Button onClick={handleSubmit} disabled={!canSubmit}>
             {status === "loading" ? "Submitting..." : "Submit Playlist"}
           </Button>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {/* The last refusal was about a link that is no longer in the field
+              once the field has a problem of its own; two sentences about
+              two different links would be one too many. */}
+          {error && !playlistLink.problem && (
+            <p className="text-sm text-destructive">{error}</p>
+          )}
           <ServiceNotice />
           <LoopFooter surface="join_footer" />
         </CardContent>

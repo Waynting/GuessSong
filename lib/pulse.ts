@@ -21,8 +21,18 @@
  *   - **quiz shares** — the owner's or a taker's share button, and what the
  *     sheet said. The step between `quiz:created` and `quiz:opened`, which
  *     was losing most quizzes with no record of how.
+ *   - **quiz copies** — the explicit "Copy link" button beside that share
+ *     button. Its own event since 2026-09-30, because filed as a share it
+ *     made `copied` mean two things (`QuizCopyOutcome` in `lib/loop-stats.ts`).
+ *   - **the first clip, a game left, a tap on Game Over** — the three things
+ *     the game page knows about a game that did not go well, none of which
+ *     is a request: whether the first Play press produced sound, that the
+ *     page went away mid-game and at which round, and which way a host who
+ *     did finish went next. Two in three games never reached Game Over in
+ *     the week to 2026-09-29, and the end beacon above is silent about every
+ *     one of them.
  *
- * So: one narrow endpoint, four event shapes, a closed set of values, and
+ * So: one narrow endpoint, a handful of event shapes, a closed set of values, and
  * nothing that a caller can turn into a key. The parsing lives here rather
  * than in the route so the rejection paths are testable — they are the ones
  * that matter, since the body arrives from the open internet.
@@ -30,24 +40,79 @@
 
 import { isLoopSurface, type LoopSurface } from "@/lib/loop-links";
 import {
+  FIRST_CLIP_OUTCOMES,
+  FIRST_CLIP_PATHS,
   GAME_ENDS,
+  GAME_HOST_KINDS,
+  GAME_OVER_TAPS,
   GAME_ROUND_CEILING,
+  GAME_ROUND_FLOOR,
+  GAME_SCREENS,
   HOST_INDEX_CEILING,
   MIXED_SUB_MODES,
   QUIZ_SHARE_BYS,
   QUIZ_SHARE_OUTCOMES,
+  type FirstClipOutcome,
+  type FirstClipPath,
   type GameEnd,
+  type GameHostKind,
+  type GameOverTap,
+  type GameScreen,
   type MixedSubMode,
   type QuizShareBy,
   type QuizShareOutcome,
 } from "@/lib/loop-stats";
+// A statement of its own rather than two more names in the list above: that
+// list is the one line of this file every new event has to touch.
+import { QUIZ_COPY_OUTCOMES, type QuizCopyOutcome } from "@/lib/loop-stats";
+import { SETUP_SOURCES, type SetupSource } from "@/lib/loop-stats";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
 }
 
+function isSetupSource(value: unknown): value is SetupSource {
+  return typeof value === "string" && (SETUP_SOURCES as readonly string[]).includes(value);
+}
+
 function isGameEnd(value: unknown): value is GameEnd {
   return typeof value === "string" && (GAME_ENDS as readonly string[]).includes(value);
+}
+
+function isGameHostKind(value: unknown): value is GameHostKind {
+  return typeof value === "string" && (GAME_HOST_KINDS as readonly string[]).includes(value);
+}
+
+function isGameScreen(value: unknown): value is GameScreen {
+  return typeof value === "string" && (GAME_SCREENS as readonly string[]).includes(value);
+}
+
+function isFirstClipPath(value: unknown): value is FirstClipPath {
+  return typeof value === "string" && (FIRST_CLIP_PATHS as readonly string[]).includes(value);
+}
+
+function isFirstClipOutcome(value: unknown): value is FirstClipOutcome {
+  return (
+    typeof value === "string" && (FIRST_CLIP_OUTCOMES as readonly string[]).includes(value)
+  );
+}
+
+function isGameOverTap(value: unknown): value is GameOverTap {
+  return typeof value === "string" && (GAME_OVER_TAPS as readonly string[]).includes(value);
+}
+
+/**
+ * A round off the wire, or null when it is not a number at all.
+ *
+ * Clamped between the floor and the ceiling like the host index, and for its
+ * reason. The floor is zero and zero is let through: it is what
+ * `countRoundsPlayed` sends for a game that ended before any clip started,
+ * and clamping it up to 1 — which this did until 2026-09-30 — filed every
+ * game that never played under "ended at round one".
+ */
+function parseRound(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(GAME_ROUND_FLOOR, Math.min(Math.trunc(value), GAME_ROUND_CEILING));
 }
 
 function isQuizShareBy(value: unknown): value is QuizShareBy {
@@ -60,10 +125,26 @@ function isQuizShareOutcome(value: unknown): value is QuizShareOutcome {
   );
 }
 
+function isQuizCopyOutcome(value: unknown): value is QuizCopyOutcome {
+  return (
+    typeof value === "string" && (QUIZ_COPY_OUTCOMES as readonly string[]).includes(value)
+  );
+}
+
 export type PulseEvent =
   | { kind: "loop_impression"; surface: LoopSurface }
-  | { kind: "game_started"; hostGameIndex: number; mixed?: MixedSubMode }
-  | { kind: "game_finished"; end: GameEnd; roundsPlayed: number }
+  | { kind: "game_started"; hostGameIndex: number; mixed?: MixedSubMode; source?: SetupSource }
+  | {
+      kind: "game_finished";
+      end: GameEnd;
+      roundsPlayed: number;
+      host?: GameHostKind;
+      screen?: GameScreen;
+    }
+  | { kind: "first_clip"; path: FirstClipPath; outcome: FirstClipOutcome }
+  | { kind: "game_left"; roundsPlayed: number; host?: GameHostKind }
+  | { kind: "game_over_tap"; target: GameOverTap }
+  | { kind: "quiz_copied"; by: QuizShareBy; outcome: QuizCopyOutcome }
   | { kind: "quiz_shared"; by: QuizShareBy; outcome: QuizShareOutcome };
 
 /**
@@ -99,9 +180,14 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // while losing the game costs the only number anyone reads. An unrecognised
     // string must never survive to `mixed_pool:${value}` — that is the field
     // that becomes a KV key.
-    return isMixedSubMode(raw.mixed)
+    const started: Extract<PulseEvent, { kind: "game_started" }> = isMixedSubMode(raw.mixed)
       ? { kind: "game_started", hostGameIndex: clamped, mixed: raw.mixed }
       : { kind: "game_started", hostGameIndex: clamped };
+    // The same trade for how the playlist got into the field, and the same
+    // hazard: `host_setup:${value}` is a key. Absent is the ordinary case for
+    // a while — every page loaded before this shipped sends none — and must
+    // parse exactly as it always did.
+    return isSetupSource(raw.source) ? { ...started, source: raw.source } : started;
   }
 
   if (raw.kind === "game_finished") {
@@ -109,10 +195,39 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // clamped like the index above, and for the same reason — a corrupted
     // counter must not cost the game its place in the "reached the end" total.
     if (!isGameEnd(raw.end)) return null;
-    const rounds = raw.roundsPlayed;
-    if (typeof rounds !== "number" || !Number.isFinite(rounds)) return null;
-    const clamped = Math.max(1, Math.min(Math.trunc(rounds), GAME_ROUND_CEILING));
-    return { kind: "game_finished", end: raw.end, roundsPlayed: clamped };
+    const clamped = parseRound(raw.roundsPlayed);
+    if (clamped === null) return null;
+    // The host kind and the screen are dropped when unknown, not rejected —
+    // the `mixed` rule above, for its reason: a page from before 2026-09-30
+    // sends neither and its game ended all the same. Neither may survive as
+    // anything but a member of its list; both become key tails.
+    return {
+      kind: "game_finished",
+      end: raw.end,
+      roundsPlayed: clamped,
+      ...(isGameHostKind(raw.host) ? { host: raw.host } : {}),
+      ...(isGameScreen(raw.screen) ? { screen: raw.screen } : {}),
+    };
+  }
+
+  if (raw.kind === "first_clip") {
+    // Both halves are key tails and neither has a fallback: a first clip
+    // that cannot say which path it took, or how it came out, is not a
+    // reading of anything.
+    if (!isFirstClipPath(raw.path) || !isFirstClipOutcome(raw.outcome)) return null;
+    return { kind: "first_clip", path: raw.path, outcome: raw.outcome };
+  }
+
+  if (raw.kind === "game_left") {
+    const clamped = parseRound(raw.roundsPlayed);
+    if (clamped === null) return null;
+    return isGameHostKind(raw.host)
+      ? { kind: "game_left", roundsPlayed: clamped, host: raw.host }
+      : { kind: "game_left", roundsPlayed: clamped };
+  }
+
+  if (raw.kind === "game_over_tap") {
+    return isGameOverTap(raw.target) ? { kind: "game_over_tap", target: raw.target } : null;
   }
 
   if (raw.kind === "quiz_shared") {
@@ -120,6 +235,14 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // fallback, because an event with either half missing says nothing.
     if (!isQuizShareBy(raw.by) || !isQuizShareOutcome(raw.outcome)) return null;
     return { kind: "quiz_shared", by: raw.by, outcome: raw.outcome };
+  }
+
+  if (raw.kind === "quiz_copied") {
+    // The share event's rule, with the narrower outcome list: a copy that
+    // claims `shared` or `dismissed` is not a copy, and accepting it would
+    // put the two-meanings problem back one key over.
+    if (!isQuizShareBy(raw.by) || !isQuizCopyOutcome(raw.outcome)) return null;
+    return { kind: "quiz_copied", by: raw.by, outcome: raw.outcome };
   }
 
   return null;

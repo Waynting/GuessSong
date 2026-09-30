@@ -150,6 +150,34 @@ function scoreField(name: string): string {
   return `${SCORE_PREFIX}${foldQuizName(name)}`;
 }
 
+/**
+ * Whether a request's token is this quiz's — the one check, for the results
+ * page and for the owner's preview alike.
+ *
+ * One function because "verified the same way the board is" has to stay true
+ * by construction: a second spelling of this comparison is how the preview
+ * ends up accepting something the board refuses, or the other way round.
+ * Constant-time, and an empty token is never a match — a record whose own
+ * token is somehow empty has no owner rather than everyone.
+ *
+ * It costs nothing: the quiz is already in hand from the one `hgetall` every
+ * caller makes, which matters on `checkQuizAnswer`, the largest per-address
+ * KV budget on the site.
+ *
+ * What a `true` is worth is what the token is worth — it lives in the
+ * creating browser's localStorage (`lib/quiz-session.ts`) — and what a
+ * `false` means is only "not provably the owner". Every caller but the board
+ * treats `false` as an ordinary taker and never as an error: the owner on a
+ * second device, or on the first after its storage was cleared, is a friend
+ * as far as this can tell.
+ */
+function isQuizOwner(quiz: LoadedQuiz, hostToken: string | null | undefined): boolean {
+  const stored = quiz.meta.hostToken;
+  if (typeof stored !== "string" || !stored) return false;
+  if (typeof hostToken !== "string" || !hostToken) return false;
+  return timingSafeEqualStrings(stored, hostToken);
+}
+
 function generateCode(): string {
   let code = "";
   for (let i = 0; i < QUIZ_CODE_LENGTH; i += 1) {
@@ -308,9 +336,17 @@ function toView(quiz: LoadedQuiz): QuizView {
   };
 }
 
-/** What a taker's phone receives. Never the answer key. */
-export async function getQuizView(code: string): Promise<QuizView> {
-  return toView(await requireQuiz(code));
+/**
+ * What a taker's phone receives. Never the answer key — and that holds for
+ * the owner too: a verified token marks the view `owner` and changes nothing
+ * else in it. The owner previews the quiz their friends will get, key
+ * withheld, one `check` per question like anyone; the answers by name are
+ * what the board is for, behind the same token.
+ */
+export async function getQuizView(code: string, hostToken?: string | null): Promise<QuizView> {
+  const quiz = await requireQuiz(code);
+  const view = toView(quiz);
+  return isQuizOwner(quiz, hostToken) ? { ...view, owner: true } : view;
 }
 
 /** What the unfurl needs: the card's words, and the canonical code for its URL. */
@@ -358,24 +394,53 @@ export async function peekQuiz(code: string): Promise<QuizPeek | null> {
  * its score short of a second name (and a double count on the board). So the
  * phone mints a `submissionId` per attempt; a collision whose stored `sid`
  * matches replays that row as the answer it was.
+ *
+ * **The owner's own sheet is graded and never written.** A request carrying
+ * the quiz's host token is a preview: the same grading against the same key,
+ * the same sheet rules, and then the result is handed back with `preview`
+ * set and no `hsetnx` at all — no row, no name claimed, nothing for a later
+ * taker to collide with. Before 2026-09-30 an owner trying their own link
+ * was a row on the public board like anyone's, usually a perfect one, which
+ * is the first thing a friend then saw. The name is not required of them,
+ * because there is no row for it to name; from anyone else an empty name is
+ * still `quiz_name_required`. Decided before the replay lookup, so an owner
+ * whose name matches a row — their own, from before this shipped — is not
+ * refused it.
  */
 export async function submitQuizAnswers(
   code: string,
   name: string,
   answers: unknown,
   hintsUsed: unknown,
-  submissionId?: string
+  submissionId?: string,
+  hostToken?: string | null
 ): Promise<AnswerQuizResponse> {
   const quiz = await requireQuiz(code);
+  const owner = isQuizOwner(quiz, hostToken);
 
   const trimmedName = name.trim();
-  if (!trimmedName) throw new QuizError("quiz_name_required", 422);
+  if (!trimmedName && !owner) throw new QuizError("quiz_name_required", 422);
   if (!isAnswerList(answers, quiz.questions.length)) {
     throw new QuizError("quiz_invalid_answers", 422);
   }
 
   const graded = gradeAnswers(quiz.questions, answers);
   const hints = clampHintsUsed(hintsUsed, quiz.questions.length);
+
+  if (owner) {
+    return {
+      correct: graded.correct,
+      total: graded.total,
+      hintsUsed: hints,
+      verdict: verdictFor(graded.correct, graded.total),
+      key: graded.key,
+      recorded: false,
+      rank: null,
+      scoreboard: sortScoreboard(quiz.scores).map(publicScore),
+      preview: true,
+    };
+  }
+
   const folded = foldQuizName(trimmedName);
   const sid = typeof submissionId === "string" && submissionId ? submissionId : undefined;
 
@@ -456,12 +521,19 @@ export async function submitQuizAnswers(
  * Two KV commands per tap — the route's limiter and one `hgetall` — where a
  * quiz used to cost two per taker. Bounded by the code space (a valid code
  * is the price of admission) and by `QUIZ_CHECK_LIMIT` per address.
+ *
+ * `owner` rides back beside the answer, present only for a verified host
+ * token, and it is for the route, not the wire: the route reads it to decide
+ * whether question zero is a friend starting (`quiz:started`) and answers
+ * with `answer` alone. The owner gets no more here than a friend does — one
+ * question's key against a pick for it.
  */
 export async function checkQuizAnswer(
   code: string,
   questionIndex: number,
-  pick: number
-): Promise<CheckQuizResponse> {
+  pick: number,
+  hostToken?: string | null
+): Promise<CheckQuizResponse & { owner?: true }> {
   // Shape first, before the hash is read, like `getQuizHint`.
   if (!Number.isInteger(questionIndex) || questionIndex < 0 || questionIndex >= QUIZ_MAX_QUESTIONS) {
     throw new QuizError("quiz_invalid_answers", 422);
@@ -470,7 +542,9 @@ export async function checkQuizAnswer(
   const quiz = await requireQuiz(code);
   const question = quiz.questions[questionIndex];
   if (!question || pick >= question.options.length) throw new QuizError("quiz_invalid_answers", 422);
-  return { answer: question.answer };
+  return isQuizOwner(quiz, hostToken)
+    ? { answer: question.answer, owner: true }
+    : { answer: question.answer };
 }
 
 /**
@@ -485,7 +559,7 @@ export async function checkQuizAnswer(
  */
 export async function getQuizBoard(code: string, hostToken: string): Promise<QuizBoardResponse> {
   const quiz = await requireQuiz(code);
-  if (!hostToken || !timingSafeEqualStrings(quiz.meta.hostToken, hostToken)) {
+  if (!isQuizOwner(quiz, hostToken)) {
     throw new QuizError("quiz_not_host", 403);
   }
   const summary = summarizeBoard(quiz.scores, quiz.questions.length);

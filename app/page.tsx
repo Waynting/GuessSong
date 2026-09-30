@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Track } from "@/types";
@@ -9,15 +9,48 @@ import { trackEvent } from "@/lib/analytics";
 import { arrivedFrom } from "@/lib/loop-links";
 import { bumpHostGameCount, recallLoopRef, rememberLoopRef } from "@/lib/host-session";
 import { reportGameStart } from "@/lib/loop-client";
-import type { MixedSubMode } from "@/lib/loop-stats";
+import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
 import {
   AppError,
   apiError,
   describeError,
-  errorMessage,
   shouldRememberAllRejections,
   shouldRememberRejection,
 } from "@/lib/error-messages";
+import {
+  editorialWarning,
+  failureFor,
+  failureOf,
+  playlistHelp,
+  type SetupFailure,
+} from "@/lib/playlist-help";
+import { isEditorialLink, playlistIdOf, playlistUrlOf } from "@/lib/playlist-ref";
+import { isSubmittablePlaylistLink } from "@/lib/spotify-link";
+import {
+  CLIP_DURATIONS,
+  DEFAULT_CLIP_DURATION,
+  MIXED_SAMPLE_COUNTS,
+  PLAYER_NAME_MAX,
+  chipsFor,
+  forgetSetup,
+  initialSetup,
+  recallRecentPlaylists,
+  recallSetup,
+  rememberPlaylist,
+  rememberSetup,
+  type LinkSource,
+  type RecentPlaylist,
+  type SetupArrival,
+  type SetupForm,
+} from "@/lib/setup-memory";
+import { STARTER_PLAYLISTS, starterPlacement } from "@/lib/starter-playlists";
+import {
+  EditorialWarning,
+  PlaylistChips,
+  PlaylistHelpLine,
+  RecallNote,
+  SetupAssistStyles,
+} from "@/components/setup-assist";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { ServiceNotice } from "@/components/service-notice";
 import { buildGamePayload } from "@/lib/game-session";
@@ -46,8 +79,11 @@ import {
 } from "@/lib/song-count";
 import { MIXED_MIN_CONTRIBUTORS, startState, type SetupMode } from "@/lib/start-status";
 
-const CLIP_DURATIONS = [5, 10, 15, 20, 30];
-const MIXED_SAMPLE_COUNTS = [5, 8, 10, 12];
+// `CLIP_DURATIONS` and `MIXED_SAMPLE_COUNTS` were declared here until the form
+// started remembering itself. They are in lib/setup-memory.ts now, because
+// what is read back out of storage is validated against them: with a copy in
+// each file, a remembered clip length could pass the check and then match no
+// pill, and the Settings line would name a length the host cannot see selected.
 
 /**
  * How many /api/playlist loads Mixed mode has in flight at once.
@@ -140,8 +176,16 @@ export default function SetupPage() {
   const router = useRouter();
   const [setupMode, setSetupMode] = useState<SetupMode>("single");
   const [playlistUrl, setPlaylistUrl] = useState("");
+  /**
+   * How the link in the field got there. Every path that writes the field
+   * writes this beside it — typing, the restore, a chip, the share target —
+   * and the game that starts reports whichever was last (`setup_source`). It
+   * is state about the *field*, which is why typing one character over a
+   * restored link makes it `typed`: the host has taken the link over.
+   */
+  const [linkSource, setLinkSource] = useState<LinkSource>("typed");
   const [players, setPlayers] = useState<string[]>(["", ""]);
-  const [clipDuration, setClipDuration] = useState(15);
+  const [clipDuration, setClipDuration] = useState(DEFAULT_CLIP_DURATION);
   // Selected count + the custom field's text, moved together so the transitions
   // between them stay in lib/song-count.ts where the suite can reach them.
   const [songCount, setSongCount] = useState(DEFAULT_SONG_COUNT_STATE);
@@ -160,7 +204,20 @@ export default function SetupPage() {
   const [roomStarting, setRoomStarting] = useState(false);
   const [roomError, setRoomError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // The sentence and the code it came from, together. The code is what lets
+  // the box say what to do next; see `SetupFailure` in lib/playlist-help.ts.
+  const [failure, setFailure] = useState<SetupFailure | null>(null);
+  // Both empty until the mount effect has read storage: the page is
+  // prerendered, and the server has no idea what this device remembers.
+  const [recentPlaylists, setRecentPlaylists] = useState<RecentPlaylist[]>([]);
+  const [recalled, setRecalled] = useState(false);
+  /**
+   * What the URL asked for on arrival. Kept because "Start fresh" means the
+   * form this visit would have opened on had the device remembered nothing —
+   * so a fresh start on `/?mode=mixed` stays on Mixed, and one on a shared
+   * `?playlist=` keeps the link that was just shared.
+   */
+  const arrivalRef = useRef<SetupArrival>({ sharedUrl: null, requestedMode: null });
   const [mounted, setMounted] = useState(false);
   // Clip length, song count and the buzzer sit behind one summary line. Every
   // one of them has a default most hosts never touch, and laid out flat they
@@ -183,8 +240,12 @@ export default function SetupPage() {
    * One ref rather than one per mode: the modes share a Start button, and a
    * host who switches mode has changed the question, so losing the other
    * mode's memo costs at most one request.
+   *
+   * It holds the whole failure, code included, so the replay is the same box
+   * with the same help under it. Holding the sentence alone would make the
+   * second press of Start the one that loses the link to the guide.
    */
-  const lastRejectedRef = useRef<{ key: string; message: string } | null>(null);
+  const lastRejectedRef = useRef<{ key: string; failure: SetupFailure } | null>(null);
 
   // What the one room has to do, given the modes picked above. Pass-the-phone
   // with the buzzer off needs no room at all, and never opens one.
@@ -217,6 +278,58 @@ export default function SetupPage() {
   function chooseMode(mode: SetupMode) {
     setSetupMode(mode);
     resetRoom();
+  }
+
+  /**
+   * Put a whole form on screen: the restore on arrival, and "Start fresh".
+   * What the form *is* gets decided by `initialSetup` in lib/setup-memory.ts,
+   * where the suite can reach it; this is only the wiring.
+   *
+   * The buzzer is the one field checked again here. It is remembered as a
+   * switch, and whether the switch exists is a property of the deployment:
+   * restoring "on" where `NEXT_PUBLIC_BUZZER_WS_URL` has since been unset
+   * would hide the roster behind a room that can never open, with the toggle
+   * that turns it back off hidden too.
+   */
+  const applySetup = useCallback((form: SetupForm) => {
+    setSetupMode(form.setupMode);
+    setMixedSubMode(form.mixedSubMode);
+    setPlaylistUrl(form.playlistUrl);
+    setLinkSource(form.linkSource);
+    setPlayers(form.players);
+    setClipDuration(form.clipDuration);
+    setSongCount(form.songCount);
+    setSampledPerPlayer(form.sampledPerPlayer);
+    setBuzzerEnabled(form.buzzer && isBuzzerConfigured());
+  }, []);
+
+  /**
+   * Forget what this device remembered and put the form back to what this
+   * visit would have opened on without it.
+   *
+   * Withheld while a room is open (see where it renders): it can turn the
+   * buzzer off, and a room with phones already in it is not something a link
+   * this small should be able to throw away.
+   */
+  function startFresh() {
+    forgetSetup();
+    resetRoom();
+    applySetup(initialSetup(arrivalRef.current, null));
+    setRecentPlaylists([]);
+    setRecalled(false);
+    setFailure(null);
+    lastRejectedRef.current = null;
+  }
+
+  /**
+   * A chip was tapped. The field takes the playlist's canonical address, and
+   * the error on screen goes with the link it was about — the host has just
+   * done what the box told them to.
+   */
+  function pickPlaylist(id: string, source: LinkSource) {
+    setPlaylistUrl(playlistUrlOf(id));
+    setLinkSource(source);
+    setFailure(null);
   }
 
   async function handleRoomStart() {
@@ -265,6 +378,15 @@ export default function SetupPage() {
         contributor_count: data.players.length,
         unique_tracks: data.tracks.length,
       });
+      // The switches and the settings, and nothing about who was in the room:
+      // those names came off other people's phones. See lib/setup-memory.ts.
+      rememberSetup({
+        mode: "mixed",
+        mixedSubMode: "room",
+        sampledPerPlayer,
+        clipDuration,
+        buzzer: Boolean(room),
+      });
       router.push("/game");
     } catch (e: unknown) {
       // The last step of the room funnel, and the one where a full room can still
@@ -286,10 +408,6 @@ export default function SetupPage() {
     // this app, and this is not the page to introduce one on.
     const query = new URLSearchParams(window.location.search);
 
-    // Prefill from the share target redirect (/share → /?playlist=...).
-    const shared = query.get("playlist");
-    if (shared) setPlaylistUrl(shared);
-
     // Attribution from /r/[surface]. Stored rather than used immediately: the
     // person who just followed a call to action at someone else's party is not
     // about to host one tonight, so the game this credits is weeks away.
@@ -305,7 +423,27 @@ export default function SetupPage() {
       window.location.replace(quizArrivalHref(query));
       return;
     }
-  }, []);
+
+    // Everything else that fills the form on arrival, in one place: the share
+    // target's `?playlist=` (/share → /?playlist=...), a `?mode=mixed` link,
+    // and what this device remembers from its last game. Which of them wins
+    // where they disagree is `initialSetup`'s rule, not this effect's — the
+    // URL outranks the memory, both times.
+    //
+    // In an effect and not in the `useState` initialisers, for the reason the
+    // query is: this page is prerendered, the server knows none of it, and a
+    // first render that differed from the server's is a hydration mismatch on
+    // the page that takes nearly all of the site's traffic.
+    const arrival: SetupArrival = {
+      sharedUrl: query.get("playlist"),
+      requestedMode: requestedSetupMode(query),
+    };
+    arrivalRef.current = arrival;
+    const remembered = recallSetup();
+    applySetup(initialSetup(arrival, remembered));
+    setRecalled(remembered !== null);
+    setRecentPlaylists(chipsFor(recallRecentPlaylists(), remembered));
+  }, [applySetup]);
 
   /**
    * Everything a hosted start owes the funnel, in one place.
@@ -326,18 +464,32 @@ export default function SetupPage() {
    * and the phone route never shows a join page to anybody. Both were therefore
    * invisible to every counter, which is not the same as unused — and a
    * question `npm run stats` cannot answer is one nobody will answer.
+   *
+   * The setup source is derived here rather than passed, so the three callers
+   * cannot disagree about it: a mixed game is `mixed` because it has no single
+   * link, and every other game is however the link in the field got there.
    */
   function recordHostedStart(mixed?: MixedSubMode) {
     const hostGameIndex = bumpHostGameCount();
-    reportGameStart(hostGameIndex, mixed);
+    const setupSource: SetupSource = mixed ? "mixed" : linkSource;
+    reportGameStart(hostGameIndex, mixed, setupSource);
     return {
       host_game_index: hostGameIndex,
       arrived_from: arrivedFrom(recallLoopRef()),
+      setup_source: setupSource,
     };
   }
 
-  const isValidSpotifyUrl = playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
-  const isEditorial = playlistUrl.includes("37i9");
+  // Cosmetic only — the green check. Start is never gated on it: this form
+  // and `/quiz` are the only ones that send a wrong link to the server, which
+  // is what makes `playlist_invalid:*` countable (lib/spotify-link.ts).
+  const isValidSpotifyUrl = isSubmittablePlaylistLink(playlistUrl);
+  // The id begins `37i9`, which is the question the server asks before it
+  // refuses — not "those four characters are somewhere in the text". See
+  // lib/playlist-ref.ts.
+  const isEditorial = isEditorialLink(playlistUrl);
+  // Which playlist the field holds, for the chip that names it.
+  const currentPlaylistId = playlistIdOf(playlistUrl);
 
   function addPlayer() {
     setPlayers((p) => [...p, ""]);
@@ -352,10 +504,10 @@ export default function SetupPage() {
   }
 
   async function handleStart() {
-    setError(null);
+    setFailure(null);
     const validPlayers = players.filter((p) => p.trim());
     if (!playlistUrl.trim()) {
-      setError(errorMessage("playlist_url_required", locale));
+      setFailure(failureFor("playlist_url_required", locale));
       return;
     }
     // Buzzer Mode has no manual roster to check — players name themselves as
@@ -363,7 +515,7 @@ export default function SetupPage() {
     // empty list here would make "Start Game" unreachable in the exact mode
     // that hides the list.
     if (!buzzerEnabled && validPlayers.length < 1) {
-      setError(errorMessage("players_required", locale));
+      setFailure(failureFor("players_required", locale));
       return;
     }
     // Same link, same refusal. Re-show it rather than spending a request to be
@@ -373,7 +525,7 @@ export default function SetupPage() {
     const submissionKey = `own:${playlistUrl}`;
     const rejected = lastRejectedRef.current;
     if (rejected && rejected.key === submissionKey) {
-      setError(rejected.message);
+      setFailure(rejected.failure);
       return;
     }
     setLoading(true);
@@ -424,28 +576,42 @@ export default function SetupPage() {
         game_mode: room ? "buzzer" : "party",
         ...recordHostedStart(),
       });
+      // Remembered here — once the playlist has loaded and the game is stored
+      // — and nowhere earlier: a link is worth keeping when it has worked, and
+      // that is also the first moment its name is known. The roster is left
+      // out of a buzzer game for the reason it is left out of the payload
+      // above: the fields are hidden, so whatever they hold is not who played,
+      // and writing it would replace the names the host typed last time.
+      rememberSetup({
+        mode: "single",
+        playlistUrl,
+        playlistName: data.name,
+        ...(room ? {} : { players: validPlayers }),
+        clipDuration,
+        songCount: songCount.count,
+        buzzer: Boolean(room),
+      });
+      rememberPlaylist(playlistUrl, data.name);
       router.push("/game");
     } catch (e: unknown) {
-      const message = describeError(e, locale, "playlist_load_failed");
+      const failed = failureOf(e, locale, "playlist_load_failed");
       // Only failures the URL itself determines are remembered. A throttled or
       // unknown one has to stay retryable — the host's link may be perfect and
       // the next attempt may well be the one that works.
       lastRejectedRef.current = shouldRememberRejection(e)
-        ? { key: submissionKey, message }
+        ? { key: submissionKey, failure: failed }
         : null;
-      setError(message);
+      setFailure(failed);
     } finally {
       setLoading(false);
     }
   }
 
   async function handleMixedStart() {
-    setError(null);
+    setFailure(null);
     if (mixedContributions.length < MIXED_MIN_CONTRIBUTORS) {
-      setError(
-        errorMessage("mixed_min_contributors", locale, {
-          params: { count: MIXED_MIN_CONTRIBUTORS },
-        })
+      setFailure(
+        failureFor("mixed_min_contributors", locale, { count: MIXED_MIN_CONTRIBUTORS })
       );
       return;
     }
@@ -456,7 +622,7 @@ export default function SetupPage() {
     )}`;
     const rejected = lastRejectedRef.current;
     if (rejected && rejected.key === submissionKey) {
-      setError(rejected.message);
+      setFailure(rejected.failure);
       return;
     }
     /**
@@ -562,14 +728,26 @@ export default function SetupPage() {
         total_raw_tracks: totalRawTracks,
         overlap_count: overlapCount,
       });
+      // The switches and the settings only. The contributors are other
+      // people's names and other people's playlists, typed into a phone that
+      // was passed around. See lib/setup-memory.ts.
+      rememberSetup({
+        mode: "mixed",
+        mixedSubMode: "phone",
+        sampledPerPlayer,
+        clipDuration,
+        buzzer: Boolean(room),
+      });
       router.push("/game");
     } catch (e: unknown) {
-      const message = describeError(e, locale, "playlist_load_failed");
+      const failed = failureOf(e, locale, "playlist_load_failed");
       // `allFailuresFinal` stays false for the throttled rethrow above and for
       // anything that failed before the per-contributor loop, so both remain
       // retryable — a shared quota clears on its own.
-      lastRejectedRef.current = allFailuresFinal ? { key: submissionKey, message } : null;
-      setError(message);
+      lastRejectedRef.current = allFailuresFinal
+        ? { key: submissionKey, failure: failed }
+        : null;
+      setFailure(failed);
     } finally {
       setLoading(false);
     }
@@ -593,6 +771,27 @@ export default function SetupPage() {
     ? handleMixedStart
     : handleRoomStart;
 
+  // What goes under the error's sentence: null for every failure that is not
+  // the link's own fault, which is most of them and all of the throttling ones.
+  const help = failure ? playlistHelp(failure.code, locale) : null;
+  // Null while lib/starter-playlists.ts ships an empty list, so nothing below
+  // that reads it renders.
+  const starterPlace = starterPlacement({
+    singleMode: setupMode === "single",
+    fieldEmpty: !playlistUrl.trim(),
+    recentCount: recentPlaylists.length,
+    failureCode: failure?.code ?? null,
+  });
+  const starterChips = (
+    <PlaylistChips
+      label="Starter playlists"
+      caption="No playlist handy? Try one of these"
+      playlists={STARTER_PLAYLISTS}
+      currentId={currentPlaylistId}
+      onPick={(playlist) => pickPlaylist(playlist.id, "starter")}
+    />
+  );
+
   return (
     <>
       <script
@@ -610,6 +809,7 @@ export default function SetupPage() {
         }}
       />
       <SetupStyles />
+      <SetupAssistStyles />
 
       <SetupBackdrop />
 
@@ -650,6 +850,15 @@ export default function SetupPage() {
             </h2>
           </div>
 
+          {/* Why the form is full, and the way to empty it. Above the card
+              rather than in it: it is about the whole form, in either mode,
+              and up here it costs the Start button 12px instead of a row.
+              The way out is withheld while a room is open or a start is in
+              flight — see `startFresh`. */}
+          {recalled && (
+            <RecallNote onStartFresh={startFresh} locked={openedRoom !== null || startBusy} />
+          )}
+
           {/* Card */}
           <div
             className={`card ${mounted ? "fade-in fade-in-2" : ""}`}
@@ -679,7 +888,10 @@ export default function SetupPage() {
                     className={`url-input${isValidSpotifyUrl ? " valid" : ""}`}
                     placeholder="https://open.spotify.com/playlist/..."
                     value={playlistUrl}
-                    onChange={(e) => setPlaylistUrl(e.target.value)}
+                    onChange={(e) => {
+                      setPlaylistUrl(e.target.value);
+                      setLinkSource("typed");
+                    }}
                     spellCheck={false}
                   />
                   {isValidSpotifyUrl && (
@@ -696,20 +908,24 @@ export default function SetupPage() {
                     </span>
                   )}
                 </div>
-                {isEditorial && (
-                  <p
-                    style={{
-                      marginTop: "8px",
-                      fontSize: "12px",
-                      color: "#f59e0b",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    <span>⚠</span> Editorial playlists (Discover Weekly, etc.) may not work
-                  </p>
-                )}
+                {/* It said "may not work". These are refused every time, so
+                    it says so, and says what to do instead — before the host
+                    has spent a Start finding out. */}
+                {isEditorial && <EditorialWarning warning={editorialWarning(locale)} />}
+
+                {/* The playlists this device has played, newest first; the
+                    one in the field is lit, which is the only place on the
+                    form a link has a name. One row, so five of them cost the
+                    Start button the same height as one. With none, and an
+                    empty field, the slot goes to the starters — a list that
+                    ships empty. */}
+                <PlaylistChips
+                  label="Recent"
+                  playlists={recentPlaylists}
+                  currentId={currentPlaylistId}
+                  onPick={(playlist) => pickPlaylist(playlist.id, "recent")}
+                />
+                {starterPlace === "field" && starterChips}
               </div>
             )}
 
@@ -758,7 +974,7 @@ export default function SetupPage() {
                             placeholder={`Player ${idx + 1}`}
                             value={name}
                             onChange={(e) => updatePlayer(idx, e.target.value)}
-                            maxLength={24}
+                            maxLength={PLAYER_NAME_MAX}
                           />
                           {players.length > 1 && (
                             <button
@@ -974,8 +1190,12 @@ export default function SetupPage() {
 
               {/* `role="alert"`: a failed submit is announced, not just
                   painted. Without it a screen reader hears the button go
-                  quiet and nothing else. */}
-              {error && (
+                  quiet and nothing else.
+
+                  Under the sentence, for a link that will never load: what to
+                  do next and where the guide explains it. The box used to be
+                  the sentence alone. */}
+              {failure && (
                 <div
                   role="alert"
                   style={{
@@ -989,9 +1209,11 @@ export default function SetupPage() {
                     lineHeight: 1.5,
                   }}
                 >
-                  {error}
+                  <p>{failure.message}</p>
+                  {help && <PlaylistHelpLine help={help} />}
                 </div>
               )}
+              {starterPlace === "refusal" && starterChips}
 
               {/* The other two ways in, as links rather than a pill row above
                   the form: one is 3% of games and the other is not a game and

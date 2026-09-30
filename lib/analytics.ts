@@ -12,7 +12,11 @@ import type { ShareOutcome } from "@/lib/result-image";
 // and never becomes a runtime import cycle.
 import type { GameMode } from "@/lib/game-session";
 import type { ArrivedFrom, LoopSurface } from "@/lib/loop-links";
+// Type-only for the same reason: lib/loop-stats.ts imports lib/kv.ts, and a
+// value import here would carry the Upstash client into the browser bundle.
+import type { SetupSource } from "@/lib/loop-stats";
 import type { QuizVerdict } from "@/lib/quiz";
+import type { QuizSource } from "@/lib/quiz-source";
 
 export type PlaylistSource = "own" | "mixed";
 export type ShareType = "track" | "album" | "artist" | "unknown";
@@ -49,6 +53,12 @@ export function roomJobs(collectsPlaylists: boolean, buzzer: boolean): RoomJobs 
 export type SubmittedBy = "player" | "host";
 /** The join page a scanned phone actually landed on. See roomJoinUrl(). */
 export type JoinPage = "buzz" | "j";
+/**
+ * Who is holding the phone on `/q/[code]`: the person who made the quiz, as
+ * the server recognised them, or anyone else. `taker` is the word the rest of
+ * the quiz code uses for a friend answering.
+ */
+export type QuizViewer = "owner" | "taker";
 
 declare global {
   interface Window {
@@ -89,6 +99,18 @@ export type AnalyticsEvent =
          */
         arrived_from?: ArrivedFrom;
         /**
+         * How the playlist got into the field: typed, restored from the last
+         * game on this device, a recent or starter chip, the share target, or
+         * `mixed` when there is no single link. The KV twin is
+         * `host_setup:<source>`, and that is the one decisions are made from;
+         * this copy is here to be cut by `host_game_index`, which KV cannot do
+         * — "do returning hosts press Start on what was filled in" is a
+         * question about two params on one event.
+         *
+         * A closed union, never the link itself: a pasted URL is user input.
+         */
+        setup_source?: SetupSource;
+        /**
          * How many games this device has hosted, this one included. 1 for a
          * first-time host.
          *
@@ -127,7 +149,81 @@ export type AnalyticsEvent =
          * one, so this is what keeps "finished" from meaning "abandoned".
          */
         ended_early: boolean;
+        /**
+         * Whether this device had hosted before, as the game page read it on
+         * mount. The KV twin is `game_end_host:<kind>:<end>`; see
+         * `GameHostKind` in lib/loop-stats.ts for why `first` is a ceiling.
+         * Optional so a page that cannot say sends nothing rather than a guess.
+         */
+        host_kind?: "first" | "repeat" | "unknown";
+        /**
+         * Upcoming tracks taken out of the queue because nothing anywhere has
+         * a clip for them (`dropSilentUpcoming`). `total_tracks` is the queue
+         * as played, so `total_tracks + silent_skipped` is what the host
+         * asked for. A count, like every other count here.
+         */
+        silent_skipped?: number;
       };
+    }
+  /*
+   * Why a game did not go well, as the game page saw it. The KV copies are
+   * `first_clip:*`, `game_left_round:*` and `game_over_tap:*` in
+   * lib/loop-stats.ts, sent by the same functions in lib/loop-client.ts —
+   * those are the ones decisions are made from. `clip_blocked` has no KV
+   * twin: it is every refused `play()` in every round, which is cohorting,
+   * where the first clip of the game is the instrument.
+   */
+  | {
+      /**
+       * How the first Play press of a game came out. Once per game page.
+       * `path` is whether the clip's URL was in hand before the press; on
+       * `lazy` the `play()` call runs after an await, outside the tap.
+       */
+      name: "first_clip";
+      params: {
+        path: "prefetched" | "lazy";
+        outcome: "played" | "rejected" | "no_audio" | "unavailable" | "error" | "abandoned";
+      };
+    }
+  | {
+      /**
+       * The browser refused a `play()` and the host was asked to tap again.
+       * `site` is which of the page's four calls it was (`ClipSite` in
+       * lib/clip-start.ts): `play` and `repair` can run outside the tap that
+       * caused them, `resume` and `replay` cannot, so a count on either of
+       * the second pair is a browser doing something this page does not
+       * expect. `reason` is the rejection's kind, bucketed by
+       * `classifyPlayRejection` — `refused` is the autoplay policy,
+       * `interrupted` is an abort that nothing of ours caused — and never
+       * its message.
+       */
+      name: "clip_blocked";
+      params: {
+        site: "play" | "resume" | "replay" | "repair";
+        reason: "refused" | "interrupted";
+        round_index: number; // 1-based, matches round_completed
+      };
+    }
+  | {
+      /**
+       * The game page went away before Game Over. `via` separates the
+       * document going (a closed tab, a reload) from the page being unmounted
+       * under a live document (the back gesture); KV keeps only the round.
+       */
+      name: "game_left";
+      params: {
+        rounds_played: number;
+        host_kind: "first" | "repeat" | "unknown";
+        via: "unload" | "navigation";
+      };
+    }
+  | {
+      /**
+       * A tap on the Game Over screen, and the layout it was drawn in.
+       * `screen` is omitted, not guessed, when the page could not tell.
+       */
+      name: "game_over_tap";
+      params: { target: "play_again" | "mixed"; screen?: "phone" | "desktop" };
     }
   | {
       name: "preview_miss";
@@ -300,6 +396,29 @@ export type AnalyticsEvent =
       params: { share_type: ShareType };
     }
   | {
+      /**
+       * A form was shown a real Spotify link to the wrong thing — an album, a
+       * track, an artist page — and said so under the field instead of
+       * greying its button out in silence.
+       *
+       * This is the only record of those, and it is the weaker kind. The four
+       * forms that block a submission never send the link, so
+       * `playlist_invalid:<kind>` in lib/loop-stats.ts — the KV count, the
+       * one decisions are made from — sees only the forms that do send:
+       * the party form and the quiz. What is pasted into a room is here or
+       * nowhere.
+       *
+       * Fired when the field's reading *becomes* one of the three, not per
+       * keystroke. Bucketed by kind and by form; the link itself never
+       * travels, for the reason every failure param in this file is an enum.
+       */
+      name: "playlist_link_named";
+      params: {
+        surface: "join" | "buzz" | "collector" | "room_panel";
+        link_kind: "album" | "track" | "artist";
+      };
+    }
+  | {
       /** Footer "What's new" overlay. `version` is the newest entry shown, so a
        *  release can be checked against how many people actually read it. */
       name: "changelog_opened";
@@ -369,12 +488,33 @@ export type AnalyticsEvent =
    */
   | {
       name: "quiz_created";
-      params: { question_count: number; arrived_from?: ArrivedFrom };
+      params: {
+        question_count: number;
+        arrived_from?: ArrivedFrom;
+        /**
+         * `arrived_from` with its `organic` split three ways — `internal`,
+         * `external`, `none` — and the KV twin's exact value
+         * (`quiz_from:<source>`, lib/quiz-source.ts). One of a closed set;
+         * the referrer it was derived from never reaches a param.
+         */
+        quiz_from?: QuizSource;
+      };
     }
   | {
       /** A friend's phone loaded a quiz. The denominator for `quiz_completed`. */
       name: "quiz_opened";
-      params: { question_count: number };
+      params: {
+        question_count: number;
+        /**
+         * `owner` when the server recognised this device's host token, and
+         * the run is a preview that writes nothing. The KV twins are
+         * `quiz:owner_opened` / `quiz:owner_completed`, which are counted
+         * *instead of* the friend-side stages; here it is one event with a
+         * param, so a report that does not filter on it is friends and
+         * owners together. Absent on events from before 2026-09-30.
+         */
+        viewer?: QuizViewer;
+      };
     }
   | {
       name: "quiz_completed";
@@ -384,6 +524,8 @@ export type AnalyticsEvent =
         hints_used: number;
         /** Bucketed by lib/quiz.ts, never a raw score string. */
         verdict: QuizVerdict;
+        /** See `quiz_opened`. */
+        viewer?: QuizViewer;
       };
     }
   | {
@@ -415,14 +557,31 @@ export type AnalyticsEvent =
     }
   | {
       /**
-       * The host's share button on the setup page, or the taker's on the
-       * result screen. `outcome` follows `result_shared`: only "shared" left
-       * the device through the share sheet, and "copied" is the clipboard
-       * fallback whose reach is unknowable.
+       * An explicit "Copy link" button — the panel's on `/quiz`, the board's
+       * on `/q/[code]/board`. Split from `quiz_share_tapped` on 2026-09-30:
+       * until then a Copy tap was filed there as `copied`, beside the share
+       * button's clipboard fallback, and the two could not be told apart.
+       * KV twin: `quiz_copy:<by>:<outcome>`.
+       */
+      name: "quiz_copy_tapped";
+      params: {
+        by: "owner" | "taker" | "board";
+        outcome: "copied" | "failed";
+      };
+    }
+  | {
+      /**
+       * The host's share button on the setup page, the taker's on the
+       * result screen, or the owner's on their results page (`board`, which
+       * was filed as `owner` until 2026-09-30). `outcome` follows
+       * `result_shared`: only "shared" left the device through the share
+       * sheet, and "copied" is the clipboard fallback whose reach is
+       * unknowable — the fallback *only*, since the same date; a Copy button
+       * is `quiz_copy_tapped`.
        */
       name: "quiz_share_tapped";
       params: {
-        by: "owner" | "taker";
+        by: "owner" | "taker" | "board";
         outcome: "shared" | "copied" | "dismissed" | "failed";
       };
     };

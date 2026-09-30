@@ -54,6 +54,51 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.16.0",
+    date: "2026-09-30",
+    headline:
+      "The setup page remembers your last game, a silent clip no longer pretends to play, and a pasted link that won't work now says what to paste instead.",
+    headlineZh:
+      "設定頁會記得你上一場的設定、沒聲音的片段不會再假裝在播，貼了不能用的連結也會告訴你該改貼什麼。",
+    changes: [
+      {
+        kind: "new",
+        text: "The setup page remembers your last game on this device — the playlist, the players' names, clip length and number of songs — so Play Again no longer means typing everything back in. Your last five playlists sit under the link box as one-tap chips. \"Start fresh\" clears it all. None of it leaves your device.",
+        textZh: "設定頁會在這台裝置上記住你上一場的設定：歌單、玩家名字、片段長度和歌曲數，按「再玩一次」不用再全部重打。最近用過的五個歌單會列在連結欄下面，點一下就填好。按「重新開始」可以全部清掉。這些資料都只存在你的裝置上。",
+      },
+      {
+        kind: "fixed",
+        text: "When a phone's browser held the sound back, the game used to show \"Listening…\" and count down over silence. Now it goes back to the Play button and asks you to tap again, which works.",
+        textZh: "以前手機瀏覽器擋下聲音時，遊戲還是會顯示「正在聽…」，對著一片安靜倒數。現在會回到播放鍵，請你再點一次，再點就會有聲音。",
+      },
+      {
+        kind: "better",
+        text: "Songs that have no clip anywhere are now skipped automatically, as the FAQ always said they were, and a small line tells you how many. When a clip can't be fetched because of us rather than the song, you get a Try again button.",
+        textZh: "完全找不到片段的歌現在會自動跳過（常見問題裡一直是這樣寫的），畫面上會有一小行告訴你跳過了幾首。如果是我們這邊暫時抓不到片段、不是歌本身沒有，會多一個「再試一次」按鈕。",
+      },
+      {
+        kind: "better",
+        text: "Paste an album, a single song or an artist page and you are told which it is and what to paste instead. Short spotify.link links now work, and links copied from Spotify outside the US can be submitted when joining a room.",
+        textZh: "貼了專輯、單曲或歌手頁面的連結，會直接告訴你那是什麼、該改貼什麼。spotify.link 短網址現在可以用了；在美國以外複製的 Spotify 連結，加入房間時也送得出去了。",
+      },
+      {
+        kind: "better",
+        text: "A refused playlist link now comes with the fix and a link to the help guide, and the warning for Spotify's own playlists says plainly that they can't be loaded and how to get around it.",
+        textZh: "歌單連結被拒絕時，現在會附上解決方法和說明文章的連結；Spotify 官方歌單的提醒也直接講清楚：這種歌單讀不到，以及怎麼繞過去。",
+      },
+      {
+        kind: "better",
+        text: "On a phone, the Game Over screen offers \"Next game: everyone brings their own playlist\" instead of a QR code nobody could scan off the phone in your hand.",
+        textZh: "在手機上，遊戲結束畫面改成提供「下一場：每個人帶自己的歌單」，取代那個沒人能從你手上的手機掃到的 QR code。",
+      },
+      {
+        kind: "new",
+        text: "Your Taste Quiz link no longer disappears when you come back to the quiz page, and you can preview your own quiz — your score isn't saved or shown to anyone. Copying the link now copies a sentence with it, and the quiz page is in Chinese on Chinese-language devices.",
+        textZh: "回到測驗頁時，你的品味測驗連結不會再消失；你也可以先預覽自己的測驗，分數不會被存下來，也不會出現在排行榜上。複製連結時會連同一句說明一起複製；中文裝置上，建立測驗的頁面也改成中文了。",
+      },
+    ],
+  },
+  {
     version: "1.15.0",
     date: "2026-09-22",
     headline:

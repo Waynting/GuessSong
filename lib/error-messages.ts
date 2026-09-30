@@ -47,6 +47,12 @@ export type AppErrorCode =
   | "missing_playlist_url"
   | "playlist_url_required"
   | "invalid_playlist_url"
+  // A real Spotify link to the wrong thing — named, see their entries
+  | "playlist_link_album"
+  | "playlist_link_track"
+  | "playlist_link_artist"
+  // A short link we could not follow *this time* — retryable, see its entry
+  | "playlist_shortlink_unavailable"
   | "playlist_not_found"
   | "playlist_editorial"
   | "playlist_empty"
@@ -150,6 +156,54 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   invalid_playlist_url: {
     en: "That doesn't look like a Spotify playlist link.",
     zh: "這個連結看起來不是 Spotify 歌單。",
+  },
+  /*
+   * The three links that are perfectly good Spotify links to something that
+   * is not a playlist. They used to be `invalid_playlist_url` like any other
+   * string, and "that doesn't look like a Spotify playlist link" is a strange
+   * thing to be told about a link Spotify itself just handed you: 748 of them
+   * in the week to 2026-09-29, none of which said what was wrong or what would
+   * work.
+   *
+   * Each says what the link is and what to paste instead, and the instead is
+   * always a playlist *of your own*. Not "one of the artist's playlists", not
+   * "the playlist that song lives in": the playlists Spotify shows beside an
+   * artist or an album are its own — "This Is …", the editorial mixes — and
+   * those are `playlist_editorial`, refused every time. Sending someone from
+   * one refusal to the next is worse than the first refusal.
+   *
+   * The album sentence makes no promise. Whether albums are worth supporting
+   * is what `playlist_invalid:album` in lib/loop-stats.ts is there to find
+   * out, so the sentence says what works today and nothing about tomorrow.
+   */
+  playlist_link_album: {
+    en: "That's a link to an album, and GuessSong plays playlists. Add the album's songs to a playlist of your own, make it public, and paste that playlist's link instead.",
+    zh: "這是專輯的連結，GuessSong 玩的是歌單。請把專輯裡的歌加進你自己建立的歌單、設成公開，再貼上那個歌單的連結。",
+  },
+  playlist_link_track: {
+    en: "That's a link to a single song, and GuessSong needs a whole playlist. Open a public playlist you made — or add this song to one — and paste that playlist's link instead.",
+    zh: "這是單一首歌的連結，GuessSong 需要一整個歌單。請打開你自己建立的公開歌單（或把這首歌加進去），再貼上歌單的連結。",
+  },
+  playlist_link_artist: {
+    en: "That's a link to an artist's page, and GuessSong plays playlists. Add the artist's songs to a playlist of your own, make it public, and paste that playlist's link instead.",
+    zh: "這是歌手頁面的連結，GuessSong 玩的是歌單。請把這位歌手的歌加進你自己建立的歌單、設成公開，再貼上那個歌單的連結。",
+  },
+  /**
+   * A short link is followed on the server, and this is the following
+   * failing — a timeout, a dropped connection, an answer that was not an
+   * answer. It is a fact about the moment, not about the link, which is
+   * `absent` against `unavailable` from lib/preview-cache.ts one more time:
+   * the link may be fine, so the sentence must not say it is wrong, and the
+   * code must never join `isDeterministicPlaylistFailure` — that would leave a
+   * host whose link was always good behind a Start button that has stopped
+   * asking.
+   *
+   * It offers the full link because that is the one thing the host can do
+   * that does not depend on us getting through next time.
+   */
+  playlist_shortlink_unavailable: {
+    en: "We couldn't open that short link just now. Try again in a moment, or paste the playlist's full link instead — in Spotify, Share, then Copy link.",
+    zh: "這個短網址現在打不開。請稍後再試一次，或改貼歌單的完整連結：在 Spotify 裡按「分享」，再按「複製連結」。",
   },
   playlist_not_found: {
     en: "We couldn't open that playlist. Check that it's public, and that it's one you created yourself rather than a Spotify editorial playlist.",
@@ -703,12 +757,23 @@ export function errorMessage(
  * `server_error` are excluded for the opposite reason: we do not know what went
  * wrong, and "we don't know" must never harden into "don't bother asking".
  *
+ * `playlist_shortlink_unavailable` is excluded for both reasons at once. The
+ * short link was not followed — we timed out, or the connection dropped — so
+ * nothing has been learned about it, and the next attempt may simply work.
+ * The three `playlist_link_*` codes beside it in the set are the other
+ * outcome of the same request: the link *was* followed, and led to an album.
+ *
  * `tests/error-messages.test.ts` pins both halves of that.
  */
 const DETERMINISTIC_PLAYLIST_CODES = new Set<AppErrorCode>([
   "missing_playlist_url",
   "playlist_url_required",
   "invalid_playlist_url",
+  // What the link *is*, read off the string or off where a short link leads.
+  // An album does not become a playlist on the second press.
+  "playlist_link_album",
+  "playlist_link_track",
+  "playlist_link_artist",
   "playlist_not_found",
   "playlist_editorial",
   "playlist_empty",

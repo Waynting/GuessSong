@@ -1,5 +1,9 @@
 /**
- * Where a link that asks for the Taste Quiz should land.
+ * Where a link that asks for a particular way of playing should land.
+ *
+ * Two kinds do. A link that asks for Mixed Playlist Mode (`MIXED_SETUP_HREF`
+ * below) stays on `/` and opens the form on it. A link that asks for the Taste
+ * Quiz leaves, and the rest of this header is why:
  *
  * The quiz has its own page, `/quiz`. It used to be a mode of the setup form
  * at `/`, reached by `?mode=quiz` from the content pages and by
@@ -21,12 +25,31 @@ import { isLoopSurface, type LoopSurface } from "@/lib/loop-links";
 export const QUIZ_SETUP_HREF = "/quiz";
 
 /**
- * The modes a URL may ask for. Only the quiz: Single Playlist is the default
- * and Mixed is one tap away from it, so neither has a link that needs to say
- * so. Extending this is adding a member and a trigger below, not a second
- * mechanism.
+ * The setup form, opened on Mixed Playlist Mode.
+ *
+ * Mixed had no address while the only way to it was the text link under the
+ * Start button. "One tap away" is true of a host standing on `/` and false of
+ * one standing on the Game Over screen, where "next time, everyone brings a
+ * playlist" could only be said by sending the room to the single-playlist
+ * form and hoping somebody found the link.
+ *
+ * Exported so that screen imports the address rather than retyping it — the
+ * rule `QUIZ_SETUP_HREF` follows, and `tests/setup-arrival.test.ts` pins that
+ * this string and `requestedSetupMode` agree. Relative, so it works on a
+ * preview deploy.
  */
-export type RequestedSetupMode = "quiz";
+export const MIXED_SETUP_HREF = "/?mode=mixed";
+
+/**
+ * The modes a URL may ask for. Single Playlist is the default and has no
+ * spelling: a link that wants it says nothing. Extending this is adding a
+ * member and a trigger below, not a second mechanism.
+ *
+ * The two members do different things on arrival, which is why `/` compares
+ * the value rather than treating it as a flag: `quiz` leaves for the quiz's
+ * own page, `mixed` stays and opens the form on Mixed.
+ */
+export type RequestedSetupMode = "quiz" | "mixed";
 
 /**
  * Loop surfaces whose visitor was just shown a quiz and followed a call to
@@ -50,9 +73,18 @@ export function isQuizSurface(surface: LoopSurface): boolean {
  * value is compared, never reflected, so nothing typed into it can reach the
  * page — but it is still not worth being lenient about: `QUIZ` or `quiz `
  * is not a link anything of ours produced.
+ *
+ * A spelled-out `?mode=` outranks what a `?ref=` implies. The ref is
+ * attribution: it says where the visitor came from, and implies a destination
+ * only for the quiz's own surface. The mode is the link saying where it wants
+ * to go. Nothing of ours produces `/?mode=mixed&ref=quiz_result` today, but
+ * the half that was spelled out is the half to believe. The ref is remembered
+ * either way — `/` stores it before it asks this.
  */
 export function requestedSetupMode(query: URLSearchParams): RequestedSetupMode | null {
-  if (query.get("mode") === "quiz") return "quiz";
+  const mode = query.get("mode");
+  if (mode === "quiz") return "quiz";
+  if (mode === "mixed") return "mixed";
   const ref = query.get("ref");
   if (isLoopSurface(ref) && QUIZ_SURFACES.has(ref)) return "quiz";
   return null;

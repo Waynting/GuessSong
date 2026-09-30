@@ -74,6 +74,12 @@ export interface QuizCopy {
   /** What the owner sends with the link. */
   ownerShareTextOwner: string;
   ownerShareTextPlaylist: string;
+  /**
+   * The same, for a quiz whose length this device did not keep and whose
+   * owner gave no name. With a name, the title (`introTitleOwner`) is already
+   * that sentence without its count.
+   */
+  ownerShareTextPlaylistBare: string;
   hintStop: string;
   /**
    * The way out and into making one: under a taker's result (the loop's
@@ -122,14 +128,51 @@ export interface QuizCopy {
   revealWrong: string;
   /** On a question answered whose verdict never arrived, seen again after Back or a reload. */
   revealPending: string;
+  /* The owner running their own quiz: the server recognised this device's token */
+  /** The word over the intro, where a friend reads the site's name. */
+  previewKicker: string;
+  /** Two facts, because both are what an owner would otherwise worry about: not saved, not shown. */
+  previewIntro: string;
+  previewStart: string;
+  /** Under the verdict card, in place of `boardFull`: not written for a different reason. */
+  previewResultNote: string;
+  /* The quiz form on /quiz, before the link exists */
+  createTitle: string;
+  createSubtitle: string;
+  createPlaylistLabel: string;
+  createEditorialWarning: string;
+  createNameLabel: string;
+  createNamePlaceholder: string;
+  /** Under the name box. `{title}` is the quiz's own title, filled from `introTitleOwner`. */
+  createTitlePreview: string;
+  createQuestionsLabel: string;
+  /** The typed field's accessible name. */
+  createCustomCountLabel: string;
+  /** Under the length picker: who answers, and which lengths get finished. */
+  createLengthNote: string;
+  /** Over the panel when it is a quiz from an earlier visit, not one just made. */
+  createLastQuiz: string;
+  createLoading: string;
+  createButton: string;
+  /** Once a panel is up: pressing it makes a second code, it does not change the first. */
+  createAgainButton: string;
+  createBackToParty: string;
+  /** Where the panel will be, while its chunk is on the way. */
+  createMakingLink: string;
+  /** The panel's chunk never arrived; the link as text follows this. */
+  createLinkFallback: string;
   /* The host's panel on the setup page, once the link exists */
   panelQuestionsFrom: string;
+  /** The caption without a count, for a quiz this device remembers from before it kept one. */
+  panelQuizFrom: string;
   panelSend: string;
   panelCopyLink: string;
   panelCopied: string;
   /** Neither the share sheet nor the clipboard worked. The link is printed under this line; say so. */
   panelShareFailed: string;
   panelBoardLink: string;
+  /** To `/q/<CODE>`, where this device's token makes the run a preview. */
+  panelPreviewLink: string;
   /** Two constraints in one line: results are on this device, and the link has an end. */
   panelResultsUntil: string;
   panelShareTitle: string;
@@ -188,6 +231,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     shareTextPlaylist: "I got {correct}/{total} on the \"{playlist}\" playlist quiz. Can you beat me?",
     ownerShareTextOwner: "How well do you know {owner}'s music taste? {count} questions.",
     ownerShareTextPlaylist: "How well do you know the \"{playlist}\" playlist? {count} questions.",
+    ownerShareTextPlaylistBare: "How well do you know the \"{playlist}\" playlist?",
     hintStop: "Stop",
     makeYourOwn: "Make your own quiz →",
     expires: "This quiz expires on {date}.",
@@ -220,12 +264,37 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     revealRight: "Right — that's the one",
     revealWrong: "Nope — it's the other one",
     revealPending: "Answered — it counts at the end",
+    previewKicker: "Preview",
+    previewIntro:
+      "This is your own quiz, as your friends will see it. Your answers aren't saved and won't show on the leaderboard.",
+    previewStart: "Start the preview →",
+    previewResultNote: "Preview only — this score wasn't saved, and your friends won't see it.",
+    createTitle: "Taste Quiz",
+    createSubtitle:
+      "A link your friends open to guess your taste — and find out who knows you best.",
+    createPlaylistLabel: "Spotify Playlist",
+    createEditorialWarning: "Editorial playlists (Discover Weekly, etc.) may not work",
+    createNameLabel: "Your Name",
+    createNamePlaceholder: "Whose taste is this? (optional)",
+    createTitlePreview: "Goes in the title: “{title}”",
+    createQuestionsLabel: "Questions",
+    createCustomCountLabel: "Custom number of questions, {min} to {max}",
+    createLengthNote: "Your friends answer these. Short quizzes are the ones that get finished.",
+    createLastQuiz: "Your last quiz is still open",
+    createLoading: "Loading playlist",
+    createButton: "Create quiz link →",
+    createAgainButton: "Create a new link →",
+    createBackToParty: "← Back to the party game",
+    createMakingLink: "Getting your link ready…",
+    createLinkFallback: "Your quiz link:",
     panelQuestionsFrom: "{count} questions from",
+    panelQuizFrom: "Your quiz from",
     panelSend: "Send to friends →",
     panelCopyLink: "Copy link",
     panelCopied: "✓ Copied",
     panelShareFailed: "Couldn't share or copy from here — press and hold this link to copy it:",
     panelBoardLink: "See results →",
+    panelPreviewLink: "Preview your quiz →",
     panelResultsUntil: "Results show only on this device, until {date}.",
     panelShareTitle: "GuessSong taste quiz",
     panelQrAlt: "QR code for quiz {code}",
@@ -279,6 +348,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     shareTextPlaylist: "我在「{playlist}」這份歌單的測驗拿了 {correct}/{total}，你能贏我嗎？",
     ownerShareTextOwner: "你有多懂 {owner} 的音樂品味？共 {count} 題。",
     ownerShareTextPlaylist: "你有多懂「{playlist}」這份歌單？共 {count} 題。",
+    ownerShareTextPlaylistBare: "你有多懂「{playlist}」這份歌單？",
     hintStop: "停止",
     makeYourOwn: "自己做一份品味鑒定 →",
     expires: "這個測驗會在 {date} 到期。",
@@ -311,12 +381,35 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     revealRight: "答對了，就是這首",
     revealWrong: "答錯了，是另一首",
     revealPending: "已作答，最後一起計分",
+    previewKicker: "預覽",
+    previewIntro: "這是你自己做的測驗，朋友看到的就是這個樣子。你的作答不會存下來，也不會出現在排行榜上。",
+    previewStart: "開始預覽 →",
+    previewResultNote: "這只是預覽，分數沒有存下來，朋友也看不到。",
+    createTitle: "品味鑒定",
+    createSubtitle: "做一個連結傳給朋友，讓他們猜你的歌單，看看誰最懂你。",
+    createPlaylistLabel: "歌單連結",
+    createEditorialWarning: "官方編輯的歌單（像是每週新發現）可能沒辦法用",
+    createNameLabel: "你的名字",
+    createNamePlaceholder: "這是誰的品味？（可以不填）",
+    createTitlePreview: "會出現在標題裡：「{title}」",
+    createQuestionsLabel: "題數",
+    createCustomCountLabel: "自訂題數，{min} 到 {max} 題",
+    createLengthNote: "這些題目是給朋友答的，題數少的比較多人做完。",
+    createLastQuiz: "你上次做的測驗還能用",
+    createLoading: "讀取歌單中",
+    createButton: "產生測驗連結 →",
+    createAgainButton: "再做一個新連結 →",
+    createBackToParty: "← 回到派對遊戲",
+    createMakingLink: "連結準備中…",
+    createLinkFallback: "你的測驗連結：",
     panelQuestionsFrom: "共 {count} 題，來自",
+    panelQuizFrom: "你的測驗，來自",
     panelSend: "傳給朋友 →",
     panelCopyLink: "複製連結",
     panelCopied: "✓ 已複製",
     panelShareFailed: "這裡沒辦法分享或複製 — 長按這個連結來複製：",
     panelBoardLink: "看結果 →",
+    panelPreviewLink: "自己先玩一次 →",
     panelResultsUntil: "結果只有這台裝置看得到，連結會在 {date} 失效。",
     panelShareTitle: "品味鑒定",
     panelQrAlt: "測驗 {code} 的行動條碼",
@@ -376,14 +469,56 @@ export function quizTitle(copy: QuizCopy, ownerName: string | null | undefined):
   return ownerName ? fillCopy(copy.introTitleOwner, { owner: ownerName }) : copy.introTitlePlaylist;
 }
 
-/** The sentence a host sends with the link, in the host's own language. */
+/**
+ * The sentence a host sends with the link, in the host's own language.
+ *
+ * `questionCount` is null for a quiz this device remembers from before it
+ * kept the count (`LastQuiz` in lib/quiz-session.ts). The sentence then drops
+ * its second half rather than fill it: "{count} questions" with nothing to
+ * put in it is either the literal placeholder or the word "null", in a
+ * message the owner is about to send to their friends. With an owner name
+ * the quiz's own title is already that sentence; without one the playlist
+ * has to be named, and without even that the title's playlist form is what
+ * is left.
+ */
 export function ownerShareText(
   copy: QuizCopy,
-  quiz: { ownerName: string | null; playlistName: string; questionCount: number }
+  quiz: { ownerName: string | null; playlistName: string; questionCount: number | null }
 ): string {
+  if (quiz.questionCount === null) {
+    if (quiz.ownerName || !quiz.playlistName) return quizTitle(copy, quiz.ownerName);
+    return fillCopy(copy.ownerShareTextPlaylistBare, { playlist: quiz.playlistName });
+  }
   return quiz.ownerName
     ? fillCopy(copy.ownerShareTextOwner, { owner: quiz.ownerName, count: quiz.questionCount })
     : fillCopy(copy.ownerShareTextPlaylist, { playlist: quiz.playlistName, count: quiz.questionCount });
+}
+
+/**
+ * What an owner's clipboard gets: the sentence, then the link.
+ *
+ * The share sheet is handed `text` and `url` as two fields and the chat app
+ * puts them together; a clipboard has one field, and until 2026-09-30 the
+ * owner's got the bare URL — so the 17 owners in 19 who copied rather than
+ * shared pasted an address with no sentence, into a chat where the unfurled
+ * card may or may not draw. The taker's share has always copied both
+ * (`takerShareText`, then the URL), and this is the same shape for the same
+ * reason. One helper, so the panel's two buttons and the board's two cannot
+ * each compose it slightly differently.
+ */
+export function ownerClipboardText(
+  copy: QuizCopy,
+  quiz: { ownerName: string | null; playlistName: string; questionCount: number | null },
+  url: string
+): string {
+  return `${ownerShareText(copy, quiz)} ${url}`;
+}
+
+/** The panel's caption over the playlist name: with the count, or without one to give. */
+export function panelCaption(copy: QuizCopy, questionCount: number | null): string {
+  return questionCount === null
+    ? copy.panelQuizFrom
+    : fillCopy(copy.panelQuestionsFrom, { count: questionCount });
 }
 
 /** The sentence a taker sends with their score. */

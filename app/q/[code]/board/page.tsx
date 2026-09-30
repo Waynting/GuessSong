@@ -28,14 +28,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { trackEvent } from "@/lib/analytics";
+import { reportQuizCopy, reportQuizShare } from "@/lib/loop-client";
 import { apiError, describeError, errorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { pickBoardTiles } from "@/lib/quiz";
-import { QUIZ_COPY, fillCopy, formatQuizDate, ownerShareText, quizTitle } from "@/lib/quiz-copy";
+import {
+  QUIZ_COPY,
+  fillCopy,
+  formatQuizDate,
+  ownerClipboardText,
+  ownerShareText,
+  quizTitle,
+} from "@/lib/quiz-copy";
 import { quizUrl, recallQuizToken } from "@/lib/quiz-session";
 import { COPIED_FLASH_MS, copyLink, shareLink, type ShareLinkOutcome } from "@/lib/quiz-share";
 import { Button } from "@/components/ui/button";
-import type { QuizBoardQuestion, QuizBoardResponse } from "@/types/quiz";
+import { QUIZ_HOST_TOKEN_HEADER, type QuizBoardQuestion, type QuizBoardResponse } from "@/types/quiz";
 import { Shell } from "../shell";
 
 type Phase = "loading" | "not_host" | "error" | "ready";
@@ -92,7 +100,7 @@ export default function QuizBoardPage() {
         // string, which access logs keep.
         const res = await fetch(`/api/quiz/${encodeURIComponent(code)}/board`, {
           cache: "no-store",
-          headers: { "x-host-token": token },
+          headers: { [QUIZ_HOST_TOKEN_HEADER]: token },
         });
         const data = await res.json();
         if (!res.ok) {
@@ -153,20 +161,35 @@ export default function QuizBoardPage() {
    * that refused, which is what a locked-down webview does — says so under
    * the buttons and points at the URL printed above them, which is selectable.
    * `shared` and `dismissed` need no line: the owner watched the sheet open.
+   *
+   * What the owner sees, and nothing else: each button reports for itself
+   * below. The two used to share a `trackEvent` here, filed as `owner` and
+   * sent to GA4 alone — so this page's share arm was invisible to `npm run
+   * stats`, and where it was visible it was added to the panel's.
    */
-  function reportOutcome(outcome: ShareLinkOutcome) {
+  function show(outcome: ShareLinkOutcome) {
     setShareFailed(outcome === "failed");
     if (outcome === "copied") flashCopied();
-    trackEvent("quiz_share_tapped", { by: "owner", outcome });
   }
 
+  // `board`, not `owner`: the same person at a later moment, back for
+  // results and sending the link on. Both destinations, through
+  // lib/loop-client.ts, like the panel's and the taker's.
   async function handleShare() {
     if (!board) return;
-    reportOutcome(await shareLink({ url, text: ownerShareText(copy, board) }));
+    const outcome = await shareLink(
+      { url, text: ownerShareText(copy, board) },
+      ownerClipboardText(copy, board, url)
+    );
+    show(outcome);
+    reportQuizShare("board", outcome);
   }
 
   async function handleCopy() {
-    reportOutcome(await copyLink(url));
+    if (!board) return;
+    const outcome = await copyLink(ownerClipboardText(copy, board, url));
+    show(outcome);
+    reportQuizCopy("board", outcome);
   }
 
   if (phase === "loading") {
