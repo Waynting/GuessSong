@@ -588,6 +588,182 @@ describe("what the taker's phone receives", () => {
   });
 });
 
+describe("the owner's preview", () => {
+  /** Every field of the hash, so "nothing was written" is an assertion about the record itself. */
+  async function fieldsOf(code: string): Promise<string[]> {
+    const store = await getKvStore();
+    return Object.keys(await store.hgetall<unknown>(`quiz:v1:${code}`)).sort();
+  }
+
+  it("marks the view for the host token and changes nothing else in it", async () => {
+    const created = await make();
+    const friend = await getQuizView(created.code);
+    const owner = await getQuizView(created.code, created.hostToken);
+    expect(friend.owner).toBeUndefined();
+    expect("owner" in friend).toBe(false);
+    expect(owner.owner).toBe(true);
+    const { owner: _owner, ...rest } = owner;
+    expect(rest).toEqual(friend);
+  });
+
+  it("still withholds the key from the owner: the preview is the friends' quiz", async () => {
+    // The answers by name are what the board is for. A view that handed the
+    // owner the key would be a second, ungated copy of it one header away.
+    const created = await make();
+    const view = await getQuizView(created.code, created.hostToken);
+    for (const q of view.questions) {
+      expect(Object.keys(q)).toEqual(["options"]);
+      for (const option of q.options) expect(Object.keys(option).sort()).toEqual(["artist", "title"]);
+    }
+    expect(JSON.stringify(view)).not.toContain(created.hostToken);
+    expect(JSON.stringify(view)).not.toContain('"answer"');
+  });
+
+  it("treats a missing or wrong token as an ordinary taker, never as an error", async () => {
+    // The board answers 403 to the same tokens. Here a friend whose phone
+    // holds a stale token for a reused code has to be able to open the link.
+    const created = await make();
+    const other = await make();
+    for (const token of [undefined, null, "", "nope", other.hostToken, `${created.hostToken} `, created.hostToken.toUpperCase()]) {
+      const view = await getQuizView(created.code, token);
+      expect("owner" in view, String(token)).toBe(false);
+      const checked = await checkQuizAnswer(created.code, 0, 0, token);
+      expect("owner" in checked, String(token)).toBe(false);
+    }
+  });
+
+  it("answers a check the same for the owner, and says who asked beside it", async () => {
+    const created = await make();
+    const key = await keyFor(created.code);
+    expect(await checkQuizAnswer(created.code, 3, 0, created.hostToken)).toEqual({ answer: key[3], owner: true });
+    expect(await checkQuizAnswer(created.code, 3, 0)).toEqual({ answer: key[3] });
+  });
+
+  it("grades the owner's sheet and writes nothing: no row, no name claimed, no TTL touched", async () => {
+    const created = await make();
+    const key = await keyFor(created.code);
+    await submitQuizAnswers(created.code, "Friend", key.map((a, i) => (i < 5 ? a : (a + 1) % QUIZ_OPTION_COUNT)), 1);
+    const before = await fieldsOf(created.code);
+
+    const store = await getKvStore();
+    // Every way this store can change a record. The read is the only
+    // command an owner's sheet is allowed.
+    const writes = (["hsetnx", "expire", "set", "hdel", "del", "incr"] as const).map((method) =>
+      vi.spyOn(store, method)
+    );
+    try {
+      const result = await submitQuizAnswers(created.code, "Wayn", key, 2, "attempt-1", created.hostToken);
+      expect(result).toMatchObject({
+        correct: 10,
+        total: 10,
+        hintsUsed: 1, // clamped to the allowance, like anyone's
+        verdict: "soulmate",
+        recorded: false,
+        rank: null,
+        preview: true,
+      });
+      expect(result.key).toEqual(key);
+      // The board it is shown is the friends', and it is not on it.
+      expect(result.scoreboard.map((s) => s.name)).toEqual(["Friend"]);
+      expect(result.scoreboard.every((s) => !("right" in s) && !("sid" in s))).toBe(true);
+      for (const write of writes) expect(write, write.getMockName()).not.toHaveBeenCalled();
+    } finally {
+      for (const write of writes) write.mockRestore();
+    }
+
+    expect(await fieldsOf(created.code)).toEqual(before);
+    expect((await getQuizView(created.code)).scoreboard.map((s) => s.name)).toEqual(["Friend"]);
+    // The name was not claimed: a friend called Wayn can still take it.
+    const namesake = await submitQuizAnswers(created.code, "Wayn", key, 0);
+    expect(namesake.recorded).toBe(true);
+    expect(namesake.preview).toBeUndefined();
+  });
+
+  it("asks no name of the owner, and still asks one of everyone else", async () => {
+    const created = await make();
+    const key = await keyFor(created.code);
+    for (const name of ["", "   "]) {
+      const result = await submitQuizAnswers(created.code, name, key, 0, undefined, created.hostToken);
+      expect(result).toMatchObject({ preview: true, recorded: false, correct: 10 });
+    }
+    // A token that is not this quiz's is a friend, and a friend signs the sheet.
+    for (const token of [undefined, "", "nope"]) {
+      await expect(submitQuizAnswers(created.code, "", key, 0, undefined, token)).rejects.toMatchObject({
+        code: "quiz_name_required",
+        status: 422,
+      });
+    }
+    expect(await fieldsOf(created.code)).toEqual(["meta", "q"]);
+  });
+
+  it("holds the owner's sheet to the same shape rules as anyone's", async () => {
+    const created = await make();
+    const key = await keyFor(created.code);
+    for (const bad of [key.slice(1), [9, 9, 9, 9, 9, 9, 9, 9, 9, 9], "0101010101", null]) {
+      await expect(
+        submitQuizAnswers(created.code, "", bad, 0, undefined, created.hostToken)
+      ).rejects.toMatchObject({ code: "quiz_invalid_answers", status: 422 });
+    }
+  });
+
+  it("is a preview even when the owner's name is a row already on the board", async () => {
+    // An owner who took their own quiz before 2026-09-30 has a row, and a
+    // phone that may still hold its submission. Neither the collision nor
+    // the replay applies: the token decides first.
+    const created = await make();
+    const key = await keyFor(created.code);
+    await submitQuizAnswers(created.code, "Wayn", key, 0, "old-attempt");
+    const wrong = key.map((a) => (a + 1) % QUIZ_OPTION_COUNT);
+    for (const sid of ["old-attempt", "another", undefined]) {
+      const result = await submitQuizAnswers(created.code, "wayn", wrong, 0, sid, created.hostToken);
+      // Graded from the sheet that was sent, not replayed from the stored row.
+      expect(result).toMatchObject({ preview: true, recorded: false, correct: 0, rank: null });
+    }
+    expect((await getQuizView(created.code)).scoreboard).toHaveLength(1);
+  });
+
+  it("is a preview past a full board too, and for a reason the page can tell apart", async () => {
+    const created = await make();
+    const key = await keyFor(created.code);
+    const store = await getKvStore();
+    for (let i = 0; i < QUIZ_MAX_ENTRIES; i += 1) {
+      await store.hsetnx(`quiz:v1:${created.code}`, `s:t${i}`, { name: `T${i}`, correct: 1, total: 10, hintsUsed: 0, at: i });
+    }
+    const late = await submitQuizAnswers(created.code, "Late", key, 0);
+    expect(late.recorded).toBe(false);
+    expect(late.preview).toBeUndefined();
+    const owner = await submitQuizAnswers(created.code, "", key, 0, undefined, created.hostToken);
+    expect(owner.recorded).toBe(false);
+    expect(owner.preview).toBe(true);
+  });
+
+  it("gates the board with the same comparison, so the two cannot disagree about a token", async () => {
+    const created = await make();
+    const other = await make();
+    for (const token of ["", "nope", other.hostToken, `${created.hostToken} `]) {
+      await expect(getQuizBoard(created.code, token)).rejects.toMatchObject({ code: "quiz_not_host", status: 403 });
+      expect("owner" in (await getQuizView(created.code, token))).toBe(false);
+    }
+    await expect(getQuizBoard(created.code, created.hostToken)).resolves.toMatchObject({ code: created.code });
+    expect((await getQuizView(created.code, created.hostToken)).owner).toBe(true);
+  });
+
+  it("has no owner on a record whose own token is missing, rather than everyone", async () => {
+    const created = await make();
+    const store = await getKvStore();
+    const raw = await store.hgetall<unknown>(`quiz:v1:${created.code}`);
+    const { hostToken: _hostToken, ...meta } = raw.meta as Record<string, unknown>;
+    for (const broken of [meta, { ...meta, hostToken: "" }, { ...meta, hostToken: 7 }]) {
+      await store.hdel(`quiz:v1:${created.code}`, "meta");
+      await store.hsetnx(`quiz:v1:${created.code}`, "meta", broken);
+      for (const token of ["", "undefined", "7", created.hostToken]) {
+        expect("owner" in (await getQuizView(created.code, token))).toBe(false);
+        await expect(getQuizBoard(created.code, token)).rejects.toMatchObject({ code: "quiz_not_host" });
+      }
+    }
+  });
+});
+
 describe("getQuizBoard", () => {
   it("is refused without the host token, and answers with it", async () => {
     const created = await make();

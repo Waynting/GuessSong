@@ -13,7 +13,7 @@ import { getQuizBoard, QuizError } from "@/lib/quiz-store";
 import { recordQuizStage, recordQuizThrottled } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
-import type { QuizBoardResponse } from "@/types/quiz";
+import { QUIZ_HOST_TOKEN_HEADER, type QuizBoardResponse } from "@/types/quiz";
 
 const QUIZ_BOARD_LIMIT = 60;
 const QUIZ_BOARD_WINDOW_SECONDS = 10 * 60;
@@ -23,7 +23,7 @@ export async function GET(
   { params }: { params: Promise<{ code: string }> }
 ) {
   const { code } = await params;
-  const token = req.headers.get("x-host-token") ?? "";
+  const token = req.headers.get(QUIZ_HOST_TOKEN_HEADER) ?? "";
 
   const limited = await enforceRateLimit(
     req,

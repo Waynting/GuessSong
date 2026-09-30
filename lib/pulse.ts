@@ -21,6 +21,9 @@
  *   - **quiz shares** — the owner's or a taker's share button, and what the
  *     sheet said. The step between `quiz:created` and `quiz:opened`, which
  *     was losing most quizzes with no record of how.
+ *   - **quiz copies** — the explicit "Copy link" button beside that share
+ *     button. Its own event since 2026-09-30, because filed as a share it
+ *     made `copied` mean two things (`QuizCopyOutcome` in `lib/loop-stats.ts`).
  *
  * So: one narrow endpoint, four event shapes, a closed set of values, and
  * nothing that a caller can turn into a key. The parsing lives here rather
@@ -41,6 +44,9 @@ import {
   type QuizShareBy,
   type QuizShareOutcome,
 } from "@/lib/loop-stats";
+// A statement of its own rather than two more names in the list above: that
+// list is the one line of this file every new event has to touch.
+import { QUIZ_COPY_OUTCOMES, type QuizCopyOutcome } from "@/lib/loop-stats";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
@@ -60,10 +66,17 @@ function isQuizShareOutcome(value: unknown): value is QuizShareOutcome {
   );
 }
 
+function isQuizCopyOutcome(value: unknown): value is QuizCopyOutcome {
+  return (
+    typeof value === "string" && (QUIZ_COPY_OUTCOMES as readonly string[]).includes(value)
+  );
+}
+
 export type PulseEvent =
   | { kind: "loop_impression"; surface: LoopSurface }
   | { kind: "game_started"; hostGameIndex: number; mixed?: MixedSubMode }
   | { kind: "game_finished"; end: GameEnd; roundsPlayed: number }
+  | { kind: "quiz_copied"; by: QuizShareBy; outcome: QuizCopyOutcome }
   | { kind: "quiz_shared"; by: QuizShareBy; outcome: QuizShareOutcome };
 
 /**
@@ -120,6 +133,14 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // fallback, because an event with either half missing says nothing.
     if (!isQuizShareBy(raw.by) || !isQuizShareOutcome(raw.outcome)) return null;
     return { kind: "quiz_shared", by: raw.by, outcome: raw.outcome };
+  }
+
+  if (raw.kind === "quiz_copied") {
+    // The share event's rule, with the narrower outcome list: a copy that
+    // claims `shared` or `dismissed` is not a copy, and accepting it would
+    // put the two-meanings problem back one key over.
+    if (!isQuizShareBy(raw.by) || !isQuizCopyOutcome(raw.outcome)) return null;
+    return { kind: "quiz_copied", by: raw.by, outcome: raw.outcome };
   }
 
   return null;

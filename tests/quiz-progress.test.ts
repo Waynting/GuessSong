@@ -117,6 +117,29 @@ describe("parseQuizProgress", () => {
     }
     expect(parseQuizProgress(JSON.stringify([null, "junk", progress, 7]), NOW)).toEqual([progress]);
   });
+
+  it("reads an owner's preview with no name, and nobody else's", () => {
+    // The preview's intro asks for no name — there is no row for one to
+    // name — so its progress is the one entry allowed to have none. Without
+    // this a reload mid-preview loses the run, and `quiz:owner_completed`
+    // reads as owners who do not play.
+    const preview = { ...progress, name: "", preview: true };
+    expect(parseQuizProgress(JSON.stringify([preview]), NOW)).toEqual([preview]);
+    // Only `true` is a preview. Anything else is a friend's entry, and a
+    // friend's entry with no name is still not one.
+    for (const marker of [false, "true", 1, null, {}, "yes"]) {
+      expect(parseQuizProgress(JSON.stringify([{ ...progress, name: "", preview: marker }]), NOW), String(marker)).toEqual([]);
+    }
+    // And a friend's entry does not grow the field.
+    const [friend] = parseQuizProgress(JSON.stringify([{ ...progress, preview: false }]), NOW);
+    expect(friend).toEqual(progress);
+    expect("preview" in friend).toBe(false);
+    // A preview with a name — the owner named the quiz and had taken it
+    // before — keeps both.
+    expect(parseQuizProgress(JSON.stringify([{ ...progress, preview: true }]), NOW)).toEqual([
+      { ...progress, preview: true },
+    ]);
+  });
 });
 
 describe("fitsQuizProgress", () => {
@@ -174,6 +197,20 @@ describe("fitsQuizProgress", () => {
     // A record built with four options, inside its week, still lays out.
     const wide = { ...quiz, questions: quiz.questions.map(() => ({ options: [1, 2, 3, 4] })) };
     expect(fitsQuizProgress({ ...progress, answers: [3, 2, -1, -1] }, wide)).toBe(true);
+  });
+
+  it("resumes a preview only while the server still says owner", () => {
+    // The token is kept ten deep and storage is evicted; a device that has
+    // lost it is a friend now, and resuming a nameless entry would walk them
+    // to the last question with nothing to sign the sheet with.
+    const preview: QuizProgress = { ...progress, name: "", preview: true };
+    expect(fitsQuizProgress(preview, { ...quiz, owner: true })).toBe(true);
+    expect(fitsQuizProgress(preview, quiz)).toBe(false);
+    // The other direction is allowed: a friend's entry, name and all,
+    // resumes for an owner. What the sheet is, is the server's to say.
+    expect(fitsQuizProgress(progress, { ...quiz, owner: true })).toBe(true);
+    // And being the owner excuses nothing else about the fit.
+    expect(fitsQuizProgress({ ...preview, index: 4 }, { ...quiz, owner: true })).toBe(false);
   });
 });
 

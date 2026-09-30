@@ -19,7 +19,11 @@
  * kind of failure nobody reports, so it is counted.
  *
  * `q === 0` is also the funnel's `started`: the first half tapped, once per
- * attempt. See `QuizStage`.
+ * attempt. See `QuizStage`. Not for the owner: a check carrying the quiz's
+ * host token is their preview, and `started` is a friend playing. Nothing is
+ * counted in its place — `owner_opened` and `owner_completed` are the two
+ * ends of that run, and a third key for its middle would be a command per
+ * preview on the route with the largest KV budget on the site.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -28,7 +32,7 @@ import { checkQuizAnswer, QuizError } from "@/lib/quiz-store";
 import { recordQuizStage, recordQuizThrottled } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
-import type { CheckQuizResponse } from "@/types/quiz";
+import { QUIZ_HOST_TOKEN_HEADER, type CheckQuizResponse } from "@/types/quiz";
 
 const QUIZ_CHECK_LIMIT = 600;
 const QUIZ_CHECK_WINDOW_SECONDS = 10 * 60;
@@ -70,9 +74,15 @@ export async function POST(
   }
 
   try {
-    const result = await checkQuizAnswer(code, body.q, body.pick);
-    if (body.q === 0) await recordQuizStage("started");
-    return NextResponse.json<CheckQuizResponse>(result, {
+    const { owner, answer } = await checkQuizAnswer(
+      code,
+      body.q,
+      body.pick,
+      req.headers.get(QUIZ_HOST_TOKEN_HEADER)
+    );
+    if (body.q === 0 && !owner) await recordQuizStage("started");
+    // `answer` alone, whoever asked: `owner` was for the line above.
+    return NextResponse.json<CheckQuizResponse>({ answer }, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (err: unknown) {

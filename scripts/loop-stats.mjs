@@ -367,12 +367,34 @@ if (earlyRounds.length > 0 && endedEarly > 0) {
  * completed` next to the allowance says whether the ration holds;
  * `unavailable` is the quiz spending a throttled minute; `repaired` is the
  * year-long positive cache rotting under it.
+ *
+ * Four rows were added on 2026-09-30, for the step the funnel could not see
+ * into — a quiz made and never sent. `from` is who makes quizzes. `owner
+ * opened` / `owner played` are the maker on their own link, which until then
+ * were inside opened, started, completed, the verdicts and the length table;
+ * they are counted *instead of* those now, so every friend-side row stepped
+ * down that day and a window across it is two series. `… copy` is the Copy
+ * link button, which until then was filed as a share's `copied`. And `board
+ * share` is the results page's share button, which until then reached GA4
+ * alone. `opened` also stopped counting the result screen's Refresh.
  */
 const quizCreated = get("quiz:created");
 const quizOpened = get("quiz:opened");
 const quizStarted = get("quiz:started");
 const quizCompleted = get("quiz:completed");
 const quizBoard = get("quiz:board");
+// Under the `quiz:` prefix, which the fallback at the bottom treats as
+// rendered: without these two reads and their rows the counters move in KV
+// and no line here moves with them.
+const quizOwnerOpened = get("quiz:owner_opened");
+const quizOwnerCompleted = get("quiz:owner_completed");
+// Every tap on a quiz's share or Copy button in the window. In the guard
+// below so that a day whose only quiz activity is an owner coming back to
+// send a link made earlier still prints the block — the panel is drawn for a
+// remembered quiz now, so that day exists.
+const quizTaps = [...totals]
+  .filter(([m]) => m.startsWith("quiz_share:") || m.startsWith("quiz_copy:"))
+  .reduce((t, [, c]) => t + c, 0);
 const verdicts = [...totals.keys()]
   .filter((m) => m.startsWith("quiz_verdict:"))
   .map((m) => m.slice("quiz_verdict:".length))
@@ -400,7 +422,7 @@ function lengthsFor(stage) {
   return out;
 }
 
-if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard > 0) {
+if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwnerOpened + quizOwnerCompleted + quizTaps > 0) {
   console.log("\nPlaylist quiz — the link-shaped surface");
 
   const locales = [...totals.keys()]
@@ -412,9 +434,48 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard > 0) {
   console.log(
     `  created     ${String(quizCreated).padStart(6)}${locales ? `   ${locales}` : ""}`
   );
+
+  // Who makes quizzes. `quiz_from:<source>` is written with `created` when
+  // the page named a source, so the row's total is at most `created` and the
+  // difference is quizzes made by a page from before 2026-09-30 (or by
+  // something that is not the page). Discovered by prefix, biggest first: a
+  // loop surface added later prints under its own name with no edit here.
+  const sources = [...totals.keys()]
+    .filter((m) => m.startsWith("quiz_from:"))
+    .map((m) => m.slice("quiz_from:".length))
+    .sort((a, b) => get(`quiz_from:${b}`) - get(`quiz_from:${a}`) || a.localeCompare(b));
+  if (sources.length > 0) {
+    const named = sources.reduce((t, s) => t + get(`quiz_from:${s}`), 0);
+    console.log(
+      `  from        ${String(named).padStart(6)}   ${sources.map((s) => `${s} ${get(`quiz_from:${s}`)}`).join(" · ")}`
+    );
+    console.log(
+      "                       where the maker came from: a surface name followed one of our links, internal is\n" +
+        "                       this site, external someone else's, none no referrer (typed, bookmarked, installed)"
+    );
+    if (quizCreated > named) {
+      console.log(
+        `                       ${quizCreated - named} of ${quizCreated} quizzes named no source — made by a page from before this was sent`
+      );
+    }
+  }
+
   console.log(
     `  opened      ${String(quizOpened).padStart(6)}   ${(quizCreated ? quizOpened / quizCreated : 0).toFixed(1)} per quiz`
   );
+
+  // The maker on their own link, recognised by the host token and counted
+  // here *instead of* in opened, started, completed, the verdicts and the
+  // length table. Floors: the token is in the creating browser's storage, so
+  // the same person on another device is a friend in the rows around these.
+  if (quizOwnerOpened + quizOwnerCompleted > 0) {
+    console.log(
+      `  owner opened${String(quizOwnerOpened).padStart(6)}   ${pct(quizOwnerOpened, quizCreated)} of quizzes had their maker open the link — a preview, not in opened`
+    );
+    console.log(
+      `  owner played${String(quizOwnerCompleted).padStart(6)}   ${pct(quizOwnerCompleted, quizOwnerOpened)} of those previews were played to the end — graded, never on the board`
+    );
+  }
 
   // The step between the two lines above. `quiz_share:<by>:<outcome>` is
   // every tap on a share button and what the sheet said, so `owner` against
@@ -424,13 +485,45 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard > 0) {
   // at all is a panel the owner never got to. Printed only once recorded,
   // and each `by` on its own line.
   const shareOutcomes = ["shared", "copied", "dismissed", "failed"];
-  for (const by of ["owner", "taker"]) {
+  // What each `by` is read against: the panel against quizzes made, the
+  // result screen against sheets finished, the results page against the
+  // times it was opened. All three are taps over a count, so ceilings.
+  const tapsAgainst = (by, taps) =>
+    by === "owner"
+      ? `${pct(taps, quizCreated)} of quizzes`
+      : by === "board"
+        ? `${pct(taps, quizBoard)} of board opens`
+        : `${pct(taps, quizCompleted)} of finishes`;
+  for (const by of ["owner", "taker", "board"]) {
     const counts = shareOutcomes.map((o) => get(`quiz_share:${by}:${o}`));
     const taps = counts.reduce((t, c) => t + c, 0);
     if (taps === 0) continue;
     const parts = shareOutcomes.map((o, i) => `${o} ${counts[i]}`).join(" · ");
-    const against = by === "owner" ? `${pct(taps, quizCreated)} of quizzes` : `${pct(taps, quizCompleted)} of finishes`;
+    const against = tapsAgainst(by, taps);
     console.log(`  ${`${by} share`.padEnd(12)}${String(taps).padStart(6)}   ${against} tapped it — ${parts}`);
+  }
+
+  // The Copy link button, on its own key since 2026-09-30
+  // (`quiz_copy:<by>:<copied|failed>`). Read it beside the share row above
+  // it: together they are everyone who tried to send the link, and a quiz
+  // with neither is one its maker never tried to send.
+  const copyOutcomes = ["copied", "failed"];
+  let copyTaps = 0;
+  for (const by of ["owner", "taker", "board"]) {
+    const counts = copyOutcomes.map((o) => get(`quiz_copy:${by}:${o}`));
+    const taps = counts.reduce((t, c) => t + c, 0);
+    if (taps === 0) continue;
+    copyTaps += taps;
+    const parts = copyOutcomes.map((o, i) => `${o} ${counts[i]}`).join(" · ");
+    console.log(`  ${`${by} copy`.padEnd(12)}${String(taps).padStart(6)}   ${tapsAgainst(by, taps)} tapped Copy link — ${parts}`);
+  }
+  if (quizTaps > 0) {
+    console.log(
+      "                       on a share row, copied is the share button with no share sheet to open; a tap on\n" +
+        "                       Copy link is the copy row" +
+        (copyTaps > 0 ? "" : " (none yet)") +
+        ". Days before 2026-09-30 filed both as a share's copied"
+    );
   }
   console.log(`  started     ${String(quizStarted).padStart(6)}   ${pct(quizStarted, quizOpened)} of opens answered a question`);
   console.log(
@@ -540,6 +633,8 @@ const RENDERED_PREFIXES = [
   "playlist_shortlink:",
   "quiz:",
   "quiz_share:",
+  "quiz_copy:",
+  "quiz_from:",
   "quiz_verdict:",
   "quiz_len:",
   "quiz_locale:",

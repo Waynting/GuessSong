@@ -17,6 +17,7 @@ import { recordQuizCreated, recordQuizThrottled } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
 import { ERROR_LOCALES } from "@/lib/error-messages";
+import { isQuizSource } from "@/lib/quiz-source";
 import {
   QUIZ_MAX_QUESTIONS,
   QUIZ_MIN_QUESTIONS,
@@ -28,11 +29,20 @@ import {
 const QUIZ_CREATE_LIMIT = 10;
 const QUIZ_CREATE_WINDOW_SECONDS = 10 * 60;
 
+/**
+ * `from` is `unknown` on purpose, and must not be tightened to an enum of
+ * `QUIZ_SOURCES`. It is a measurement riding on a request whose job is making
+ * a quiz: validated in the schema, a value this build does not know — a
+ * surface a newer page was deployed with, a typo, junk — would fail the parse
+ * and refuse the host their link over a counter. It is narrowed below with
+ * `isQuizSource`, where not recognising it costs the count and nothing else.
+ */
 const CreateQuizSchema = z.object({
   url: z.string().trim().min(1),
   ownerName: z.string().trim().max(QUIZ_NAME_MAX).optional(),
   questionCount: z.number().int().min(QUIZ_MIN_QUESTIONS).max(QUIZ_MAX_QUESTIONS),
   locale: z.enum(ERROR_LOCALES).optional(),
+  from: z.unknown().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -72,6 +82,7 @@ export async function POST(req: NextRequest) {
       questionCount: created.questionCount,
       requestedCount: body.questionCount,
       locale: body.locale ?? "en",
+      from: isQuizSource(body.from) ? body.from : undefined,
     });
     return NextResponse.json<CreateQuizResponse>({
       code: created.code,

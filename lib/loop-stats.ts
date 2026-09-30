@@ -35,6 +35,7 @@ import { ERROR_LOCALES, type AppErrorCode, type ErrorLocale } from "@/lib/error-
 import type { LoopSurface } from "@/lib/loop-links";
 import { QUIZ_VERDICTS, isQuizVerdict, type QuizVerdict } from "@/lib/quiz";
 import type { ShareLinkOutcome } from "@/lib/quiz-share";
+import { QUIZ_SOURCES, isQuizSource, type QuizSource } from "@/lib/quiz-source";
 import type { PreviewStatus } from "@/types/preview";
 import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
 
@@ -114,10 +115,29 @@ export const GAME_ROUND_CEILING = 20;
  * sheet was dismissed" from "the sheet said shared and no friend opened it",
  * which are three different fixes. Every tap counts, so `owner` tallied
  * against `created` is a ceiling: one owner sending twice is two.
+ *
+ * `board` is the third place a share button lives: the owner's results page,
+ * `/q/[code]/board`. Its two buttons reported to GA4 alone until 2026-09-30,
+ * filed there as `owner`, so a second share arm was on the side nobody opens
+ * and indistinguishable from the first on the side somebody might. It is the
+ * same person as `owner` at a later moment — back for results, sending the
+ * link on to whoever has not played — and is kept apart because that moment
+ * is the one `docs/viral-loop.md` §7 calls "a second share arm going unused".
+ *
+ * **`quiz_share:<by>:copied` changed meaning on 2026-09-30, and a series that
+ * straddles that date is two series.** Before it, the panel's explicit "Copy
+ * link" button went through the same `settle()` as the share button, so
+ * `owner:copied` was the desktop fallback *plus* every deliberate Copy tap —
+ * 17 of the 19 owner taps in the week to 2026-09-29, with no way to say how
+ * many of the 17 were which. From that date `copied` here means one thing:
+ * the share button was tapped on a browser with no share sheet, and the
+ * clipboard is what it fell back to. The Copy button has its own key,
+ * `quiz_copy:<by>:<outcome>`, below. Expect `owner:copied` to step down on
+ * the day this deployed; the taps did not stop, they moved.
  */
-export type QuizShareBy = "owner" | "taker";
+export type QuizShareBy = "owner" | "taker" | "board";
 
-export const QUIZ_SHARE_BYS: readonly QuizShareBy[] = ["owner", "taker"];
+export const QUIZ_SHARE_BYS: readonly QuizShareBy[] = ["owner", "taker", "board"];
 
 export type QuizShareOutcome = ShareLinkOutcome;
 
@@ -127,6 +147,25 @@ export const QUIZ_SHARE_OUTCOMES: readonly QuizShareOutcome[] = [
   "dismissed",
   "failed",
 ];
+
+/**
+ * What came of a tap on an explicit "Copy link" button — the panel's and the
+ * board's. Keyed `quiz_copy:<by>:<outcome>`, by the same `QuizShareBy` the
+ * share button uses, so the two read side by side.
+ *
+ * Two outcomes because a clipboard has two: it took the text, or it refused
+ * (a locked-down webview, a page that lost focus). There is no `shared` and
+ * no `dismissed` — no sheet is involved — which is the whole reason this is
+ * not four more tails under `quiz_share:`: a `quiz_share:owner:copied` that
+ * could mean either button is the reading this key exists to end.
+ *
+ * What a copy is evidence of: intent to send, by someone about to paste the
+ * link somewhere this site cannot see. Whether they did is `opened`. Like a
+ * share tap it is a count of taps and a ceiling on people.
+ */
+export type QuizCopyOutcome = Extract<ShareLinkOutcome, "copied" | "failed">;
+
+export const QUIZ_COPY_OUTCOMES: readonly QuizCopyOutcome[] = ["copied", "failed"];
 
 /**
  * Why a playlist link was refused, for the links that will never work.
@@ -290,6 +329,15 @@ export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
  * on `quiz_not_host` is not in it. Like `opened`, it is bumped per fetch and
  * the page fetches on every mount, so it is a ceiling.
  *
+ * `opened` lost two things on 2026-09-30, and a series across that date steps
+ * down without anything having changed on a phone. The result screen's
+ * Refresh re-reads the view with `?refetch=1` (`QUIZ_REFETCH_PARAM` in
+ * types/quiz.ts) and is no longer an open — it never was one. And a request
+ * carrying the quiz's own host token is the owner, counted under
+ * `QuizOwnerStage` below instead. What is left is one per page load by
+ * someone who is not provably the owner: still a ceiling on friends, since a
+ * reload is a second load, but no longer inflated by a button.
+ *
  * `quiz_result`'s impression and click ride the ordinary surface counters, so
  * `completed` ≈ `impression:quiz_result` is a plumbing check: a gap means the
  * result screen stopped rendering the call to action.
@@ -297,6 +345,50 @@ export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
 export type QuizStage = "created" | "opened" | "started" | "completed" | "board";
 
 export const QUIZ_STAGES: readonly QuizStage[] = ["created", "opened", "started", "completed", "board"];
+
+/**
+ * The owner taking their own quiz, counted apart from the friends it was
+ * made for.
+ *
+ *   owner_opened     the owner's device fetched the quiz   GET /api/quiz/[code]
+ *   owner_completed  the owner's sheet was graded          POST /api/quiz/[code]/answer
+ *
+ * Keyed `quiz:owner_opened` and `quiz:owner_completed` — under the funnel's
+ * prefix because they are the funnel's own stages seen from the other chair —
+ * but declared as their own union rather than as two more `QuizStage`s, for
+ * a reason that is about the numbers and not the types: each of these is
+ * written *instead of* its namesake, never as well as. A verified owner's
+ * open bumps `owner_opened` and not `opened`; their first check bumps nothing
+ * where a friend's bumps `started`; their sheet bumps `owner_completed` and
+ * not `completed`, not the verdict, not the length table — and writes no row.
+ * So the friend-side funnel is friends, and nothing downstream of it has to
+ * subtract.
+ *
+ * "Verified" is the host token, checked by the store the way the board's is
+ * (`isQuizOwner` in lib/quiz-store.ts). A missing or wrong token is an
+ * ordinary taker. That makes both of these **floors on owners, and `opened`
+ * still a ceiling on friends**: the token lives in the creating browser's
+ * localStorage, so an owner who opens their own link on another device, in a
+ * chat app's in-app browser, or after iOS has evicted the storage is counted
+ * as a friend, exactly as before.
+ *
+ * What each counts, exactly: `owner_opened` is page loads, like `opened` —
+ * an owner who reloads is two, and the page's own re-reads are none.
+ * `owner_completed` is sheets graded, and unlike `completed` it has no
+ * replay to inflate it: the page keeps no finished row for a preview, so
+ * there is no "see my result again" to re-POST. One owner who plays twice is
+ * two, which is the thing being asked about.
+ *
+ * They exist to test one hypothesis — that owners want to play the quiz
+ * themselves, which would make some of the quizzes "made and never sent" a
+ * quiz made to be played — so the reading is `owner_opened ÷ created`, and
+ * `owner_completed ÷ owner_opened` beside the friends' `completed ÷ opened`.
+ * Before 2026-09-30 every one of these was inside `opened`, `started`,
+ * `completed`, the verdicts and the length table, and on the public board.
+ */
+export type QuizOwnerStage = "owner_opened" | "owner_completed";
+
+export const QUIZ_OWNER_STAGES: readonly QuizOwnerStage[] = ["owner_opened", "owner_completed"];
 
 /**
  * The two ends of a quiz's length: how many questions it was built with, and
@@ -414,13 +506,16 @@ export function loopStatsKeys(
   hostIndex: string[];
   mixedPool: Record<MixedSubMode, string>;
   quiz: Record<QuizStage, string>;
+  quizOwner: Record<QuizOwnerStage, string>;
   quizVerdict: Record<QuizVerdict, string>;
   quizLength: Record<QuizLengthStage, Record<number, string>>;
   quizClamped: string;
   quizLocale: Record<ErrorLocale, string>;
+  quizFrom: Record<QuizSource, string>;
   quizHint: Record<QuizHintOutcome, string>;
   quizThrottled: Record<QuizThrottledRoute, string>;
   quizShare: Record<QuizShareBy, Record<QuizShareOutcome, string>>;
+  quizCopy: Record<QuizShareBy, Record<QuizCopyOutcome, string>>;
   gameEnd: Record<GameEnd, string>;
   gameEndRound: string[];
   playlistInvalid: Record<PlaylistInvalidKind, string>;
@@ -474,6 +569,9 @@ export function loopStatsKeys(
       completed: key(day, "quiz:completed"),
       board: key(day, "quiz:board"),
     },
+    quizOwner: Object.fromEntries(
+      QUIZ_OWNER_STAGES.map((s) => [s, key(day, `quiz:${s}`)])
+    ) as Record<QuizOwnerStage, string>,
     quizVerdict: Object.fromEntries(
       QUIZ_VERDICTS.map((v) => [v, key(day, `quiz_verdict:${v}`)])
     ) as Record<QuizVerdict, string>,
@@ -490,6 +588,9 @@ export function loopStatsKeys(
     quizLocale: Object.fromEntries(
       ERROR_LOCALES.map((l) => [l, key(day, `quiz_locale:${l}`)])
     ) as Record<ErrorLocale, string>,
+    quizFrom: Object.fromEntries(
+      QUIZ_SOURCES.map((s) => [s, key(day, `quiz_from:${s}`)])
+    ) as Record<QuizSource, string>,
     quizHint: Object.fromEntries(
       QUIZ_HINT_OUTCOMES.map((o) => [o, key(day, `quiz_hint:${o}`)])
     ) as Record<QuizHintOutcome, string>,
@@ -504,6 +605,14 @@ export function loopStatsKeys(
         ),
       ])
     ) as Record<QuizShareBy, Record<QuizShareOutcome, string>>,
+    quizCopy: Object.fromEntries(
+      QUIZ_SHARE_BYS.map((by) => [
+        by,
+        Object.fromEntries(
+          QUIZ_COPY_OUTCOMES.map((o) => [o, key(day, `quiz_copy:${by}:${o}`)])
+        ),
+      ])
+    ) as Record<QuizShareBy, Record<QuizCopyOutcome, string>>,
   };
 }
 
@@ -688,8 +797,34 @@ export function recordQuizShare(by: QuizShareBy, outcome: QuizShareOutcome): Pro
   return bump(`quiz_share:${by}:${outcome}`);
 }
 
+/**
+ * Someone tapped an explicit "Copy link" button. `reportQuizCopy` in
+ * `lib/loop-client.ts` sends it, through the same open endpoint a share
+ * arrives by, so both halves are checked against their lists for the same
+ * reason: each is the tail of a key.
+ */
+export function recordQuizCopy(by: QuizShareBy, outcome: QuizCopyOutcome): Promise<void> {
+  if (!QUIZ_SHARE_BYS.includes(by) || !QUIZ_COPY_OUTCOMES.includes(outcome)) {
+    return Promise.resolve();
+  }
+  return bump(`quiz_copy:${by}:${outcome}`);
+}
+
 /** One quiz moved a stage down its funnel. */
 export function recordQuizStage(stage: QuizStage): Promise<void> {
+  return bump(`quiz:${stage}`);
+}
+
+/**
+ * The owner's own open, or their own finished sheet — written by the route
+ * *in place of* `recordQuizStage("opened")` and `recordQuizCompleted`, never
+ * beside them. One command where a friend's completion is three: the verdict
+ * and the length table describe how the quiz lands on the people it was made
+ * for, and the person who picked the songs is not a reading of either.
+ * Guarded like every key tail here, whatever the type says.
+ */
+export function recordQuizOwnerStage(stage: QuizOwnerStage): Promise<void> {
+  if (!QUIZ_OWNER_STAGES.includes(stage)) return Promise.resolve();
   return bump(`quiz:${stage}`);
 }
 
@@ -732,6 +867,16 @@ export function recordQuizLength(stage: QuizLengthStage, questionCount: number):
  * saying why. This counter is how often that happens; if it is a large share
  * of `created`, the panel should say so before the host shares the link.
  *
+ * And one about the person, since 2026-09-30:
+ *
+ *   quiz_from:<source>    where they came from — a loop surface, or one of
+ *                         `internal` / `external` / `none` (lib/quiz-source.ts)
+ *
+ * Written only when the page sent a source this build recognises, so
+ * `Σ quiz_from:* ≤ quiz:created` and the gap is quizzes made by a page from
+ * before this shipped, or by something that is not the page. A floor on each
+ * source and never a share of `created` without saying so.
+ *
  * One `Promise.all` rather than four awaits in series: the host has already
  * waited on Spotify for this response, and the marker memo is claimed before
  * its write precisely so that concurrent bumps do not each pay for it.
@@ -740,6 +885,7 @@ export async function recordQuizCreated(details: {
   questionCount: number;
   requestedCount: number;
   locale: ErrorLocale;
+  from?: QuizSource;
 }): Promise<void> {
   const writes = [
     recordQuizStage("created"),
@@ -749,6 +895,13 @@ export async function recordQuizCreated(details: {
   // locale reached the route from a request body.
   if ((ERROR_LOCALES as readonly string[]).includes(details.locale)) {
     writes.push(bump(`quiz_locale:${details.locale}`));
+  }
+  // The same guard, for the same reason, and it is the second one this value
+  // meets: the route narrows it before calling, and this module owns the key
+  // space whatever its callers did. Absent or unknown records nothing — not
+  // `none`, which is a fact about a referrer and would be a lie here.
+  if (isQuizSource(details.from)) {
+    writes.push(bump(`quiz_from:${details.from}`));
   }
   if (
     Number.isFinite(details.requestedCount) &&

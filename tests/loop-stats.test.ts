@@ -353,6 +353,128 @@ describe("playlist refusals and quiz shares", () => {
   });
 });
 
+describe("the quiz's owner, copy and source counters", () => {
+  // Added 2026-09-30 for the step between "quiz created" and "quiz sent".
+  // Imported here rather than in the list at the top of the file, which is
+  // the one statement every new counter's tests have to touch.
+  const added = import("@/lib/loop-stats");
+  const sources = import("@/lib/quiz-source");
+  const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+
+  it("writes the owner's two stages under the funnel's prefix, and nothing beside them", async () => {
+    const { QUIZ_OWNER_STAGES, recordQuizOwnerStage } = await added;
+    expect([...QUIZ_OWNER_STAGES]).toEqual(["owner_opened", "owner_completed"]);
+    expect(Object.keys(keys.quizOwner)).toHaveLength(QUIZ_OWNER_STAGES.length);
+    for (const stage of QUIZ_OWNER_STAGES) {
+      kv.incrs = [];
+      __resetLivenessForTests();
+      await recordQuizOwnerStage(stage);
+      expect(keys.quizOwner[stage]).toBe(`loop:stats:2026-08-09:quiz:${stage}`);
+      // One command and the marker: an owner's sheet is not a verdict and
+      // not a row in the length table.
+      expect(keysWritten().sort()).toEqual([keys.live, keys.quizOwner[stage]].sort());
+    }
+  });
+
+  it("keeps the owner's stages out of the friends' funnel, in both directions", async () => {
+    // `instead of, never as well as` is the routes' rule; this is the half of
+    // it the key map can break — an owner stage named like a friend's, or
+    // added to QUIZ_STAGES, where the script's funnel rows would count it.
+    const { QUIZ_OWNER_STAGES } = await added;
+    for (const stage of QUIZ_OWNER_STAGES) {
+      expect(QUIZ_STAGES as readonly string[]).not.toContain(stage);
+      expect(Object.values(keys.quiz)).not.toContain(keys.quizOwner[stage]);
+    }
+  });
+
+  it("refuses an owner stage it does not know", async () => {
+    const { recordQuizOwnerStage } = await added;
+    for (const bad of ["owner_started", "opened", "completed", "", "__proto__"]) {
+      await recordQuizOwnerStage(bad as never);
+    }
+    expect(kv.incrs).toEqual([]);
+  });
+
+  it("keys a Copy tap apart from a share, for every by", async () => {
+    const { QUIZ_COPY_OUTCOMES, recordQuizCopy } = await added;
+    expect([...QUIZ_COPY_OUTCOMES]).toEqual(["copied", "failed"]);
+    expect(Object.keys(keys.quizCopy)).toHaveLength(QUIZ_SHARE_BYS.length);
+    for (const by of QUIZ_SHARE_BYS) {
+      expect(Object.keys(keys.quizCopy[by])).toHaveLength(QUIZ_COPY_OUTCOMES.length);
+      for (const outcome of QUIZ_COPY_OUTCOMES) {
+        kv.incrs = [];
+        await recordQuizCopy(by, outcome);
+        expect(keys.quizCopy[by][outcome]).toBe(`loop:stats:2026-08-09:quiz_copy:${by}:${outcome}`);
+        expect(keysWritten()).toContain(keys.quizCopy[by][outcome]);
+        // The whole point: a Copy tap must not land on the share's `copied`.
+        expect(keysWritten().some((k) => k.includes("quiz_share:"))).toBe(false);
+      }
+    }
+  });
+
+  it("does the same the other way: a share's fallback never lands on the copy key", async () => {
+    for (const by of QUIZ_SHARE_BYS) {
+      kv.incrs = [];
+      await recordQuizShare(by, "copied");
+      expect(keysWritten()).toContain(keys.quizShare[by].copied);
+      expect(keysWritten().some((k) => k.includes("quiz_copy:"))).toBe(false);
+    }
+  });
+
+  it("refuses a copy whose by or outcome is undeclared — a sheet's outcomes are not a clipboard's", async () => {
+    const { recordQuizCopy } = await added;
+    await recordQuizCopy("host" as never, "copied");
+    await recordQuizCopy("owner", "shared" as never);
+    await recordQuizCopy("owner", "dismissed" as never);
+    await recordQuizCopy("board", "" as never);
+    expect(kv.incrs).toEqual([]);
+  });
+
+  it("counts the results page as a third sharer, beside the owner and the taker", () => {
+    expect([...QUIZ_SHARE_BYS]).toEqual(["owner", "taker", "board"]);
+    for (const outcome of QUIZ_SHARE_OUTCOMES) {
+      expect(keys.quizShare.board[outcome]).toBe(`loop:stats:2026-08-09:quiz_share:board:${outcome}`);
+    }
+  });
+
+  it("records where a quiz's maker came from, for every member of the closed set", async () => {
+    const { QUIZ_SOURCES } = await sources;
+    expect(Object.keys(keys.quizFrom)).toHaveLength(QUIZ_SOURCES.length);
+    for (const from of QUIZ_SOURCES) {
+      kv.incrs = [];
+      await recordQuizCreated({ questionCount: 10, requestedCount: 10, locale: "en", from });
+      expect(keys.quizFrom[from]).toBe(`loop:stats:2026-08-09:quiz_from:${from}`);
+      const written = keysWritten();
+      expect(written).toContain(keys.quizFrom[from]);
+      expect(written.filter((k) => k.includes("quiz_from:"))).toHaveLength(1);
+      // Beside the creation, not in place of it.
+      expect(written).toContain(keys.quiz.created);
+      expect(written).toContain(keys.quizLength.created[10]);
+    }
+  });
+
+  it("counts the creation and no source when none was named, or one it does not know", async () => {
+    // Not `none`: that is a fact about a referrer, and would be a lie about
+    // a request that never said.
+    for (const from of [undefined, "", "organic", "None", "https://www.google.com/", "__proto__", 7, null]) {
+      kv.incrs = [];
+      await recordQuizCreated({ questionCount: 10, requestedCount: 10, locale: "en", from: from as never });
+      expect(keysWritten(), String(from)).toContain(keys.quiz.created);
+      expect(keysWritten().some((k) => k.includes("quiz_from")), String(from)).toBe(false);
+    }
+  });
+
+  it("stays fail-soft", async () => {
+    const { recordQuizCopy, recordQuizOwnerStage } = await added;
+    kv.failWrites = true;
+    await expect(recordQuizCopy("board", "failed")).resolves.toBeUndefined();
+    await expect(recordQuizOwnerStage("owner_completed")).resolves.toBeUndefined();
+    await expect(
+      recordQuizCreated({ questionCount: 10, requestedCount: 10, locale: "en", from: "external" })
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe("the quiz's length, hint and refusal counters", () => {
   const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
 
@@ -653,5 +775,67 @@ describe("the digest prints what the recorders write", () => {
     expect(script).toMatch(/m\.startsWith\("playlist_refused:"\)/);
     // And the ceiling label agrees with the writer's cap.
     expect(script).toContain(`const GAME_ROUND_CEILING = ${GAME_ROUND_CEILING};`);
+  });
+
+  it("reads and prints the owner's two stages, which sit under a prefix the fallback skips", async () => {
+    // `quiz:owner_opened` starts with `quiz:`, so "Other counters" will never
+    // show it. Without a read and a row of its own it is the counter that
+    // moves in KV and nowhere in `npm run stats`.
+    const { QUIZ_OWNER_STAGES } = await import("@/lib/loop-stats");
+    for (const stage of QUIZ_OWNER_STAGES) {
+      const name = stage.replace(/_(\w)/g, (_, c: string) => c.toUpperCase());
+      const variable = `quiz${name[0].toUpperCase()}${name.slice(1)}`;
+      expect(script, `${stage} is never read`).toContain(`const ${variable} = get("quiz:${stage}");`);
+      // Read, and then used in a printed row — not only in the guard.
+      const printed = script.match(/console\.log\(\s*`  owner \w+\$\{String\((\w+)\)\.padStart\(6\)\}/g) ?? [];
+      expect(printed.some((row) => row.includes(`String(${variable})`)), `${stage} is never printed`).toBe(true);
+      const guard = script.match(/if \(([^)]*) > 0\) \{\s*console\.log\("\\nPlaylist quiz/)?.[1] ?? "";
+      expect(guard, `guard omits ${stage}`).toContain(variable);
+    }
+  });
+
+  it("reads every copy pair and every source, and claims both prefixes", async () => {
+    const { QUIZ_COPY_OUTCOMES } = await import("@/lib/loop-stats");
+    const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
+    for (const prefix of ["quiz_copy:", "quiz_from:"]) expect(rendered).toContain(`"${prefix}"`);
+
+    // Copies are read by template over two lists the script mirrors, like shares.
+    const outcomes = script.match(/const copyOutcomes = \[([^\]]*)\]/)?.[1] ?? "";
+    for (const outcome of QUIZ_COPY_OUTCOMES) expect(outcomes).toContain(`"${outcome}"`);
+    expect(script).toMatch(/get\(`quiz_copy:\$\{by\}:\$\{o\}`\)/);
+    // Both loops name every `by` — the share loop is the first, the copy
+    // loop the second, and a `by` missing from either is a row never printed.
+    const loops = [...script.matchAll(/for \(const by of \[([^\]]*)\]\)/g)].map((m) => m[1]);
+    expect(loops).toHaveLength(2);
+    for (const loop of loops) {
+      for (const by of QUIZ_SHARE_BYS) expect(loop).toContain(`"${by}"`);
+    }
+    // Each `by` is read against something: a row with no denominator named
+    // for it would borrow another's.
+    expect(script).toMatch(/by === "owner"[\s\S]{0,80}of quizzes/);
+    expect(script).toMatch(/by === "board"[\s\S]{0,80}of board opens/);
+
+    // Sources are discovered by prefix, so a loop surface added later prints
+    // under its own name without an edit to the script.
+    expect(script).toMatch(/m\.startsWith\("quiz_from:"\)/);
+    expect(script).toMatch(/get\(`quiz_from:\$\{s\}`\)/);
+  });
+
+  it("prints the quiz block for a window whose only activity is a tap or a preview", () => {
+    // The panel is drawn for a remembered quiz now, so an owner can send a
+    // link on a day nothing was created or opened. A guard that summed only
+    // the five stages would swallow that day's counters whole.
+    const guard = script.match(/if \(([^)]*) > 0\) \{\s*console\.log\("\\nPlaylist quiz/)?.[1] ?? "";
+    expect(guard).toContain("quizTaps");
+    expect(script).toMatch(
+      /const quizTaps = \[\.\.\.totals\]\s*\.filter\(\(\[m\]\) => m\.startsWith\("quiz_share:"\) \|\| m\.startsWith\("quiz_copy:"\)\)/
+    );
+  });
+
+  it("says, where it prints them, that copied changed meaning and when", () => {
+    // A reader comparing weeks across 2026-09-30 sees `owner share … copied`
+    // fall and has nothing else on screen to explain it.
+    expect(script).toContain("2026-09-30");
+    expect(script).toMatch(/Days before 2026-09-30 filed both as a share's copied/);
   });
 });

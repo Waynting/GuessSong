@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parsePulse } from "@/lib/pulse";
 import {
   GAME_ENDS,
@@ -160,6 +162,115 @@ describe("parsePulse — quiz shares", () => {
     expect(
       parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 2, hostGameIndex: 9 })
     ).toEqual({ kind: "game_finished", end: "played_out", roundsPlayed: 2 });
+  });
+});
+
+describe("parsePulse — quiz copies", () => {
+  // The clipboard's two outcomes, mirrored here rather than imported beside
+  // the list at the top of the file: that import is the one line every new
+  // event's tests have to touch.
+  const COPY_OUTCOMES = ["copied", "failed"] as const;
+
+  it("accepts every declared by × outcome pair, the results page included", () => {
+    expect(QUIZ_SHARE_BYS).toContain("board");
+    for (const by of QUIZ_SHARE_BYS) {
+      for (const outcome of COPY_OUTCOMES) {
+        expect(parsePulse({ kind: "quiz_copied", by, outcome })).toEqual({
+          kind: "quiz_copied",
+          by,
+          outcome,
+        });
+      }
+    }
+  });
+
+  it("refuses a sheet's outcome on a copy — that is the two-meanings problem one key over", () => {
+    // `shared` and `dismissed` are what a share sheet says. A clipboard
+    // cannot say either, and a copy event carrying one is a share filed
+    // under the wrong kind.
+    for (const outcome of ["shared", "dismissed", "COPIED", "", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "quiz_copied", by: "owner", outcome })).toBeNull();
+    }
+    for (const by of ["host", "", "OWNER", "Board", "__proto__", 1, null]) {
+      expect(parsePulse({ kind: "quiz_copied", by, outcome: "copied" })).toBeNull();
+    }
+  });
+
+  it("keeps the two kinds apart, and strips what neither declares", () => {
+    expect(parsePulse({ kind: "quiz_copied", by: "board", outcome: "failed", url: "https://x/q/ABC234", evil: 1 })).toEqual({
+      kind: "quiz_copied",
+      by: "board",
+      outcome: "failed",
+    });
+    // A share that fell back to the clipboard is still a share.
+    expect(parsePulse({ kind: "quiz_shared", by: "board", outcome: "copied" })).toEqual({
+      kind: "quiz_shared",
+      by: "board",
+      outcome: "copied",
+    });
+  });
+});
+
+describe("the route records every kind the parser accepts", () => {
+  // `app/api/pulse/route.ts` dispatches on `kind` with a switch that has no
+  // default, and the compiler does not ask for one. A kind added to
+  // `PulseEvent` and not to the switch parses, answers 204, and records
+  // nothing: the beacon is sent, the counter never moves, and the row in
+  // `npm run stats` reads as "nobody tapped it". Read both sources, the way
+  // the .tsx tests do.
+  const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+
+  it("has a case, and a recorder under it, for each kind in the union", () => {
+    const union = read("lib/pulse.ts").match(/export type PulseEvent =([\s\S]*?);\n/)?.[1] ?? "";
+    const kinds = [...union.matchAll(/kind: "(\w+)"/g)].map((m) => m[1]);
+    expect(kinds).toContain("quiz_copied");
+    expect(kinds).toContain("quiz_shared");
+    expect(kinds.length).toBeGreaterThanOrEqual(5);
+    const route = read("app/api/pulse/route.ts");
+    for (const kind of kinds) {
+      expect(route, `no case for ${kind}`).toMatch(
+        new RegExp(`case "${kind}":\\s*await record\\w+\\(event\\.`)
+      );
+    }
+  });
+
+  it("sends a copy to the copy recorder and a share to the share recorder", () => {
+    const route = read("app/api/pulse/route.ts");
+    expect(route).toMatch(/case "quiz_copied":\s*await recordQuizCopy\(event\.by, event\.outcome\);/);
+    expect(route).toMatch(/case "quiz_shared":\s*await recordQuizShare\(event\.by, event\.outcome\);/);
+  });
+
+  it("has each button on the panel and the board report through its own function", () => {
+    // Both reporters take `(by, outcome)` and `copied`/`failed` are valid
+    // share outcomes, so a Copy handler calling `reportQuizShare` compiles.
+    // That is how `owner:copied` came to mean two things.
+    const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+    for (const [file, by] of [
+      ["components/quiz-panel.tsx", "owner"],
+      ["app/q/[code]/board/page.tsx", "board"],
+    ] as const) {
+      const body = code(read(file));
+      const share = body.match(/async function handleShare\(\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+      const copy = body.match(/async function handleCopy\(\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+      expect(share, `${file} handleShare`).toContain(`reportQuizShare("${by}", outcome)`);
+      expect(share, `${file} handleShare`).not.toContain("reportQuizCopy");
+      expect(copy, `${file} handleCopy`).toContain(`reportQuizCopy("${by}", outcome)`);
+      expect(copy, `${file} handleCopy`).not.toContain("reportQuizShare");
+      // One call each in the whole file, and no third path to GA4 alone.
+      expect(body.match(/reportQuizShare\(/g) ?? [], file).toHaveLength(1);
+      expect(body.match(/reportQuizCopy\(/g) ?? [], file).toHaveLength(1);
+      expect(body, file).not.toMatch(/trackEvent\("quiz_(share|copy)_tapped"/);
+    }
+  });
+
+  it("sends both copies of each report, GA4 and KV, from the one function", () => {
+    const client = read("lib/loop-client.ts");
+    expect(client).toMatch(
+      /export function reportQuizCopy\([^)]*\): void \{\s*trackEvent\("quiz_copy_tapped", \{ by, outcome \}\);\s*sendPulse\(\{ kind: "quiz_copied", by, outcome \}\);\s*\}/
+    );
+    expect(client).toMatch(
+      /export function reportQuizShare\([^)]*\): void \{\s*trackEvent\("quiz_share_tapped", \{ by, outcome \}\);\s*sendPulse\(\{ kind: "quiz_shared", by, outcome \}\);\s*\}/
+    );
   });
 });
 
