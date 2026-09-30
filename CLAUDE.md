@@ -372,6 +372,71 @@ Five things in that path are easy to undo by accident:
 
 Every surface name is declared once in `lib/loop-links.ts` and derived from there by the link, the analytics param, and the server-side validator. Hand-syncing those three fails silently: a stale validator still redirects, the counter just stops, and that arm reads as "nobody clicked it".
 
+## Nothing on screen claims sound until the element reports it
+
+`playClip` used to call `audio.play().catch(() => {})`, set the phase to
+`playing` and start the clip timers — so a refused `play()` (iOS's autoplay
+policy on a `play()` that ran after `await fetchPreview`, outside the tap)
+showed "Listening…" and counted down over silence, and nothing recorded it.
+Round one is where the lazy path is likeliest, and round one was where early
+ends piled up.
+
+- **Every `play()` goes through `requestSound` → `startPlayback`
+  (`lib/clip-start.ts`), and `setPhase("playing")` / `startClipTimers()` each
+  appear exactly once, in `soundStarted`**, driven by the element's `playing`
+  event. `tests/game-page.test.ts` reads the page for a bare `play()`.
+- **`soundRequestRef` is dropped before `pause()`**, in `stopClip` and
+  `pauseClip`: the pause rejects the pending `play()`, and a request left
+  standing reads that as the browser blocking the host. `afterPlayRejected`'s
+  `standing` flag is how an interruption the page caused is told apart.
+- **`dropSilentUpcoming` (`lib/track-queue.ts`) drops only `=== null`, and
+  only after the current index.** `previewCache` never stores `unavailable`,
+  so an unavailable track and an unasked one both read `undefined`; dropping
+  either removes a song that may well play. The prefetch is asked once per
+  page (`prefetchAskedRef`), because dropping changes `tracks` and the effect
+  depends on it. The mix list and taste card read `pool`, not `tracks`, or a
+  contributor whose songs were all silent vanishes from the record.
+- **An `unavailable` refresh does not spend the track's one repair attempt.**
+- **The leave beacon is `pagehide`, never `visibilitychange`, `unload` or
+  `beforeunload`**, and the first clip and the leave are sent only by a
+  game's first page (`claimFirstPage` in `lib/game-beacons.ts`), because a
+  reload restarts at round one with no start beacon. Round 0 is a bucket, not
+  a round: its floor is `GAME_ROUND_FLOOR` in both the parser and the recorder.
+- **`LoopQr` is unmounted on phones, never hidden with CSS** — it reports its
+  impression on mount. `PHONE_MEDIA_QUERY` in `lib/game-over.ts` must equal the
+  page's `@media (max-width: 768px)`; a test pins it.
+
+## The setup page remembers the host, and the URL beats the memory
+
+56.5% of games in the week to 2026-09-29 were a returning host's, and Play
+Again was `router.push("/")` to an empty form. `lib/setup-memory.ts` fixes that
+under six rules:
+
+- **Storage goes only through `lib/setup-memory.ts` → `lib/host-session.ts`'s
+  guarded helpers, read in the mount effect, never in a `useState`
+  initialiser** — `/` is prerendered, and storage throws in locked-down
+  browsers.
+- **Written only at the three hosted starts, after `saveGame` and the count,
+  never on a keystroke; `rememberSetup` / `rememberPlaylist` never throw.**
+  They sit inside the `try` whose `catch` reports a failed playlist, so a throw
+  there is a host told their playlist is bad — the `storage_blocked` mistake.
+- **Read back field by field and repaired, never rejected wholesale** — the
+  `parseGamePayload` rule, because storage survives deploys and is editable.
+- **A Mixed game's contributors are never remembered**, and `forgetSetup`
+  ("Start fresh") never clears the game counter or the loop ref.
+- **The URL beats the memory** (`initialSetup`): `?playlist=` beats the
+  restored link and forces Single; `?mode=` beats the remembered mode.
+- **`PLAYLIST_HELP_BY_CODE` (`lib/playlist-help.ts`) holds only link-deterministic
+  codes** — help reads as "your link is the problem", which is the old throttled
+  host bug in a new sentence. The rejection memo stores `{code, message}` so a
+  replayed refusal keeps its help. `lib/playlist-ref.ts` is names for
+  `lib/spotify-link.ts`, not a parser; the recent-chip row never wraps, to keep
+  Start on a 390×844 screen.
+- **`lib/starter-playlists.ts` ships empty and must only ever hold public
+  playlists from the site owner's own account.** A tested 22-character,
+  non-`37i9` id is enforced; someone else's playlist is one deletion away from
+  a dead button on the setup page.
+
 ## Phones are the host's screen
 
 Most games are hosted from a phone, and `app/game/page.tsx` has a phone
