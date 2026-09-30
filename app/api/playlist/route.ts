@@ -19,10 +19,15 @@ const PLAYLIST_WINDOW_SECONDS = 10 * 60;
  * client could not tell "your playlist is wrong" from "we are throttled" — so
  * the UI told throttled hosts to check their URL, and they retried into an
  * already-spent quota. Pass the meaningful statuses through instead.
+ *
+ * 503 is the third of those: a short link the server could not follow *this
+ * time* (`playlist_shortlink_unavailable`). It is ours and it is temporary,
+ * and a 400 would file it in the logs beside the links that are simply wrong.
+ * The client decides whether to ask again from the code, never the status.
  */
 function statusFor(err: unknown): number {
   if (!(err instanceof SpotifyApiError)) return 400;
-  if (err.status === 429 || err.status === 404) return err.status;
+  if (err.status === 429 || err.status === 404 || err.status === 503) return err.status;
   return 400;
 }
 

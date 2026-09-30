@@ -31,6 +31,7 @@ import { roomJobs, trackEvent } from "@/lib/analytics";
 import { DEFAULT_HOST_NAME } from "@/lib/game-session";
 import { apiError, buzzerErrorMessage, describeError, errorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
+import { usePlaylistLinkCheck } from "@/lib/use-playlist-link";
 import { readStored, writeStored } from "@/lib/host-session";
 import { canPollAgainAfter, pollIntervalMs, pollTickAction } from "@/lib/room-poll";
 import { ROOM_TTL_SECONDS, type RoomSubmissionSummary } from "@/types/room";
@@ -81,6 +82,7 @@ export function RoomPanel({
   const [hostSubmitting, setHostSubmitting] = useState(false);
   const [hostTrackCount, setHostTrackCount] = useState<number | null>(null);
   const [hostSubmitError, setHostSubmitError] = useState<string | null>(null);
+  const hostPlaylistLink = usePlaylistLinkCheck(hostPlaylistUrl, "room_panel");
   const locale = useErrorLocale();
 
   useEffect(() => {
@@ -519,22 +521,29 @@ export function RoomPanel({
                 spellCheck={false}
                 style={{ width: "100%", marginBottom: "8px" }}
               />
+              {hostPlaylistLink.problem && (
+                <p
+                  style={{
+                    marginBottom: "8px",
+                    fontSize: "12px",
+                    color: "#fca5a5",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {errorMessage(hostPlaylistLink.problem, locale)}
+                </p>
+              )}
               <button
                 className="add-player-btn"
                 onClick={handleHostSubmit}
-                // Same shape check the join page makes, so an obvious typo
-                // fails here instead of after a round trip to Spotify.
-                disabled={
-                  hostSubmitting ||
-                  !(
-                    hostPlaylistUrl.includes("spotify.com/playlist") ||
-                    hostPlaylistUrl.includes("spotify:playlist:")
-                  )
-                }
+                // The check the join page makes and the one the server makes
+                // (lib/spotify-link.ts), so an obvious mistake fails here
+                // with its reason rather than after a round trip.
+                disabled={hostSubmitting || !hostPlaylistLink.submittable}
               >
                 {hostSubmitting ? "Adding..." : "Add My Playlist"}
               </button>
-              {hostSubmitError && (
+              {hostSubmitError && !hostPlaylistLink.problem && (
                 <p style={{ marginTop: "8px", fontSize: "12px", color: "#fca5a5" }}>
                   {hostSubmitError}
                 </p>

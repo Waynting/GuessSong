@@ -81,23 +81,22 @@ export default function Page() {
       <ul>
         <li>
           <strong>An album link.</strong> <code>/album/…</code> is not <code>/playlist/…</code>.
-          Easy to do from the Now Playing screen.
+          Easy to do from the Now Playing screen. An album is not a playlist even though it
+          looks like one; add its songs to a playlist of your own and use that.
         </li>
         <li>
           <strong>An artist or track link.</strong> Same problem — check the path segment.
-        </li>
-        <li>
-          <strong>A short <code>spotify.link</code> URL.</strong> Some share sheets produce
-          a redirect link rather than the real one. Open it in a browser first and copy the
-          address it lands on.
-        </li>
-        <li>
-          <strong>A Spotify URI.</strong> <code>spotify:playlist:…</code> is the desktop
-          app&rsquo;s internal format, not a web address.
+          GuessSong tells you which of the three you pasted rather than only that the link
+          is wrong.
         </li>
         <li>
           <strong>A folder.</strong> Folders group playlists in the desktop app and are not
           playlists themselves. There is nothing to share.
+        </li>
+        <li>
+          <strong>A link cut short.</strong> A playlist id is exactly 22 letters and digits.
+          If the end of the link was lost when it was copied out of a chat, what is left
+          is not a playlist any more.
         </li>
       </ul>
       <p>
@@ -107,8 +106,27 @@ export default function Page() {
       </p>
       <p>
         Anything after a <code>?</code> is tracking parameters and can be left on or
-        removed; it makes no difference.
+        removed; it makes no difference. Neither does a language segment in the middle
+        (<code>open.spotify.com/intl-ja/playlist/…</code>), which the web player adds
+        outside the United States.
       </p>
+      <p>
+        Two spellings that look wrong and are not, at least here:
+      </p>
+      <ul>
+        <li>
+          <strong>A Spotify URI.</strong> <code>spotify:playlist:…</code> is the desktop
+          app&rsquo;s internal format rather than a web address. GuessSong reads it; plenty
+          of other tools do not, so if one refuses it, use the web link.
+        </li>
+        <li>
+          <strong>A short <code>spotify.link</code> URL.</strong> Some mobile share sheets
+          hand out a redirect instead of the real address. GuessSong follows it for you. If
+          it says it could not open the short link, that is a passing failure on our side
+          rather than a bad link — try again, or open the short link in a browser and copy
+          the address it lands on.
+        </li>
+      </ul>
 
       <h2>4. Rate limiting — and how to tell it apart</h2>
       <p>
@@ -195,7 +213,7 @@ export default function Page() {
           </tr>
           <tr>
             <td>Rejected immediately as invalid</td>
-            <td>Album, track, folder or short link</td>
+            <td>Album, track or artist link, or a link cut short</td>
             <td>Use a <code>/playlist/</code> URL</td>
           </tr>
           <tr>
