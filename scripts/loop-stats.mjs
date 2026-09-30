@@ -280,6 +280,56 @@ console.log(
 );
 
 /**
+ * How the playlist got into the field, for the games that said.
+ *
+ * `host_setup:<source>` rides on the same beacon as `Games started` and is
+ * written by `recordGameStart` in lib/loop-stats.ts. The setup form began
+ * remembering the last game on a device because more than half of all games
+ * come from a host who has played before and every one of them was retyping
+ * an empty form; this line is whether that memory gets used.
+ *
+ * Reading it: `restored` and `recent` are a returning host who did not
+ * retype, and the second line is their share of the games that had a single
+ * link at all. Put it beside `Repeat hosts` — a repeat host who still
+ * `typed` is one whose storage was evicted (iOS, seven idle days), or who
+ * wanted a different playlist tonight, and the two cannot be told apart from
+ * here. `starter` is zero until lib/starter-playlists.ts has a list.
+ *
+ * The denominator is the games that *said*, not `Games started`: a page
+ * loaded before this shipped sends no source and is counted above exactly
+ * as it always was. So the six sum to at most `games`, and in a window that
+ * straddles the deploy the gap is old tabs, not a seventh source. Floors,
+ * like the line they hang off.
+ *
+ * The order mirrors `SETUP_SOURCES` — an .mjs has no path to a TypeScript
+ * constant — and only orders: a source this list does not know still prints,
+ * after the ones it does.
+ */
+const SETUP_SOURCE_ORDER = ["typed", "restored", "recent", "starter", "shared", "mixed"];
+const setupSources = [...totals.keys()]
+  .filter((m) => m.startsWith("host_setup:"))
+  .map((m) => m.slice("host_setup:".length))
+  .sort((a, b) => {
+    const [ia, ib] = [SETUP_SOURCE_ORDER.indexOf(a), SETUP_SOURCE_ORDER.indexOf(b)];
+    return (ia === -1 ? Infinity : ia) - (ib === -1 ? Infinity : ib) || a.localeCompare(b);
+  });
+const setupSaid = setupSources.reduce((t, s) => t + get(`host_setup:${s}`), 0);
+
+if (setupSaid > 0) {
+  const parts = setupSources.map((s) => `${s} ${get(`host_setup:${s}`)}`).join(" · ");
+  const remembered = get("host_setup:restored") + get("host_setup:recent");
+  // Over the games that had a link to remember. A mixed game has none, so
+  // leaving it in the denominator would read the memory as less used the
+  // more Mixed is played.
+  const withLink = setupSaid - get("host_setup:mixed");
+  console.log(`Playlist came from  ${parts}   (${setupSaid} of ${games} games said)`);
+  console.log(
+    `                    ${pct(remembered, withLink).trim()} of single-playlist games started on a link the form ` +
+      "remembered (restored + recent) — read it beside Repeat hosts"
+  );
+}
+
+/**
  * Where the games went. `Games started` is a beacon from the setup page;
  * these two are beacons from the Game Over screen, so the difference is the
  * tab that closed mid-party — and the Game Over screen is where every
@@ -626,6 +676,7 @@ const RENDERED_PREFIXES = [
   "impression:",
   "click:",
   "host_index:",
+  "host_setup:",
   "game_end:",
   "game_end_round:",
   "playlist_refused:",

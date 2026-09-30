@@ -6,6 +6,7 @@ import {
   GAME_ENDS,
   GAME_ROUND_CEILING,
   HOST_INDEX_CEILING,
+  SETUP_SOURCES,
   QUIZ_SHARE_BYS,
   QUIZ_SHARE_OUTCOMES,
 } from "@/lib/loop-stats";
@@ -89,6 +90,76 @@ describe("parsePulse — the mixed sub-mode", () => {
     // Same trade as the index clamp above: the game is real either way, and
     // losing one row of detail beats losing the number anyone reads.
     expect(parsePulse({ kind: "game_started", hostGameIndex: 4, mixed: "nonsense" })).not.toBeNull();
+  });
+});
+
+describe("parsePulse — the setup source", () => {
+  it("accepts every declared source", () => {
+    for (const source of SETUP_SOURCES) {
+      expect(parsePulse({ kind: "game_started", hostGameIndex: 2, source })).toEqual({
+        kind: "game_started",
+        hostGameIndex: 2,
+        source,
+      });
+    }
+  });
+
+  it("parses a body with no source exactly as it did before there was one", () => {
+    // Every page loaded before the deploy sends this. It is the ordinary
+    // case for a while, not a malformed one.
+    const parsed = parsePulse({ kind: "game_started", hostGameIndex: 1 });
+    expect(parsed).toEqual({ kind: "game_started", hostGameIndex: 1 });
+    expect(parsed && "source" in parsed).toBe(false);
+  });
+
+  it("carries the sub-mode and the source together on a mixed game", () => {
+    expect(
+      parsePulse({ kind: "game_started", hostGameIndex: 3, mixed: "phone", source: "mixed" })
+    ).toEqual({ kind: "game_started", hostGameIndex: 3, mixed: "phone", source: "mixed" });
+  });
+
+  it("drops an undeclared source rather than letting it reach a KV key, and keeps the game", () => {
+    // `host_setup:${value}` is a key.
+    for (const bad of ["Typed", "pasted", "", "typed ", "__proto__", "constructor", "a".repeat(500), 1, true, null, {}, ["typed"]]) {
+      const parsed = parsePulse({ kind: "game_started", hostGameIndex: 1, source: bad });
+      expect(parsed, String(bad)).toEqual({ kind: "game_started", hostGameIndex: 1 });
+      expect(parsed && "source" in parsed, String(bad)).toBe(false);
+    }
+  });
+
+  it("judges the two optional fields separately — a bad one does not cost the good one", () => {
+    expect(
+      parsePulse({ kind: "game_started", hostGameIndex: 1, mixed: "qr", source: "mixed" })
+    ).toEqual({ kind: "game_started", hostGameIndex: 1, source: "mixed" });
+    expect(
+      parsePulse({ kind: "game_started", hostGameIndex: 1, mixed: "room", source: "scanned" })
+    ).toEqual({ kind: "game_started", hostGameIndex: 1, mixed: "room" });
+  });
+
+  it("still rejects the event when the index is the thing that is wrong", () => {
+    expect(parsePulse({ kind: "game_started", hostGameIndex: "3", source: "typed" })).toBeNull();
+  });
+
+  it("does not let a source ride in on any other event", () => {
+    expect(parsePulse({ kind: "loop_impression", surface: "share", source: "typed" })).toEqual({
+      kind: "loop_impression",
+      surface: "share",
+    });
+    expect(
+      parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 2, source: "typed" })
+    ).toEqual({ kind: "game_finished", end: "played_out", roundsPlayed: 2 });
+  });
+
+  it("fits in the route's body limit with every field at its longest", () => {
+    // app/api/pulse/route.ts refuses anything over 512 bytes as not one of ours.
+    const longest = [...SETUP_SOURCES].sort((a, b) => b.length - a.length)[0];
+    const body = JSON.stringify({
+      kind: "game_started",
+      hostGameIndex: Number.MAX_SAFE_INTEGER,
+      mixed: "phone",
+      source: longest,
+    });
+    expect(body.length).toBeLessThan(512);
   });
 });
 

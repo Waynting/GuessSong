@@ -22,6 +22,7 @@ import { trackEvent } from "@/lib/analytics";
 import type { LoopSurface } from "@/lib/loop-links";
 import type { GameEnd, MixedSubMode, QuizShareBy, QuizShareOutcome } from "@/lib/loop-stats";
 import type { QuizCopyOutcome } from "@/lib/loop-stats";
+import type { SetupSource } from "@/lib/loop-stats";
 import { sendPulse } from "@/lib/pulse-client";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
@@ -83,9 +84,22 @@ export function reportLoopClick(surface: LoopSurface): void {
  * `mixed` is omitted rather than sent as a sentinel on a single-playlist game,
  * so the field's presence is the whole signal and nothing has to agree on what
  * "none" is called.
+ *
+ * `source` is how the playlist got into the field (`SetupSource` in
+ * `lib/loop-stats.ts`). Optional for the same reason: a caller that does not
+ * know sends nothing, and the game is counted as it always was.
  */
-export function reportGameStart(hostGameIndex: number, mixed?: MixedSubMode): void {
-  sendPulse(mixed ? { kind: "game_started", hostGameIndex, mixed } : { kind: "game_started", hostGameIndex });
+export function reportGameStart(
+  hostGameIndex: number,
+  mixed?: MixedSubMode,
+  source?: SetupSource
+): void {
+  sendPulse({
+    kind: "game_started",
+    hostGameIndex,
+    ...(mixed ? { mixed } : {}),
+    ...(source ? { source } : {}),
+  });
 }
 
 /**

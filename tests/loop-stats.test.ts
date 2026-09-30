@@ -28,6 +28,7 @@ const {
   HOST_INDEX_CEILING,
   LOOP_STATS_TTL_SECONDS,
   MIXED_SUB_MODES,
+  SETUP_SOURCES,
   PLAYLIST_REFUSAL_CODES,
   PLAYLIST_INVALID_KINDS,
   SHORTLINK_OUTCOMES,
@@ -93,6 +94,12 @@ describe("the key format is the contract between writer and reader", () => {
       kv.incrs = [];
       await recordGameStart(1, mixed);
       expect(keysWritten()).toContain(expected.mixedPool[mixed]);
+    }
+
+    for (const source of SETUP_SOURCES) {
+      kv.incrs = [];
+      await recordGameStart(1, undefined, source);
+      expect(keysWritten()).toContain(expected.hostSetup[source]);
     }
 
     for (const stage of QUIZ_STAGES) {
@@ -189,6 +196,15 @@ describe("the key format is the contract between writer and reader", () => {
       expect(keys.mixedPool[mode]).toBe(`loop:stats:2026-08-09:mixed_pool:${mode}`);
     }
     expect(Object.keys(keys.mixedPool)).toHaveLength(MIXED_SUB_MODES.length);
+  });
+
+  it("names a key for every declared setup source", () => {
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    for (const source of SETUP_SOURCES) {
+      expect(keys.hostSetup[source]).toBe(`loop:stats:2026-08-09:host_setup:${source}`);
+    }
+    expect(Object.keys(keys.hostSetup)).toHaveLength(SETUP_SOURCES.length);
+    expect(new Set(SETUP_SOURCES).size).toBe(SETUP_SOURCES.length);
   });
 
   it("names a key for every quiz stage and every verdict bucket", () => {
@@ -654,6 +670,62 @@ describe("host game index", () => {
   });
 });
 
+describe("how the playlist got into the field", () => {
+  const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+  const setupKeys = () => keysWritten().filter((k) => k.includes(":host_setup:"));
+
+  it("counts a game from a page that sent no source exactly as it always was", async () => {
+    // Every tab open across the deploy is such a page. It must add nothing
+    // under `host_setup:` and lose nothing anywhere else.
+    await recordGameStart(3);
+    expect(setupKeys()).toEqual([]);
+    expect(keysWritten()).toEqual([keys.games, keys.live, keys.hostIndex[2], keys.repeatHost]);
+  });
+
+  it("adds exactly one command for a game that said, and keys nothing else differently", async () => {
+    await recordGameStart(3, undefined, "restored");
+    expect(setupKeys()).toEqual([keys.hostSetup.restored]);
+    expect(kv.incrs).toHaveLength(5);
+    expect(keysWritten()).toEqual([
+      keys.games,
+      keys.live,
+      keys.hostIndex[2],
+      keys.repeatHost,
+      keys.hostSetup.restored,
+    ]);
+  });
+
+  it("records a mixed game under both its pool and its source", async () => {
+    await recordGameStart(1, "phone", "mixed");
+    expect(keysWritten()).toContain(keys.mixedPool.phone);
+    expect(setupKeys()).toEqual([keys.hostSetup.mixed]);
+  });
+
+  it("refuses a source outside the list, and still counts the game", async () => {
+    // The value becomes the tail of a key, and the body that carried it
+    // reached /api/pulse from the open internet.
+    for (const bad of ["Typed", "pasted", "", "__proto__", "constructor", "typed ", "a".repeat(500)]) {
+      kv.incrs = [];
+      __resetLivenessForTests();
+      await recordGameStart(1, undefined, bad as never);
+      expect(setupKeys(), bad).toEqual([]);
+      expect(keysWritten(), bad).toContain(keys.games);
+    }
+  });
+
+  it("keeps the key space at the six declared sources", async () => {
+    for (const source of SETUP_SOURCES) await recordGameStart(1, undefined, source);
+    expect(new Set(setupKeys()).size).toBe(SETUP_SOURCES.length);
+    expect([...SETUP_SOURCES]).toEqual(["typed", "restored", "recent", "starter", "shared", "mixed"]);
+  });
+
+  it("is swallowed with the rest when KV is down", async () => {
+    kv.failWrites = true;
+    await expect(recordGameStart(2, "room", "mixed")).resolves.toBeUndefined();
+    await expect(recordGameStart(2, undefined, "recent")).resolves.toBeUndefined();
+  });
+});
+
 describe("fail-soft", () => {
   it("swallows a KV outage rather than failing the caller's request", async () => {
     kv.failWrites = true;
@@ -758,6 +830,28 @@ describe("the digest prints what the recorders write", () => {
     expect(refused).toBeGreaterThan(-1);
     expect(split).toBeGreaterThan(refused);
     expect(editorial).toBeGreaterThan(split);
+  });
+
+  it("renders the setup sources under the games block, and claims their prefix", () => {
+    // `host_setup:` is a new prefix, so without its own renderer it would
+    // have fallen to "Other counters" as six unexplained rows — and with the
+    // prefix claimed but nothing reading it, to nowhere at all.
+    const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
+    expect(rendered).toContain('"host_setup:"');
+    expect(script).toMatch(/m\.startsWith\("host_setup:"\)/);
+    expect(script).toMatch(/console\.log\(`Playlist came from/);
+    // The order it prints in is the order the writer declares.
+    const order = script.match(/const SETUP_SOURCE_ORDER = \[([^\]]*)\]/)?.[1] ?? "";
+    expect(order.match(/"([a-z]+)"/g)?.map((s) => s.slice(1, -1))).toEqual([...SETUP_SOURCES]);
+    // The two it adds up are read by name, so they have to be real ones.
+    for (const source of ["restored", "recent", "mixed"] as const) {
+      expect(SETUP_SOURCES).toContain(source);
+      expect(script).toMatch(new RegExp(`get\\("host_setup:${source}"\\)`));
+    }
+    // And it sits with the game starts: after Repeat hosts, before the ends.
+    const at = script.indexOf("Playlist came from");
+    expect(at).toBeGreaterThan(script.indexOf("`Repeat hosts"));
+    expect(at).toBeLessThan(script.indexOf("`Reached Game Over"));
   });
 
   it("reads both game ends, every share pair, and the refusal prefix", () => {

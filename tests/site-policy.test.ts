@@ -87,6 +87,30 @@ describe("privacy policy", () => {
     }
   });
 
+  it("says what the setup page remembers on the device, on both sides", () => {
+    // `lib/setup-memory.ts` keeps player names and playlist links in local
+    // storage between visits. Until it did, "disappears when you close the
+    // tab" was the whole truth about a host's names; a policy that still said
+    // only that would now be wrong, and it is the page a reviewer reads.
+    // Each side names what is kept, that it stays on the device, and the
+    // control that deletes it — under the label the form actually shows.
+    expect(en).toMatch(/player names/i);
+    expect(en).toMatch(/recent/i);
+    expect(en).toMatch(/not sent to us/i);
+    expect(en).toContain("Start fresh");
+    expect(zh).toContain("玩家名字");
+    expect(zh).toContain("最近玩過的歌單");
+    expect(zh).toContain("不會傳給我們");
+    expect(zh).toContain("Start fresh");
+    // And the form does show that label, so the policy names a button that exists.
+    expect(read("components/setup-assist.tsx")).toMatch(/>\s*Start fresh\s*</);
+    // Neither side says the names go anywhere, or promises they are gone on close
+    // without also saying what is kept.
+    for (const source of [en, zh]) {
+      expect(source).toContain("local storage");
+    }
+  });
+
   it("carries a contact address on both sides", () => {
     for (const source of [en, zh]) {
       expect(source).toContain("CONTACT_EMAIL");
