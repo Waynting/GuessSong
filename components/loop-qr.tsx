@@ -14,6 +14,14 @@
  * the wrong answer on the result card: nobody types a URL off a screen. A QR
  * is the only thing five people can act on at once from across a room.
  *
+ * **Across a room is the premise, and a phone does not meet it.** Hosted from
+ * a phone, the screen showing the code is in the host's hand and is the one
+ * device present that cannot scan it: 994 shown, 3 followed, in the week to
+ * 2026-09-29. So the game page renders this on its desktop layout only
+ * (`gameOverOnward` in `lib/game-over.ts`) — and it has to be *not rendered*
+ * there rather than hidden, because the impression below is reported by
+ * mounting. A `display: none` would go on counting a surface nobody saw.
+ *
  * `qrcode` is already a production dependency — `components/buzzer-host-panel`
  * and `components/room-panel` both use it for the join code — so this costs a
  * component and no bundle.

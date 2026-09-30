@@ -1,6 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import type { Track } from "@/types";
 import { trackEvent, type PlaylistSource } from "@/lib/analytics";
@@ -33,9 +39,53 @@ import {
   drawCardFooter,
   shareOrDownloadCanvas,
 } from "@/lib/result-image";
-import { reportGameEnd } from "@/lib/loop-client";
+import {
+  reportFirstClip,
+  reportGameEnd,
+  reportGameLeft,
+  reportGameOverTap,
+} from "@/lib/loop-client";
+import type { FirstClipOutcome, GameHostKind, GameScreen } from "@/lib/loop-stats";
+import { getHostGameCount } from "@/lib/host-session";
+import {
+  CLIP_COPY,
+  afterClipError,
+  afterPlayRejected,
+  afterSoundStarted,
+  startPlayback,
+  type ClipMiss,
+  type ClipSite,
+  type PlaybackResult,
+} from "@/lib/clip-start";
+import { createClipClock } from "@/lib/clip-clock";
+import { createFirstClipTracker, firstClipPath } from "@/lib/first-clip";
+import { dropSilentUpcoming, silentSkippedLine } from "@/lib/track-queue";
+import {
+  MIXED_NEXT_GAME_LABEL,
+  MIXED_SETUP_HREF,
+  PHONE_MEDIA_QUERY,
+  gameOverOnward,
+  gameScreenFor,
+  readGameScreen,
+} from "@/lib/game-over";
+import {
+  claimFirstPage,
+  gameFingerprint,
+  gamePageStorage,
+  hostKindOf,
+} from "@/lib/game-beacons";
 
 type Phase = "waiting" | "playing" | "guessing" | "revealed" | "finished";
+
+/**
+ * A `play()` the page has asked for and the element has not answered yet.
+ * Carries its own round token, so whatever answers it can tell whether the
+ * round it was asked in is still the one on screen.
+ */
+interface SoundRequest {
+  site: ClipSite;
+  stillThisRound: () => boolean;
+}
 
 const ALBUM_PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='%231a1a1a'/%3E%3Ccircle cx='200' cy='200' r='80' fill='%23222'/%3E%3Ccircle cx='200' cy='200' r='20' fill='%23111'/%3E%3C/svg%3E";
@@ -89,8 +139,28 @@ export default function GamePage() {
   const [roundHistory, setRoundHistory] = useState<RoundHistoryEntry[]>([]);
   const [albumHintShown, setAlbumHintShown] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [noAudio, setNoAudio] = useState(false);
+  /**
+   * Why this round has no clip, or null. Two values rather than the boolean
+   * it used to be, because they are two different things to tell a host:
+   * `absent` is the song's, `unavailable` is ours and gets a Retry. See
+   * CLIP_COPY in lib/clip-start.ts.
+   */
+  const [clipMiss, setClipMiss] = useState<ClipMiss | null>(null);
+  /** The browser refused a play(), and the host is being asked to tap again. */
+  const [playBlocked, setPlayBlocked] = useState(false);
   const [loadingSkipVisible, setLoadingSkipVisible] = useState(false);
+  /** Known-silent tracks taken out of the queue — lib/track-queue.ts. */
+  const [silentSkipped, setSilentSkipped] = useState(0);
+  /**
+   * The pool as it was loaded, which `tracks` stops being once silent rounds
+   * are dropped from it. The mix list and the taste card describe the
+   * evening's music, not the rounds that could be played: built from the
+   * queue, a contributor whose songs all lacked a clip would be reported as
+   * having had none of their playlist make the pool.
+   */
+  const [pool, setPool] = useState<Track[]>([]);
+  /** Null until an effect has asked — see gameScreenFor in lib/game-over.ts. */
+  const [screen, setScreen] = useState<GameScreen | null>(null);
   const [playlistSource, setPlaylistSource] = useState<PlaylistSource>("own");
   const [mixedMeta, setMixedMeta] = useState<MixedPlaylistMeta | null>(null);
   const [mixCopied, setMixCopied] = useState(false);
@@ -116,12 +186,32 @@ export default function GamePage() {
   // Clip time is accounted in segments rather than from one start timestamp,
   // because a pause splits the clip into several. Without this a 15s clip
   // paused for 20s would end the moment it resumed — the deadline was wall
-  // clock, not playback.
-  const clipElapsedRef = useRef(0);
-  const clipSegmentStartRef = useRef(0);
+  // clock, not playback. The arithmetic is lib/clip-clock.ts.
+  const clockRef = useRef(createClipClock());
   // Read by the buzz handler, which must not re-subscribe on every phase change.
   const phaseRef = useRef<Phase>("waiting");
   phaseRef.current = phase;
+  // Read by what outlives a render: the prefetch's answer, which lands
+  // seconds after the effect that asked, and the leave beacon, which fires
+  // from a listener registered once.
+  const tracksRef = useRef<Track[]>([]);
+  tracksRef.current = tracks;
+  const currentIndexRef = useRef(0);
+  currentIndexRef.current = currentIndex;
+  /**
+   * The one `play()` still waiting on the element, or null. Set by the ask,
+   * cleared by whatever answers it — and by anything that stops the clip,
+   * *before* it pauses, because the pause is what rejects the promise.
+   */
+  const soundRequestRef = useRef<SoundRequest | null>(null);
+  /**
+   * Which press the loading affordances belong to. Two rounds' lookups can be
+   * in flight at once, so "Skip Track appears after 1.5s" must only ever
+   * answer for the press that started the wait: a timer that fired for an
+   * abandoned round would otherwise hand the *next* round its Skip button
+   * early, and one that was cleared by it would take the button away.
+   */
+  const busyRef = useRef(0);
   /**
    * Which round the host is looking at. See lib/round-token.ts for the rule and
    * for why it is not written inline here.
@@ -140,8 +230,27 @@ export default function GamePage() {
   const previewCache = useRef<Record<string, string | null>>({});
   /** One repair attempt per track, so a genuinely dead URL can't loop. */
   const refreshedTracks = useRef<Set<string>>(new Set());
+  /**
+   * The track whose repair is in flight, if any. A failing element can fire
+   * `error` more than once, and the second must neither start a second
+   * repair nor be read as "repaired already, and failed again".
+   */
+  const repairingRef = useRef<string | null>(null);
   const gameStartTimeRef = useRef<number>(Date.now());
   const finishedTrackedRef = useRef(false);
+  /** The first Play press of this page, reported once — lib/first-clip.ts. */
+  const firstClipRef = useRef(createFirstClipTracker());
+  /** Read on mount; "unknown" until then and whenever storage will not say. */
+  const hostKindRef = useRef<GameHostKind>("unknown");
+  /**
+   * False when this page is a reload of a game that already had one. Null
+   * until the game has loaded. See claimFirstPage in lib/game-beacons.ts for
+   * why a restarted page sends neither a first clip nor a leave.
+   */
+  const firstPageRef = useRef<boolean | null>(null);
+  const leftRef = useRef(false);
+  const mountedRef = useRef(false);
+  const prefetchAskedRef = useRef(false);
 
   /**
    * The clip transport, identical in "playing" and "guessing".
@@ -194,13 +303,27 @@ export default function GamePage() {
   /**
    * The waiting-phase escape hatch, shared by the "still finding audio" and
    * "no audio" branches so the pair cannot drift apart.
+   *
+   * Retry is here rather than in a branch of its own for that reason, and it
+   * is offered for `unavailable` only: that one is about us and clears, so
+   * asking again can answer differently. `absent` is settled — the cache
+   * would hand the same null straight back — and a button that cannot work
+   * teaches the host that none of them do. Reveal stays the primary: the
+   * server holds an `unavailable` for ninety seconds, so a second ask inside
+   * that window is told the same thing.
    */
   function skipControls() {
+    const canRetry = clipMiss === "unavailable" && !previewLoading;
     return (
-      <div className="btn-row">
+      <div className={`btn-row${canRetry ? " with-retry" : ""}`}>
         <button className="btn-primary" onClick={reveal}>
           Reveal Answer →
         </button>
+        {canRetry && (
+          <button className="btn-ghost" onClick={playClip}>
+            {CLIP_COPY.retry}
+          </button>
+        )}
         <button className="btn-ghost" onClick={nextTrack}>
           Skip Track
         </button>
@@ -227,6 +350,21 @@ export default function GamePage() {
     const data = loadGame();
     if (!data || data.tracks.length === 0) { router.push("/"); return; }
     setTracks(data.tracks);
+    setPool(data.tracks);
+    // The start on `/` bumped the count before it navigated here, so the
+    // count is this game's index. Read now and kept: a second tab starting
+    // its own game later must not change what this one reports at its end.
+    const hostGames = getHostGameCount();
+    hostKindRef.current = hostKindOf(hostGames);
+    // Claimed once per page, not once per effect run — StrictMode runs this
+    // twice in development, and the second run would find the first's marker
+    // and read its own page as a reload.
+    if (firstPageRef.current === null) {
+      firstPageRef.current = claimFirstPage(
+        gamePageStorage(),
+        gameFingerprint(data.tracks, hostGames)
+      );
+    }
     setPlayers(data.players);
     setPlaylistName(data.playlistName);
     setClipDuration(data.clipDuration);
@@ -258,10 +396,21 @@ export default function GamePage() {
    *
    * Deliberately not awaited by anything: the host can start immediately, and
    * playClip reads whatever has landed by then.
+   *
+   * **Asked once per page, and the guard is what makes dropping tracks safe.**
+   * The answer below takes the known-silent rounds out of `tracks`, and this
+   * effect depends on `tracks` — so without `prefetchAskedRef` every drop
+   * would re-run it and send a second batch made of exactly the tracks the
+   * first could not settle: the throttled ones, re-asked the moment they were
+   * refused, on the hottest path in the app. They take the lazy path instead,
+   * when the game reaches them, which is what they did before.
+   *
+   * The answer is kept for as long as the page is mounted, not until this
+   * effect's next cleanup. The cleanup runs whenever `tracks` changes, and
+   * with the guard above an answer cancelled by it is never asked for again.
    */
   useEffect(() => {
-    if (tracks.length === 0) return;
-    let cancelled = false;
+    if (tracks.length === 0 || prefetchAskedRef.current) return;
 
     const pending: PreviewBatchTrack[] = tracks
       .filter((t) => previewCache.current[t.id] === undefined)
@@ -272,25 +421,144 @@ export default function GamePage() {
         durationMs: t.durationMs,
       }));
     if (pending.length === 0) return;
+    prefetchAskedRef.current = true;
 
     void fetchPreviewBatch(pending).then((resolved) => {
-      if (cancelled) return;
+      if (!mountedRef.current) return;
       for (const [id, result] of resolved) {
         if (isPreviewSettled(result.status)) previewCache.current[id] = result.previewUrl;
       }
+      // The refs, not this closure's `tracks` and index: the batch takes
+      // seconds, and the host has been free to play for all of them.
+      const { queue, dropped } = dropSilentUpcoming(
+        tracksRef.current,
+        currentIndexRef.current,
+        previewCache.current
+      );
+      if (dropped === 0) return;
+      setTracks([...queue]);
+      setSilentSkipped((n) => n + dropped);
     });
-
-    return () => {
-      cancelled = true;
-    };
   }, [tracks]);
 
-  const stopClip = useCallback(() => {
-    audioRef.current?.pause();
+  // Which layout this is. In an effect because the server has no viewport —
+  // see gameScreenFor. Re-read on change: a phone turned on its side crosses
+  // the breakpoint, and the stylesheet follows it whether this does or not.
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia(PHONE_MEDIA_QUERY);
+    const read = () => setScreen(gameScreenFor(query.matches));
+    read();
+    // Safari before 14 has only the deprecated pair.
+    if (typeof query.addEventListener === "function") {
+      query.addEventListener("change", read);
+      return () => query.removeEventListener("change", read);
+    }
+    query.addListener(read);
+    return () => query.removeListener(read);
+  }, []);
+
+  /**
+   * Report how the first Play press came out. Safe to call from anywhere, any
+   * number of times: the tracker answers once, for the first press only.
+   */
+  const settleFirstClip = useCallback((outcome: FirstClipOutcome) => {
+    const report = firstClipRef.current.settle(outcome);
+    if (!report || firstPageRef.current === false) return;
+    reportFirstClip(report.path, report.outcome);
+  }, []);
+
+  /**
+   * The game page went away with the game unfinished.
+   *
+   * Once per page. A page restored from the back/forward cache is the same
+   * page, so it does not report a second leave — and if its game then reaches
+   * Game Over it is in both counts, which is a thing to know when reading
+   * them rather than a thing this can take back.
+   */
+  const reportLeave = useCallback(
+    (via: "unload" | "navigation") => {
+      if (leftRef.current) return;
+      // No game was ever on this page: the payload was missing and the mount
+      // effect is already sending the host back to setup.
+      if (tracksRef.current.length === 0) return;
+      if (phaseRef.current === "finished") return;
+      leftRef.current = true;
+      // A press still waiting on its clip is a press that came to nothing.
+      settleFirstClip("abandoned");
+      if (firstPageRef.current === false) return;
+      reportGameLeft(
+        countRoundsPlayed(currentIndexRef.current, phaseRef.current),
+        hostKindRef.current,
+        via
+      );
+    },
+    [settleFirstClip]
+  );
+
+  /**
+   * `pagehide`, not `visibilitychange`. A phone that locks mid-party hides
+   * the tab and the party is still going; counting that as leaving would file
+   * every long guess under "left at round N".
+   *
+   * The unmount is the other way off this page and fires no `pagehide`: the
+   * back gesture is a client-side navigation, so the document lives on and
+   * only the component goes. It is reported a tick late on purpose —
+   * StrictMode unmounts and remounts every component once in development,
+   * and a leave sent from that would be a real beacon for a game nobody left.
+   */
+  useEffect(() => {
+    mountedRef.current = true;
+    const onPageHide = () => reportLeave("unload");
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      mountedRef.current = false;
+      window.removeEventListener("pagehide", onPageHide);
+      window.setTimeout(() => {
+        if (!mountedRef.current) reportLeave("navigation");
+      }, 0);
+    };
+  }, [reportLeave]);
+
+  const stopClipTimers = useCallback(() => {
     if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-    setClipPaused(false);
+    clipTimeoutRef.current = null;
+    progressIntervalRef.current = null;
   }, []);
+
+  /**
+   * Show the spinner for this press, and the way out of it 1.5s later if the
+   * press is still the one being waited on. Covers both waits a press can
+   * have — the lookup, and the element loading what the lookup found — as
+   * one, counted from the tap, because the host is waiting from the tap.
+   */
+  const beginBusy = useCallback(() => {
+    const mine = ++busyRef.current;
+    setPreviewLoading(true);
+    setLoadingSkipVisible(false);
+    window.setTimeout(() => {
+      if (busyRef.current === mine) setLoadingSkipVisible(true);
+    }, 1500);
+  }, []);
+
+  /** The wait is over, however it ended. Retires the press's timer with it. */
+  const endBusy = useCallback(() => {
+    busyRef.current += 1;
+    setPreviewLoading(false);
+    setLoadingSkipVisible(false);
+  }, []);
+
+  const stopClip = useCallback(() => {
+    // Before the pause, not after: pausing rejects a play() that is still
+    // pending, and whatever this browser calls that rejection, it has to
+    // find no request left to answer.
+    soundRequestRef.current = null;
+    audioRef.current?.pause();
+    stopClipTimers();
+    clockRef.current.close(Date.now());
+    setClipPaused(false);
+  }, [stopClipTimers]);
 
   /**
    * Hand back the clip the element is holding, so a round cannot inherit the
@@ -321,38 +589,139 @@ export default function GamePage() {
    * and a fourth round-ending path is exactly the kind of thing that gets added
    * later. Nothing can test that ordering — the guard lives in a component the
    * vitest suite cannot reach — so it has to be impossible to get wrong instead.
+   *
+   * The first clip is settled first, while the press it belongs to can still
+   * be told from the next round's: a host who skips past a clip that never
+   * started has abandoned it, and that is the outcome.
    */
   const retireRound = useCallback(() => {
+    settleFirstClip("abandoned");
     stopClip();
     roundsRef.current.bump();
     releaseClip();
-    setPreviewLoading(false);
-    setNoAudio(false);
-    setLoadingSkipVisible(false);
-  }, [stopClip, releaseClip]);
+    endBusy();
+    setClipMiss(null);
+    setPlayBlocked(false);
+  }, [settleFirstClip, stopClip, releaseClip, endBusy]);
 
   /**
    * Start (or restart) the progress bar and the end-of-clip deadline for
-   * however much of the clip is left. Called once when a clip starts, and again
-   * on every resume.
+   * however much of the clip is left.
+   *
+   * **Called when the element reports sound, never when it is asked for.**
+   * That is the whole of `soundStarted` below and the reason it exists: these
+   * used to start on the line after `play()`, so a refused or still-loading
+   * clip counted its window down over silence.
    */
   const startClipTimers = useCallback(() => {
+    stopClipTimers();
     const totalMs = clipDuration * 1000;
-    clipSegmentStartRef.current = Date.now();
+    const clock = clockRef.current;
+    clock.open(Date.now());
     progressIntervalRef.current = setInterval(() => {
-      const elapsed = clipElapsedRef.current + (Date.now() - clipSegmentStartRef.current);
-      setProgress(Math.min((elapsed / totalMs) * 100, 100));
+      setProgress(Math.min((clock.elapsed(Date.now()) / totalMs) * 100, 100));
     }, 80);
     clipTimeoutRef.current = setTimeout(() => {
       audioRef.current?.pause();
-      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+      stopClipTimers();
       // Bank the whole clip, so a later Resume knows the window is spent and
       // plays on instead of re-arming a countdown that already finished.
-      clipElapsedRef.current = totalMs;
+      clock.spend(totalMs);
       setProgress(100);
       setPhase("guessing");
-    }, Math.max(0, totalMs - clipElapsedRef.current));
-  }, [clipDuration]);
+    }, Math.max(0, totalMs - clock.elapsed(Date.now())));
+  }, [clipDuration, stopClipTimers]);
+
+  /**
+   * The element is making sound. The only place a clip's timers start and the
+   * only place a round becomes "playing".
+   *
+   * Reached twice for most clips — the promise `play()` returned resolves and
+   * the `playing` event fires, for the same fact — and the request is what
+   * makes the second a no-op. Both are listened to because neither is
+   * universal: a browser old enough to return no promise has only the event.
+   * A `playing` with no request is one nobody asked for (the element picking
+   * up after a stall), and it must not restart a countdown.
+   */
+  const soundStarted = useCallback(() => {
+    const request = soundRequestRef.current;
+    if (!request) return;
+    soundRequestRef.current = null;
+
+    const verdict = afterSoundStarted({
+      phase: phaseRef.current,
+      currentRound: request.stillThisRound(),
+      windowSpent: clockRef.current.elapsed(Date.now()) >= clipDuration * 1000,
+    });
+    if (verdict === "silence") {
+      audioRef.current?.pause();
+      return;
+    }
+
+    endBusy();
+    settleFirstClip("played");
+    setClipPaused(false);
+    if (verdict === "play_on") {
+      clockRef.current.open(Date.now());
+      return;
+    }
+    startClipTimers();
+    setPhase("playing");
+  }, [clipDuration, endBusy, settleFirstClip, startClipTimers]);
+
+  /**
+   * Ask the element for sound, and do nothing else until it answers.
+   *
+   * Every `play()` on this page goes through here; there were four, each
+   * `audio.play().catch(() => {})` with the phase and the timers set on the
+   * next line. A request replaces the one before it, so an answer that
+   * arrives for a request no longer in the ref — Replay tapped twice, a
+   * repair that overtook the start it is repairing — belongs to nobody.
+   */
+  const requestSound = useCallback(
+    (site: ClipSite) => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      const request: SoundRequest = { site, stillThisRound: roundsRef.current.begin() };
+      soundRequestRef.current = request;
+      setPlayBlocked(false);
+
+      void startPlayback(audio).then((result: PlaybackResult) => {
+        const standing = soundRequestRef.current === request;
+        if (result === "pending") return;
+        if (result === "sounding") {
+          if (standing) soundStarted();
+          return;
+        }
+
+        const verdict = afterPlayRejected({
+          result,
+          phase: phaseRef.current,
+          currentRound: request.stillThisRound(),
+          standing,
+        });
+        // `unplayable` leaves the request where it is: the element fires
+        // `error` for the same fault, and handleAudioError reads the request
+        // to know this round was waiting on a clip.
+        if (verdict.act === "ignore") return;
+
+        soundRequestRef.current = null;
+        stopClipTimers();
+        clockRef.current.close(Date.now());
+        endBusy();
+        settleFirstClip("rejected");
+        trackEvent("clip_blocked", {
+          site,
+          reason: result === "interrupted" ? "interrupted" : "refused",
+          round_index: currentIndexRef.current + 1,
+        });
+        setClipPaused(false);
+        setPlayBlocked(true);
+        setPhase(verdict.phase);
+      });
+    },
+    [soundStarted, stopClipTimers, endBusy, settleFirstClip]
+  );
 
   /**
    * Hold the music where it is, without ending the round. Someone buzzing in is
@@ -368,28 +737,25 @@ export default function GamePage() {
     const audio = audioRef.current;
     if (!audio || audio.paused) return;
     if (phaseRef.current !== "playing" && phaseRef.current !== "guessing") return;
+    // Same order as stopClip, same reason: a Replay still loading when the
+    // buzz lands has a play() pending, and this pause is what rejects it.
+    soundRequestRef.current = null;
     audio.pause();
-    clipElapsedRef.current += Date.now() - clipSegmentStartRef.current;
-    if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
-    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    clockRef.current.close(Date.now());
+    stopClipTimers();
     setClipPaused(true);
-  }, []);
+  }, [stopClipTimers]);
 
+  /**
+   * Hand the rest of the clip back. Whether there is any of it left to count
+   * down — or the host is deliberately playing on past the window — is
+   * decided when the sound starts, by `afterSoundStarted`, not here.
+   */
   const resumeClip = useCallback(() => {
     const audio = audioRef.current;
     if (!audio?.src) return;
-    audio.play().catch(() => {});
-    setClipPaused(false);
-    // Only re-arm the end-of-clip deadline if any of the clip is left. Past
-    // that the host is deliberately playing on, so there is nothing left to
-    // count down to and we stay put rather than snapping the phase around.
-    if (clipElapsedRef.current < clipDuration * 1000) {
-      startClipTimers();
-      setPhase("playing");
-    } else {
-      clipSegmentStartRef.current = Date.now();
-    }
-  }, [clipDuration, startClipTimers]);
+    requestSound("resume");
+  }, [requestSound]);
 
   /** Stop the music and ask the room. The clip stays resumable. */
   const holdClip = useCallback(() => {
@@ -401,17 +767,18 @@ export default function GamePage() {
   const replayClip = useCallback(() => {
     const audio = audioRef.current;
     if (!audio?.src) return;
-    if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
-    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    stopClipTimers();
+    clockRef.current.reset();
     audio.currentTime = 0;
-    clipElapsedRef.current = 0;
-    audio.play().catch(() => {});
-    setClipPaused(false);
     setProgress(0);
-    startClipTimers();
-    setPhase("playing");
-  }, [startClipTimers]);
+    requestSound("replay");
+  }, [stopClipTimers, requestSound]);
 
+  /**
+   * The waiting-phase Play button, and Retry, which is the same press asked
+   * again. Both are taps in the waiting phase of the round on screen, which
+   * is the only thing the guards below assume.
+   */
   async function playClip() {
     const audio = audioRef.current;
     const track = tracks[currentIndex];
@@ -423,49 +790,45 @@ export default function GamePage() {
     // always comes from iTunes or Deezer via lib/preview-cache.ts.
     const cached = previewCache.current[track.id];
     let previewUrl = cached ?? null;
-    let missReason: "absent" | "unavailable" = "absent";
+    let missReason: ClipMiss = "absent";
+
+    // Armed by the first press of the page and by no other — see the tracker.
+    firstClipRef.current.press(firstClipPath(cached));
+    setClipMiss(null);
+    setPlayBlocked(false);
+    // One wait from the tap to the sound, whichever of the two steps below
+    // it is spent in. The prefetched path shows it too, for as long as the
+    // element takes to load — which is the honest thing to show.
+    beginBusy();
 
     // `undefined` means nobody has asked yet. A cached `null` is a settled
     // "nothing anywhere has a clip for this", and re-asking it on every press
     // of Play is the load the cache exists to remove.
     if (!previewUrl && cached === undefined) {
-      setPreviewLoading(true);
-      setLoadingSkipVisible(false);
-      // Held in a local rather than a ref on purpose. Two rounds' resolutions
-      // can be in flight at once, and a shared ref would already belong to the
-      // round that replaced us — clearing it would take the next host's Skip
-      // button away instead of our own.
-      const skipTimer = setTimeout(() => setLoadingSkipVisible(true), 1500);
-
       const result = await fetchPreview({
         id: track.id,
         name: track.name,
         artist: track.artists[0] ?? "",
         durationMs: track.durationMs,
       });
-      clearTimeout(skipTimer);
       // Keyed by track id, so it is worth keeping whichever round we came back
       // to — the host who skipped past this track may still come back to it.
       // Settled answers only — see previewCache's declaration.
       if (isPreviewSettled(result.status)) previewCache.current[track.id] = result.previewUrl;
 
       // The host moved on while we were asking. Everything past here writes to
-      // state and to an element that now belong to somebody else's round.
+      // state and to an element that now belong to somebody else's round —
+      // the loading affordances included: retireRound has already put ours
+      // away, and the spinner on screen now may be the next round's.
       if (!stillThisRound()) return;
-
-      // Past the token check this is still our round, so the loading
-      // affordances are ours to put away — including on the reveal path just
-      // below, which returns without ever starting a clip. Doing it any earlier
-      // would let an abandoned round switch off a *new* round's spinner.
-      setLoadingSkipVisible(false);
-      setPreviewLoading(false);
 
       // The round does not have to *end* for the answer to be stale. "Reveal
       // Answer" is rendered by this very loading state, and reveal() only moves
       // the phase — so without this the clip started under the answer card the
       // host had just put up, tearing the scoring buttons off screen. playClip
-      // has exactly one caller, the waiting-phase Play button, so a resolution
-      // landing in any other phase can never legitimately start a clip.
+      // is only ever called from the waiting phase, so a resolution landing in
+      // any other can never legitimately start a clip. reveal() has put the
+      // spinner away itself.
       if (phaseRef.current !== "waiting") return;
 
       previewUrl = result.previewUrl;
@@ -479,18 +842,35 @@ export default function GamePage() {
         artist: track.artists[0] ?? "",
         reason: missReason,
       });
-      setNoAudio(true);
+      endBusy();
+      settleFirstClip(missReason === "unavailable" ? "unavailable" : "no_audio");
+      setClipMiss(missReason);
       return;
     }
 
     audio.src = previewUrl;
     audio.currentTime = 0;
-    audio.play().catch(() => {});
-    setPhase("playing");
+    clockRef.current.reset();
     setProgress(0);
-    clipElapsedRef.current = 0;
     setClipPaused(false);
-    startClipTimers();
+    // The phase stays "waiting" and no timer starts. On the lazy path this
+    // play() is already outside the tap that asked for it, which is where a
+    // browser may refuse it; soundStarted and the rejection in requestSound
+    // are the two ways this round leaves the spinner.
+    requestSound("play");
+  }
+
+  /**
+   * The clip cannot be played and there is nothing left to try. Put the
+   * round into the state a track with no clip starts in, rather than leaving
+   * a spinner, or a progress bar, over silence.
+   */
+  function clipFailed(miss: ClipMiss) {
+    stopClip();
+    endBusy();
+    settleFirstClip("error");
+    setClipMiss(miss);
+    setPhase("waiting");
   }
 
   /**
@@ -502,57 +882,93 @@ export default function GamePage() {
    * `lookup?id=` call re-resolves the track, where letting the entry expire
    * instead would mean re-searching every song in the catalogue on a timer.
    *
-   * Once per track per game. A URL that fails twice is not a rotated one.
+   * Once per track per game. A URL that fails twice is not a rotated one —
+   * and a second failure ends the round's clip rather than being ignored,
+   * which is what it used to be: the early return left whatever was on
+   * screen counting down over an element that could no longer make a sound.
    */
   async function handleAudioError() {
     const audio = audioRef.current;
     const track = tracks[currentIndex];
-    // The element also fires `error` when we clear its src between rounds,
-    // which is us tearing the round down, not a URL going bad.
-    if (!audio?.src || !track) return;
-    if (phaseRef.current !== "playing" && phaseRef.current !== "guessing") return;
-    if (refreshedTracks.current.has(track.id)) return;
-    refreshedTracks.current.add(track.id);
-    const stillThisRound = roundsRef.current.begin();
+    if (!audio || !track) return;
+    // Is this round waiting on the element at all? Read as a function because
+    // it is asked twice, either side of the await, and the second answer is
+    // the one that counts.
+    const verdictNow = () =>
+      afterClipError({
+        // The element also fires `error` when we clear its src between
+        // rounds, which is us tearing the round down, not a URL going bad.
+        hasSource: Boolean(audio.src),
+        phase: phaseRef.current,
+        starting: soundRequestRef.current !== null,
+        repairing: repairingRef.current === track.id,
+        alreadyRepaired: refreshedTracks.current.has(track.id),
+      });
 
+    const verdict = verdictNow();
+    if (verdict === "ignore") return;
+    // Whatever was counting, the sound it was counting has stopped.
+    stopClipTimers();
+    clockRef.current.close(Date.now());
+    if (verdict === "give_up") {
+      clipFailed("absent");
+      return;
+    }
+
+    repairingRef.current = track.id;
+    const stillThisRound = roundsRef.current.begin();
     const result = await fetchPreview(
       { id: track.id, name: track.name, artist: track.artists[0] ?? "", durationMs: track.durationMs },
       { refresh: true }
     );
+    // Ours to clear only if it is still ours: the host may have skipped onto
+    // a track that is being repaired in its own right.
+    if (repairingRef.current === track.id) repairingRef.current = null;
+    // An `unavailable` repair is a repair that was never made — the refresh
+    // route has its own, much tighter limit — so it does not spend the
+    // track's one attempt: Retry replays the dead URL, lands back here, and
+    // has to be allowed to ask.
+    if (result.status !== "unavailable") refreshedTracks.current.add(track.id);
 
-    // Same rule as playClip, and the reason the phase guard above is not enough:
-    // it was read before the await. A repair that lands after the host has moved
+    // Same rule as playClip, and the reason the guard above is not enough: it
+    // was read before the await. A repair that lands after the host has moved
     // on would put the previous round's clip on this round's card.
     if (!stillThisRound()) {
       if (result.previewUrl) previewCache.current[track.id] = result.previewUrl;
       return;
     }
-    // The guard above the await is read before it, so it cannot speak for where
-    // the host is now. Reveal moves the phase without ending the round, and a
-    // repair can land up to UPSTREAM_TIMEOUT_MS later: without this it either
-    // starts the clip under the answer card, or — on the failure branch — puts
-    // the phase back to "waiting" and takes the whole scoring card with it.
-    if (phaseRef.current !== "playing" && phaseRef.current !== "guessing") {
+    // Reveal moves the phase without ending the round, and a repair can land
+    // up to UPSTREAM_TIMEOUT_MS later: without this it either starts the clip
+    // under the answer card, or — on the failure branch — puts the phase back
+    // to "waiting" and takes the whole scoring card with it.
+    if (verdictNow() === "ignore") {
       if (result.previewUrl) previewCache.current[track.id] = result.previewUrl;
       return;
     }
 
     if (!result.previewUrl) {
-      // Nothing left to try. Put the round into the state a track with no clip
-      // starts in, rather than leaving a progress bar counting down silence.
-      stopClip();
-      setNoAudio(true);
-      setPhase("waiting");
+      clipFailed(result.status === "unavailable" ? "unavailable" : "absent");
       return;
     }
 
     previewCache.current[track.id] = result.previewUrl;
     audio.src = result.previewUrl;
     audio.currentTime = 0;
-    audio.play().catch(() => {});
+    // From the top, so the room gets a whole clip of the repaired one.
+    clockRef.current.reset();
+    setProgress(0);
+    // After an await, so outside any tap: the other play() a browser may
+    // refuse. A refusal puts the host at a button, with the URL now cached.
+    requestSound("repair");
   }
 
   function reveal() {
+    // A press still waiting on its clip when the answer goes up came to
+    // nothing, and nothing after this will answer it: stopClip drops the
+    // request, so the spinner it was holding has to be put away here.
+    settleFirstClip("abandoned");
+    endBusy();
+    setPlayBlocked(false);
     stopClip();
     // Deliberately does NOT resolve the room's round.
     //
@@ -630,7 +1046,13 @@ export default function GamePage() {
     const roundsPlayed = countRoundsPlayed(currentIndex, phase);
     // The KV copy, under the same once-per-game guard so the two cannot
     // disagree. `Games started` minus this is the tab that closed mid-party.
-    reportGameEnd(endedEarly ? "ended_early" : "played_out", roundsPlayed);
+    // The layout is read here, in the click, rather than from `screen`: it
+    // names the screen this tap is about to draw.
+    const layout = readGameScreen();
+    reportGameEnd(endedEarly ? "ended_early" : "played_out", roundsPlayed, {
+      host: hostKindRef.current,
+      ...(layout ? { screen: layout } : {}),
+    });
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,
       total_tracks: tracks.length,
@@ -638,6 +1060,8 @@ export default function GamePage() {
       playlist_source: playlistSource,
       game_mode: mode,
       ended_early: endedEarly,
+      host_kind: hostKindRef.current,
+      ...(silentSkipped > 0 ? { silent_skipped: silentSkipped } : {}),
       // The reach denominator: how many phones this game actually touched.
       // Only meaningful in buzzer mode, so it's omitted elsewhere rather than
       // reported as 0 and dragging the average down.
@@ -682,6 +1106,10 @@ export default function GamePage() {
       trackGameFinished(false);
       setPhase("finished");
     } else {
+      // The ref moves with the state rather than a render behind it: the
+      // prefetch's answer reads it to decide which tracks are still upcoming,
+      // and the track that has just become current must not be one of them.
+      currentIndexRef.current = currentIndex + 1;
       setCurrentIndex((i) => i + 1);
       setPhase("waiting");
       setRoundWinner(null);
@@ -702,7 +1130,20 @@ export default function GamePage() {
   }
 
   function playAgain() {
+    reportGameOverTap("play_again", screen);
     router.push("/");
+  }
+
+  /**
+   * The phone's way onward from Game Over. A real `href`, so the link can be
+   * long-pressed and opened like one, routed client-side on a plain tap so
+   * the document — and the beacon just handed to it — survives.
+   */
+  function openMixedSetup(event: ReactMouseEvent<HTMLAnchorElement>) {
+    reportGameOverTap("mixed", screen);
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    router.push(MIXED_SETUP_HREF);
   }
 
   /**
@@ -716,7 +1157,8 @@ export default function GamePage() {
    */
   async function copyMixList() {
     const text = formatMixList({
-      tracks,
+      // The pool, not the queue — see `pool`'s declaration.
+      tracks: pool,
       contributorNames: mixedMeta?.contributorNames ?? [],
       playlistName,
     });
@@ -802,7 +1244,8 @@ export default function GamePage() {
 
   /** Mixed Playlist Mode (v2): the group taste card — shared bangers + awards. */
   async function downloadTasteCard() {
-    const tasteCard = buildTasteCard(tracks, roundHistory);
+    // The pool, not the queue: a shared banger with no clip is still shared.
+    const tasteCard = buildTasteCard(pool, roundHistory);
     const W = 640;
     const sharedTracks = tasteCard.sharedTracks.slice(0, 5);
     const sharedRowH = 44;
@@ -917,6 +1360,8 @@ export default function GamePage() {
   // rather than a sentence made of zeroes.
   const roundSummaryLine = describeRounds(summarizeRounds(roundHistory));
   const maxScore = sortedPlayers[0]?.score ?? 0;
+  const skippedLine = silentSkippedLine(silentSkipped);
+  const onward = gameOverOnward(screen);
 
   if (tracks.length === 0) {
     return (
@@ -1164,6 +1609,20 @@ export default function GamePage() {
         }
 
         .btn-row { display: flex; gap: 8px; }
+        /* Three buttons do not fit one row on a phone: the card is 330px
+           inside at 390 wide, and "Reveal Answer" alone needs 150 of it, so
+           it wrapped to two lines beside the other two. Reveal takes the
+           first row and Retry and Skip share the second, at every width, so
+           the row a host learned on a laptop is the row on their phone. */
+        .btn-row.with-retry { flex-wrap: wrap; }
+        .btn-row.with-retry .btn-primary { flex: 1 1 100%; }
+        .btn-row.with-retry .btn-ghost { flex: 1 1 0; }
+
+        /* One quiet line under the Play prompt. The blocked variant is the
+           one the host has to act on, so it is the one that is legible
+           across a room. */
+        .clip-note { margin-top: 8px; font-size: 12px; line-height: 1.4; color: #555; text-align: center; }
+        .clip-note.blocked { margin-top: 0; font-size: 14px; font-weight: 500; color: #e8e8e8; }
 
         .btn-primary {
           flex: 1;
@@ -1561,6 +2020,33 @@ export default function GamePage() {
           margin-top: 10px;
         }
 
+        /* The phone's way onward from Game Over, where the desktop has the
+           QR. A link and not a button: it goes somewhere, and it is the
+           quietest thing on the screen by design, under a primary and a row
+           of ghosts. 44px tall because it is tapped with a thumb, and free
+           to wrap because the sentence is 48 characters and a 360px phone
+           has room for about 44 of them. */
+        .next-game-link {
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          max-width: 480px;
+          min-height: 44px;
+          margin-top: 6px;
+          padding: 6px 12px;
+          color: #1DB954;
+          font-size: 14px;
+          font-weight: 600;
+          line-height: 1.3;
+          text-align: center;
+          text-decoration: none;
+          border-radius: var(--radius);
+          transition: color 0.15s, background 0.15s;
+        }
+        @media (hover: hover) { .next-game-link:hover { color: #1ed760; background: rgba(29,185,84,0.08); } }
+        .next-game-link:active { background: rgba(29,185,84,0.14); transform: scale(0.985); transition: none; }
+
         .install-cta {
           width: 100%;
           max-width: 480px;
@@ -1731,9 +2217,12 @@ export default function GamePage() {
         }
       `}</style>
 
+      {/* `playing`, not `play`: `play` fires when the element is asked, and
+          `playing` when there is sound. The round waits for the second. */}
       <audio
         ref={audioRef}
         onPlay={() => setAudioPlaying(true)}
+        onPlaying={soundStarted}
         onPause={() => setAudioPlaying(false)}
         onEnded={() => setAudioPlaying(false)}
         onError={handleAudioError}
@@ -1786,7 +2275,7 @@ export default function GamePage() {
                 draggable={false}
               />
               {/* Play button overlay */}
-              {phase === "waiting" && !noAudio && (
+              {phase === "waiting" && !clipMiss && (
                 <div className="album-overlay">
                   <button className="play-btn" onClick={playClip} aria-label="Play clip" disabled={previewLoading} style={previewLoading ? { opacity: 0.5, cursor: "not-allowed" } : {}}>
                     {previewLoading ? (
@@ -1797,10 +2286,13 @@ export default function GamePage() {
                   </button>
                 </div>
               )}
-              {/* No audio overlay */}
-              {phase === "waiting" && noAudio && (
+              {/* No audio overlay. Two sentences, because they are two facts:
+                  the song has no clip, or we could not fetch one. */}
+              {phase === "waiting" && clipMiss && (
                 <div className="album-overlay" style={{ background: "rgba(0,0,0,0.75)", flexDirection: "column", gap: "8px" }}>
-                  <p style={{ color: "#999", fontSize: "13px", textAlign: "center", padding: "0 16px" }}>No audio for this track</p>
+                  <p style={{ color: "#999", fontSize: "13px", textAlign: "center", padding: "0 16px" }}>
+                    {clipMiss === "unavailable" ? CLIP_COPY.unavailable : CLIP_COPY.absent}
+                  </p>
                 </div>
               )}
               {phase === "playing" && (
@@ -1863,12 +2355,19 @@ export default function GamePage() {
                     </p>
                     {loadingSkipVisible && skipControls()}
                   </div>
-                ) : noAudio ? (
+                ) : clipMiss ? (
                   skipControls()
-                ) : (
-                  <p style={{ color: "#555", fontSize: "13px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                    Press Play to start the clip
+                ) : playBlocked ? (
+                  <p className="clip-note blocked" role="status">
+                    {CLIP_COPY.blockedPlay}
                   </p>
+                ) : (
+                  <>
+                    <p style={{ color: "#555", fontSize: "13px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                      Press Play to start the clip
+                    </p>
+                    {skippedLine && <p className="clip-note">{skippedLine}</p>}
+                  </>
                 )}
               </div>
             )}
@@ -1887,6 +2386,14 @@ export default function GamePage() {
                 <p style={{ textAlign: "center", fontSize: "20px", fontWeight: 600, color: "#f0f0f0", marginBottom: "12px" }}>
                   What&apos;s the song?
                 </p>
+                {/* A refused Resume, Replay or repair lands here rather than
+                    in "playing": the transport below it shows Resume, which
+                    is the tap the line asks for. */}
+                {playBlocked && (
+                  <p className="clip-note blocked" role="status" style={{ marginBottom: "12px" }}>
+                    {CLIP_COPY.blockedResume}
+                  </p>
+                )}
                 {clipControls()}
               </div>
             )}
@@ -2120,8 +2627,16 @@ export default function GamePage() {
 
               {/* The room is looking at this screen with their phones already
                   in hand, which is the one moment in the game when a way onward
-                  costs the host nothing to offer. */}
-              <LoopQr />
+                  costs the host nothing to offer. On a phone the screen *is*
+                  the phone in hand, so the way onward is a link — and the QR
+                  is not rendered at all, because rendering is what reports
+                  its impression. lib/game-over.ts. */}
+              {onward === "qr" && <LoopQr />}
+              {onward === "mixed_link" && (
+                <a className="next-game-link" href={MIXED_SETUP_HREF} onClick={openMixedSetup}>
+                  {MIXED_NEXT_GAME_LABEL}
+                </a>
+              )}
             </div>
           )}
         </main>
