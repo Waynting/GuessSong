@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getClientIp, rateLimit } from "@/lib/rate-limit";
 import { parsePulse } from "@/lib/pulse";
 import {
+  recordFirstClip,
   recordGameEnd,
+  recordGameLeft,
+  recordGameOverTap,
   recordGameStart,
   recordLoopImpression,
   recordQuizShare,
@@ -67,7 +70,19 @@ export async function POST(req: NextRequest) {
       await recordGameStart(event.hostGameIndex, event.mixed);
       break;
     case "game_finished":
-      await recordGameEnd(event.end, event.roundsPlayed);
+      await recordGameEnd(event.end, event.roundsPlayed, {
+        host: event.host,
+        screen: event.screen,
+      });
+      break;
+    case "first_clip":
+      await recordFirstClip(event.path, event.outcome);
+      break;
+    case "game_left":
+      await recordGameLeft(event.roundsPlayed, event.host);
+      break;
+    case "game_over_tap":
+      await recordGameOverTap(event.target);
       break;
     case "quiz_shared":
       await recordQuizShare(event.by, event.outcome);

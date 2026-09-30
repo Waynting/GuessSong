@@ -98,6 +98,129 @@ export const GAME_ENDS: readonly GameEnd[] = ["played_out", "ended_early"];
 export const GAME_ROUND_CEILING = 20;
 
 /**
+ * Round zero: the game ended, or the page went away, before any clip had
+ * started. Not a round — the bucket for a game that never played a note.
+ *
+ * `countRoundsPlayed` has always answered 0 for End Game pressed in the first
+ * round's waiting phase, and until 2026-09-30 both `parsePulse` and
+ * `recordGameEnd` clamped that up to 1. So "ended early at round 1" read 213
+ * of 676 in the week to 2026-09-29 and could not say how many of those hosts
+ * had heard a clip at all, which is the difference between "one song in, the
+ * room was not interested" and "the game could not play". The floor is a
+ * constant rather than a literal so the parser, the recorder and the key map
+ * cannot disagree about where the histogram starts.
+ */
+export const GAME_ROUND_FLOOR = 0;
+
+/**
+ * Whether the host of a game that ended (or was left) had hosted before.
+ *
+ *   first    this device's first hosted game
+ *   repeat   its second or later
+ *   unknown  the page could not read the count — storage refused, or the
+ *            start's write never landed
+ *
+ * The start counters (`host_index:<n>`) and the end counters were unjoined:
+ * both were day totals, so "is the pile at rounds 0–2 people trying the site
+ * once, or hosts who came back and whose game broke" had no answer, and the
+ * two call for opposite work. The game page reads the stored count on mount —
+ * the start on `/` has already bumped it, so the count *is* this game's index
+ * — and sends the bucket with the end. Three values, not the index: the
+ * question is binary, and an index here would multiply every key below by ten.
+ *
+ * Inherits the host count's floor (`lib/host-session.ts`): iOS evicts the
+ * count after seven idle days, so `first` contains returning hosts the device
+ * forgot. `repeat` is never wrong; `first` is a ceiling.
+ */
+export type GameHostKind = "first" | "repeat" | "unknown";
+
+export const GAME_HOST_KINDS: readonly GameHostKind[] = ["first", "repeat", "unknown"];
+
+/**
+ * Where an unfinished game stopped, in the three bands that call for
+ * different work: `r0` never played a clip, `r1_2` is the pile the reading
+ * rule calls "a game that could not play", `r3_plus` is a room that played
+ * and stopped. Banded only where it is crossed with the host kind — the
+ * plain histograms keep the exact round — because kind × exact round is
+ * sixty-three keys a day for a question three bands answer.
+ */
+export type EarlyEndBand = "r0" | "r1_2" | "r3_plus";
+
+export const EARLY_END_BANDS: readonly EarlyEndBand[] = ["r0", "r1_2", "r3_plus"];
+
+export function earlyEndBand(round: number): EarlyEndBand {
+  if (round <= GAME_ROUND_FLOOR) return "r0";
+  return round <= 2 ? "r1_2" : "r3_plus";
+}
+
+/**
+ * Which layout the Game Over screen was drawn in. The phone layout is the
+ * `max-width: 768px` one (`lib/game-over.ts`), and it is what decides
+ * whether that screen shows the QR or the Mixed link — so it is also the
+ * denominator `game_over_tap:mixed` needs, and the only record of how many
+ * hosts reach the end on a phone at all.
+ */
+export type GameScreen = "phone" | "desktop";
+
+export const GAME_SCREENS: readonly GameScreen[] = ["phone", "desktop"];
+
+/**
+ * How the first clip a host asked for came out, and whether its URL was
+ * already in hand when they pressed Play.
+ *
+ *   prefetched  the batch prefetch had settled this track before the press
+ *   lazy        it had not, so the press itself had to go and ask
+ *
+ *   played       the `<audio>` element reported sound
+ *   rejected     `play()` was refused and the host was asked to tap again.
+ *                The autoplay policy, all but always; an abort that nothing
+ *                of ours caused lands here too, and is path-blind
+ *   no_audio     nothing anywhere has a clip for the track (`absent`)
+ *   unavailable  we could not answer: throttled, out of budget, offline
+ *   error        the element failed to load the clip and the repair did too
+ *   abandoned    the host skipped, revealed, ended or left before any of
+ *                the above happened
+ *
+ * One per game page, for the first Play press only, because the hypothesis
+ * it tests is about the first press: on the lazy path `play()` runs after an
+ * `await`, outside the tap that asked for it, which is the classic way to be
+ * refused on iOS — and round one is when the prefetch is least likely to
+ * have landed. `lazy:rejected` well above `prefetched:rejected` confirms it;
+ * the two level kills it. Later rounds are GA4's (`clip_blocked`).
+ */
+export type FirstClipPath = "prefetched" | "lazy";
+
+export const FIRST_CLIP_PATHS: readonly FirstClipPath[] = ["prefetched", "lazy"];
+
+export type FirstClipOutcome =
+  | "played"
+  | "rejected"
+  | "no_audio"
+  | "unavailable"
+  | "error"
+  | "abandoned";
+
+export const FIRST_CLIP_OUTCOMES: readonly FirstClipOutcome[] = [
+  "played",
+  "rejected",
+  "no_audio",
+  "unavailable",
+  "error",
+  "abandoned",
+];
+
+/**
+ * What a host tapped on the Game Over screen: `play_again` is the primary
+ * button, `mixed` is the link to Mixed Playlist Mode that replaced the QR on
+ * phones (994 shown, 3 followed — nobody scans a code off the phone in their
+ * own hand). Both are client-side navigations, so unlike a loop link these
+ * can be beacons: the document survives the tap.
+ */
+export type GameOverTap = "play_again" | "mixed";
+
+export const GAME_OVER_TAPS: readonly GameOverTap[] = ["play_again", "mixed"];
+
+/**
  * Who tapped a quiz's share button, and what came of it.
  *
  * `owner` is the panel on `/quiz` after a quiz is made — the step between
@@ -358,7 +481,16 @@ export function loopStatsKeys(
   quizThrottled: Record<QuizThrottledRoute, string>;
   quizShare: Record<QuizShareBy, Record<QuizShareOutcome, string>>;
   gameEnd: Record<GameEnd, string>;
+  /** Indexed by round: `[0]` is round zero, `[GAME_ROUND_CEILING]` is "20+". */
   gameEndRound: string[];
+  gameEndHost: Record<GameHostKind, Record<GameEnd, string>>;
+  gameEndEarly: Record<GameHostKind, Record<EarlyEndBand, string>>;
+  gameEndScreen: Record<GameScreen, string>;
+  /** Indexed by round, like `gameEndRound`. */
+  gameLeftRound: string[];
+  gameLeftHost: Record<GameHostKind, Record<EarlyEndBand, string>>;
+  firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
+  gameOverTap: Record<GameOverTap, string>;
   playlistRefused: Record<PlaylistRefusalCode, string>;
 } {
   const impressions: Record<string, string> = {};
@@ -372,9 +504,19 @@ export function loopStatsKeys(
     hostIndex.push(key(day, `host_index:${n}`));
   }
   const gameEndRound: string[] = [];
-  for (let n = 1; n <= GAME_ROUND_CEILING; n += 1) {
+  const gameLeftRound: string[] = [];
+  for (let n = GAME_ROUND_FLOOR; n <= GAME_ROUND_CEILING; n += 1) {
     gameEndRound.push(key(day, `game_end_round:${n}`));
+    gameLeftRound.push(key(day, `game_left_round:${n}`));
   }
+  /** `<prefix>:<host kind>:<tail>` for every kind, over one closed list of tails. */
+  const byHost = <T extends string>(prefix: string, tails: readonly T[]) =>
+    Object.fromEntries(
+      GAME_HOST_KINDS.map((kind) => [
+        kind,
+        Object.fromEntries(tails.map((t) => [t, key(day, `${prefix}:${kind}:${t}`)])),
+      ])
+    ) as Record<GameHostKind, Record<T, string>>;
   return {
     live: key(day, "live"),
     throttled: key(day, "throttled"),
@@ -388,6 +530,26 @@ export function loopStatsKeys(
       ended_early: key(day, "game_end:ended_early"),
     },
     gameEndRound,
+    gameEndHost: byHost("game_end_host", GAME_ENDS),
+    gameEndEarly: byHost("game_end_early", EARLY_END_BANDS),
+    gameEndScreen: {
+      phone: key(day, "game_end_screen:phone"),
+      desktop: key(day, "game_end_screen:desktop"),
+    },
+    gameLeftRound,
+    gameLeftHost: byHost("game_left_host", EARLY_END_BANDS),
+    firstClip: Object.fromEntries(
+      FIRST_CLIP_PATHS.map((path) => [
+        path,
+        Object.fromEntries(
+          FIRST_CLIP_OUTCOMES.map((o) => [o, key(day, `first_clip:${path}:${o}`)])
+        ),
+      ])
+    ) as Record<FirstClipPath, Record<FirstClipOutcome, string>>,
+    gameOverTap: {
+      play_again: key(day, "game_over_tap:play_again"),
+      mixed: key(day, "game_over_tap:mixed"),
+    },
     playlistRefused: Object.fromEntries(
       PLAYLIST_REFUSAL_CODES.map((c) => [c, key(day, `playlist_refused:${c}`)])
     ) as Record<PlaylistRefusalCode, string>,
@@ -550,16 +712,93 @@ export async function recordGameStart(
  * `roundsPlayed` is keyed only for an early end — for a game that played out
  * it is the song count the host chose, which is a different question and
  * already a GA4 param. Clamped to `GAME_ROUND_CEILING` for the reason the
- * host index is: it arrives from a page.
+ * host index is: it arrives from a page. The floor is `GAME_ROUND_FLOOR`,
+ * zero, which is its own bucket and not a round.
+ *
+ * `details` is what a page from 2026-09-30 on adds, and both halves are
+ * optional for the page that does not: a tab opened before that deploy sends
+ * neither, and its end has to count exactly as it always did — the two
+ * original keys, nothing else, and nothing filed under `unknown`, which
+ * means "the page asked and storage would not say", not "the page was old".
  */
-export async function recordGameEnd(end: GameEnd, roundsPlayed: number): Promise<void> {
+export async function recordGameEnd(
+  end: GameEnd,
+  roundsPlayed: number,
+  details: { host?: GameHostKind; screen?: GameScreen } = {}
+): Promise<void> {
   if (!GAME_ENDS.includes(end)) return;
   await bump(`game_end:${end}`);
-  if (end !== "ended_early") return;
-  const round = Number.isFinite(roundsPlayed)
-    ? Math.max(1, Math.min(Math.trunc(roundsPlayed), GAME_ROUND_CEILING))
-    : 1;
+  const host = isGameHostKind(details.host) ? details.host : null;
+  const extras: Promise<void>[] = [];
+  if (host) extras.push(bump(`game_end_host:${host}:${end}`));
+  if (isGameScreen(details.screen)) extras.push(bump(`game_end_screen:${details.screen}`));
+  if (end !== "ended_early") {
+    await Promise.all(extras);
+    return;
+  }
+  const round = clampRound(roundsPlayed);
   await bump(`game_end_round:${round}`);
+  if (host) extras.push(bump(`game_end_early:${host}:${earlyEndBand(round)}`));
+  await Promise.all(extras);
+}
+
+/** Guards for the key tails above. Each value reaches here from a request body. */
+function isGameHostKind(value: unknown): value is GameHostKind {
+  return typeof value === "string" && (GAME_HOST_KINDS as readonly string[]).includes(value);
+}
+
+function isGameScreen(value: unknown): value is GameScreen {
+  return typeof value === "string" && (GAME_SCREENS as readonly string[]).includes(value);
+}
+
+/**
+ * A round as a key tail: an integer from the floor to the ceiling. Clamped
+ * rather than refused, like the host index beside it and for its reason — the
+ * event is real whatever the counter says, and the key space is bounded
+ * either way.
+ */
+function clampRound(round: number): number {
+  return Number.isFinite(round)
+    ? Math.max(GAME_ROUND_FLOOR, Math.min(Math.trunc(round), GAME_ROUND_CEILING))
+    : GAME_ROUND_FLOOR;
+}
+
+/**
+ * The first clip a host asked for, and how it came out. One per game page —
+ * `createFirstClipTracker` in `lib/first-clip.ts` is what makes it one — so
+ * the sum over every key is "games in which Play was pressed", and `games`
+ * minus that sum is a game nobody ever pressed Play in (or a lost beacon).
+ * Both halves are key tails and both are refused when unknown: a first clip
+ * with half its description missing says nothing.
+ */
+export function recordFirstClip(path: FirstClipPath, outcome: FirstClipOutcome): Promise<void> {
+  if (!FIRST_CLIP_PATHS.includes(path) || !FIRST_CLIP_OUTCOMES.includes(outcome)) {
+    return Promise.resolve();
+  }
+  return bump(`first_clip:${path}:${outcome}`);
+}
+
+/**
+ * The game page went away before the game reached Game Over: the tab was
+ * closed, reloaded or navigated off. The other half of `recordGameEnd` —
+ * between them they account for what `games` started, and what is left over
+ * is a page that could send nothing at all.
+ *
+ * The round is `countRoundsPlayed`'s figure at the moment of leaving, the
+ * same arithmetic as the end beacon, so the two histograms can be read
+ * against each other row for row. The host band is written only when the
+ * page sent a kind, for the reason `recordGameEnd` gives.
+ */
+export async function recordGameLeft(roundsPlayed: number, host?: GameHostKind): Promise<void> {
+  const round = clampRound(roundsPlayed);
+  await bump(`game_left_round:${round}`);
+  if (isGameHostKind(host)) await bump(`game_left_host:${host}:${earlyEndBand(round)}`);
+}
+
+/** A tap on the Game Over screen. See `GameOverTap`. */
+export function recordGameOverTap(target: GameOverTap): Promise<void> {
+  if (!GAME_OVER_TAPS.includes(target)) return Promise.resolve();
+  return bump(`game_over_tap:${target}`);
 }
 
 /**
