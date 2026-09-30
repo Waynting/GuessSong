@@ -23,6 +23,13 @@ import type { LoopSurface } from "@/lib/loop-links";
 import type { GameEnd, MixedSubMode, QuizShareBy, QuizShareOutcome } from "@/lib/loop-stats";
 import type { QuizCopyOutcome } from "@/lib/loop-stats";
 import type { SetupSource } from "@/lib/loop-stats";
+import type {
+  FirstClipOutcome,
+  FirstClipPath,
+  GameHostKind,
+  GameOverTap,
+  GameScreen,
+} from "@/lib/loop-stats";
 import { sendPulse } from "@/lib/pulse-client";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
@@ -109,9 +116,66 @@ export function reportGameStart(
  * is the copy `npm run stats` can subtract from `Games started`.
  *
  * `roundsPlayed` is `countRoundsPlayed`'s figure, the one GA4 gets.
+ *
+ * `details` joins the end to the two things the day totals could not: whether
+ * this device had hosted before, and which layout drew the Game Over screen.
+ * Spread rather than passed, so a caller that has neither sends the body an
+ * older page would have — the server counts that one exactly as it always did.
  */
-export function reportGameEnd(end: GameEnd, roundsPlayed: number): void {
-  sendPulse({ kind: "game_finished", end, roundsPlayed });
+export function reportGameEnd(
+  end: GameEnd,
+  roundsPlayed: number,
+  details: { host?: GameHostKind; screen?: GameScreen } = {}
+): void {
+  sendPulse({
+    kind: "game_finished",
+    end,
+    roundsPlayed,
+    ...(details.host ? { host: details.host } : {}),
+    ...(details.screen ? { screen: details.screen } : {}),
+  });
+}
+
+/**
+ * Call once per game page, when the first Play press has come out one way or
+ * another. `createFirstClipTracker` in `lib/first-clip.ts` is what makes it
+ * once; this only sends. Both destinations, for the reason at the top of this
+ * file.
+ */
+export function reportFirstClip(path: FirstClipPath, outcome: FirstClipOutcome): void {
+  trackEvent("first_clip", { path, outcome });
+  sendPulse({ kind: "first_clip", path, outcome });
+}
+
+/**
+ * Call as the game page goes away with the game unfinished.
+ *
+ * On `pagehide` this is the last thing the document does, which is the case
+ * `sendPulse` is a beacon for. `via` is GA4's alone — `unload` is the
+ * document going (a closed tab, a reload), `navigation` is the page being
+ * unmounted with the document still alive (the back gesture) — because the
+ * two are one fact to the histogram and two to anyone asking which it was.
+ */
+export function reportGameLeft(
+  roundsPlayed: number,
+  host: GameHostKind,
+  via: "unload" | "navigation"
+): void {
+  trackEvent("game_left", { rounds_played: roundsPlayed, host_kind: host, via });
+  sendPulse({ kind: "game_left", roundsPlayed, host });
+}
+
+/**
+ * Call from a tap on the Game Over screen, before the navigation it causes.
+ *
+ * A loop link must be a real navigation because the click tears its document
+ * down (`reportLoopClick`, above). These two do not: both are `router.push`,
+ * the document survives, and the beacon was handed to the browser before the
+ * route changed.
+ */
+export function reportGameOverTap(target: GameOverTap, screen: GameScreen | null): void {
+  trackEvent("game_over_tap", screen ? { target, screen } : { target });
+  sendPulse({ kind: "game_over_tap", target });
 }
 
 /**

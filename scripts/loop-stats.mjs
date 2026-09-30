@@ -349,17 +349,64 @@ const playedOut = get("game_end:played_out");
 const endedEarly = get("game_end:ended_early");
 const reachedEnd = playedOut + endedEarly;
 
+/**
+ * The games that did not reach Game Over and said so: `game_left_round:<n>`,
+ * a beacon from the game page's `pagehide` (and from its unmount, which is
+ * what the back gesture is). Until it existed the line under `Reached Game
+ * Over` called the whole remainder "closed the tab", which was a name for
+ * what nothing had counted. Now the remainder is only what sent neither
+ * beacon, and the line says so.
+ *
+ * Not a partition of `games`, and the subtraction can go negative: a reload
+ * is a leave *and* a game that may still reach Game Over, with one start
+ * between them. A window that begins before the leave beacon shipped has
+ * starts in it that could not have sent one, so the remainder reads high
+ * there; it is a direction, like the gap it replaced.
+ */
+const leftRounds = [...totals.keys()]
+  .filter((m) => m.startsWith("game_left_round:"))
+  .map((m) => Number(m.slice("game_left_round:".length)))
+  .filter(Number.isFinite)
+  .sort((a, b) => a - b);
+const leftMidGame = leftRounds.reduce((t, n) => t + get(`game_left_round:${n}`), 0);
+
 if (reachedEnd > 0) {
   console.log(
     `Reached Game Over   ${reachedEnd}   ${pct(reachedEnd, games)} of games — ` +
       `${playedOut} played out · ${endedEarly} ended early`
   );
-  if (games > reachedEnd) {
+  if (leftMidGame > 0) {
+    const unaccounted = games - reachedEnd - leftMidGame;
+    console.log(
+      `Left mid-game       ${leftMidGame}   ${pct(leftMidGame, games)} of games — ` +
+        "the page was closed, reloaded or navigated away before Game Over"
+    );
+    if (unaccounted > 0) {
+      console.log(
+        `                    the other ${unaccounted} sent neither beacon: a tab the phone killed, ` +
+          "a beacon that was lost, or a game from before the leave beacon shipped"
+      );
+    } else if (unaccounted < 0) {
+      console.log(
+        `                    ${-unaccounted} more ends and leaves than starts: a reloaded game ` +
+          "leaves once and can still reach Game Over"
+      );
+    }
+  } else if (games > reachedEnd) {
     console.log(
       `                    the other ${games - reachedEnd} closed the tab mid-game ` +
         "(a floor: a lost beacon lands here too)"
     );
   }
+}
+
+const screenPhone = get("game_end_screen:phone");
+const screenDesktop = get("game_end_screen:desktop");
+if (screenPhone + screenDesktop > 0) {
+  console.log(
+    `                    Game Over was drawn on a phone ${screenPhone} times ` +
+      `(${pct(screenPhone, screenPhone + screenDesktop).trim()}) and on a desktop ${screenDesktop}`
+  );
 }
 
 const indices = [...totals.keys()]
@@ -383,15 +430,157 @@ const earlyRounds = [...totals.keys()]
   .filter(Number.isFinite)
   .sort((a, b) => a - b);
 
+/**
+ * Row 0 is not a round. It is End Game (or a leave) before any clip had
+ * started, which the page has always reported as 0 and which was clamped up
+ * into row 1 until 2026-09-30 — so a window that straddles that date has
+ * some of its zeros in row 1. Labelled on the row itself, because a bare
+ * "0" at the top of a histogram of rounds reads as one.
+ */
+const ROUND_ZERO_NOTE = "  ← no clip had started";
+
 if (earlyRounds.length > 0 && endedEarly > 0) {
   console.log("\nEnded early at round");
   for (const n of earlyRounds) {
     const count = get(`game_end_round:${n}`);
     const bar = "█".repeat(Math.min(40, Math.round((count / endedEarly) * 40)));
     console.log(
-      `  ${String(n).padStart(2)}${n === GAME_ROUND_CEILING ? "+" : " "} ${String(count).padStart(5)}  ${bar}`
+      `  ${String(n).padStart(2)}${n === GAME_ROUND_CEILING ? "+" : " "} ${String(count).padStart(5)}  ${bar}` +
+        (n === 0 ? ROUND_ZERO_NOTE : "")
     );
   }
+  console.log(
+    "  how to read it: a pile at 0–2 is a game that could not play; a spread through\n" +
+      "  the teens is a room that had enough. Row 0 never heard a clip at all."
+  );
+}
+
+if (leftRounds.length > 0 && leftMidGame > 0) {
+  console.log("\nLeft mid-game at round");
+  for (const n of leftRounds) {
+    const count = get(`game_left_round:${n}`);
+    const bar = "█".repeat(Math.min(40, Math.round((count / leftMidGame) * 40)));
+    console.log(
+      `  ${String(n).padStart(2)}${n === GAME_ROUND_CEILING ? "+" : " "} ${String(count).padStart(5)}  ${bar}` +
+        (n === 0 ? ROUND_ZERO_NOTE : "")
+    );
+  }
+  console.log(
+    "  how to read it: same rows as the histogram above, for the hosts who left without\n" +
+      "  pressing End Game. Once per game — a reload counts where it happened, and the\n" +
+      "  restarted game sends no second leave."
+  );
+}
+
+/**
+ * The two histograms above, crossed with whether the device had hosted
+ * before — `game_end_host:<kind>:<end>`, `game_end_early:<kind>:<band>` and
+ * `game_left_host:<kind>:<band>`, the kind riding on the end and leave
+ * beacons. The question it answers is which audience the pile at rounds 0–2
+ * is: people trying the site once, or hosts who came back and whose game
+ * broke. Banded, because kind × exact round is sixty-three keys a day.
+ *
+ * `first` is a ceiling and `repeat` a floor, for the reason the repeat-host
+ * figure is one: iOS evicts the count after seven idle days, so a returning
+ * host can read as a first. `unknown` is a page that asked and was refused.
+ * Kinds and bands mirror GAME_HOST_KINDS / EARLY_END_BANDS in
+ * lib/loop-stats.ts; tests/loop-stats.test.ts holds the two together.
+ */
+const hostKinds = ["first", "repeat", "unknown"];
+const earlyBands = [
+  ["r0", "no clip started"],
+  ["r1_2", "rounds 1–2"],
+  ["r3_plus", "round 3 or later"],
+];
+const byHost = (prefix, tail) => hostKinds.map((k) => get(`${prefix}:${k}:${tail}`));
+const hostRow = (label, counts) =>
+  `  ${label.padEnd(26)}${counts.map((c) => String(c).padStart(9)).join("")}`;
+const hostPlayedOut = byHost("game_end_host", "played_out");
+const hostEndedEarly = byHost("game_end_host", "ended_early");
+const hostLeft = hostKinds.map((k) =>
+  earlyBands.reduce((t, [band]) => t + get(`game_left_host:${k}:${band}`), 0)
+);
+
+if ([...hostPlayedOut, ...hostEndedEarly, ...hostLeft].some((c) => c > 0)) {
+  console.log("\nHow games ended, by whether the device had hosted before");
+  console.log(hostRow("", hostKinds));
+  console.log(hostRow("played out", hostPlayedOut));
+  console.log(hostRow("ended early", hostEndedEarly));
+  for (const [band, label] of earlyBands) {
+    console.log(hostRow(`  ${label}`, byHost("game_end_early", band)));
+  }
+  console.log(hostRow("left mid-game", hostLeft));
+  for (const [band, label] of earlyBands) {
+    console.log(hostRow(`  ${label}`, byHost("game_left_host", band)));
+  }
+  console.log(
+    "  how to read it: compare the 0–2 rows across the first two columns. Heavier under\n" +
+      "  `first` is people trying the site; heavier under `repeat` is a game that broke\n" +
+      "  for someone who knew how it should go."
+  );
+}
+
+/**
+ * The first Play press of each game: `first_clip:<path>:<outcome>`.
+ *
+ * The hypothesis it was built to test is in the two `rejected` cells. On the
+ * lazy path the page has to look the clip up before it can play it, so
+ * `play()` runs after an await — outside the tap — and a browser may refuse
+ * it; round one is when the prefetch is least likely to have landed. Rates
+ * are per path, because the paths are different sizes and the comparison is
+ * between them. Paths and outcomes mirror FIRST_CLIP_PATHS /
+ * FIRST_CLIP_OUTCOMES in lib/loop-stats.ts.
+ */
+const clipPaths = ["prefetched", "lazy"];
+const clipOutcomes = [
+  ["played", "played"],
+  ["rejected", "refused by the browser"],
+  ["no_audio", "no clip anywhere"],
+  ["unavailable", "we could not answer"],
+  ["error", "would not load"],
+  ["abandoned", "host moved on first"],
+];
+const clipTotals = clipPaths.map((p) =>
+  clipOutcomes.reduce((t, [o]) => t + get(`first_clip:${p}:${o}`), 0)
+);
+const firstClips = clipTotals.reduce((t, c) => t + c, 0);
+
+if (firstClips > 0) {
+  console.log("\nFirst clip of the game");
+  console.log(`  ${"".padEnd(26)}${clipPaths.map((p) => p.padStart(18)).join("")}`);
+  for (const [outcome, label] of clipOutcomes) {
+    const cells = clipPaths.map((p, i) => {
+      const count = get(`first_clip:${p}:${outcome}`);
+      return `${String(count).padStart(9)}  ${pct(count, clipTotals[i])}`;
+    });
+    console.log(`  ${label.padEnd(26)}${cells.join("")}`);
+  }
+  console.log(
+    `  ${firstClips} games had Play pressed, ${pct(firstClips, games).trim()} of games started`
+  );
+  console.log(
+    "  how to read it: `refused` much higher under lazy than under prefetched is the\n" +
+      "  autoplay policy catching a play() that ran outside the tap. If the two rates are\n" +
+      "  level, that is not what is ending games at round one."
+  );
+}
+
+/**
+ * What a host who reached Game Over tapped next: `game_over_tap:<target>`.
+ * `play_again` is against every Game Over; `mixed` is the link phones get in
+ * place of the QR, so it is against the phone screens only.
+ */
+const tapAgain = get("game_over_tap:play_again");
+const tapMixed = get("game_over_tap:mixed");
+if (tapAgain + tapMixed > 0) {
+  console.log(
+    `\nTapped on Game Over  Play Again ${tapAgain} (${pct(tapAgain, reachedEnd).trim()} of Game Overs)` +
+      ` · Mixed link ${tapMixed} (${pct(tapMixed, screenPhone).trim()} of phone Game Overs)`
+  );
+  console.log(
+    "  how to read it: the Mixed link is where the QR used to be on a phone, so its rate\n" +
+      "  is the one to set beside the game_over row above."
+  );
 }
 
 /**
@@ -679,6 +868,13 @@ const RENDERED_PREFIXES = [
   "host_setup:",
   "game_end:",
   "game_end_round:",
+  "game_end_host:",
+  "game_end_early:",
+  "game_end_screen:",
+  "game_left_round:",
+  "game_left_host:",
+  "first_clip:",
+  "game_over_tap:",
   "playlist_refused:",
   "playlist_invalid:",
   "playlist_shortlink:",

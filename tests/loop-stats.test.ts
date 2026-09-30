@@ -23,8 +23,19 @@ vi.mock("@/lib/kv", () => ({
 }));
 
 const {
+  EARLY_END_BANDS,
+  FIRST_CLIP_OUTCOMES,
+  FIRST_CLIP_PATHS,
   GAME_ENDS,
+  GAME_HOST_KINDS,
+  GAME_OVER_TAPS,
   GAME_ROUND_CEILING,
+  GAME_ROUND_FLOOR,
+  GAME_SCREENS,
+  earlyEndBand,
+  recordFirstClip,
+  recordGameLeft,
+  recordGameOverTap,
   HOST_INDEX_CEILING,
   LOOP_STATS_TTL_SECONDS,
   MIXED_SUB_MODES,
@@ -160,7 +171,44 @@ describe("the key format is the contract between writer and reader", () => {
     }
     kv.incrs = [];
     await recordGameEnd("ended_early", 5);
-    expect(keysWritten()).toContain(expected.gameEndRound[4]); // game_end_round:5
+    expect(keysWritten()).toContain(expected.gameEndRound[5]); // game_end_round:5
+
+    for (const host of GAME_HOST_KINDS) {
+      for (const end of GAME_ENDS) {
+        kv.incrs = [];
+        await recordGameEnd(end, 5, { host });
+        expect(keysWritten()).toContain(expected.gameEndHost[host][end]);
+      }
+      for (const [round, band] of [[0, "r0"], [2, "r1_2"], [9, "r3_plus"]] as const) {
+        kv.incrs = [];
+        await recordGameEnd("ended_early", round, { host });
+        expect(keysWritten()).toContain(expected.gameEndEarly[host][band]);
+        kv.incrs = [];
+        await recordGameLeft(round, host);
+        expect(keysWritten()).toContain(expected.gameLeftRound[round]);
+        expect(keysWritten()).toContain(expected.gameLeftHost[host][band]);
+      }
+    }
+
+    for (const screen of GAME_SCREENS) {
+      kv.incrs = [];
+      await recordGameEnd("played_out", 20, { screen });
+      expect(keysWritten()).toContain(expected.gameEndScreen[screen]);
+    }
+
+    for (const path of FIRST_CLIP_PATHS) {
+      for (const outcome of FIRST_CLIP_OUTCOMES) {
+        kv.incrs = [];
+        await recordFirstClip(path, outcome);
+        expect(keysWritten()).toContain(expected.firstClip[path][outcome]);
+      }
+    }
+
+    for (const target of GAME_OVER_TAPS) {
+      kv.incrs = [];
+      await recordGameOverTap(target);
+      expect(keysWritten()).toContain(expected.gameOverTap[target]);
+    }
 
     for (const code of PLAYLIST_REFUSAL_CODES) {
       kv.incrs = [];
@@ -262,8 +310,16 @@ describe("the key format is the contract between writer and reader", () => {
       expect(keys.gameEnd[end]).toBe(`loop:stats:2026-08-09:game_end:${end}`);
     }
     expect(Object.keys(keys.gameEnd)).toHaveLength(GAME_ENDS.length);
-    expect(keys.gameEndRound).toHaveLength(GAME_ROUND_CEILING);
-    expect(keys.gameEndRound[0]).toBe("loop:stats:2026-08-09:game_end_round:1");
+    // Indexed by round, zero included: `[n]` is round n's key.
+    expect(GAME_ROUND_FLOOR).toBe(0);
+    expect(keys.gameEndRound).toHaveLength(GAME_ROUND_CEILING + 1);
+    expect(keys.gameEndRound[0]).toBe("loop:stats:2026-08-09:game_end_round:0");
+    expect(keys.gameEndRound[1]).toBe("loop:stats:2026-08-09:game_end_round:1");
+    expect(keys.gameEndRound[GAME_ROUND_CEILING]).toBe(
+      `loop:stats:2026-08-09:game_end_round:${GAME_ROUND_CEILING}`
+    );
+    expect(keys.gameLeftRound).toHaveLength(GAME_ROUND_CEILING + 1);
+    expect(keys.gameLeftRound[0]).toBe("loop:stats:2026-08-09:game_left_round:0");
     for (const code of PLAYLIST_REFUSAL_CODES) {
       expect(keys.playlistRefused[code]).toBe(`loop:stats:2026-08-09:playlist_refused:${code}`);
     }
@@ -282,7 +338,7 @@ describe("game ends", () => {
     kv.incrs = [];
     await recordGameEnd("ended_early", 3);
     expect(keysWritten()).toContain(keys.gameEnd.ended_early);
-    expect(keysWritten()).toContain(keys.gameEndRound[2]);
+    expect(keysWritten()).toContain(keys.gameEndRound[3]);
   });
 
   it("caps the round key space, so a scripted counter cannot fill KV", async () => {
@@ -290,14 +346,134 @@ describe("game ends", () => {
     expect(keysWritten()).toContain(`loop:stats:2026-08-09:game_end_round:${GAME_ROUND_CEILING}`);
   });
 
-  it("clamps nonsense to round one and refuses an end it does not know", async () => {
-    for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, 0.4]) {
+  it("files round zero under its own key, and rounds one and up where they always were", async () => {
+    // Zero used to be clamped up to one, so "ended at round 1" was partly
+    // games that never played a clip. Rounds 1–20 must keep their meaning:
+    // the histogram is read week against week.
+    await recordGameEnd("ended_early", 0);
+    expect(keysWritten()).toContain("loop:stats:2026-08-09:game_end_round:0");
+    expect(keysWritten()).not.toContain("loop:stats:2026-08-09:game_end_round:1");
+
+    for (const round of [1, 2, 7, GAME_ROUND_CEILING]) {
+      kv.incrs = [];
+      await recordGameEnd("ended_early", round);
+      expect(keysWritten()).toContain(`loop:stats:2026-08-09:game_end_round:${round}`);
+    }
+  });
+
+  it("clamps nonsense to the floor and refuses an end it does not know", async () => {
+    for (const bad of [-5, Number.NaN, Number.POSITIVE_INFINITY, 0.4]) {
       kv.incrs = [];
       await recordGameEnd("ended_early", bad);
-      expect(keysWritten()).toContain("loop:stats:2026-08-09:game_end_round:1");
+      expect(keysWritten()).toContain(`loop:stats:2026-08-09:game_end_round:${GAME_ROUND_FLOOR}`);
     }
     kv.incrs = [];
     await recordGameEnd("abandoned" as never, 3);
+    expect(kv.incrs).toEqual([]);
+  });
+
+  it("counts an older page's end exactly as before: the two original keys and nothing else", async () => {
+    // A tab opened before the deploy sends no host kind and no screen. One
+    // key for a played-out game, two for an early end, plus the marker —
+    // and nothing filed under `unknown`, which is a different fact.
+    await recordGameEnd("played_out", 20);
+    expect(keysWritten()).toEqual([keys.gameEnd.played_out, keys.live]);
+
+    kv.incrs = [];
+    await recordGameEnd("ended_early", 4);
+    expect(keysWritten()).toEqual([keys.gameEnd.ended_early, keys.gameEndRound[4]]);
+
+    kv.incrs = [];
+    await recordGameEnd("ended_early", 4, {});
+    expect(keysWritten().some((k) => /game_end_(host|early|screen):/.test(k))).toBe(false);
+  });
+
+  it("joins the end to the host kind, and bands the round only for an early end", async () => {
+    await recordGameEnd("played_out", 20, { host: "repeat" });
+    expect(keysWritten()).toContain(keys.gameEndHost.repeat.played_out);
+    expect(keysWritten().some((k) => k.includes("game_end_early:"))).toBe(false);
+
+    kv.incrs = [];
+    await recordGameEnd("ended_early", 1, { host: "first", screen: "phone" });
+    const written = keysWritten();
+    expect(written).toContain(keys.gameEnd.ended_early);
+    expect(written).toContain(keys.gameEndRound[1]);
+    expect(written).toContain(keys.gameEndHost.first.ended_early);
+    expect(written).toContain(keys.gameEndEarly.first.r1_2);
+    expect(written).toContain(keys.gameEndScreen.phone);
+    expect(written).toHaveLength(5);
+  });
+
+  it("refuses a host kind or a screen it does not know, and still counts the end", async () => {
+    await recordGameEnd("ended_early", 2, { host: "regular" as never, screen: "tablet" as never });
+    expect(keysWritten()).toEqual([keys.gameEnd.ended_early, keys.live, keys.gameEndRound[2]]);
+  });
+
+  it("bands the early rounds where the reading rule draws its lines", () => {
+    expect(earlyEndBand(0)).toBe("r0");
+    expect(earlyEndBand(1)).toBe("r1_2");
+    expect(earlyEndBand(2)).toBe("r1_2");
+    expect(earlyEndBand(3)).toBe("r3_plus");
+    expect(earlyEndBand(GAME_ROUND_CEILING)).toBe("r3_plus");
+    expect(EARLY_END_BANDS).toEqual(["r0", "r1_2", "r3_plus"]);
+  });
+});
+
+describe("the first clip, a game left, and a tap on Game Over", () => {
+  const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+
+  it("names a key for every host kind × band, every first-clip pair, both screens and both taps", () => {
+    for (const host of GAME_HOST_KINDS) {
+      for (const end of GAME_ENDS) {
+        expect(keys.gameEndHost[host][end]).toBe(`loop:stats:2026-08-09:game_end_host:${host}:${end}`);
+      }
+      for (const band of EARLY_END_BANDS) {
+        expect(keys.gameEndEarly[host][band]).toBe(`loop:stats:2026-08-09:game_end_early:${host}:${band}`);
+        expect(keys.gameLeftHost[host][band]).toBe(`loop:stats:2026-08-09:game_left_host:${host}:${band}`);
+      }
+    }
+    expect(Object.keys(keys.gameEndHost)).toHaveLength(GAME_HOST_KINDS.length);
+    for (const path of FIRST_CLIP_PATHS) {
+      expect(Object.keys(keys.firstClip[path])).toHaveLength(FIRST_CLIP_OUTCOMES.length);
+      for (const outcome of FIRST_CLIP_OUTCOMES) {
+        expect(keys.firstClip[path][outcome]).toBe(`loop:stats:2026-08-09:first_clip:${path}:${outcome}`);
+      }
+    }
+    expect(Object.keys(keys.firstClip)).toHaveLength(FIRST_CLIP_PATHS.length);
+    for (const screen of GAME_SCREENS) {
+      expect(keys.gameEndScreen[screen]).toBe(`loop:stats:2026-08-09:game_end_screen:${screen}`);
+    }
+    expect(Object.keys(keys.gameEndScreen)).toHaveLength(GAME_SCREENS.length);
+    for (const target of GAME_OVER_TAPS) {
+      expect(keys.gameOverTap[target]).toBe(`loop:stats:2026-08-09:game_over_tap:${target}`);
+    }
+    expect(Object.keys(keys.gameOverTap)).toHaveLength(GAME_OVER_TAPS.length);
+  });
+
+  it("refuses a first clip whose path or outcome is undeclared — both are key tails", async () => {
+    await recordFirstClip("cached" as never, "played");
+    await recordFirstClip("lazy", "NotAllowedError" as never);
+    expect(kv.incrs).toEqual([]);
+  });
+
+  it("writes a leave's round from zero up, capped, with the end beacon's arithmetic", async () => {
+    await recordGameLeft(0);
+    expect(keysWritten()).toEqual([keys.gameLeftRound[0], keys.live]);
+
+    kv.incrs = [];
+    await recordGameLeft(9_999, "repeat");
+    expect(keysWritten()).toEqual([
+      keys.gameLeftRound[GAME_ROUND_CEILING],
+      keys.gameLeftHost.repeat.r3_plus,
+    ]);
+
+    kv.incrs = [];
+    await recordGameLeft(1, "regular" as never);
+    expect(keysWritten()).toEqual([keys.gameLeftRound[1]]);
+  });
+
+  it("refuses a tap it does not know", async () => {
+    await recordGameOverTap("save_results" as never);
     expect(kv.incrs).toEqual([]);
   });
 });
@@ -741,6 +917,12 @@ describe("fail-soft", () => {
     await expect(recordQuizHint("found", true)).resolves.toBeUndefined();
     await expect(recordQuizThrottled("answer")).resolves.toBeUndefined();
     await expect(recordGameEnd("ended_early", 2)).resolves.toBeUndefined();
+    await expect(
+      recordGameEnd("ended_early", 0, { host: "first", screen: "phone" })
+    ).resolves.toBeUndefined();
+    await expect(recordGameLeft(3, "repeat")).resolves.toBeUndefined();
+    await expect(recordFirstClip("lazy", "rejected")).resolves.toBeUndefined();
+    await expect(recordGameOverTap("mixed")).resolves.toBeUndefined();
     await expect(recordPlaylistRefused("playlist_editorial")).resolves.toBeUndefined();
     await expect(recordQuizShare("owner", "dismissed")).resolves.toBeUndefined();
   });
@@ -931,5 +1113,69 @@ describe("the digest prints what the recorders write", () => {
     // fall and has nothing else on screen to explain it.
     expect(script).toContain("2026-09-30");
     expect(script).toMatch(/Days before 2026-09-30 filed both as a share's copied/);
+  });
+
+  it("claims and reads every prefix the game page's beacons write", () => {
+    // Seven prefixes, each rendered by its own block. One that is claimed
+    // and not read is a counter that moves in KV and prints nowhere; one
+    // that is read and not claimed prints twice.
+    const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
+    for (const prefix of [
+      "game_end_host:",
+      "game_end_early:",
+      "game_end_screen:",
+      "game_left_round:",
+      "game_left_host:",
+      "first_clip:",
+      "game_over_tap:",
+    ]) {
+      expect(rendered, `${prefix} is not claimed`).toContain(`"${prefix}"`);
+    }
+    expect(script).toMatch(/m\.startsWith\("game_left_round:"\)/);
+    for (const screen of GAME_SCREENS) {
+      expect(script, `${screen} is never read`).toMatch(new RegExp(`get\\("game_end_screen:${screen}"\\)`));
+    }
+    for (const target of GAME_OVER_TAPS) {
+      expect(script, `${target} is never read`).toMatch(new RegExp(`get\\("game_over_tap:${target}"\\)`));
+    }
+    // The rest are read by template over lists the script mirrors by hand,
+    // so the lists are what has to agree with the writer's.
+    const literal = (name: string) =>
+      script.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`))?.[1] ?? "";
+    /** `["a", "b"]` — every string in it. */
+    const flat = (name: string) => [...literal(name).matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]);
+    /** `[["a", "label"], …]` — the key of each pair, never its label. */
+    const heads = (name: string) => [...literal(name).matchAll(/\["([a-z0-9_]+)",/g)].map((m) => m[1]);
+    expect(flat("hostKinds")).toEqual([...GAME_HOST_KINDS]);
+    expect(heads("earlyBands")).toEqual([...EARLY_END_BANDS]);
+    expect(flat("clipPaths")).toEqual([...FIRST_CLIP_PATHS]);
+    expect(heads("clipOutcomes")).toEqual([...FIRST_CLIP_OUTCOMES]);
+    for (const template of [
+      "`${prefix}:${k}:${tail}`",
+      "`game_left_host:${k}:${band}`",
+      "`first_clip:${p}:${o}`",
+      "`first_clip:${p}:${outcome}`",
+    ]) {
+      expect(script, `${template} is never read`).toContain(template);
+    }
+    expect(script).toMatch(/byHost\("game_end_host", "played_out"\)/);
+    expect(script).toMatch(/byHost\("game_end_host", "ended_early"\)/);
+    expect(script).toMatch(/byHost\("game_end_early", band\)/);
+    expect(script).toMatch(/byHost\("game_left_host", band\)/);
+  });
+
+  it("labels round zero on its own row, in both histograms, so nobody reads it as a round", () => {
+    expect(script).toMatch(/const ROUND_ZERO_NOTE = "[^"]*no clip had started"/);
+    expect(script.match(/\(n === 0 \? ROUND_ZERO_NOTE : ""\)/g) ?? []).toHaveLength(2);
+  });
+
+  it("stops calling the remainder 'closed the tab' once leaves are counted", () => {
+    // The old line named the whole gap after something nothing had counted.
+    // With a leave beacon the gap is only what sent neither, and the old
+    // sentence must be reachable only when there are no leaves to subtract.
+    expect(script).toMatch(
+      /if \(leftMidGame > 0\) \{[\s\S]*?sent neither beacon[\s\S]*?\} else if \(games > reachedEnd\) \{[\s\S]*?closed the tab mid-game/
+    );
+    expect(script).toMatch(/const unaccounted = games - reachedEnd - leftMidGame;/);
   });
 });

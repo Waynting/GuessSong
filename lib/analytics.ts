@@ -149,7 +149,81 @@ export type AnalyticsEvent =
          * one, so this is what keeps "finished" from meaning "abandoned".
          */
         ended_early: boolean;
+        /**
+         * Whether this device had hosted before, as the game page read it on
+         * mount. The KV twin is `game_end_host:<kind>:<end>`; see
+         * `GameHostKind` in lib/loop-stats.ts for why `first` is a ceiling.
+         * Optional so a page that cannot say sends nothing rather than a guess.
+         */
+        host_kind?: "first" | "repeat" | "unknown";
+        /**
+         * Upcoming tracks taken out of the queue because nothing anywhere has
+         * a clip for them (`dropSilentUpcoming`). `total_tracks` is the queue
+         * as played, so `total_tracks + silent_skipped` is what the host
+         * asked for. A count, like every other count here.
+         */
+        silent_skipped?: number;
       };
+    }
+  /*
+   * Why a game did not go well, as the game page saw it. The KV copies are
+   * `first_clip:*`, `game_left_round:*` and `game_over_tap:*` in
+   * lib/loop-stats.ts, sent by the same functions in lib/loop-client.ts —
+   * those are the ones decisions are made from. `clip_blocked` has no KV
+   * twin: it is every refused `play()` in every round, which is cohorting,
+   * where the first clip of the game is the instrument.
+   */
+  | {
+      /**
+       * How the first Play press of a game came out. Once per game page.
+       * `path` is whether the clip's URL was in hand before the press; on
+       * `lazy` the `play()` call runs after an await, outside the tap.
+       */
+      name: "first_clip";
+      params: {
+        path: "prefetched" | "lazy";
+        outcome: "played" | "rejected" | "no_audio" | "unavailable" | "error" | "abandoned";
+      };
+    }
+  | {
+      /**
+       * The browser refused a `play()` and the host was asked to tap again.
+       * `site` is which of the page's four calls it was (`ClipSite` in
+       * lib/clip-start.ts): `play` and `repair` can run outside the tap that
+       * caused them, `resume` and `replay` cannot, so a count on either of
+       * the second pair is a browser doing something this page does not
+       * expect. `reason` is the rejection's kind, bucketed by
+       * `classifyPlayRejection` — `refused` is the autoplay policy,
+       * `interrupted` is an abort that nothing of ours caused — and never
+       * its message.
+       */
+      name: "clip_blocked";
+      params: {
+        site: "play" | "resume" | "replay" | "repair";
+        reason: "refused" | "interrupted";
+        round_index: number; // 1-based, matches round_completed
+      };
+    }
+  | {
+      /**
+       * The game page went away before Game Over. `via` separates the
+       * document going (a closed tab, a reload) from the page being unmounted
+       * under a live document (the back gesture); KV keeps only the round.
+       */
+      name: "game_left";
+      params: {
+        rounds_played: number;
+        host_kind: "first" | "repeat" | "unknown";
+        via: "unload" | "navigation";
+      };
+    }
+  | {
+      /**
+       * A tap on the Game Over screen, and the layout it was drawn in.
+       * `screen` is omitted, not guessed, when the page could not tell.
+       */
+      name: "game_over_tap";
+      params: { target: "play_again" | "mixed"; screen?: "phone" | "desktop" };
     }
   | {
       name: "preview_miss";

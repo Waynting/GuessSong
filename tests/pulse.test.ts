@@ -3,8 +3,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parsePulse } from "@/lib/pulse";
 import {
+  FIRST_CLIP_OUTCOMES,
+  FIRST_CLIP_PATHS,
   GAME_ENDS,
+  GAME_HOST_KINDS,
+  GAME_OVER_TAPS,
   GAME_ROUND_CEILING,
+  GAME_SCREENS,
   HOST_INDEX_CEILING,
   SETUP_SOURCES,
   QUIZ_SHARE_BYS,
@@ -180,10 +185,21 @@ describe("parsePulse — game ends", () => {
     }
   });
 
+  it("lets round zero through — a game that ended before any clip is not round one", () => {
+    // `countRoundsPlayed` answers 0 for End Game in the first round's waiting
+    // phase. Clamping that up to 1 filed every game that never played under
+    // "ended at round one", which was the tallest bar in the report.
+    expect(parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: 0 })).toEqual({
+      kind: "game_finished",
+      end: "ended_early",
+      roundsPlayed: 0,
+    });
+  });
+
   it("clamps the round like the host index, so a corrupted counter keeps the game", () => {
     const cases: Array<[number, number]> = [
-      [0, 1],
-      [-3, 1],
+      [-3, 0],
+      [0.9, 0],
       [4.8, 4],
       [GAME_ROUND_CEILING + 1, GAME_ROUND_CEILING],
       [1e9, GAME_ROUND_CEILING],
@@ -200,6 +216,125 @@ describe("parsePulse — game ends", () => {
   it("rejects a non-finite or non-numeric round", () => {
     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, "3", null, undefined, {}]) {
       expect(parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: bad })).toBeNull();
+    }
+  });
+
+  it("carries the host kind and the screen when the page sent them", () => {
+    for (const host of GAME_HOST_KINDS) {
+      for (const screen of GAME_SCREENS) {
+        expect(
+          parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: 2, host, screen })
+        ).toEqual({ kind: "game_finished", end: "ended_early", roundsPlayed: 2, host, screen });
+      }
+    }
+  });
+
+  it("parses an older page's end exactly as it always did — no host, no screen, no keys for either", () => {
+    // A tab opened before the deploy sends neither field. Its game ended all
+    // the same, and nothing may be invented for it: `unknown` means the page
+    // asked and storage would not say, not that the page was old.
+    const parsed = parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 12 });
+    expect(parsed).toEqual({ kind: "game_finished", end: "played_out", roundsPlayed: 12 });
+    expect(parsed && "host" in parsed).toBe(false);
+    expect(parsed && "screen" in parsed).toBe(false);
+  });
+
+  it("drops an undeclared host kind or screen rather than the game, and never lets one reach a key", () => {
+    for (const bad of ["First", "returning", "", "__proto__", 1, true, null, {}]) {
+      const parsed = parsePulse({
+        kind: "game_finished",
+        end: "ended_early",
+        roundsPlayed: 1,
+        host: bad,
+        screen: bad,
+      });
+      expect(parsed).toEqual({ kind: "game_finished", end: "ended_early", roundsPlayed: 1 });
+    }
+  });
+});
+
+describe("parsePulse — the first clip", () => {
+  it("accepts every declared path × outcome pair", () => {
+    for (const path of FIRST_CLIP_PATHS) {
+      for (const outcome of FIRST_CLIP_OUTCOMES) {
+        expect(parsePulse({ kind: "first_clip", path, outcome })).toEqual({
+          kind: "first_clip",
+          path,
+          outcome,
+        });
+      }
+    }
+  });
+
+  it("rejects the event when either half is undeclared — both are key tails", () => {
+    for (const path of ["cached", "", "LAZY", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "first_clip", path, outcome: "played" })).toBeNull();
+    }
+    for (const outcome of ["NotAllowedError", "blocked", "", "PLAYED", "__proto__", 1, null]) {
+      expect(parsePulse({ kind: "first_clip", path: "lazy", outcome })).toBeNull();
+    }
+  });
+
+  it("strips everything but the two fields", () => {
+    expect(
+      parsePulse({ kind: "first_clip", path: "lazy", outcome: "rejected", track: "Hello", evil: 1 })
+    ).toEqual({ kind: "first_clip", path: "lazy", outcome: "rejected" });
+  });
+});
+
+describe("parsePulse — a game left", () => {
+  it("accepts a round from zero to the ceiling, with or without a host kind", () => {
+    expect(parsePulse({ kind: "game_left", roundsPlayed: 0 })).toEqual({
+      kind: "game_left",
+      roundsPlayed: 0,
+    });
+    for (const host of GAME_HOST_KINDS) {
+      expect(parsePulse({ kind: "game_left", roundsPlayed: 6, host })).toEqual({
+        kind: "game_left",
+        roundsPlayed: 6,
+        host,
+      });
+    }
+  });
+
+  it("clamps the round with the end beacon's arithmetic, so the two histograms share their rows", () => {
+    const cases: Array<[number, number]> = [
+      [-1, 0],
+      [3.7, 3],
+      [GAME_ROUND_CEILING + 5, GAME_ROUND_CEILING],
+    ];
+    for (const [input, expected] of cases) {
+      expect(parsePulse({ kind: "game_left", roundsPlayed: input })).toEqual({
+        kind: "game_left",
+        roundsPlayed: expected,
+      });
+      expect(
+        parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: input })
+      ).toMatchObject({ roundsPlayed: expected });
+    }
+  });
+
+  it("rejects a round that is not a number, and drops a host kind it does not know", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, "3", null, undefined, {}]) {
+      expect(parsePulse({ kind: "game_left", roundsPlayed: bad })).toBeNull();
+    }
+    expect(parsePulse({ kind: "game_left", roundsPlayed: 2, host: "regular" })).toEqual({
+      kind: "game_left",
+      roundsPlayed: 2,
+    });
+  });
+});
+
+describe("parsePulse — taps on Game Over", () => {
+  it("accepts both declared targets and nothing else", () => {
+    for (const target of GAME_OVER_TAPS) {
+      expect(parsePulse({ kind: "game_over_tap", target })).toEqual({
+        kind: "game_over_tap",
+        target,
+      });
+    }
+    for (const target of ["save", "qr", "", "MIXED", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "game_over_tap", target })).toBeNull();
     }
   });
 });
@@ -292,7 +427,7 @@ describe("the route records every kind the parser accepts", () => {
   const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
   it("has a case, and a recorder under it, for each kind in the union", () => {
-    const union = read("lib/pulse.ts").match(/export type PulseEvent =([\s\S]*?);\n/)?.[1] ?? "";
+    const union = read("lib/pulse.ts").match(/export type PulseEvent =([\s\S]*?)\n\n/)?.[1] ?? "";
     const kinds = [...union.matchAll(/kind: "(\w+)"/g)].map((m) => m[1]);
     expect(kinds).toContain("quiz_copied");
     expect(kinds).toContain("quiz_shared");
