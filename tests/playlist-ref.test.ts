@@ -94,11 +94,12 @@ describe("the editorial check asks the server's question", () => {
     }
   });
 
-  it("speaks up as soon as the id has begun that way, not once it is complete", () => {
-    // The server parses whatever run of characters follows `playlist/`, so a
-    // link cut short in the pasting is still refused as editorial.
-    expect(isEditorialLink("https://open.spotify.com/playlist/37i9")).toBe(true);
-    expect(isEditorialLink("https://open.spotify.com/playlist/37i")).toBe(false);
+  it("asks the server's question, so a cut-short id is not called editorial", () => {
+    // The server reads exactly 22 characters (lib/spotify-link.ts); a link cut
+    // short in the pasting is refused as not-a-link, never as editorial, and
+    // the warning must not tell the host a different story than the error.
+    expect(isEditorialLink("https://open.spotify.com/playlist/37i9")).toBe(false);
+    expect(isEditorialLink(`https://open.spotify.com/playlist/${EDITORIAL}`)).toBe(true);
   });
 });
 

@@ -25,6 +25,7 @@ import {
   type SetupFailure,
 } from "@/lib/playlist-help";
 import { isEditorialLink, playlistIdOf, playlistUrlOf } from "@/lib/playlist-ref";
+import { isSubmittablePlaylistLink } from "@/lib/spotify-link";
 import {
   CLIP_DURATIONS,
   DEFAULT_CLIP_DURATION,
@@ -479,7 +480,10 @@ export default function SetupPage() {
     };
   }
 
-  const isValidSpotifyUrl = playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
+  // Cosmetic only — the green check. Start is never gated on it: this form
+  // and `/quiz` are the only ones that send a wrong link to the server, which
+  // is what makes `playlist_invalid:*` countable (lib/spotify-link.ts).
+  const isValidSpotifyUrl = isSubmittablePlaylistLink(playlistUrl);
   // The id begins `37i9`, which is the question the server asks before it
   // refuses — not "those four characters are somewhere in the text". See
   // lib/playlist-ref.ts.

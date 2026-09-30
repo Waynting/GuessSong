@@ -260,8 +260,13 @@ describe("the remembered link", () => {
   });
 
   it("only ever puts an open.spotify.com playlist address in the field", () => {
+    // A foreign host is not a playlist link at all (lib/spotify-link.ts
+    // checks the host), so nothing is restored; a real one is stored
+    // canonical, with its `?si=` and anything else dropped.
     const hostile = `https://evil.example/playlist/${OWN}?x=<script>`;
-    expect(store({ playlistUrl: hostile })?.playlistUrl).toBe(url(OWN));
+    expect(store({ playlistUrl: hostile })?.playlistUrl).toBe("");
+    const pasted = `https://open.spotify.com/intl-ja/playlist/${OWN}?si=x<script>`;
+    expect(store({ playlistUrl: pasted })?.playlistUrl).toBe(url(OWN));
   });
 
   it("bounds the name", () => {

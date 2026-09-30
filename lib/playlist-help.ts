@@ -134,6 +134,9 @@ export const PLAYLIST_HELP_BY_CODE: Partial<Record<AppErrorCode, PlaylistHelpTop
   playlist_editorial: "editorial",
   playlist_not_found: "private",
   invalid_playlist_url: "wrong_link",
+  playlist_link_album: "wrong_link",
+  playlist_link_track: "wrong_link",
+  playlist_link_artist: "wrong_link",
   playlist_empty: "empty",
 };
 
