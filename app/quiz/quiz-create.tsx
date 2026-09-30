@@ -12,6 +12,7 @@ import { CheckIcon, SpotifyIcon } from "@/components/setup-chrome";
 import { QUIZ_COPY, fillCopy } from "@/lib/quiz-copy";
 import { quizUrl, recallLastQuiz, rememberLastQuiz, rememberQuizToken, type LastQuiz } from "@/lib/quiz-session";
 import { currentQuizSource } from "@/lib/quiz-source";
+import { isEditorialPlaylistLink, isSubmittablePlaylistLink } from "@/lib/spotify-link";
 import {
   QUIZ_MAX_QUESTIONS,
   QUIZ_MIN_QUESTIONS,
@@ -148,9 +149,11 @@ export function QuizCreate() {
     if (last) void loadQuizPanel().catch(() => {});
   }, []);
 
-  const isValidSpotifyUrl =
-    playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");
-  const isEditorial = playlistUrl.includes("37i9");
+  // Cosmetic only — the green check and the editorial warning. Create is
+  // never gated on it: this form and `/` are the only ones that send a wrong
+  // link to the server, which is what makes `playlist_invalid:*` countable.
+  const isValidSpotifyUrl = isSubmittablePlaylistLink(playlistUrl);
+  const isEditorial = isEditorialPlaylistLink(playlistUrl);
 
   /**
    * One panel, from whichever source has a quiz: the one just made, else the

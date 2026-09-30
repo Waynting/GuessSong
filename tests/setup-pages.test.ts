@@ -203,12 +203,15 @@ describe("the quiz form on /quiz", () => {
     expect(types).toContain("export const QUIZ_MAX_QUESTIONS = 50;");
   });
 
-  it("leaves the playlist-link check exactly as it was", () => {
-    // Another change replaces this line with a classifier; until it lands
-    // the two `includes` are the rule, spelled as they always were.
-    expect(read(QUIZ_FORM)).toContain(
-      '  const isValidSpotifyUrl =\n    playlistUrl.includes("spotify.com/playlist") || playlistUrl.includes("spotify:playlist:");\n'
-    );
+  it("reads the playlist link through the one classifier, and never gates Create on it", () => {
+    // The form used to carry its own `includes("spotify.com/playlist")`,
+    // which disagreed with the server about `/intl-xx/` and short links.
+    // It must not block either: a wrong link sent here is what
+    // `playlist_invalid:*` counts.
+    const source = read(QUIZ_FORM);
+    expect(source).not.toMatch(/includes\(\s*["'`][^"'`]*(spotify|37i9)/);
+    expect(source).toMatch(/isSubmittablePlaylistLink\(playlistUrl\)/);
+    expect(source).toMatch(/isEditorialPlaylistLink\(playlistUrl\)/);
   });
 
   it("counts questions with the quiz's own bounds, not the party's", () => {
