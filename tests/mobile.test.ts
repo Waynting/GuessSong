@@ -248,6 +248,10 @@ const TOUCH_SHEETS = [
   "components/site-footer.tsx",
   "components/service-notice.tsx",
   "components/install-banner.tsx",
+  // The quiz panel's Send/Copy pair on `/quiz`, and the post-to-a-platform
+  // row drawn on the panel, the board and the taker's result.
+  "components/quiz-panel.tsx",
+  "components/quiz-social-links.tsx",
 ];
 
 describe("hover is a mouse thing", () => {

@@ -632,7 +632,9 @@ const quizOwnerCompleted = get("quiz:owner_completed");
 // send a link made earlier still prints the block — the panel is drawn for a
 // remembered quiz now, so that day exists.
 const quizTaps = [...totals]
-  .filter(([m]) => m.startsWith("quiz_share:") || m.startsWith("quiz_copy:"))
+  .filter(
+    ([m]) => m.startsWith("quiz_share:") || m.startsWith("quiz_copy:") || m.startsWith("quiz_social:")
+  )
   .reduce((t, [, c]) => t + c, 0);
 const verdicts = [...totals.keys()]
   .filter((m) => m.startsWith("quiz_verdict:"))
@@ -764,6 +766,34 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwn
         ". Days before 2026-09-30 filed both as a share's copied"
     );
   }
+
+  // The post-to-a-platform links (`quiz_social:<by>:<platform>`), drawn only
+  // on a browser with no share sheet — so the population that ever saw them
+  // is the share row's `copied`, not its total, and a row here is read
+  // against that as much as against the denominator printed. A tap opens the
+  // platform's composer in a new tab; whether anything was posted is opened.
+  // Platforms mirror SOCIAL_PLATFORMS in lib/social-share.ts.
+  const socialPlatforms = ["line", "threads", "x", "facebook", "whatsapp"];
+  let socialTaps = 0;
+  for (const by of ["owner", "taker", "board"]) {
+    const counts = socialPlatforms.map((p) => get(`quiz_social:${by}:${p}`));
+    const taps = counts.reduce((t, c) => t + c, 0);
+    if (taps === 0) continue;
+    socialTaps += taps;
+    const parts = socialPlatforms
+      .map((p, i) => [p, counts[i]])
+      .filter(([, c]) => c > 0)
+      .map(([p, c]) => `${p} ${c}`)
+      .join(" · ");
+    const sheetless = get(`quiz_share:${by}:copied`);
+    console.log(
+      `  ${`${by} social`.padEnd(12)}${String(taps).padStart(6)}   ${tapsAgainst(by, taps)} posted to a platform — ${parts}` +
+        (sheetless > 0 ? ` (${sheetless} share taps had no sheet)` : "")
+    );
+  }
+  if (quizTaps > 0 && socialTaps === 0) {
+    console.log("  social           0   no LINE / Threads / X / Facebook / WhatsApp link tapped (shown only without a share sheet)");
+  }
   console.log(`  started     ${String(quizStarted).padStart(6)}   ${pct(quizStarted, quizOpened)} of opens answered a question`);
   console.log(
     `  completed   ${String(quizCompleted).padStart(6)}   ${pct(quizCompleted, quizOpened)} of opens · ${pct(quizCompleted, quizStarted)} of starts`
@@ -881,6 +911,7 @@ const RENDERED_PREFIXES = [
   "quiz:",
   "quiz_share:",
   "quiz_copy:",
+  "quiz_social:",
   "quiz_from:",
   "quiz_verdict:",
   "quiz_len:",

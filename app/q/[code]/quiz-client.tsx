@@ -114,7 +114,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { QUIZ_SETUP_HREF } from "@/lib/setup-arrival";
 import { trackEvent } from "@/lib/analytics";
-import { reportQuizShare } from "@/lib/loop-client";
+import { reportQuizCopy, reportQuizShare } from "@/lib/loop-client";
+import { QuizSocialLinks } from "@/components/quiz-social-links";
 import { AppError, apiError, describeError, errorMessage, type AppErrorCode } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { foldQuizName, rankOf, type QuizVerdict } from "@/lib/quiz";
@@ -141,8 +142,8 @@ import {
   type QuizCopy,
 } from "@/lib/quiz-copy";
 import { createRoundToken } from "@/lib/round-token";
-import { quizOwnerHeaders } from "@/lib/quiz-session";
-import { COPIED_FLASH_MS, shareLink } from "@/lib/quiz-share";
+import { quizOwnerHeaders, quizUrl } from "@/lib/quiz-session";
+import { COPIED_FLASH_MS, copyLink, shareLink } from "@/lib/quiz-share";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -422,6 +423,8 @@ export function QuizClient({ code }: { code: string }) {
   const [hint, setHint] = useState<HintState>("idle");
   const [result, setResult] = useState<AnswerQuizResponse | null>(null);
   const [copied, setCopied] = useState(false);
+  /** The Copy button's own flash, so a Copy tap does not relabel Share. */
+  const [linkCopied, setLinkCopied] = useState(false);
   /** The page's own URL, shown to copy by hand once neither share nor clipboard worked. */
   const [shareFailedUrl, setShareFailedUrl] = useState<string | null>(null);
   /** The result screen's board, re-read on tap; starts as what grading returned. */
@@ -1017,6 +1020,24 @@ export function QuizClient({ code }: { code: string }) {
     reportQuizShare("taker", outcome);
   }
 
+  // The explicit Copy button beside Share: the same sentence and link the
+  // share falls back to, through the clipboard alone, on its own reporter —
+  // a Copy tap filed as a share's `copied` is the two-meanings problem.
+  async function handleCopy() {
+    if (!view || !result) return;
+    setShareFailedUrl(null);
+    const url = window.location.href;
+    const text = takerShareText(copy, view, result);
+    const outcome = await copyLink(`${text} ${url}`);
+    if (outcome === "copied") {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), COPIED_FLASH_MS);
+    } else {
+      setShareFailedUrl(url);
+    }
+    reportQuizCopy("taker", outcome);
+  }
+
   const title = quizTitle(copy, view?.ownerName);
   const expires = view ? fillCopy(copy.expires, { date: formatQuizDate(view.expiresAt, locale) }) : "";
   const styles = <style>{DUEL_CSS}</style>;
@@ -1372,6 +1393,17 @@ export function QuizClient({ code }: { code: string }) {
             <Button variant="secondary" className="q-primary" onClick={() => void handleShare()}>
               {copied ? copy.copied : copy.shareButton}
             </Button>
+            <Button variant="outline" className="q-primary" onClick={() => void handleCopy()}>
+              {linkCopied ? copy.copied : copy.copyLinkButton}
+            </Button>
+            {/* The plain quiz address, not this tab's: the platforms get the
+                link a friend opens. Only where there is no share sheet. */}
+            <QuizSocialLinks
+              by="taker"
+              url={quizUrl(view.code)}
+              text={takerShareText(copy, view, result)}
+              locale={locale}
+            />
             {shareFailedUrl && (
               <>
                 <p className="q-muted" role="status">

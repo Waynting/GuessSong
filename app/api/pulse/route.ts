@@ -10,7 +10,7 @@ import {
   recordLoopImpression,
   recordQuizShare,
 } from "@/lib/loop-stats";
-import { recordQuizCopy } from "@/lib/loop-stats";
+import { recordQuizCopy, recordQuizSocial } from "@/lib/loop-stats";
 
 /**
  * Fire-and-forget counters from the browser. See `lib/pulse.ts` for what the
@@ -93,6 +93,9 @@ export async function POST(req: NextRequest) {
     // `tests/pulse.test.ts` reads this file for a case per kind.
     case "quiz_copied":
       await recordQuizCopy(event.by, event.outcome);
+      break;
+    case "quiz_social":
+      await recordQuizSocial(event.by, event.platform);
       break;
   }
 

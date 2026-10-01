@@ -35,6 +35,7 @@ import { ERROR_LOCALES, type AppErrorCode, type ErrorLocale } from "@/lib/error-
 import type { LoopSurface } from "@/lib/loop-links";
 import { QUIZ_VERDICTS, isQuizVerdict, type QuizVerdict } from "@/lib/quiz";
 import type { ShareLinkOutcome } from "@/lib/quiz-share";
+import { SOCIAL_PLATFORMS, isSocialPlatform, type SocialPlatform } from "@/lib/social-share";
 import { QUIZ_SOURCES, isQuizSource, type QuizSource } from "@/lib/quiz-source";
 import type { PreviewStatus } from "@/types/preview";
 import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
@@ -289,6 +290,22 @@ export const QUIZ_SHARE_OUTCOMES: readonly QuizShareOutcome[] = [
 export type QuizCopyOutcome = Extract<ShareLinkOutcome, "copied" | "failed">;
 
 export const QUIZ_COPY_OUTCOMES: readonly QuizCopyOutcome[] = ["copied", "failed"];
+
+/**
+ * A tap on one of the post-to-a-platform links (`lib/social-share.ts`),
+ * keyed `quiz_social:<by>:<platform>`. They are drawn only on a browser with
+ * no share sheet — the laptop, where 18 of 21 owner share taps fell back to
+ * the clipboard — so read a row against the share row's `copied`, not its
+ * total: that is the population that ever saw the links.
+ *
+ * A tap is the composer opening in a new tab, not a post. There is no
+ * outcome, because nothing comes back from another site's tab; whether it
+ * was posted is `opened`. A count of taps and a ceiling on people, like the
+ * two keys above.
+ */
+export type QuizSocialPlatform = SocialPlatform;
+
+export const QUIZ_SOCIAL_PLATFORMS: readonly QuizSocialPlatform[] = SOCIAL_PLATFORMS;
 
 /**
  * Why a playlist link was refused, for the links that will never work.
@@ -677,6 +694,7 @@ export function loopStatsKeys(
   quizThrottled: Record<QuizThrottledRoute, string>;
   quizShare: Record<QuizShareBy, Record<QuizShareOutcome, string>>;
   quizCopy: Record<QuizShareBy, Record<QuizCopyOutcome, string>>;
+  quizSocial: Record<QuizShareBy, Record<QuizSocialPlatform, string>>;
   gameEnd: Record<GameEnd, string>;
   /** Indexed by round: `[0]` is round zero, `[GAME_ROUND_CEILING]` is "20+". */
   gameEndRound: string[];
@@ -816,6 +834,14 @@ export function loopStatsKeys(
         ),
       ])
     ) as Record<QuizShareBy, Record<QuizCopyOutcome, string>>,
+    quizSocial: Object.fromEntries(
+      QUIZ_SHARE_BYS.map((by) => [
+        by,
+        Object.fromEntries(
+          QUIZ_SOCIAL_PLATFORMS.map((p) => [p, key(day, `quiz_social:${by}:${p}`)])
+        ),
+      ])
+    ) as Record<QuizShareBy, Record<QuizSocialPlatform, string>>,
   };
 }
 
@@ -1095,6 +1121,20 @@ export function recordQuizCopy(by: QuizShareBy, outcome: QuizCopyOutcome): Promi
     return Promise.resolve();
   }
   return bump(`quiz_copy:${by}:${outcome}`);
+}
+
+/**
+ * Someone tapped a post-to-a-platform link. `reportQuizSocial` in
+ * `lib/loop-client.ts` sends it, through the same open endpoint as the two
+ * above; both halves are key tails, so both are refused unless declared —
+ * never clamped onto a neighbour, which would be a tap on a platform nobody
+ * offered.
+ */
+export function recordQuizSocial(by: QuizShareBy, platform: QuizSocialPlatform): Promise<void> {
+  if (!QUIZ_SHARE_BYS.includes(by) || !isSocialPlatform(platform)) {
+    return Promise.resolve();
+  }
+  return bump(`quiz_social:${by}:${platform}`);
 }
 
 /** One quiz moved a stage down its funnel. */

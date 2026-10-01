@@ -24,6 +24,9 @@
  *   - **quiz copies** — the explicit "Copy link" button beside that share
  *     button. Its own event since 2026-09-30, because filed as a share it
  *     made `copied` mean two things (`QuizCopyOutcome` in `lib/loop-stats.ts`).
+ *   - **quiz social taps** — a post-to-a-platform link (LINE, X, …), drawn
+ *     only where there is no share sheet. Nothing comes back from another
+ *     site's tab, so the tap is the whole fact (`recordQuizSocial`).
  *   - **the first clip, a game left, a tap on Game Over** — the three things
  *     the game page knows about a game that did not go well, none of which
  *     is a request: whether the first Play press produced sound, that the
@@ -66,6 +69,7 @@ import {
 // list is the one line of this file every new event has to touch.
 import { QUIZ_COPY_OUTCOMES, type QuizCopyOutcome } from "@/lib/loop-stats";
 import { SETUP_SOURCES, type SetupSource } from "@/lib/loop-stats";
+import { isSocialPlatform, type SocialPlatform } from "@/lib/social-share";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
@@ -145,7 +149,8 @@ export type PulseEvent =
   | { kind: "game_left"; roundsPlayed: number; host?: GameHostKind }
   | { kind: "game_over_tap"; target: GameOverTap }
   | { kind: "quiz_copied"; by: QuizShareBy; outcome: QuizCopyOutcome }
-  | { kind: "quiz_shared"; by: QuizShareBy; outcome: QuizShareOutcome };
+  | { kind: "quiz_shared"; by: QuizShareBy; outcome: QuizShareOutcome }
+  | { kind: "quiz_social"; by: QuizShareBy; platform: SocialPlatform };
 
 /**
  * Narrows an untrusted request body, or returns null.
@@ -243,6 +248,13 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // put the two-meanings problem back one key over.
     if (!isQuizShareBy(raw.by) || !isQuizCopyOutcome(raw.outcome)) return null;
     return { kind: "quiz_copied", by: raw.by, outcome: raw.outcome };
+  }
+
+  if (raw.kind === "quiz_social") {
+    // Both fields are key tails. An undeclared platform is refused, not
+    // filed under a neighbour: a tap on a link nobody rendered is not data.
+    if (!isQuizShareBy(raw.by) || !isSocialPlatform(raw.platform)) return null;
+    return { kind: "quiz_social", by: raw.by, platform: raw.platform };
   }
 
   return null;

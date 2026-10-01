@@ -27,6 +27,14 @@
  * shared between them (`show`). A handler here that calls the other button's
  * reporter type-checks and puts the two meanings back.
  *
+ * ## Copy is a button, and the platforms appear where there is no sheet
+ *
+ * Copy was drawn as `.add-player-btn` — the dashed "+ Add player" outline —
+ * and read as a placeholder rather than a control. It is a solid secondary
+ * button now (`.quiz-copy-btn`, below), with Send the one green thing. Under
+ * both, `QuizSocialLinks` puts LINE / Threads / X / Facebook / WhatsApp on a
+ * browser with no share sheet, which is most of the people who make quizzes.
+ *
  * ## It also comes back
  *
  * The same panel is drawn for a quiz made on an earlier visit
@@ -37,6 +45,7 @@
 
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
+import { QuizSocialLinks } from "@/components/quiz-social-links";
 import { reportQuizCopy, reportQuizShare } from "@/lib/loop-client";
 import type { ErrorLocale } from "@/lib/error-messages";
 import {
@@ -49,6 +58,38 @@ import {
 } from "@/lib/quiz-copy";
 import { quizUrl } from "@/lib/quiz-session";
 import { COPIED_FLASH_MS, copyLink, shareLink, type ShareLinkOutcome } from "@/lib/quiz-share";
+
+/**
+ * The two send buttons. Send keeps `.start-btn`'s green; Copy is a solid
+ * dark button beside it. Two classes deep so they beat `.start-btn`'s
+ * `width: 100%` on a laptop, where the pair sits on one row; on a phone both
+ * go full width and stack, Send on top.
+ */
+const PANEL_CSS = `
+  .quiz-send-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .quiz-send-row .quiz-send-btn { width: auto; padding: 12px 24px; font-size: 16px; }
+  .quiz-send-row .quiz-copy-btn {
+    padding: 12px 24px;
+    background: #222;
+    color: #f0f0f0;
+    border: 1px solid #3a3a3a;
+    border-radius: 12px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  @media (hover: hover) {
+    .quiz-send-row .quiz-copy-btn:hover { background: #2a2a2a; border-color: #1DB954; }
+  }
+  .quiz-send-row .quiz-copy-btn:active { background: #111; border-color: #1DB954; transform: scale(0.985); transition: none; }
+  @media (max-width: 768px) {
+    .quiz-send-row .quiz-send-btn,
+    .quiz-send-row .quiz-copy-btn { width: 100%; }
+  }
+`;
 
 export function QuizPanel({
   code,
@@ -121,6 +162,7 @@ export function QuizPanel({
 
   return (
     <div className="card" style={{ padding: "24px", textAlign: "center" }}>
+      <style>{PANEL_CSS}</style>
       {/* Both lines or neither: a caption ending in "from" over nothing is
           worse than no caption, and an entry with no playlist name is one
           somebody edited. */}
@@ -169,14 +211,15 @@ export function QuizPanel({
           </a>
         </div>
       )}
-      <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap" }}>
-        <button className="start-btn" style={{ width: "auto", padding: "12px 24px" }} onClick={handleShare}>
+      <div className="quiz-send-row">
+        <button type="button" className="start-btn quiz-send-btn" onClick={handleShare}>
           {copy.panelSend}
         </button>
-        <button className="add-player-btn" onClick={handleCopy}>
+        <button type="button" className="quiz-copy-btn" onClick={handleCopy}>
           {feedback === "copied" ? copy.panelCopied : copy.panelCopyLink}
         </button>
       </div>
+      <QuizSocialLinks by="owner" url={url} text={ownerShareText(copy, quiz)} locale={locale} />
       {/* The owner's two ways onto their own quiz. The preview is a plain
           link to the address their friends get — no `?owner`, nothing in the
           URL at all: what makes it a preview is this device's token, sent in

@@ -571,6 +571,20 @@ export type AnalyticsEvent =
     }
   | {
       /**
+       * A post-to-a-platform link (`lib/social-share.ts`) on the panel, the
+       * board or the taker's result — drawn only on a browser with no share
+       * sheet. A tap opens the platform's composer in a new tab; whether
+       * anything was posted is not knowable from here. KV twin:
+       * `quiz_social:<by>:<platform>`.
+       */
+      name: "quiz_social_tapped";
+      params: {
+        by: "owner" | "taker" | "board";
+        platform: "line" | "threads" | "x" | "facebook" | "whatsapp";
+      };
+    }
+  | {
+      /**
        * The host's share button on the setup page, the taker's on the
        * result screen, or the owner's on their results page (`board`, which
        * was filed as `owner` until 2026-09-30). `outcome` follows
