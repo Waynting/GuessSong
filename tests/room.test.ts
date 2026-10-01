@@ -345,6 +345,22 @@ describe("room lifecycle", () => {
     await expect(late).rejects.toMatchObject({ status: 410 });
   });
 
+  it("releases the room when reading the pool fails after the claim", async () => {
+    // A KV error on the one mget after `consumed` was claimed used to strand
+    // the room: the route answered 500 and the host's retry got 410.
+    vi.mocked(playlistCache.loadPlaylist).mockResolvedValue(loaded([makeTrack()]));
+    const { roomCode, hostToken } = await createRoom();
+    await submitToRoom(roomCode, "Alice", "url-1");
+
+    const store = await getKvStore();
+    const mget = vi.spyOn(store, "mget").mockRejectedValueOnce(new Error("kv down"));
+    await expect(consumeRoomPool(roomCode, 8, hostToken)).rejects.toThrow("kv down");
+    mget.mockRestore();
+
+    const pool = await consumeRoomPool(roomCode, 8, hostToken);
+    expect(pool.players).toEqual(["Alice"]);
+  });
+
   it("releases the room when a consume finds no tracks to pool", async () => {
     // Claiming `consumed` is how the consume race is decided, so it has to
     // happen before we know whether the track keys are still there. If they are
