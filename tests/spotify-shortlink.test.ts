@@ -48,7 +48,63 @@ const ID = "3cEYpjA9oz9GiPac4AsH4n";
 const SHORT = "https://spotify.link/AbCdEfG";
 const PLAYLIST = `https://open.spotify.com/playlist/${ID}?si=abc&_branch_match_id=1`;
 
-type Reply = { status: number; location?: string } | Error;
+type Reply = { status: number; location?: string; html?: string } | Error;
+
+/**
+ * Branch's interstitial, trimmed from what `spotify.app.link` answered a
+ * live playlist short link on 2026-10-01 when asked with Node's default
+ * `User-Agent: node` — the page every production short link landed on. The
+ * destination is in an "open in browser" anchor and in the script's
+ * `window.top.location = validateProtocol(…)`; the app's own `spotify://`
+ * address is beside them.
+ */
+const branchPage = (target: string) => `<!DOCTYPE html>
+<html>
+	<head>
+		<meta name="deepview-service" content="deepview-service">
+		<style>.card--no-data { display: flex; }</style>
+	</head>
+	<body>
+		<div class="heading">Launching Spotify</div>
+		<div class="sub-heading">
+			We have redirected you to the desktop app.
+			You can also <a class="secondary-action" href="${target}">open this link in your browser.</a>
+		</div>
+		<a class="action" href="spotify://playlist/${ID}?_branch_referrer=H4sIAAAA&link_click_id=1634193397790090417">Launch Spotify</a>
+	<script type="text/javascript">
+function validateProtocol(url){
+   var parser = document.createElement("a");
+   parser.href = url;
+   return url;
+}
+        window.onload = function() {
+          window.top.location = validateProtocol("spotify://playlist/${ID}?link_click_id=1634193397790090417");
+          setTimeout(function timeout() {
+            if (!hasURI) {
+              window.top.location = validateProtocol("${target}");
+            }
+          }, 500);
+        };</script></body>
+</html>`;
+
+const INTERSTITIAL = branchPage(
+  `https://open.spotify.com/playlist/${ID}?si=s1MRgeESTQ2OK4Rn-xpXtw&pi=a-rG9J6UAVS9-1&_branch_match_id=1634193397790090417&utm_source=copy-link&utm_medium=sharing`
+);
+
+/**
+ * What the same hosts answered for a short link that names nothing any
+ * more (`spotify.link/h5TbcGLLkhb`, 2026-10-01): the same page, sending the
+ * browser to the app store. Nothing in it is a Spotify address.
+ */
+const DEAD_LINK_PAGE = branchPage(
+  "https://apps.apple.com/us/app/spotify-discover-new-music/id324684580?_branch_match_id=1634193401736822629&utm_source=Web"
+);
+
+/** The first hop Node's default User-Agent got from `spotify.link`. */
+const TO_APP_LINK = {
+  status: 307,
+  location: "https://spotify.app.link/AbCdEfG?_p=c11037dc990366eee0188de3eab1bd",
+};
 
 /** Answers each request from a script, in order, and records what was asked. */
 function stubFetch(...replies: Reply[]) {
@@ -59,10 +115,10 @@ function stubFetch(...replies: Reply[]) {
     const reply = queue.shift();
     if (!reply) throw new Error(`unscripted request to ${String(url)}`);
     if (reply instanceof Error) throw reply;
-    return new Response(null, {
-      status: reply.status,
-      headers: reply.location ? { location: reply.location } : {},
-    });
+    const headers: Record<string, string> = {};
+    if (reply.location) headers.location = reply.location;
+    if (reply.html !== undefined) headers["content-type"] = "text/html; charset=utf-8";
+    return new Response(reply.html ?? null, { status: reply.status, headers });
   });
   vi.stubGlobal("fetch", mock);
   return { requests, calls: () => mock.mock.calls.length };
@@ -183,6 +239,82 @@ describe("the host is matched before any request is made", () => {
   });
 });
 
+describe("Branch's interstitial, which is what production actually got", () => {
+  it("names itself so Branch answers with a redirect rather than a page", async () => {
+    // Node's default `User-Agent: node` is read as a browser and handed the
+    // interstitial; named as a crawler, the link is one 307 to the playlist.
+    const net = stubFetch(TO_APP_LINK, { status: 307, location: PLAYLIST });
+    await resolveShortlink(SHORT);
+    expect(net.calls()).toBe(2);
+    for (const { init } of net.requests) {
+      const ua = new Headers(init?.headers).get("user-agent") ?? "";
+      expect(ua).toMatch(/bot/i);
+      expect(ua).toContain("guessong.app");
+    }
+  });
+
+  it("reads the destination off the page, after the hop to spotify.app.link", async () => {
+    // The exact sequence the six production short links went through.
+    const net = stubFetch(TO_APP_LINK, { status: 200, html: INTERSTITIAL });
+    await expect(resolveShortlink(SHORT)).resolves.toEqual({
+      status: "resolved",
+      link: { kind: "playlist", id: ID },
+    });
+    expect(net.calls()).toBe(2);
+    expect(cacheWrites()).toHaveLength(1);
+    expect(counted("resolved")).toBe(1);
+  });
+
+  it("reads an album off the page as an album", async () => {
+    stubFetch({ status: 200, html: branchPage(`https://open.spotify.com/album/${ID}?si=x`) });
+    await expect(resolveShortlink(SHORT)).resolves.toEqual({
+      status: "resolved",
+      link: { kind: "album" },
+    });
+  });
+
+  it("calls a page that names no Spotify address unavailable, never unusable", async () => {
+    // A dead link's page and a page whose markup moved look the same to
+    // this reader; only a clean reply may produce the permanent answer.
+    for (const html of [DEAD_LINK_PAGE, "<html><body>Launching Spotify</body></html>", ""]) {
+      kv.mem.clear();
+      kv.writes.length = 0;
+      stubFetch(TO_APP_LINK, { status: 200, html });
+      await expect(resolveShortlink(SHORT)).resolves.toEqual({ status: "unavailable" });
+      expect(cacheWrites()).toEqual([]);
+    }
+  });
+
+  it("calls a page naming two different things unavailable", async () => {
+    const other = "4aBcDeFgHiJkLmNoPqRsTu";
+    const html = INTERSTITIAL + `<a href="https://open.spotify.com/playlist/${other}">another</a>`;
+    stubFetch({ status: 200, html });
+    await expect(resolveShortlink(SHORT)).resolves.toEqual({ status: "unavailable" });
+  });
+
+  it("ignores a page's links to things that are not music", async () => {
+    const html = `<a href="https://open.spotify.com/">home</a>` + INTERSTITIAL;
+    stubFetch({ status: 200, html });
+    await expect(resolveShortlink(SHORT)).resolves.toEqual({
+      status: "resolved",
+      link: { kind: "playlist", id: ID },
+    });
+  });
+
+  it("reads only so far into a page", async () => {
+    // A destination past the cap is not read: the redirector does not get
+    // to make us download whatever it likes.
+    const html = "<!--" + "x".repeat(70 * 1024) + "-->" + INTERSTITIAL;
+    stubFetch({ status: 200, html });
+    await expect(resolveShortlink(SHORT)).resolves.toEqual({ status: "unavailable" });
+  });
+
+  it("does not read a 200 that is not a page", async () => {
+    stubFetch({ status: 200 });
+    await expect(resolveShortlink(SHORT)).resolves.toEqual({ status: "unavailable" });
+  });
+});
+
 describe("unusable is a fact about the link, unavailable is a fact about us", () => {
   it("calls a link the redirector does not know unusable", async () => {
     for (const status of [404, 410]) {
@@ -214,7 +346,7 @@ describe("unusable is a fact about the link, unavailable is a fact about us", ()
     const replies: Reply[] = [
       timeout,
       new TypeError("fetch failed"),
-      { status: 200 }, // an interstitial where a redirect was expected
+      { status: 200 }, // a 200 that is not a page
       { status: 403 },
       { status: 429 },
       { status: 500 },

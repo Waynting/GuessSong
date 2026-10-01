@@ -18,7 +18,8 @@
  *   unusable     it answered cleanly, and named none of those — a fact about
  *                the link, so the refusal is permanent
  *   unavailable  a fact about *us*: we timed out, the connection dropped, or
- *                the reply was not a redirect. Nothing was learned about the
+ *                the reply was neither a redirect nor an interstitial page
+ *                naming one destination. Nothing was learned about the
  *                link, so the caller must be able to ask again
  *
  * Only a clean reply may produce `unusable`. Everything that is not one is
@@ -86,6 +87,29 @@ const MAX_HOPS = 3;
 
 /** A redirect target longer than this is not one we follow. */
 const HOP_URL_MAX = 2048;
+
+/**
+ * Who we say we are, and the wording is load-bearing. Branch — the service
+ * behind both short-link hosts — decides per User-Agent whether to answer
+ * with a redirect or with its JavaScript interstitial page, and Node's
+ * default `User-Agent: node` is read as a browser: `spotify.link` answered
+ * 307 to `spotify.app.link`, which answered a 200 page, and every short link
+ * pasted in production came back `unavailable` (6 of 6 the first day). Named
+ * as a crawler, the same link is one 307 straight to `open.spotify.com`
+ * (measured 2026-10-01). Branch's rule is not ours to rely on, so the
+ * interstitial is also read — see `fromInterstitial`.
+ */
+const SHORTLINK_USER_AGENT = "Mozilla/5.0 (compatible; GuessSongBot/1.0; +https://www.guessong.app)";
+
+/**
+ * How much of an interstitial is read. Branch's page is ~8 KB with the
+ * destination two thirds of the way down; this is room for it to grow, and
+ * a bound on what a redirector can make us download.
+ */
+const INTERSTITIAL_MAX_BYTES = 64 * 1024;
+
+/** A destination as the interstitial spells it. No lookbehind; bounded. */
+const DESTINATION_RE = /https:\/\/open\.spotify\.com\/[^\s"'<>\\]{1,2048}/g;
 
 function cacheKey(url: string): string {
   // `url` is the classifier's rebuild — lower-cased host, one slug — so two
@@ -159,6 +183,62 @@ function nextHop(location: string, from: string): string | null {
   return href.length <= HOP_URL_MAX ? href : null;
 }
 
+/** At most `max` bytes of a body, decoded. Throws on abort, like `text()`. */
+async function readCapped(res: Response, max: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      size += value.byteLength;
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  const bytes = new Uint8Array(Math.min(size, max));
+  let at = 0;
+  for (const chunk of chunks) {
+    const part = chunk.subarray(0, bytes.length - at);
+    bytes.set(part, at);
+    at += part.length;
+    if (at >= bytes.length) break;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * The destination a Branch interstitial names, or null.
+ *
+ * The page sends the browser on with `window.top.location =
+ * validateProtocol("https://open.spotify.com/playlist/…")` and repeats the
+ * address in an "open this link" anchor. Every `open.spotify.com` address in
+ * the page is classified, and the answer is taken only when all the ones
+ * that name music agree — a page that names two things, or none, has told
+ * us nothing, and the caller treats that as `unavailable`, never `unusable`:
+ * a dead link's page (it points at the app store) looks the same to a
+ * reader as a page whose markup moved.
+ */
+function fromInterstitial(html: string): ResolvedLink | null {
+  let found: ResolvedLink | null = null;
+  for (const match of html.matchAll(DESTINATION_RE)) {
+    const link = classifySpotifyLink(match[0]);
+    if (link.kind === "unknown" || link.kind === "shortlink") continue;
+    if (!found) {
+      found = link;
+      continue;
+    }
+    const same =
+      found.kind === link.kind &&
+      (found.kind !== "playlist" || (link.kind === "playlist" && found.id === link.id));
+    if (!same) return null;
+  }
+  return found;
+}
+
 async function follow(start: string): Promise<ShortlinkResolution> {
   // One deadline across every hop — see SHORTLINK_TIMEOUT_MS.
   const signal = AbortSignal.timeout(SHORTLINK_TIMEOUT_MS);
@@ -175,14 +255,29 @@ async function follow(start: string): Promise<ShortlinkResolution> {
         // hosts ever contacted are the ones `nextHop` admits.
         redirect: "manual",
         cache: "no-store",
+        headers: { "user-agent": SHORTLINK_USER_AGENT },
         signal,
       });
     } catch {
       // Timed out, or never connected.
       return { status: "unavailable" };
     }
-    // The body is never read; hand the socket back rather than leave it to
-    // the garbage collector.
+
+    if (res.status === 200 && /text\/html/i.test(res.headers.get("content-type") ?? "")) {
+      // Branch's interstitial: the redirect, written as a page. Read under
+      // the same deadline, and only so far.
+      let html: string;
+      try {
+        html = await readCapped(res, INTERSTITIAL_MAX_BYTES);
+      } catch {
+        return { status: "unavailable" };
+      }
+      const link = fromInterstitial(html);
+      return link ? { status: "resolved", link } : { status: "unavailable" };
+    }
+
+    // Otherwise the body is never read; hand the socket back rather than
+    // leave it to the garbage collector.
     void res.body?.cancel().catch(() => {});
 
     if (res.status >= 300 && res.status < 400) {
@@ -208,10 +303,9 @@ async function follow(start: string): Promise<ShortlinkResolution> {
     // The redirector's own "no such link".
     if (res.status === 404 || res.status === 410) return { status: "unusable" };
 
-    // Everything else, a 200 included. A page where a redirect was expected
-    // is the redirector deciding this caller should see an interstitial; a
-    // 403, 429 or 5xx is it refusing or failing. None of them says anything
-    // about where the link goes.
+    // Everything else: a 200 that is not a page, a 403, 429 or 5xx — the
+    // redirector refusing or failing. None of them says anything about where
+    // the link goes.
     return { status: "unavailable" };
   }
 
