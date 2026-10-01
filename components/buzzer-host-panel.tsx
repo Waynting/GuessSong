@@ -19,6 +19,7 @@ import { useBuzzerSocket } from "@/lib/use-buzzer-socket";
 import { buzzerJoinUrl } from "@/lib/buzzer-client";
 import { trackEvent } from "@/lib/analytics";
 import type { BuzzEntry, ServerMessage } from "@/lib/buzzer-protocol";
+import { hostOpenWasLost } from "@/lib/buzzer-round";
 import { buzzerErrorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 
@@ -80,9 +81,17 @@ export function BuzzerHostPanel({
   // events, never the render, so re-rendering on every buzz would be waste.
   const buzzCountRef = useRef(0);
   const peakRef = useRef(0);
+  // Read from the message handler, which must not be rebuilt per phase change.
+  const gamePhaseRef = useRef(gamePhase);
+  gamePhaseRef.current = gamePhase;
+  const hostOpenRef = useRef<() => void>(() => {});
 
   const handleServerMessage = useCallback(
     (msg: ServerMessage) => {
+      // The open for this round was dropped on a socket that was not open
+      // yet (or any more), and the once-per-round guard below will not send
+      // it again. The room's answer to our re-join is where that shows.
+      if (hostOpenWasLost(msg, gamePhaseRef.current)) hostOpenRef.current();
       if (msg.type === "buzz") {
         buzzCountRef.current += 1;
         trackEvent("buzz_received", {
@@ -115,6 +124,7 @@ export function BuzzerHostPanel({
       hostToken,
       onServerMessage: handleServerMessage,
     });
+  hostOpenRef.current = hostOpen;
   const locale = useErrorLocale();
 
   useEffect(() => {
