@@ -28,7 +28,7 @@ import { announcesNoScore } from "@/lib/round-outcome";
 import { isPreviewSettled, type PreviewBatchTrack } from "@/types/preview";
 import { BuzzerHostPanel, type BuzzerControls } from "@/components/buzzer-host-panel";
 import { LoopQr } from "@/components/loop-qr";
-import type { RoundHistoryEntry } from "@/lib/round-history";
+import { closeRoundEntry, type RoundHistoryEntry } from "@/lib/round-history";
 import { describeRounds, summarizeRounds } from "@/lib/round-summary";
 import { formatMixList } from "@/lib/mix-export";
 import { buildTasteCard } from "@/lib/taste-card";
@@ -1098,19 +1098,7 @@ export default function GamePage() {
       playlist_source: playlistSource,
     });
 
-    const finishedTrack = tracks[currentIndex];
-    if (finishedTrack?.contributors && finishedTrack.contributors.length > 0) {
-      setRoundHistory((prev) => [
-        ...prev,
-        {
-          trackId: finishedTrack.id,
-          contributors: finishedTrack.contributors!,
-          songWinner: roundWinner,
-          albumWinner: albumWinner,
-          sourceWinner: sourceWinner,
-        },
-      ]);
-    }
+    recordRound("next");
 
     if (currentIndex + 1 >= tracks.length) {
       trackGameFinished(false);
@@ -1133,8 +1121,22 @@ export default function GamePage() {
     }
   }
 
+  // Both round-closing paths go through here; the rule is closeRoundEntry.
+  function recordRound(via: "next" | "end") {
+    const entry = closeRoundEntry({
+      track: tracks[currentIndex],
+      revealed: phase === "revealed",
+      songWinner: roundWinner,
+      albumWinner,
+      sourceWinner,
+      via,
+    });
+    if (entry) setRoundHistory((prev) => [...prev, entry]);
+  }
+
   function endGame() {
     retireRound();
+    recordRound("end");
     trackGameFinished(currentIndex + 1 < tracks.length || phase !== "revealed");
     setPhase("finished");
   }
@@ -1840,7 +1842,11 @@ export default function GamePage() {
           justify-content: flex-start;
           padding: 28px 24px calc(24px + env(safe-area-inset-bottom));
           animation: fade-in 0.4s ease;
-          overflow: hidden;
+          /* Scrolls once the scoreboard has given way to its floor: on a
+             short phone with the install card and the mix fallback both up,
+             everything else refuses to shrink and the board went to 0px. */
+          overflow-x: hidden;
+          overflow-y: auto;
         }
         @keyframes fade-in { from{opacity:0} to{opacity:1} }
 
@@ -1917,7 +1923,8 @@ export default function GamePage() {
           overflow-y: auto;
           overflow-x: hidden;
           flex: 1 1 0;
-          min-height: 0;
+          /* Gives way down to three rows, never to nothing. */
+          min-height: 132px;
           margin-bottom: 16px;
         }
         /* subtle scrollbar */

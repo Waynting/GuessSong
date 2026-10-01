@@ -331,11 +331,18 @@ describe("the Game Over screen", () => {
   });
 
   it("keeps the scoreboard the one thing on the screen that gives way", () => {
-    // The overlay is fixed and does not scroll, so everything under the
-    // scoreboard has to refuse to shrink and the scoreboard has to agree to.
+    // Everything under the scoreboard refuses to shrink and the scoreboard
+    // agrees to — down to a floor of rows, never to 0px. Past that floor the
+    // overlay itself scrolls: on a 375x667 phone with the install card and
+    // the mix fallback up, a 0px floor in an unscrollable overlay hid 2nd
+    // place and below with nothing to scroll.
     const board = source.match(/^\s*\.final-scoreboard\s*\{([^}]*)\}/m)?.[1] ?? "";
     expect(board).toMatch(/flex:\s*1 1 0/);
-    expect(board).toMatch(/min-height:\s*0/);
+    const floor = Number(board.match(/min-height:\s*(\d+)px/)?.[1] ?? 0);
+    expect(floor).toBeGreaterThanOrEqual(2 * 44);
+    const overlay = source.match(/^\s*\.finished-overlay\s*\{([^}]*)\}/m)?.[1] ?? "";
+    expect(overlay).toMatch(/overflow-y:\s*auto/);
+    expect(overlay).not.toMatch(/overflow:\s*hidden/);
     for (const cls of [".btn-lg", ".finished-secondary", ".next-game-link", ".install-cta"]) {
       const rule = source.match(new RegExp(`^\\s*${cls.replace(".", "\\.")}\\s*\\{([^}]*)\\}`, "m"))?.[1] ?? "";
       expect(rule, cls).toMatch(/flex-shrink:\s*0/);
@@ -354,5 +361,17 @@ describe("an award reaches the row it names", () => {
       expect(resolve, name).toBeGreaterThan(-1);
       expect(fn.indexOf("Awarded(true)"), name).toBeGreaterThan(resolve);
     }
+  });
+});
+
+describe("a round reaches the history the same way from Next Track and End Game", () => {
+  it("records through closeRoundEntry from both paths, and nowhere else", () => {
+    // End Game used to append nothing, so a source point awarded on the round
+    // on screen vanished from the summary and the taste card.
+    expect(member("nextTrack")).toMatch(/recordRound\("next"\)/);
+    expect(member("endGame")).toMatch(/recordRound\("end"\)/);
+    expect(member("recordRound")).toMatch(/closeRoundEntry\(/);
+    expect(member("recordRound")).toMatch(/revealed: phase === "revealed"/);
+    expect(body.match(/setRoundHistory\(\(/g) ?? []).toHaveLength(1);
   });
 });
