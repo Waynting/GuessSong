@@ -1842,7 +1842,11 @@ export default function GamePage() {
           justify-content: flex-start;
           padding: 28px 24px calc(24px + env(safe-area-inset-bottom));
           animation: fade-in 0.4s ease;
-          overflow: hidden;
+          /* Scrolls once the scoreboard has given way to its floor: on a
+             short phone with the install card and the mix fallback both up,
+             everything else refuses to shrink and the board went to 0px. */
+          overflow-x: hidden;
+          overflow-y: auto;
         }
         @keyframes fade-in { from{opacity:0} to{opacity:1} }
 
@@ -1919,7 +1923,8 @@ export default function GamePage() {
           overflow-y: auto;
           overflow-x: hidden;
           flex: 1 1 0;
-          min-height: 0;
+          /* Gives way down to three rows, never to nothing. */
+          min-height: 132px;
           margin-bottom: 16px;
         }
         /* subtle scrollbar */
