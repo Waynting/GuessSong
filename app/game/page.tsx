@@ -14,6 +14,7 @@ import { canInstall, promptInstall } from "@/lib/pwa";
 import {
   countRoundsPlayed,
   mergeRoomRoster,
+  scoreboardName,
   type GameMode,
   type GamePlayer as Player,
   type BuzzerRoomHandle,
@@ -1001,8 +1002,11 @@ export default function GamePage() {
     setPlayers((prev) => mergeRoomRoster(prev, names));
   }, []);
 
-  function awardPoint(playerName: string) {
+  function awardPoint(requested: string) {
     if (pointsAwarded) return;
+    // A buzz carries the phone's spelling; the row keeps the scoreboard's.
+    const playerName = scoreboardName(players, requested);
+    if (playerName === null) return;
     setRoundWinner(playerName);
     setPointsAwarded(true);
     setScorePulse(playerName);
@@ -1012,8 +1016,11 @@ export default function GamePage() {
     setTimeout(() => setScorePulse(null), 600);
   }
 
-  function awardAlbumPoint(playerName: string) {
+  function awardAlbumPoint(requested: string) {
     if (albumPointsAwarded) return;
+    // A buzz carries the phone's spelling; the row keeps the scoreboard's.
+    const playerName = scoreboardName(players, requested);
+    if (playerName === null) return;
     setAlbumWinner(playerName);
     setAlbumPointsAwarded(true);
     setScorePulse(playerName);
@@ -1024,8 +1031,11 @@ export default function GamePage() {
   }
 
   /** Mixed Playlist Mode: +2 for guessing whose playlist the track came from. */
-  function awardSourcePoint(playerName: string) {
+  function awardSourcePoint(requested: string) {
     if (sourcePointsAwarded) return;
+    // A buzz carries the phone's spelling; the row keeps the scoreboard's.
+    const playerName = scoreboardName(players, requested);
+    if (playerName === null) return;
     setSourceWinner(playerName);
     setSourcePointsAwarded(true);
     setScorePulse(playerName);

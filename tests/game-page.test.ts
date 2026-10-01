@@ -342,3 +342,17 @@ describe("the Game Over screen", () => {
     }
   });
 });
+
+describe("an award reaches the row it names", () => {
+  it("resolves every award through scoreboardName before marking the round scored", () => {
+    // awardPoint compared p.name === playerName exactly while the roster merge
+    // folded case, so a buzz from "amy" against the scoreboard's "Amy" was
+    // announced as +3 and scored nobody.
+    for (const name of ["awardPoint", "awardAlbumPoint", "awardSourcePoint"]) {
+      const fn = member(name);
+      const resolve = fn.indexOf("scoreboardName(players,");
+      expect(resolve, name).toBeGreaterThan(-1);
+      expect(fn.indexOf("Awarded(true)"), name).toBeGreaterThan(resolve);
+    }
+  });
+});

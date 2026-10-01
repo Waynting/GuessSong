@@ -381,3 +381,15 @@ describe("the chips", () => {
     expect(code(assist)).toMatch(/if \(playlists\.length === 0\) return null;/);
   });
 });
+
+describe("Single mode refuses two rows that would score as one", () => {
+  it("checks the typed names for a duplicate before any request is sent", () => {
+    const body = code(read(HOME));
+    const start = body.indexOf("async function handleStart(");
+    const check = body.indexOf('findDuplicateName(validPlayers)', start);
+    const fetchAt = body.indexOf('fetch("/api/playlist"', start);
+    expect(check).toBeGreaterThan(start);
+    expect(check).toBeLessThan(fetchAt);
+    expect(body.slice(check, fetchAt)).toContain('"players_duplicate_name"');
+  });
+});

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Track } from "@/types";
+import { shuffle } from "@/lib/shuffle";
 import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolResponse } from "@/types/room";
 import { trackEvent } from "@/lib/analytics";
 import { arrivedFrom } from "@/lib/loop-links";
@@ -53,7 +54,7 @@ import {
 } from "@/components/setup-assist";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { ServiceNotice } from "@/components/service-notice";
-import { buildGamePayload } from "@/lib/game-session";
+import { buildGamePayload, findDuplicateName } from "@/lib/game-session";
 import { saveGame } from "@/lib/game-storage";
 import { isBuzzerConfigured } from "@/lib/buzzer-client";
 import type { OpenRoom } from "@/lib/room-client";
@@ -518,6 +519,11 @@ export default function SetupPage() {
       setFailure(failureFor("players_required", locale));
       return;
     }
+    // Scores are kept by name, so "Alex" and "alex" would score as one row.
+    if (!buzzerEnabled && findDuplicateName(validPlayers) !== null) {
+      setFailure(failureFor("players_duplicate_name", locale));
+      return;
+    }
     // Same link, same refusal. Re-show it rather than spending a request to be
     // told the identical thing — see `lastRejectedRef`. Deliberately silent
     // about the shortcut: from the host's side this is the error they are
@@ -539,7 +545,7 @@ export default function SetupPage() {
       const data = await res.json();
       if (!res.ok) throw apiError(data, "playlist_load_failed");
 
-      const shuffled = [...data.tracks].sort(() => Math.random() - 0.5);
+      const shuffled = shuffle(data.tracks as Track[]);
       const limited =
         songCount.count === "all" ? shuffled : shuffled.slice(0, songCount.count);
 
