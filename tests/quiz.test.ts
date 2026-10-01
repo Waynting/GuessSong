@@ -11,6 +11,7 @@ import {
   foldQuizName,
   gradeAnswers,
   hintAllowance,
+  hintCharge,
   isAnswerList,
   pickBoardTiles,
   pickDecoys,
@@ -1036,6 +1037,17 @@ describe("hints", () => {
     expect(clampHintsUsed(-3, 10)).toBe(0);
     expect(clampHintsUsed("2", 10)).toBe(0);
     expect(clampHintsUsed(undefined, 10)).toBe(0);
+  });
+
+  it("charges a question once, and refuses a new charge with none left", () => {
+    // Already charged (this session, or restored after a reload): free.
+    expect(hintCharge(true, 0)).toBe("free");
+    expect(hintCharge(true, 2)).toBe("free");
+    // Not charged: a held clip URL is not a payment, so this costs a hint —
+    // a refunded blocked play keeps its URL, and replaying it free was a
+    // free point at two options.
+    expect(hintCharge(false, 1)).toBe("charge");
+    expect(hintCharge(false, 0)).toBe("refuse");
   });
 });
 

@@ -672,6 +672,20 @@ export function hintAllowance(questionCount: number): number {
 }
 
 /**
+ * What tapping the hint on one question costs: nothing if that question is
+ * already charged, one hint if there is one left, otherwise the tap is
+ * refused. A clip URL the phone already holds is not a payment — a refunded
+ * hint (`play()` refused by the browser) keeps its URL, and a replay that
+ * skipped this rule was a free hint, which at two options is a free point.
+ */
+export type HintCharge = "free" | "charge" | "refuse";
+
+export function hintCharge(charged: boolean, hintsLeft: number): HintCharge {
+  if (charged) return "free";
+  return hintsLeft > 0 ? "charge" : "refuse";
+}
+
+/**
  * The client's own count of hints it played, bounded by what it could have.
  * The server cannot attribute a hint to a taker — there is no identity to hang
  * it on — so this is trusted and clamped, and only ever breaks ties.
