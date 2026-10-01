@@ -9,6 +9,7 @@ function round(overrides: Partial<RoundHistoryEntry> = {}): RoundHistoryEntry {
     songWinner: null,
     albumWinner: null,
     sourceWinner: null,
+    revealed: true,
     ...overrides,
   };
 }

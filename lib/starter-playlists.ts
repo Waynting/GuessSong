@@ -1,15 +1,14 @@
 /**
  * Playlists to offer a host who has none to hand.
  *
- * ## The list is empty, and that is the shipped state
+ * ## Whose playlists these should be
  *
- * This is the slot, not the contents. The site's owner adds public playlists
- * from their own Spotify account; until then `STARTER_PLAYLISTS` is `[]`,
- * `starterPlacement` returns null for every input, and the page renders
- * exactly what it rendered before this file existed. Do not fill it with ids
- * found elsewhere: a playlist somebody else owns can go private or be deleted
- * on any afternoon, and the first thing a new visitor is offered becomes a
- * refusal nobody here can fix.
+ * The site owner's own public playlists, by default. With `STARTER_PLAYLISTS`
+ * empty, `starterPlacement` returns null for every input and the page renders
+ * exactly what it rendered before this file existed. A playlist somebody else
+ * owns can go private or be deleted on any afternoon, and the first thing a
+ * new visitor is offered becomes a refusal nobody here can fix — the list as
+ * it stands is an exception the owner chose; see its note.
  *
  * ## This is not the built-in mode that was removed
  *
@@ -47,12 +46,33 @@ export interface StarterPlaylist {
 }
 
 /**
- * Ships empty — see the header. `tests/starter-playlists.test.ts` checks
- * whatever is added: every id 22 characters of base62, none beginning `37i9`
- * (Spotify's own, which no app can load), none listed twice, and a name and a
- * blurb on each.
+ * `tests/starter-playlists.test.ts` checks whatever is here: every id 22
+ * characters of base62, none beginning `37i9` (Spotify's own, which no app
+ * can load), none listed twice, and a name and a blurb on each.
+ *
+ * ## These two are not the site owner's, by the owner's choice (2026-10-01)
+ *
+ * The header's rule is own-account playlists only. The owner chose these two
+ * as they stand instead, knowing the cost: either can go private, be emptied
+ * or be deleted with no notice here, and the first thing a new host is
+ * offered becomes a refusal. It has already moved once — the second was
+ * found as "Reggaetón Viejo" and is titled "LOS DE HOTMAIL" by its owner as
+ * of that day; the chip's name is ours, so only the contents matter. If
+ * `playlist_refused:playlist_not_found` jumps after a deploy, check these
+ * first, and prefer copies on the owner's own account when replacing them.
  */
-export const STARTER_PLAYLISTS: readonly StarterPlaylist[] = [];
+export const STARTER_PLAYLISTS: readonly StarterPlaylist[] = [
+  {
+    id: "5xS3Gi0fA3Uo6RScucyct6",
+    name: "Party Hits 2010–2026",
+    blurb: "The songs everyone knows from the last fifteen years.",
+  },
+  {
+    id: "5omiLK2rcAPMJXVTLZJ9d9",
+    name: "Reggaetón Viejo",
+    blurb: "Old-school reggaetón: Don Omar, Wisin & Yandel, Arcángel.",
+  },
+];
 
 export type StarterPlace = "field" | "refusal";
 

@@ -288,6 +288,14 @@ export function useBuzzerSocket({
     // analytics event. A closure variable can't be clobbered by a later run.
     let cancelled = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    // The Worker said the room is gone (`room_expired`, then a close). That is
+    // the one refusal that is an answer about the room rather than about this
+    // connection, so nothing is retried after it: the retries could only be
+    // refused at the upgrade with a 404, three of those overwrote the error
+    // with `no_answer`, and every phone and the host then retried every 30s
+    // for as long as the tab stayed open. `reconnect()` starts a fresh run,
+    // which clears this with everything else.
+    let roomExpired = false;
 
     const connect = () => {
       if (cancelled) return;
@@ -344,6 +352,7 @@ export function useBuzzerSocket({
         } catch {
           return;
         }
+        if (msg.type === "error" && msg.code === "room_expired") roomExpired = true;
         onMessageRef.current?.(msg);
         setState((s) => reduce(s, msg));
       });
@@ -351,6 +360,7 @@ export function useBuzzerSocket({
       ws.addEventListener("close", () => {
         if (cancelled) return;
         setState((s) => ({ ...s, connected: false }));
+        if (roomExpired) return;
 
         if (ws.readyState === WebSocket.CLOSED && !openedThisAttempt) {
           failedOpensRef.current += 1;

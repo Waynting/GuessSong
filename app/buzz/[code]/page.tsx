@@ -295,6 +295,8 @@ export default function BuzzPlayerPage() {
       <BuzzerButton
         phase={snapshot?.phase ?? "idle"}
         buzzes={snapshot?.buzzes ?? []}
+        roundIndex={snapshot?.roundIndex ?? null}
+        roundOpenedAt={snapshot?.roundOpenedAt ?? null}
         playerId={playerId}
         connected={connected}
         onBuzz={buzz}

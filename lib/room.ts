@@ -450,9 +450,19 @@ export async function consumeRoomPool(
 
   // Only now are the track lists worth fetching — one mget for the whole room,
   // rather than having dragged them along in every roster poll all evening.
-  const lists = await store.mget<Track[]>(
-    room.roster.map((entry) => tracksKey(code, entry.folded, entry.tracksId))
-  );
+  let lists: Array<Track[] | null>;
+  try {
+    lists = await store.mget<Track[]>(
+      room.roster.map((entry) => tracksKey(code, entry.folded, entry.tracksId))
+    );
+  } catch (err) {
+    // The claim above already landed, so a failed read would otherwise leave
+    // the room consumed with no pool handed out: the host's retry is told the
+    // game already started, which is false, and the room is lost. Release it
+    // as the empty-pool branch below does.
+    await store.hdel(roomKey(code), CONSUMED_FIELD).catch(() => {});
+    throw err;
+  }
   const submissions = room.roster
     .map((entry, i) => ({ playerName: entry.playerName, tracks: lists[i] ?? [] }))
     // A contributor whose tracks key is missing cannot be in the pool, and

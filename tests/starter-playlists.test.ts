@@ -11,13 +11,11 @@ import {
 } from "@/lib/starter-playlists";
 
 /**
- * The starter playlists: a slot that ships empty.
+ * The starter playlists.
  *
  * Two things are pinned. The rule for where starters are offered is tested
- * against a fixture, because the real list has nothing in it to test with.
- * And the real list is checked entry by entry — vacuously today, which is the
- * point: the check is here before the first id is, so whatever the site's
- * owner adds later is validated the day it is added.
+ * against a fixture, so it does not move when the real list does. And the
+ * real list is checked entry by entry.
  */
 
 const FIXTURE: readonly StarterPlaylist[] = [
@@ -38,11 +36,9 @@ function context(over: Partial<StarterContext> = {}): StarterContext {
 }
 
 describe("the list as it ships", () => {
-  it("is empty", () => {
-    // Deliberately. The slot is built; the playlists are the owner's to add,
-    // from their own account. If this fails because ids were added, delete
-    // this one test — the ones below are what check them.
-    expect(STARTER_PLAYLISTS).toEqual([]);
+  it("is not empty", () => {
+    // Filled on 2026-10-01; the checks below are what hold each entry.
+    expect(STARTER_PLAYLISTS.length).toBeGreaterThan(0);
   });
 
   it("holds only ids that could load: 22 characters of base62, and none of Spotify's own", () => {
@@ -85,9 +81,6 @@ describe("with the list empty, nothing is offered anywhere", () => {
         for (const recentCount of [0, 1, 5]) {
           for (const failureCode of [null, "playlist_not_found", "playlist_editorial", "spotify_rate_limited"]) {
             const state = { singleMode, fieldEmpty, recentCount, failureCode };
-            // Once against the real list by default, once against an
-            // explicit empty one.
-            expect(starterPlacement(state), JSON.stringify(state)).toBeNull();
             expect(starterPlacement({ ...state, starters: [] }), JSON.stringify(state)).toBeNull();
           }
         }

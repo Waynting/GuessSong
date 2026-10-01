@@ -51,7 +51,7 @@ describe("the reveal asks for one question's key against a pick for it", () => {
     expect(body).toMatch(/locked\.current = index;/);
     expect(body).toMatch(/disabled=\{busy \|\| chosen >= 0\}/);
     // And once answered, the clip is not on offer: the verdict is on screen.
-    expect(body).toMatch(/const canHear = chosen < 0 && \(/);
+    expect(body).toMatch(/const canHear = chosen < 0 && /);
   });
 
   it("takes the round token before the await and advances through the ref, never the closure", () => {
@@ -119,7 +119,7 @@ describe("the reveal asks for one question's key against a pick for it", () => {
     // question — so a hint still in flight keeps a current token for the
     // whole dwell. Without the lock check it would be charged and start
     // under the answer the taker already has.
-    expect(body).toMatch(/if \(!isCurrent\(\) \|\| locked\.current === question\) return;\s*if \(!paid\) \{/);
+    expect(body).toMatch(/if \(!isCurrent\(\) \|\| locked\.current === question\) return;\s*if \(charge === "charge"\) \{/);
   });
 
   it("shows an answered question whose verdict never came as locked, and says so", () => {
@@ -203,5 +203,34 @@ describe("the verdict is painted on the pick, and wrong is red", () => {
     expect(reveal).not.toBeNull();
     expect(reveal![1]).not.toMatch(/background:\s*#1DB954/i);
     expect(reveal![1]).toMatch(/border-color:\s*#1DB954/i);
+  });
+});
+
+describe("a hint is charged however its clip is reached", () => {
+  const body = code(read(CLIENT));
+  const handler = body.match(/async function handleHint\(\)[\s\S]*?\n  function handleClipError/);
+
+  it("charges the cached replay exactly as the fetch, through one rule", () => {
+    // `refundHint` keeps the URL after a blocked `play()` and gives the hint
+    // back; a cached branch that played without charging was a free hint.
+    expect(handler).not.toBeNull();
+    const h = handler![0];
+    const rule = h.indexOf("hintCharge(charged.current.has(question), hintsLeft)");
+    const refuse = h.indexOf('if (charge === "refuse") return;');
+    const cached = h.indexOf("hintUrls.current.get(question)");
+    expect(rule).toBeGreaterThan(-1);
+    expect(refuse).toBeGreaterThan(rule);
+    expect(cached).toBeGreaterThan(refuse);
+    const branch = h.match(/if \(cached\) \{([\s\S]*?)await playUrl\(cached/);
+    expect(branch).not.toBeNull();
+    expect(branch![1]).toMatch(/if \(charge === "charge"\) \{\s*charged\.current\.add\(question\);\s*setHintsLeft\(\(n\) => n - 1\);/);
+    // Both plays sit behind the same decision; no `paid` shortcut of its own.
+    expect(h.match(/charge === "charge"/g)?.length).toBe(2);
+    expect(h).not.toMatch(/\bpaid\b/);
+  });
+
+  it("offers the button by the same rule, not by a held URL", () => {
+    expect(body).toMatch(/const canHear = chosen < 0 && hintCharge\(charged\.current\.has\(index\), hintsLeft\) !== "refuse";/);
+    expect(body).not.toMatch(/hasCachedHint/);
   });
 });

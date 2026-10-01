@@ -51,7 +51,8 @@
  * path in the app nothing until someone is stuck. A clip that cannot be found
  * (`absent` or `unavailable`, and the page does not need to know which) is
  * reported as "no clip" and the hint is *not* spent. Replaying a hint already
- * fetched for this question is free.
+ * charged for this question is free; a URL held from a refunded play is not a
+ * payment, so replaying it charges like a fetch (`hintCharge` in lib/quiz.ts).
  *
  * A hint is a round's async work, and CLAUDE.md's rule applies: it must not
  * land on the next question. `handleHint` takes a `lib/round-token.ts` token
@@ -118,7 +119,7 @@ import { reportQuizCopy, reportQuizShare } from "@/lib/loop-client";
 import { QuizSocialLinks } from "@/components/quiz-social-links";
 import { AppError, apiError, describeError, errorMessage, type AppErrorCode } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
-import { foldQuizName, rankOf, type QuizVerdict } from "@/lib/quiz";
+import { foldQuizName, hintCharge, rankOf, type QuizVerdict } from "@/lib/quiz";
 import {
   clearQuizProgress,
   findQuizSubmission,
@@ -698,16 +699,22 @@ export function QuizClient({ code }: { code: string }) {
       return;
     }
     const question = index;
+    // A question already paid for — before a reload, say — is heard again
+    // for free; the allowance only gates a *new* charge. A cached URL is not
+    // a payment: `refundHint` keeps it after a blocked play and gives the
+    // hint back, so the replay must charge exactly as the fetch does.
+    const charge = hintCharge(charged.current.has(question), hintsLeft);
+    if (charge === "refuse") return;
     const isCurrent = round.current.begin();
     const cached = hintUrls.current.get(question);
     if (cached) {
+      if (charge === "charge") {
+        charged.current.add(question);
+        setHintsLeft((n) => n - 1);
+      }
       await playUrl(cached, question, isCurrent);
       return;
     }
-    // A question already paid for — before a reload, say — is fetched again
-    // for free; the allowance only gates a *new* charge.
-    const paid = charged.current.has(question);
-    if (!paid && hintsLeft <= 0) return;
     // Still inside the tap: `load()` on the element counts as the user
     // gesture iOS wants before a later, programmatic `play()` is allowed,
     // and the `await fetch` below is exactly where that gesture used to be
@@ -732,7 +739,7 @@ export function QuizClient({ code }: { code: string }) {
       // on screen, and a hint under it is a charge for nothing. The URL is
       // kept for a revisit either way.
       if (!isCurrent() || locked.current === question) return;
-      if (!paid) {
+      if (charge === "charge") {
         charged.current.add(question);
         setHintsLeft((n) => n - 1);
       }
@@ -1163,10 +1170,9 @@ export function QuizClient({ code }: { code: string }) {
     const busy = phase === "submitting";
     /** Answered, and nothing is about to move it: Back, a reload, a refused submit. */
     const parked = chosen >= 0 && !pending && !busy;
-    const hasCachedHint = hintUrls.current.has(index);
     // Paid for already (this session or, restored, an earlier one): free to hear.
     // Not once answered: the clip is a hint, and the verdict is on screen.
-    const canHear = chosen < 0 && (hasCachedHint || charged.current.has(index) || hintsLeft > 0);
+    const canHear = chosen < 0 && hintCharge(charged.current.has(index), hintsLeft) !== "refuse";
     const hintLabel =
       hint === "loading"
         ? copy.hintLoading

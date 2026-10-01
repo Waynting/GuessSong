@@ -61,6 +61,9 @@ export function computeMostObscure(history: RoundHistoryEntry[]): ObscureAward |
     // ambiguous (crediting all of them would inflate everyone's rate), so
     // only single-contributor tracks count toward this stat.
     if (entry.contributors.length !== 1) continue;
+    // A round skipped before the reveal was never put to the room, so its
+    // null sourceWinner is no evidence that nobody could place the track.
+    if (!entry.revealed) continue;
     const [contributor] = entry.contributors;
     totals.set(contributor, (totals.get(contributor) ?? 0) + 1);
     if (entry.sourceWinner !== null) {
