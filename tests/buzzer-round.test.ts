@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { BuzzEntry, RoomSnapshot } from "@/lib/buzzer-protocol";
-import { buzzerRoundKey, describeBuzzer } from "@/lib/buzzer-round";
+import type { BuzzEntry, RoomSnapshot, ServerMessage } from "@/lib/buzzer-protocol";
+import { buzzerRoundKey, describeBuzzer, hostOpenWasLost } from "@/lib/buzzer-round";
 
 const entry = (playerId: string, order: number): BuzzEntry => ({
   playerId,
@@ -75,5 +75,42 @@ describe("the button never promises a queue the player cannot join", () => {
     const v = describeBuzzer({ ...base, phase: "locked", pressed: false });
     expect(v.disabled).toBe(false);
     expect(v.sub).toMatch(/queue/);
+  });
+});
+
+describe("a host:open that never reached the room is sent again", () => {
+  const joinReply = (phase: RoomSnapshot["phase"], isHost = true): ServerMessage => ({
+    type: "state",
+    snapshot: snap({ phase, roundOpenedAt: phase === "idle" ? null : 1_000 }),
+    you: { playerId: isHost ? "host" : "", isHost },
+  });
+
+  it("re-sends when the room answers the host's (re)join idle while the clip is running or held", () => {
+    // Play tapped before /game's socket finished its handshake, or a Wi-Fi
+    // blip during the backoff: send() dropped the frame, the guard never
+    // re-sent it, and every phone read "Wait for the clip" all song.
+    expect(hostOpenWasLost(joinReply("idle"), "playing")).toBe(true);
+    expect(hostOpenWasLost(joinReply("idle"), "guessing")).toBe(true);
+  });
+
+  it("leaves a round that did open alone, and every phase where idle is right", () => {
+    expect(hostOpenWasLost(joinReply("open"), "playing")).toBe(false);
+    expect(hostOpenWasLost(joinReply("locked"), "guessing")).toBe(false);
+    for (const phase of ["waiting", "revealed", "finished"]) {
+      expect(hostOpenWasLost(joinReply("idle"), phase), phase).toBe(false);
+    }
+  });
+
+  it("ignores host:next's broadcast, which a fast Next then Play receives after the new open went out", () => {
+    expect(hostOpenWasLost(joinReply("idle", false), "playing")).toBe(false);
+    expect(hostOpenWasLost({ type: "round:resolved", roundIndex: 0, verdict: "revealed" }, "playing")).toBe(false);
+  });
+
+  it("is wired into the host panel's message handler, through refs so the handler is not rebuilt", () => {
+    const panel = readFileSync(join(process.cwd(), "components/buzzer-host-panel.tsx"), "utf8");
+    const handler = panel.slice(panel.indexOf("const handleServerMessage = useCallback("), panel.indexOf("useBuzzerSocket({"));
+    expect(handler).toMatch(/if \(hostOpenWasLost\(msg, gamePhaseRef\.current\)\) hostOpenRef\.current\(\);/);
+    expect(panel).toMatch(/gamePhaseRef\.current = gamePhase;/);
+    expect(panel).toMatch(/hostOpenRef\.current = hostOpen;/);
   });
 });

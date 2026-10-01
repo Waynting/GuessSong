@@ -3,7 +3,35 @@
  * reaches `lib/` and cannot import the `.tsx` components that apply them.
  */
 
-import type { BuzzerPhase, BuzzEntry, RoomSnapshot } from "@/lib/buzzer-protocol";
+import type { BuzzerPhase, BuzzEntry, RoomSnapshot, ServerMessage } from "@/lib/buzzer-protocol";
+
+/**
+ * True when the room's answer to the host's own (re)join says the round the
+ * host is playing was never opened, so `host:open` has to go out again.
+ *
+ * The host panel sends the open once per round, and `send` drops a frame on a
+ * socket that is not OPEN — Play tapped before `/game`'s socket finished its
+ * handshake, or a Wi-Fi blip during the reconnect backoff. The once-per-round
+ * guard then never sent it again, and every phone read "Wait for the clip"
+ * for the whole song. Every reconnect is answered with a `state`, so that is
+ * where the loss shows: the room idle while the host's clip is running or
+ * held. Nothing ends a round from those two phases (Reveal moves the host to
+ * `revealed`), so idle there can only mean the open never landed.
+ *
+ * Only the join reply counts (`you.isHost`): `host:next` broadcasts its
+ * `state` to everyone with an empty `you`, and on a fast Next → Play that
+ * idle snapshot arrives after the new round's open was already sent — a
+ * re-send there would wipe the queue of a round that is live.
+ */
+export function hostOpenWasLost(msg: ServerMessage, gamePhase: string): boolean {
+  return (
+    msg.type === "state" &&
+    msg.you.isHost &&
+    msg.snapshot.phase === "idle" &&
+    (gamePhase === "playing" || gamePhase === "guessing")
+  );
+}
+
 
 /**
  * Which round a buzz belongs to, as the phone can tell it. A new round from
