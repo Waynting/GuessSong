@@ -356,3 +356,15 @@ describe("an award reaches the row it names", () => {
     }
   });
 });
+
+describe("a round reaches the history the same way from Next Track and End Game", () => {
+  it("records through closeRoundEntry from both paths, and nowhere else", () => {
+    // End Game used to append nothing, so a source point awarded on the round
+    // on screen vanished from the summary and the taste card.
+    expect(member("nextTrack")).toMatch(/recordRound\("next"\)/);
+    expect(member("endGame")).toMatch(/recordRound\("end"\)/);
+    expect(member("recordRound")).toMatch(/closeRoundEntry\(/);
+    expect(member("recordRound")).toMatch(/revealed: phase === "revealed"/);
+    expect(body.match(/setRoundHistory\(\(/g) ?? []).toHaveLength(1);
+  });
+});

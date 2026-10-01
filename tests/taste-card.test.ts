@@ -39,10 +39,10 @@ describe("findSharedTracks", () => {
 describe("computeMostObscure", () => {
   it("picks the contributor with the lowest correct-source-guess rate", () => {
     const history: RoundHistoryEntry[] = [
-      { trackId: "a", contributors: ["Alice"], songWinner: null, albumWinner: null, sourceWinner: "Bob" },
-      { trackId: "b", contributors: ["Alice"], songWinner: null, albumWinner: null, sourceWinner: null },
-      { trackId: "c", contributors: ["Bob"], songWinner: null, albumWinner: null, sourceWinner: "Alice" },
-      { trackId: "d", contributors: ["Bob"], songWinner: null, albumWinner: null, sourceWinner: "Alice" },
+      { trackId: "a", contributors: ["Alice"], songWinner: null, albumWinner: null, sourceWinner: "Bob", revealed: true },
+      { trackId: "b", contributors: ["Alice"], songWinner: null, albumWinner: null, sourceWinner: null, revealed: true },
+      { trackId: "c", contributors: ["Bob"], songWinner: null, albumWinner: null, sourceWinner: "Alice", revealed: true },
+      { trackId: "d", contributors: ["Bob"], songWinner: null, albumWinner: null, sourceWinner: "Alice", revealed: true },
     ];
     // Alice: 1/2 correct (0.5). Bob: 2/2 correct (1.0). Alice is more obscure.
     const result = computeMostObscure(history);
@@ -53,7 +53,7 @@ describe("computeMostObscure", () => {
 
   it("excludes shared (multi-contributor) tracks — no way to know which contributor was guessed", () => {
     const history: RoundHistoryEntry[] = [
-      { trackId: "a", contributors: ["Alice", "Bob"], songWinner: null, albumWinner: null, sourceWinner: "Carol" },
+      { trackId: "a", contributors: ["Alice", "Bob"], songWinner: null, albumWinner: null, sourceWinner: "Carol", revealed: true },
     ];
     // A correct guess on a track shared by Alice and Bob doesn't say which
     // of them was actually named, so it can't be credited to either without
@@ -63,8 +63,8 @@ describe("computeMostObscure", () => {
 
   it("only counts single-contributor tracks when a history mixes shared and solo tracks", () => {
     const history: RoundHistoryEntry[] = [
-      { trackId: "a", contributors: ["Alice", "Bob"], songWinner: null, albumWinner: null, sourceWinner: "Carol" },
-      { trackId: "b", contributors: ["Alice"], songWinner: null, albumWinner: null, sourceWinner: "Alice" },
+      { trackId: "a", contributors: ["Alice", "Bob"], songWinner: null, albumWinner: null, sourceWinner: "Carol", revealed: true },
+      { trackId: "b", contributors: ["Alice"], songWinner: null, albumWinner: null, sourceWinner: "Alice", revealed: true },
     ];
     const result = computeMostObscure(history);
     expect(result?.playerName).toBe("Alice");
@@ -78,10 +78,10 @@ describe("computeMostObscure", () => {
     // crowned whoever the Map saw first, i.e. whoever submitted earliest — an
     // award that reads as a finding and is an accident of ordering.
     const award = computeMostObscure([
-      { trackId: "a1", contributors: ["Ana"], songWinner: null, albumWinner: null, sourceWinner: null },
-      { trackId: "b1", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null },
-      { trackId: "b2", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null },
-      { trackId: "b3", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null },
+      { trackId: "a1", contributors: ["Ana"], songWinner: null, albumWinner: null, sourceWinner: null, revealed: true },
+      { trackId: "b1", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null, revealed: true },
+      { trackId: "b2", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null, revealed: true },
+      { trackId: "b3", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null, revealed: true },
     ]);
     expect(award).toEqual({
       playerName: "Ben",
@@ -95,13 +95,14 @@ describe("computeMostObscure", () => {
     // The tiebreak must only apply on an exact tie. Ana at 0/1 is more obscure
     // than Ben at 5/10 however many tracks Ben brought.
     const history = [
-      { trackId: "a1", contributors: ["Ana"], songWinner: null, albumWinner: null, sourceWinner: null },
+      { trackId: "a1", contributors: ["Ana"], songWinner: null, albumWinner: null, sourceWinner: null, revealed: true },
       ...Array.from({ length: 10 }, (_, i) => ({
         trackId: `b${i}`,
         contributors: ["Ben"],
         songWinner: null,
         albumWinner: null,
         sourceWinner: i < 5 ? "Ana" : null,
+        revealed: true,
       })),
     ];
     expect(computeMostObscure(history)?.playerName).toBe("Ana");
@@ -109,8 +110,8 @@ describe("computeMostObscure", () => {
 
   it("is stable when the rate and the track count both tie", () => {
     const history = [
-      { trackId: "a1", contributors: ["Ana"], songWinner: null, albumWinner: null, sourceWinner: null },
-      { trackId: "b1", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null },
+      { trackId: "a1", contributors: ["Ana"], songWinner: null, albumWinner: null, sourceWinner: null, revealed: true },
+      { trackId: "b1", contributors: ["Ben"], songWinner: null, albumWinner: null, sourceWinner: null, revealed: true },
     ];
     const first = computeMostObscure(history);
     expect(first).not.toBeNull();
@@ -156,8 +157,8 @@ describe("buildTasteCard", () => {
       makeTrack({ id: "b", contributors: ["Bob"], popularity: 40 }),
     ];
     const history: RoundHistoryEntry[] = [
-      { trackId: "a", contributors: ["Alice", "Bob"], songWinner: null, albumWinner: null, sourceWinner: "Carol" },
-      { trackId: "b", contributors: ["Bob"], songWinner: null, albumWinner: null, sourceWinner: null },
+      { trackId: "a", contributors: ["Alice", "Bob"], songWinner: null, albumWinner: null, sourceWinner: "Carol", revealed: true },
+      { trackId: "b", contributors: ["Bob"], songWinner: null, albumWinner: null, sourceWinner: null, revealed: true },
     ];
     const card = buildTasteCard(tracks, history);
     expect(card.sharedTracks).toHaveLength(1);
