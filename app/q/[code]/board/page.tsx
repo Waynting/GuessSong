@@ -43,6 +43,7 @@ import {
 import { quizUrl, recallQuizToken } from "@/lib/quiz-session";
 import { COPIED_FLASH_MS, copyLink, shareLink, type ShareLinkOutcome } from "@/lib/quiz-share";
 import { Button } from "@/components/ui/button";
+import { QuizSocialLinks } from "@/components/quiz-social-links";
 import { QUIZ_HOST_TOKEN_HEADER, type QuizBoardQuestion, type QuizBoardResponse } from "@/types/quiz";
 import { Shell } from "../shell";
 
@@ -374,6 +375,8 @@ export default function QuizBoardPage() {
               {copied ? copy.copied : copy.boardCopyLink}
             </Button>
           </div>
+          {/* Only where there is no share sheet; see the component. */}
+          <QuizSocialLinks by="board" url={url} text={ownerShareText(copy, board)} locale={locale} />
           {shareFailed && (
             <div role="alert" className="text-center text-xs leading-relaxed">
               <p className="text-[#f5b942]">{copy.boardShareFailed}</p>

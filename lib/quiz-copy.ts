@@ -64,7 +64,15 @@ export interface QuizCopy {
   refreshingBoard: string;
   youMarker: string;
   shareButton: string;
+  /** The taker's explicit Copy button, beside Share: the same sentence and link, to the clipboard. */
+  copyLinkButton: string;
   copied: string;
+  /**
+   * Over the post-to-a-platform links, drawn only where there is no share
+   * sheet (`components/quiz-social-links.tsx`). The labels under it are the
+   * platforms' own names, the same in both languages.
+   */
+  socialLead: string;
   /** Neither the share sheet nor the clipboard worked; the link follows, to copy by hand. */
   shareFailed: string;
   /** The taker's score, with an owner to name. */
@@ -225,7 +233,9 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     refreshingBoard: "Refreshing…",
     youMarker: "you",
     shareButton: "Share my score",
+    copyLinkButton: "Copy link",
     copied: "Copied!",
+    socialLead: "Or post it to",
     shareFailed: "Couldn't share or copy — copy this link by hand:",
     shareText: "I got {correct}/{total} on {owner}'s music taste quiz. Can you beat me?",
     shareTextPlaylist: "I got {correct}/{total} on the \"{playlist}\" playlist quiz. Can you beat me?",
@@ -342,7 +352,9 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     refreshingBoard: "更新中…",
     youMarker: "你",
     shareButton: "分享我的分數",
+    copyLinkButton: "複製連結",
     copied: "已複製！",
+    socialLead: "或直接分享到",
     shareFailed: "沒辦法分享或複製 — 請手動複製這個連結：",
     shareText: "我在 {owner} 的音樂品味測驗拿了 {correct}/{total}，你能贏我嗎？",
     shareTextPlaylist: "我在「{playlist}」這份歌單的測驗拿了 {correct}/{total}，你能贏我嗎？",

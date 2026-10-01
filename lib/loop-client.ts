@@ -22,6 +22,7 @@ import { trackEvent } from "@/lib/analytics";
 import type { LoopSurface } from "@/lib/loop-links";
 import type { GameEnd, MixedSubMode, QuizShareBy, QuizShareOutcome } from "@/lib/loop-stats";
 import type { QuizCopyOutcome } from "@/lib/loop-stats";
+import type { SocialPlatform } from "@/lib/social-share";
 import type { SetupSource } from "@/lib/loop-stats";
 import type {
   FirstClipOutcome,
@@ -203,4 +204,18 @@ export function reportQuizShare(by: QuizShareBy, outcome: QuizShareOutcome): voi
 export function reportQuizCopy(by: QuizShareBy, outcome: QuizCopyOutcome): void {
   trackEvent("quiz_copy_tapped", { by, outcome });
   sendPulse({ kind: "quiz_copied", by, outcome });
+}
+
+/**
+ * Call from a tap on a post-to-a-platform link, as the click happens.
+ *
+ * The link opens in a new tab (`target="_blank"`), so this document survives
+ * the click and the beacon is not racing a teardown — the reason the loop
+ * links must be real navigations does not apply. Its own function, event and
+ * key for the reason `reportQuizCopy` gives: a third button folded into
+ * either neighbour's counter is a number that means two things.
+ */
+export function reportQuizSocial(by: QuizShareBy, platform: SocialPlatform): void {
+  trackEvent("quiz_social_tapped", { by, platform });
+  sendPulse({ kind: "quiz_social", by, platform });
 }

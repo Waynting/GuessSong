@@ -417,6 +417,45 @@ describe("parsePulse — quiz copies", () => {
   });
 });
 
+describe("parsePulse — quiz social taps", () => {
+  // Mirrored, not imported beside the list at the top, for the reason the
+  // copy block gives. `tests/social-share.test.ts` pins the mirror.
+  const PLATFORMS = ["line", "threads", "x", "facebook", "whatsapp"] as const;
+
+  it("accepts every declared by × platform pair", () => {
+    for (const by of QUIZ_SHARE_BYS) {
+      for (const platform of PLATFORMS) {
+        expect(parsePulse({ kind: "quiz_social", by, platform })).toEqual({
+          kind: "quiz_social",
+          by,
+          platform,
+        });
+      }
+    }
+  });
+
+  it("refuses an undeclared platform or sharer — both are key tails, and neither is clamped", () => {
+    for (const platform of ["twitter", "LINE", "telegram", "", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "quiz_social", by: "owner", platform })).toBeNull();
+    }
+    for (const by of ["host", "", "TAKER", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "quiz_social", by, platform: "line" })).toBeNull();
+    }
+  });
+
+  it("strips what it does not declare, and is not a share or a copy", () => {
+    expect(
+      parsePulse({ kind: "quiz_social", by: "taker", platform: "x", outcome: "shared", url: "https://x/q/ABC234" })
+    ).toEqual({ kind: "quiz_social", by: "taker", platform: "x" });
+    // A share or a copy carrying a platform is still only that.
+    expect(parsePulse({ kind: "quiz_copied", by: "owner", outcome: "copied", platform: "line" })).toEqual({
+      kind: "quiz_copied",
+      by: "owner",
+      outcome: "copied",
+    });
+  });
+});
+
 describe("the route records every kind the parser accepts", () => {
   // `app/api/pulse/route.ts` dispatches on `kind` with a switch that has no
   // default, and the compiler does not ask for one. A kind added to
@@ -431,6 +470,7 @@ describe("the route records every kind the parser accepts", () => {
     const kinds = [...union.matchAll(/kind: "(\w+)"/g)].map((m) => m[1]);
     expect(kinds).toContain("quiz_copied");
     expect(kinds).toContain("quiz_shared");
+    expect(kinds).toContain("quiz_social");
     expect(kinds.length).toBeGreaterThanOrEqual(5);
     const route = read("app/api/pulse/route.ts");
     for (const kind of kinds) {
@@ -444,6 +484,7 @@ describe("the route records every kind the parser accepts", () => {
     const route = read("app/api/pulse/route.ts");
     expect(route).toMatch(/case "quiz_copied":\s*await recordQuizCopy\(event\.by, event\.outcome\);/);
     expect(route).toMatch(/case "quiz_shared":\s*await recordQuizShare\(event\.by, event\.outcome\);/);
+    expect(route).toMatch(/case "quiz_social":\s*await recordQuizSocial\(event\.by, event\.platform\);/);
   });
 
   it("has each button on the panel and the board report through its own function", () => {
@@ -451,9 +492,15 @@ describe("the route records every kind the parser accepts", () => {
     // share outcomes, so a Copy handler calling `reportQuizShare` compiles.
     // That is how `owner:copied` came to mean two things.
     const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+    //
+    // The taker's result screen joined on 2026-10-01, when it grew a Copy
+    // button beside "Share my score". And none of the three may report a
+    // social tap itself: that is `QuizSocialLinks`' one call, pinned in
+    // `tests/social-share.test.ts`.
     for (const [file, by] of [
       ["components/quiz-panel.tsx", "owner"],
       ["app/q/[code]/board/page.tsx", "board"],
+      ["app/q/[code]/quiz-client.tsx", "taker"],
     ] as const) {
       const body = code(read(file));
       const share = body.match(/async function handleShare\(\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
@@ -465,7 +512,8 @@ describe("the route records every kind the parser accepts", () => {
       // One call each in the whole file, and no third path to GA4 alone.
       expect(body.match(/reportQuizShare\(/g) ?? [], file).toHaveLength(1);
       expect(body.match(/reportQuizCopy\(/g) ?? [], file).toHaveLength(1);
-      expect(body, file).not.toMatch(/trackEvent\("quiz_(share|copy)_tapped"/);
+      expect(body, file).not.toMatch(/reportQuizSocial\(/);
+      expect(body, file).not.toMatch(/trackEvent\("quiz_(share|copy|social)_tapped"/);
     }
   });
 
@@ -476,6 +524,9 @@ describe("the route records every kind the parser accepts", () => {
     );
     expect(client).toMatch(
       /export function reportQuizShare\([^)]*\): void \{\s*trackEvent\("quiz_share_tapped", \{ by, outcome \}\);\s*sendPulse\(\{ kind: "quiz_shared", by, outcome \}\);\s*\}/
+    );
+    expect(client).toMatch(
+      /export function reportQuizSocial\([^)]*\): void \{\s*trackEvent\("quiz_social_tapped", \{ by, platform \}\);\s*sendPulse\(\{ kind: "quiz_social", by, platform \}\);\s*\}/
     );
   });
 });
