@@ -226,6 +226,11 @@ export type AnalyticsEvent =
       params: { target: "play_again" | "mixed"; screen?: "phone" | "desktop" };
     }
   | {
+      /** The setup page's nudge toward Mixed mode. See `lib/mixed-nudge.ts`. */
+      name: "mixed_nudge";
+      params: { stage: "shown" | "tapped" | "started" };
+    }
+  | {
       name: "preview_miss";
       params: {
         playlist_source: PlaylistSource;

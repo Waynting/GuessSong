@@ -9,7 +9,8 @@ import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolRe
 import { trackEvent } from "@/lib/analytics";
 import { arrivedFrom } from "@/lib/loop-links";
 import { bumpHostGameCount, recallLoopRef, rememberLoopRef } from "@/lib/host-session";
-import { reportGameStart } from "@/lib/loop-client";
+import { reportGameStart, reportMixedNudge } from "@/lib/loop-client";
+import { showMixedNudge } from "@/lib/mixed-nudge";
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
 import {
   AppError,
@@ -247,6 +248,10 @@ export default function SetupPage() {
    * second press of Start the one that loses the link to the guide.
    */
   const lastRejectedRef = useRef<{ key: string; failure: SetupFailure } | null>(null);
+  // The Mixed nudge: counted once per page load when first drawn, and its tap
+  // remembered so a Mixed start from this page can be credited to it.
+  const nudgeShownRef = useRef(false);
+  const nudgeTappedRef = useRef(false);
 
   // What the one room has to do, given the modes picked above. Pass-the-phone
   // with the buzzer off needs no room at all, and never opens one.
@@ -474,6 +479,10 @@ export default function SetupPage() {
     const hostGameIndex = bumpHostGameCount();
     const setupSource: SetupSource = mixed ? "mixed" : linkSource;
     reportGameStart(hostGameIndex, mixed, setupSource);
+    if (mixed && nudgeTappedRef.current) {
+      nudgeTappedRef.current = false;
+      reportMixedNudge("started");
+    }
     return {
       host_game_index: hostGameIndex,
       arrived_from: arrivedFrom(recallLoopRef()),
@@ -771,6 +780,20 @@ export default function SetupPage() {
     mixedContributions: mixedContributions.length,
     roomSubmissions: roomSubmissions.length,
   });
+  // A room's worth of names on Single Playlist: offer the mode built for it.
+  const mixedNudge = showMixedNudge({ setupMode, buzzerEnabled, players });
+  useEffect(() => {
+    if (!mixedNudge || nudgeShownRef.current) return;
+    nudgeShownRef.current = true;
+    reportMixedNudge("shown");
+  }, [mixedNudge]);
+
+  function takeMixedNudge() {
+    nudgeTappedRef.current = true;
+    reportMixedNudge("tapped");
+    chooseMode("mixed");
+  }
+
   const startClick = setupMode === "single"
     ? handleStart
     : mixedSubMode === "phone"
@@ -998,6 +1021,15 @@ export default function SetupPage() {
                         Add Player
                       </button>
                     </div>
+                    {mixedNudge && (
+                      <button type="button" className="mixed-nudge" onClick={takeMixedNudge}>
+                        <span aria-hidden style={{ fontSize: "18px" }}>🎧</span>
+                        <span>
+                          Three or more of you? Everyone brings a playlist and you also
+                          guess whose it was. <strong>Try Mixed mode →</strong>
+                        </span>
+                      </button>
+                    )}
                   </div>
             )}
 

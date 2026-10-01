@@ -6,6 +6,7 @@ import {
   recordGameEnd,
   recordGameLeft,
   recordGameOverTap,
+  recordMixedNudge,
   recordGameStart,
   recordLoopImpression,
   recordQuizShare,
@@ -84,6 +85,9 @@ export async function POST(req: NextRequest) {
       break;
     case "game_over_tap":
       await recordGameOverTap(event.target);
+      break;
+    case "mixed_nudge":
+      await recordMixedNudge(event.stage);
       break;
     case "quiz_shared":
       await recordQuizShare(event.by, event.outcome);

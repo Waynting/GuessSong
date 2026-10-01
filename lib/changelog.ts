@@ -54,6 +54,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.19.0",
+    date: "2026-10-01",
+    headline: "Got three or more players? The setup page now points you to Mixed mode.",
+    headlineZh: "三個人以上一起玩？設定頁現在會提醒你可以用混合歌單模式。",
+    changes: [
+      {
+        kind: "new",
+        text: "Once you type a third player's name, a hint under the player list suggests Mixed mode, where everyone brings their own playlist and you also guess whose song it was. One tap switches to it.",
+        textZh: "輸入第三位玩家的名字後，玩家列表下方會出現提示，建議改用混合歌單模式：每個人各帶一份歌單，還能猜這首歌是誰的。點一下就能切換。",
+      },
+    ],
+  },
+  {
     version: "1.18.0",
     date: "2026-10-01",
     headline:

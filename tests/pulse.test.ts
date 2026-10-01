@@ -8,6 +8,7 @@ import {
   GAME_ENDS,
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
+  MIXED_NUDGE_STAGES,
   GAME_ROUND_CEILING,
   GAME_SCREENS,
   HOST_INDEX_CEILING,
@@ -322,6 +323,17 @@ describe("parsePulse — a game left", () => {
       kind: "game_left",
       roundsPlayed: 2,
     });
+  });
+});
+
+describe("parsePulse — the setup page's Mixed nudge", () => {
+  it("accepts the three stages and nothing else", () => {
+    for (const stage of MIXED_NUDGE_STAGES) {
+      expect(parsePulse({ kind: "mixed_nudge", stage })).toEqual({ kind: "mixed_nudge", stage });
+    }
+    for (const stage of ["clicked", "", "SHOWN", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "mixed_nudge", stage })).toBeNull();
+    }
   });
 });
 

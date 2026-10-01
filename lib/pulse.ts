@@ -48,6 +48,7 @@ import {
   GAME_ENDS,
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
+  MIXED_NUDGE_STAGES,
   GAME_ROUND_CEILING,
   GAME_ROUND_FLOOR,
   GAME_SCREENS,
@@ -60,6 +61,7 @@ import {
   type GameEnd,
   type GameHostKind,
   type GameOverTap,
+  type MixedNudgeStage,
   type GameScreen,
   type MixedSubMode,
   type QuizShareBy,
@@ -105,6 +107,10 @@ function isGameOverTap(value: unknown): value is GameOverTap {
   return typeof value === "string" && (GAME_OVER_TAPS as readonly string[]).includes(value);
 }
 
+function isMixedNudgeStage(value: unknown): value is MixedNudgeStage {
+  return typeof value === "string" && (MIXED_NUDGE_STAGES as readonly string[]).includes(value);
+}
+
 /**
  * A round off the wire, or null when it is not a number at all.
  *
@@ -148,6 +154,7 @@ export type PulseEvent =
   | { kind: "first_clip"; path: FirstClipPath; outcome: FirstClipOutcome }
   | { kind: "game_left"; roundsPlayed: number; host?: GameHostKind }
   | { kind: "game_over_tap"; target: GameOverTap }
+  | { kind: "mixed_nudge"; stage: MixedNudgeStage }
   | { kind: "quiz_copied"; by: QuizShareBy; outcome: QuizCopyOutcome }
   | { kind: "quiz_shared"; by: QuizShareBy; outcome: QuizShareOutcome }
   | { kind: "quiz_social"; by: QuizShareBy; platform: SocialPlatform };
@@ -233,6 +240,10 @@ export function parsePulse(body: unknown): PulseEvent | null {
 
   if (raw.kind === "game_over_tap") {
     return isGameOverTap(raw.target) ? { kind: "game_over_tap", target: raw.target } : null;
+  }
+
+  if (raw.kind === "mixed_nudge") {
+    return isMixedNudgeStage(raw.stage) ? { kind: "mixed_nudge", stage: raw.stage } : null;
   }
 
   if (raw.kind === "quiz_shared") {
