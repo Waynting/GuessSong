@@ -195,6 +195,9 @@ const STATS_TTL_SECONDS = 7 * 24 * 60 * 60;
 /* Keys                                                                */
 /* ------------------------------------------------------------------ */
 
+/** A Spotify track id: exactly 22 base62 characters. */
+const SPOTIFY_TRACK_ID = /^[A-Za-z0-9]{22}$/;
+
 /**
  * Track id is the stable identity — the same recording appears under varying
  * name/artist strings across playlists (feat. credits, remaster tags, casing),
@@ -202,7 +205,12 @@ const STATS_TTL_SECONDS = 7 * 24 * 60 * 60;
  * key so callers without an id still get caching.
  */
 export function previewCacheKey(id: string, track: string, artist: string): string {
-  if (id) return `preview:id:${id}`;
+  // Only an id shaped like Spotify's names a key of its own. The id arrives
+  // from an unauthenticated caller with no length cap, and anything else used
+  // to be written as-is under `preview:id:` for up to a year — 90 KB ids, 25
+  // keys a request. A malformed one falls back to the query key below, which
+  // is what a caller with no id gets.
+  if (SPOTIFY_TRACK_ID.test(id)) return `preview:id:${id}`;
   // Normalise each part before joining, not the joined string: Spotify track
   // names carry stray leading/trailing whitespace, and trimming only the ends
   // of "track|artist" would leave " song |artist" as a distinct key from

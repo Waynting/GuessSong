@@ -9,6 +9,7 @@ import {
   type PreviewResult,
   type PreviewStatus,
 } from "@/types/preview";
+import { previewCacheKey } from "@/lib/preview-cache";
 
 /**
  * Two things every test here is really about.
@@ -209,7 +210,7 @@ describe("preview lookup", () => {
   it("resolves from iTunes on a cold cache", async () => {
     const probe = installFetchMock({ itunes: { body: ITUNES_HIT } });
 
-    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1" }));
+    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
 
     expect(await resultOf(res)).toEqual({
       previewUrl: "https://itunes.example/preview.m4a",
@@ -221,7 +222,7 @@ describe("preview lookup", () => {
   it("falls back to Deezer when iTunes has nothing", async () => {
     const probe = installFetchMock({ deezer: { body: DEEZER_HIT } });
 
-    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp2" }));
+    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp2xxxxxxxxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://deezer.example/preview.mp3");
     // Both iTunes queries exhausted, then the first Deezer query hits.
@@ -231,7 +232,7 @@ describe("preview lookup", () => {
   it("reports absent when both sources answer and neither has a preview", async () => {
     const probe = installFetchMock();
 
-    const res = await GET(request({ track: "Nothing", artist: "Nobody", id: "sp3" }));
+    const res = await GET(request({ track: "Nothing", artist: "Nobody", id: "sp3xxxxxxxxxxxxxxxxxxx" }));
 
     expect(await resultOf(res)).toEqual({ previewUrl: null, status: "absent" });
     // The full fan-out this cache exists to prevent: 2 iTunes + 3 Deezer.
@@ -338,7 +339,7 @@ describe("a wrong recording is never accepted for a right title", () => {
       },
     });
 
-    const res = await GET(request({ track: "Hello", artist: "Adele", id: "artist-1" }));
+    const res = await GET(request({ track: "Hello", artist: "Adele", id: "artist1xxxxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://deezer.example/adele.mp3");
     expect(probe.itunesTerms()).toEqual(["Hello Adele", "Hello"]);
@@ -361,7 +362,7 @@ describe("a wrong recording is never accepted for a right title", () => {
       },
     });
 
-    const res = await GET(request({ track: "Alone", artist: "Marshmello", id: "artist-2" }));
+    const res = await GET(request({ track: "Alone", artist: "Marshmello", id: "artist2xxxxxxxxxxxxxxx" }));
 
     expect(await resultOf(res)).toEqual({ previewUrl: null, status: "absent" });
   });
@@ -379,7 +380,7 @@ describe("a wrong recording is never accepted for a right title", () => {
       },
     });
 
-    const res = await GET(request({ track: "小幸運", artist: "Hebe Tien", id: "artist-3" }));
+    const res = await GET(request({ track: "小幸運", artist: "Hebe Tien", id: "artist3xxxxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/hebe.m4a");
   });
@@ -399,7 +400,7 @@ describe("a wrong recording is never accepted for a right title", () => {
       },
     });
 
-    const res = await GET(request({ track: "小幸運", artist: "田馥甄", id: "artist-4" }));
+    const res = await GET(request({ track: "小幸運", artist: "田馥甄", id: "artist4xxxxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/hebe.m4a");
   });
@@ -415,7 +416,7 @@ describe("a wrong recording is never accepted for a right title", () => {
       },
     });
 
-    const res = await GET(request({ track: "Alone", artist: "Marshmello", id: "artist-5" }));
+    const res = await GET(request({ track: "Alone", artist: "Marshmello", id: "artist5xxxxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/marshmello.m4a");
   });
@@ -426,7 +427,7 @@ describe("a wrong recording is never accepted for a right title", () => {
       itunes: { Alone: itunesResult("Alone", "Sian Evans", "https://itunes.example/sian.m4a") },
     });
 
-    const res = await GET(request({ track: "Alone", artist: "Sia", id: "artist-6" }));
+    const res = await GET(request({ track: "Alone", artist: "Sia", id: "artist6xxxxxxxxxxxxxxx" }));
 
     expect(await resultOf(res)).toEqual({ previewUrl: null, status: "absent" });
   });
@@ -436,7 +437,7 @@ describe("a wrong recording is never accepted for a right title", () => {
     // query list spent a second upstream call re-asking an identical question.
     const probe = installTermMock({});
 
-    const res = await GET(request({ track: "Song", id: "artist-7" }));
+    const res = await GET(request({ track: "Song", id: "artist7xxxxxxxxxxxxxxx" }));
 
     expect(await resultOf(res)).toEqual({ previewUrl: null, status: "absent" });
     expect(probe.itunesTerms()).toEqual(["Song"]);
@@ -474,7 +475,7 @@ describe("a credit has to name the act, not merely contain it", () => {
     });
 
     const res = await GET(
-      request({ track: "Hello", artist: "Adele", durationMs: "295502", id: "tribute-1" })
+      request({ track: "Hello", artist: "Adele", durationMs: "295502", id: "tribute1xxxxxxxxxxxxxx" })
     );
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/adele.m4a");
@@ -493,7 +494,7 @@ describe("a credit has to name the act, not merely contain it", () => {
       },
     });
 
-    const res = await GET(request({ track: "One Kiss", artist: "Calvin Harris", id: "credit-1" }));
+    const res = await GET(request({ track: "One Kiss", artist: "Calvin Harris", id: "credit1xxxxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/onekiss.m4a");
   });
@@ -509,7 +510,7 @@ describe("a credit has to name the act, not merely contain it", () => {
       },
     });
 
-    const res = await GET(request({ track: "Come Together", artist: "Beatles", id: "credit-2" }));
+    const res = await GET(request({ track: "Come Together", artist: "Beatles", id: "credit2xxxxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/beatles.m4a");
   });
@@ -539,7 +540,7 @@ describe("a credit has to name the act, not merely contain it", () => {
     });
 
     const res = await GET(
-      request({ track: "Boom Clap", artist: "Charli XCX", durationMs: "169000", id: "sep-x" })
+      request({ track: "Boom Clap", artist: "Charli XCX", durationMs: "169000", id: "sepxxxxxxxxxxxxxxxxxxx" })
     );
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/real.m4a");
@@ -565,7 +566,7 @@ describe("a credit has to name the act, not merely contain it", () => {
       },
     });
 
-    const res = await GET(request({ track: "Work", artist: "Rihanna", id: "sep-feat" }));
+    const res = await GET(request({ track: "Work", artist: "Rihanna", id: "sepfeatxxxxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/work.m4a");
   });
@@ -594,7 +595,7 @@ describe("a credit has to name the act, not merely contain it", () => {
     });
 
     const res = await GET(
-      request({ track: "Hello", artist: "Adele", durationMs: "295502", id: "sep-empty" })
+      request({ track: "Hello", artist: "Adele", durationMs: "295502", id: "sepemptyxxxxxxxxxxxxxx" })
     );
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/adele.m4a");
@@ -631,7 +632,7 @@ describe("a qualifier one platform adds is not a different recording", () => {
         track: "Karma Police - Remastered 2011",
         artist: "Radiohead",
         durationMs: "263000",
-        id: "loose-1",
+        id: "loose1xxxxxxxxxxxxxxxx",
       })
     );
 
@@ -666,7 +667,7 @@ describe("a qualifier one platform adds is not a different recording", () => {
         track: "Sunflower (feat. Swae Lee)",
         artist: "Post Malone",
         durationMs: "158000",
-        id: "loose-feat",
+        id: "loosefeatxxxxxxxxxxxxx",
       })
     );
 
@@ -702,7 +703,7 @@ describe("a qualifier one platform adds is not a different recording", () => {
         track: "Hip-Hop Is Dead - Remastered",
         artist: "Nas",
         durationMs: "240000",
-        id: "loose-hyphen",
+        id: "loosehyphenxxxxxxxxxxx",
       })
     );
 
@@ -733,7 +734,7 @@ describe("a qualifier one platform adds is not a different recording", () => {
     });
 
     const res = await GET(
-      request({ track: "(Live)", artist: "Foo", durationMs: "200000", id: "loose-empty" })
+      request({ track: "(Live)", artist: "Foo", durationMs: "200000", id: "looseemptyxxxxxxxxxxxx" })
     );
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/else.m4a");
@@ -756,7 +757,7 @@ describe("an artist-less lookup still answers to something", () => {
       },
     });
 
-    const res = await GET(request({ track: "Hello", durationMs: "295502", id: "noartist-1" }));
+    const res = await GET(request({ track: "Hello", durationMs: "295502", id: "noartist1xxxxxxxxxxxxx" }));
 
     expect(await resultOf(res)).toEqual({ previewUrl: null, status: "absent" });
   });
@@ -773,7 +774,7 @@ describe("an artist-less lookup still answers to something", () => {
       },
     });
 
-    const res = await GET(request({ track: "Hello", durationMs: "295502", id: "noartist-2" }));
+    const res = await GET(request({ track: "Hello", durationMs: "295502", id: "noartist2xxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/adele.m4a");
   });
@@ -786,7 +787,7 @@ describe("an artist-less lookup still answers to something", () => {
       itunes: { Hello: itunesResult("Hello", "Pinkfong", "https://itunes.example/pinkfong.m4a") },
     });
 
-    const res = await GET(request({ track: "Hello", id: "noartist-3" }));
+    const res = await GET(request({ track: "Hello", id: "noartist3xxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/pinkfong.m4a");
   });
@@ -810,7 +811,7 @@ describe("an artist-less lookup still answers to something", () => {
       },
     });
 
-    const res = await GET(request({ track: "Hello", durationMs: "295502", id: "dz-noartist-1" }));
+    const res = await GET(request({ track: "Hello", durationMs: "295502", id: "dznoartist1xxxxxxxxxxx" }));
 
     expect(await resultOf(res)).toEqual({ previewUrl: null, status: "absent" });
   });
@@ -834,7 +835,7 @@ describe("an artist-less lookup still answers to something", () => {
       },
     });
 
-    const res = await GET(request({ track: "Hello", durationMs: "295502", id: "dz-noartist-2" }));
+    const res = await GET(request({ track: "Hello", durationMs: "295502", id: "dznoartist2xxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://deezer.example/adele.mp3");
   });
@@ -856,7 +857,7 @@ describe("a field the caller controls is clamped before it reaches a regex", () 
   it("clamps what the GET route sends upstream", async () => {
     const probe = installTermMock({});
 
-    await GET(request({ track: pathological, artist: "Artist", id: "clamp-1" }));
+    await GET(request({ track: pathological, artist: "Artist", id: "clamp1xxxxxxxxxxxxxxxx" }));
 
     expect(probe.itunesTerms().length).toBeGreaterThan(0);
     for (const term of probe.itunesTerms()) {
@@ -871,7 +872,7 @@ describe("a field the caller controls is clamped before it reaches a regex", () 
     installTermMock({});
 
     const res = await POST(
-      batchRequest([{ id: "clamp-3", name: "a".repeat(PREVIEW_FIELD_MAX - 1) + "😀", artist: "A" }])
+      batchRequest([{ id: "clamp3xxxxxxxxxxxxxxxx", name: "a".repeat(PREVIEW_FIELD_MAX - 1) + "😀", artist: "A" }])
     );
 
     expect(res.status).toBe(200);
@@ -880,7 +881,7 @@ describe("a field the caller controls is clamped before it reaches a regex", () 
   it("clamps the batch route the same way, or one key holds two answers", async () => {
     const probe = installTermMock({});
 
-    await POST(batchRequest([{ id: "clamp-2", name: pathological, artist: "Artist" }]));
+    await POST(batchRequest([{ id: "clamp2xxxxxxxxxxxxxxxx", name: pathological, artist: "Artist" }]));
 
     expect(probe.itunesTerms().length).toBeGreaterThan(0);
     for (const term of probe.itunesTerms()) {
@@ -923,7 +924,7 @@ describe("running time separates a recording from its cover", () => {
         track: "刻在我心底的名字",
         artist: "盧廣仲",
         durationMs: "320165",
-        id: "dur-1",
+        id: "dur1xxxxxxxxxxxxxxxxxx",
       })
     );
 
@@ -935,7 +936,7 @@ describe("running time separates a recording from its cover", () => {
     // must still resolve — just less precisely, exactly as it did before.
     installTermMock({ itunes: { "刻在我心底的名字 盧廣仲": ENGRAVED() } });
 
-    const res = await GET(request({ track: "刻在我心底的名字", artist: "盧廣仲", id: "dur-2" }));
+    const res = await GET(request({ track: "刻在我心底的名字", artist: "盧廣仲", id: "dur2xxxxxxxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/cover.m4a");
   });
@@ -963,7 +964,7 @@ describe("running time separates a recording from its cover", () => {
     });
 
     const res = await GET(
-      request({ track: "小幸運", artist: "Hebe Tien", durationMs: "265521", id: "dur-3" })
+      request({ track: "小幸運", artist: "Hebe Tien", durationMs: "265521", id: "dur3xxxxxxxxxxxxxxxxxx" })
     );
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/happiness.m4a");
@@ -986,7 +987,7 @@ describe("running time separates a recording from its cover", () => {
     });
 
     const res = await GET(
-      request({ track: "恋", artist: "星野源", durationMs: "253333", id: "dur-4" })
+      request({ track: "恋", artist: "星野源", durationMs: "253333", id: "dur4xxxxxxxxxxxxxxxxxx" })
     );
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/koi.m4a");
@@ -1006,7 +1007,7 @@ describe("running time separates a recording from its cover", () => {
     });
 
     const res = await GET(
-      request({ track: "Hello", artist: "Adele", durationMs: "295502", id: "dur-5" })
+      request({ track: "Hello", artist: "Adele", durationMs: "295502", id: "dur5xxxxxxxxxxxxxxxxxx" })
     );
 
     expect(await resultOf(res)).toEqual({ previewUrl: null, status: "absent" });
@@ -1037,7 +1038,7 @@ describe("running time separates a recording from its cover", () => {
     });
 
     const res = await GET(
-      request({ track: "Karma Police", artist: "Radiohead", durationMs: "260000", id: "dur-6" })
+      request({ track: "Karma Police", artist: "Radiohead", durationMs: "260000", id: "dur6xxxxxxxxxxxxxxxxxx" })
     );
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/karma.m4a");
@@ -1062,14 +1063,14 @@ describe("running time separates a recording from its cover", () => {
     withDrift(2000);
     expect(
       await previewUrlFrom(
-        await GET(request({ track: "Koi", artist: "Gen Hoshino", durationMs: "253333", id: "tol-1" }))
+        await GET(request({ track: "Koi", artist: "Gen Hoshino", durationMs: "253333", id: "tol1xxxxxxxxxxxxxxxxxx" }))
       )
     ).toBe("https://itunes.example/koi.m4a");
 
     withDrift(2001);
     expect(
       await resultOf(
-        await GET(request({ track: "Koi", artist: "Gen Hoshino", durationMs: "253333", id: "tol-2" }))
+        await GET(request({ track: "Koi", artist: "Gen Hoshino", durationMs: "253333", id: "tol2xxxxxxxxxxxxxxxxxx" }))
       )
     ).toEqual({ previewUrl: null, status: "absent" });
   });
@@ -1091,7 +1092,7 @@ describe("running time separates a recording from its cover", () => {
       },
     });
 
-    const res = await GET(request({ track: "千里之外", artist: "周杰倫", id: "cjk-1" }));
+    const res = await GET(request({ track: "千里之外", artist: "周杰倫", id: "cjk1xxxxxxxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/jay.m4a");
   });
@@ -1124,7 +1125,7 @@ describe("running time separates a recording from its cover", () => {
     });
 
     const res = await GET(
-      request({ track: "泡沫", artist: "鄧紫棋", durationMs: "258865", id: "dz-1" })
+      request({ track: "泡沫", artist: "鄧紫棋", durationMs: "258865", id: "dz1xxxxxxxxxxxxxxxxxxx" })
     );
 
     expect(await previewUrlFrom(res)).toBe("https://deezer.example/gem.mp3");
@@ -1160,10 +1161,10 @@ describe("a refusal is never mistaken for a missing song", () => {
     // refusal to fall through as an empty result set.
     const probe = installFetchMock({ itunes: { status: 403 }, deezer: { body: DEEZER_EMPTY } });
 
-    const first = await GET(request({ track: "Song", artist: "Artist", id: "hot" }));
+    const first = await GET(request({ track: "Song", artist: "Artist", id: "hotxxxxxxxxxxxxxxxxxxx" }));
     expect(await statusOf(first)).toBe("unavailable");
 
-    const entry = writeFor("preview:id:hot");
+    const entry = writeFor("preview:id:hotxxxxxxxxxxxxxxxxxxx");
     expect(entry?.value).toMatchObject({ previewUrl: null, confirmed: false });
     // Ninety seconds, not seven days. This is the whole bug in one number.
     expect(entry?.ttlSeconds).toBe(UNAVAILABLE_TTL);
@@ -1173,14 +1174,14 @@ describe("a refusal is never mistaken for a missing song", () => {
     vi.useFakeTimers();
     try {
       installFetchMock({ itunes: { status: 403 } });
-      await GET(request({ track: "Song", artist: "Artist", id: "hot" }));
+      await GET(request({ track: "Song", artist: "Artist", id: "hotxxxxxxxxxxxxxxxxxxx" }));
 
       vi.advanceTimersByTime((UNAVAILABLE_TTL + 1) * 1000);
       vi.unstubAllGlobals();
       // Past the cooldown too, so iTunes is asked again rather than skipped.
       const probe = installFetchMock({ itunes: { body: ITUNES_HIT } });
 
-      const res = await GET(request({ track: "Song", artist: "Artist", id: "hot" }));
+      const res = await GET(request({ track: "Song", artist: "Artist", id: "hotxxxxxxxxxxxxxxxxxxx" }));
       expect(await previewUrlFrom(res)).toBe("https://itunes.example/preview.m4a");
       expect(probe.itunesCalls()).toBeGreaterThan(0);
     } finally {
@@ -1191,11 +1192,11 @@ describe("a refusal is never mistaken for a missing song", () => {
   it("treats a dropped connection as unavailable, not as an answer", async () => {
     installFetchMock({ throwOnFetch: true });
 
-    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp4" }));
+    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp4xxxxxxxxxxxxxxxxxxx" }));
 
     expect(res.status).toBe(200);
     expect(await statusOf(res)).toBe("unavailable");
-    expect(writeFor("preview:id:sp4")?.ttlSeconds).toBe(UNAVAILABLE_TTL);
+    expect(writeFor("preview:id:sp4xxxxxxxxxxxxxxxxxxx")?.ttlSeconds).toBe(UNAVAILABLE_TTL);
   });
 
   it("reads Deezer's quota error out of the body of a 200", async () => {
@@ -1203,7 +1204,7 @@ describe("a refusal is never mistaken for a missing song", () => {
     // status-only check reads "quota exceeded" as "no such song".
     installFetchMock({ deezer: { body: DEEZER_QUOTA } });
 
-    const res = await GET(request({ track: "Song", artist: "Artist", id: "dz" }));
+    const res = await GET(request({ track: "Song", artist: "Artist", id: "dzxxxxxxxxxxxxxxxxxxxx" }));
 
     expect(await statusOf(res)).toBe("unavailable");
   });
@@ -1211,7 +1212,7 @@ describe("a refusal is never mistaken for a missing song", () => {
   it("treats a 5xx as unavailable rather than as an empty catalogue", async () => {
     installFetchMock({ itunes: { status: 503 }, deezer: { status: 500 } });
 
-    const res = await GET(request({ track: "Song", artist: "Artist", id: "down" }));
+    const res = await GET(request({ track: "Song", artist: "Artist", id: "downxxxxxxxxxxxxxxxxxx" }));
 
     expect(await statusOf(res)).toBe("unavailable");
   });
@@ -1221,16 +1222,16 @@ describe("a refusal is never mistaken for a missing song", () => {
     // for a week is the point of caching misses at all.
     installFetchMock();
 
-    const res = await GET(request({ track: "Nothing", artist: "Nobody", id: "gone" }));
+    const res = await GET(request({ track: "Nothing", artist: "Nobody", id: "gonexxxxxxxxxxxxxxxxxx" }));
 
     expect(await statusOf(res)).toBe("absent");
-    expect(writeFor("preview:id:gone")?.ttlSeconds).toBe(ABSENT_TTL);
+    expect(writeFor("preview:id:gonexxxxxxxxxxxxxxxxxx")?.ttlSeconds).toBe(ABSENT_TTL);
   });
 
   it("stops asking a source that just refused, instead of spending a second call", async () => {
     const probe = installFetchMock({ itunes: { status: 429 }, deezer: { body: DEEZER_HIT } });
 
-    await GET(request({ track: "Song", artist: "Artist", id: "one-shot" }));
+    await GET(request({ track: "Song", artist: "Artist", id: "oneshotxxxxxxxxxxxxxxx" }));
 
     // One iTunes query, not two: a second against a host that just said no
     // buys another no.
@@ -1241,11 +1242,11 @@ describe("a refusal is never mistaken for a missing song", () => {
 describe("per-source cooldown", () => {
   it("parks iTunes site-wide after it throttles us, and asks Deezer alone", async () => {
     installFetchMock({ itunes: { status: 403 }, deezer: { body: DEEZER_EMPTY } });
-    await GET(request({ track: "Song", artist: "Artist", id: "a" }));
+    await GET(request({ track: "Song", artist: "Artist", id: "axxxxxxxxxxxxxxxxxxxxx" }));
 
     vi.unstubAllGlobals();
     const probe = installFetchMock({ itunes: { body: ITUNES_HIT }, deezer: { body: DEEZER_HIT } });
-    const res = await GET(request({ track: "Song", artist: "Artist", id: "b" }));
+    const res = await GET(request({ track: "Song", artist: "Artist", id: "bxxxxxxxxxxxxxxxxxxxxx" }));
 
     // iTunes is skipped entirely — the saving is the call we never make.
     expect(probe.itunesCalls()).toBe(0);
@@ -1254,7 +1255,7 @@ describe("per-source cooldown", () => {
 
   it("honours Retry-After, clamped to a sane floor", async () => {
     installFetchMock({ itunes: { status: 429, headers: { "retry-after": "600" } } });
-    await GET(request({ track: "Song", artist: "Artist", id: "a" }));
+    await GET(request({ track: "Song", artist: "Artist", id: "axxxxxxxxxxxxxxxxxxxxx" }));
 
     expect(writeFor("preview:cooldown:itunes")?.ttlSeconds).toBe(600);
   });
@@ -1282,7 +1283,7 @@ describe("per-source cooldown", () => {
     // One flaky socket is not a rate limit, and parking iTunes for everyone
     // over it would turn a blip into a site-wide outage of the better source.
     installFetchMock({ throwOnFetch: true });
-    await GET(request({ track: "Song", artist: "Artist", id: "a" }));
+    await GET(request({ track: "Song", artist: "Artist", id: "axxxxxxxxxxxxxxxxxxxxx" }));
 
     expect(writeFor("preview:cooldown:itunes")).toBeUndefined();
     expect(writeFor("preview:cooldown:deezer")).toBeUndefined();
@@ -1294,26 +1295,26 @@ describe("the global lookup budget", () => {
     vi.stubEnv("PREVIEW_MAX_LOOKUPS_PER_MINUTE", "2");
     const probe = installFetchMock({ itunes: { body: ITUNES_HIT } });
 
-    await GET(request({ track: "A", artist: "Artist", id: "1" }));
-    await GET(request({ track: "B", artist: "Artist", id: "2" }));
+    await GET(request({ track: "A", artist: "Artist", id: "1xxxxxxxxxxxxxxxxxxxxx" }));
+    await GET(request({ track: "B", artist: "Artist", id: "2xxxxxxxxxxxxxxxxxxxxx" }));
     const spent = probe.upstreamCalls();
 
-    const res = await GET(request({ track: "C", artist: "Artist", id: "3" }));
+    const res = await GET(request({ track: "C", artist: "Artist", id: "3xxxxxxxxxxxxxxxxxxxxx" }));
 
     expect(await statusOf(res)).toBe("unavailable");
     expect(probe.upstreamCalls()).toBe(spent);
     // Not cached: the budget claim is already cheap and self-limiting, and a
     // marker per track would spend a KV write during the exact spike we are
     // trying to ride out.
-    expect(writeFor("preview:id:3")).toBeUndefined();
+    expect(writeFor("preview:id:3xxxxxxxxxxxxxxxxxxxxx")).toBeUndefined();
   });
 
   it("still serves cached tracks while the budget is spent", async () => {
     vi.stubEnv("PREVIEW_MAX_LOOKUPS_PER_MINUTE", "1");
     installFetchMock({ itunes: { body: ITUNES_HIT } });
 
-    await GET(request({ track: "A", artist: "Artist", id: "1" }));
-    const res = await GET(request({ track: "A", artist: "Artist", id: "1" }));
+    await GET(request({ track: "A", artist: "Artist", id: "1xxxxxxxxxxxxxxxxxxxxx" }));
+    const res = await GET(request({ track: "A", artist: "Artist", id: "1xxxxxxxxxxxxxxxxxxxxx" }));
 
     // A party mid-game is unaffected by someone else's spike.
     expect(await statusOf(res)).toBe("found");
@@ -1325,7 +1326,7 @@ describe("the global lookup budget", () => {
     kv.flags.failReads = true;
     const probe = installFetchMock({ itunes: { body: ITUNES_HIT } });
 
-    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1" }));
+    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
 
     expect(await statusOf(res)).toBe("found");
     expect(probe.upstreamCalls()).toBeGreaterThan(0);
@@ -1336,9 +1337,9 @@ describe("preview cache", () => {
   it("serves a repeat hit with zero upstream calls", async () => {
     const probe = installFetchMock({ itunes: { body: ITUNES_HIT } });
 
-    await GET(request({ track: "Song", artist: "Artist", id: "sp1" }));
+    await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
     const callsAfterFirst = probe.upstreamCalls();
-    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1" }));
+    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/preview.m4a");
     expect(probe.upstreamCalls()).toBe(callsAfterFirst);
@@ -1349,10 +1350,10 @@ describe("preview cache", () => {
     // repeatedly; without a negative entry each replay burns the full fan-out.
     const probe = installFetchMock();
 
-    await GET(request({ track: "Nothing", artist: "Nobody", id: "sp3" }));
+    await GET(request({ track: "Nothing", artist: "Nobody", id: "sp3xxxxxxxxxxxxxxxxxxx" }));
     expect(probe.upstreamCalls()).toBe(5);
 
-    const res = await GET(request({ track: "Nothing", artist: "Nobody", id: "sp3" }));
+    const res = await GET(request({ track: "Nothing", artist: "Nobody", id: "sp3xxxxxxxxxxxxxxxxxxx" }));
 
     expect(await statusOf(res)).toBe("absent");
     expect(probe.upstreamCalls()).toBe(5);
@@ -1360,24 +1361,24 @@ describe("preview cache", () => {
 
   it("holds found URLs far longer than misses, and refusals barely at all", async () => {
     installFetchMock({ itunes: { body: ITUNES_HIT } });
-    await GET(request({ track: "Song", artist: "Artist", id: "hit" }));
+    await GET(request({ track: "Song", artist: "Artist", id: "hitxxxxxxxxxxxxxxxxxxx" }));
 
     vi.unstubAllGlobals();
     installFetchMock();
-    await GET(request({ track: "Nothing", artist: "Nobody", id: "miss" }));
+    await GET(request({ track: "Nothing", artist: "Nobody", id: "missxxxxxxxxxxxxxxxxxx" }));
 
     // A recording does not change. URL rot is repaired by refresh, not waited
     // out — which is what lets this be a year rather than a month.
-    expect(writeFor("preview:id:hit")?.ttlSeconds).toBe(FOUND_TTL);
-    expect(writeFor("preview:id:miss")?.ttlSeconds).toBe(ABSENT_TTL);
+    expect(writeFor("preview:id:hitxxxxxxxxxxxxxxxxxxx")?.ttlSeconds).toBe(FOUND_TTL);
+    expect(writeFor("preview:id:missxxxxxxxxxxxxxxxxxx")?.ttlSeconds).toBe(ABSENT_TTL);
   });
 
   it("stores the iTunes track id, so a rotted URL can be repaired cheaply", async () => {
     installFetchMock({ itunes: { body: ITUNES_HIT } });
 
-    await GET(request({ track: "Song", artist: "Artist", id: "sp1" }));
+    await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
 
-    expect(writeFor("preview:id:sp1")?.value).toMatchObject({
+    expect(writeFor("preview:id:sp1xxxxxxxxxxxxxxxxxxx")?.value).toMatchObject({
       source: "itunes",
       itunesTrackId: 4242,
     });
@@ -1386,12 +1387,12 @@ describe("preview cache", () => {
   it("keys on track id, so the same name under a different id is a separate entry", async () => {
     const probe = installFetchMock({ itunes: { body: ITUNES_HIT } });
 
-    await GET(request({ track: "Song", artist: "Artist", id: "sp-a" }));
+    await GET(request({ track: "Song", artist: "Artist", id: "spaxxxxxxxxxxxxxxxxxxx" }));
     const afterFirst = probe.upstreamCalls();
-    await GET(request({ track: "Song", artist: "Artist", id: "sp-b" }));
+    await GET(request({ track: "Song", artist: "Artist", id: "spbxxxxxxxxxxxxxxxxxxx" }));
 
     expect(probe.upstreamCalls()).toBeGreaterThan(afterFirst);
-    expect(kv.writes.map((w) => w.key)).toEqual(["preview:id:sp-a", "preview:id:sp-b"]);
+    expect(kv.writes.map((w) => w.key)).toEqual(["preview:id:spaxxxxxxxxxxxxxxxxxxx", "preview:id:spbxxxxxxxxxxxxxxxxxxx"]);
   });
 
   it("still caches when the caller sends no id, keyed on a normalised query", async () => {
@@ -1419,17 +1420,17 @@ describe("preview cache", () => {
     // release; see CHANGELOG 1.2.0 "Known gaps" for why the mechanism is harder
     // than it looks.
     const probe = installFetchMock({ itunes: { body: ITUNES_HIT } });
-    kv.mem.set("preview:id:old-hit", {
+    kv.mem.set("preview:id:oldhitxxxxxxxxxxxxxxxx", {
       value: { previewUrl: "https://legacy.example/clip.m4a" },
       expiresAt: Date.now() + 60_000,
     });
-    kv.mem.set("preview:id:old-miss", {
+    kv.mem.set("preview:id:oldmissxxxxxxxxxxxxxxx", {
       value: { previewUrl: null },
       expiresAt: Date.now() + 60_000,
     });
 
-    const hit = await GET(request({ track: "Song", artist: "Artist", id: "old-hit" }));
-    const miss = await GET(request({ track: "Song", artist: "Artist", id: "old-miss" }));
+    const hit = await GET(request({ track: "Song", artist: "Artist", id: "oldhitxxxxxxxxxxxxxxxx" }));
+    const miss = await GET(request({ track: "Song", artist: "Artist", id: "oldmissxxxxxxxxxxxxxxx" }));
 
     expect(await resultOf(hit)).toEqual({
       previewUrl: "https://legacy.example/clip.m4a",
@@ -1446,12 +1447,12 @@ describe("preview cache", () => {
 describe("refresh", () => {
   it("repairs a rotted URL with one lookup instead of a full search", async () => {
     installFetchMock({ itunes: { body: ITUNES_HIT } });
-    await GET(request({ track: "Song", artist: "Artist", id: "sp1" }));
+    await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
 
     vi.unstubAllGlobals();
     const probe = installFetchMock({ lookup: { body: ITUNES_REFRESHED } });
     const res = await GET(
-      request({ track: "Song", artist: "Artist", id: "sp1", refresh: "1" })
+      request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx", refresh: "1" })
     );
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/fresh.m4a");
@@ -1461,7 +1462,7 @@ describe("refresh", () => {
 
   it("falls back to a full search when the stored id no longer resolves", async () => {
     installFetchMock({ itunes: { body: ITUNES_HIT } });
-    await GET(request({ track: "Song", artist: "Artist", id: "sp1" }));
+    await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
 
     vi.unstubAllGlobals();
     // The id was retired from the store; a search can still route around it.
@@ -1470,7 +1471,7 @@ describe("refresh", () => {
       itunes: { body: ITUNES_REFRESHED },
     });
     const res = await GET(
-      request({ track: "Song", artist: "Artist", id: "sp1", refresh: "1" })
+      request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx", refresh: "1" })
     );
 
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/fresh.m4a");
@@ -1487,12 +1488,12 @@ describe("refresh", () => {
     });
 
     const refused = await GET(
-      request({ track: "Song", artist: "Artist", id: "sp1", refresh: "1" })
+      request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx", refresh: "1" })
     );
     expect(refused.status).toBe(429);
 
     // The ordinary read path is untouched by a spent refresh budget.
-    const ok = await GET(request({ track: "Song", artist: "Artist", id: "sp1" }));
+    const ok = await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
     expect(ok.status).toBe(200);
     expect(probe.upstreamCalls()).toBeGreaterThan(0);
   });
@@ -1503,7 +1504,7 @@ describe("preview cache failure modes", () => {
     kv.flags.failReads = true;
     const probe = installFetchMock({ itunes: { body: ITUNES_HIT } });
 
-    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1" }));
+    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
 
     expect(res.status).toBe(200);
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/preview.m4a");
@@ -1516,7 +1517,7 @@ describe("preview cache failure modes", () => {
     kv.flags.failWrites = true;
     installFetchMock({ itunes: { body: ITUNES_HIT } });
 
-    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1" }));
+    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
 
     expect(res.status).toBe(200);
     expect(await previewUrlFrom(res)).toBe("https://itunes.example/preview.m4a");
@@ -1532,7 +1533,7 @@ describe("preview rate limiting", () => {
       expiresAt: Date.now() + 600_000,
     });
 
-    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1" }));
+    const res = await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
 
     expect(res.status).toBe(429);
     expect(probe.upstreamCalls()).toBe(0);
@@ -1540,7 +1541,9 @@ describe("preview rate limiting", () => {
 });
 
 describe("batch lookups", () => {
-  const track = (n: number) => ({ id: `sp${n}`, name: `Song ${n}`, artist: "Artist" });
+  // Shaped like Spotify's ids: anything else is never keyed by id (`previewCacheKey`).
+  const spId = (n: number) => `sp${n}`.padEnd(22, "x");
+  const track = (n: number) => ({ id: spId(n), name: `Song ${n}`, artist: "Artist" });
 
   async function previewsFrom(res: Response): Promise<Record<string, PreviewResult>> {
     const body = (await res.json()) as { previews: Record<string, PreviewResult> };
@@ -1572,12 +1575,12 @@ describe("batch lookups", () => {
 
     const res = await POST(
       batchRequest([
-        { id: "b1", name: "刻在我心底的名字", artist: "盧廣仲", durationMs: 320165 },
+        { id: "b1xxxxxxxxxxxxxxxxxxxx", name: "刻在我心底的名字", artist: "盧廣仲", durationMs: 320165 },
       ])
     );
 
     // Without the duration the exact title wins and this is the cover.
-    expect((await previewsFrom(res)).b1.previewUrl).toBe("https://itunes.example/crowdlu.m4a");
+    expect((await previewsFrom(res)).b1xxxxxxxxxxxxxxxxxxxx.previewUrl).toBe("https://itunes.example/crowdlu.m4a");
   });
 
   it("drops a malformed running time instead of refusing the whole batch", async () => {
@@ -1594,11 +1597,11 @@ describe("batch lookups", () => {
     });
 
     const res = await POST(
-      batchRequest([{ id: "sp1", name: "Song 1", artist: "Artist", durationMs: "not-a-number" }])
+      batchRequest([{ id: "sp1xxxxxxxxxxxxxxxxxxx", name: "Song 1", artist: "Artist", durationMs: "not-a-number" }])
     );
 
     expect(res.status).toBe(200);
-    expect((await previewsFrom(res)).sp1.previewUrl).toBe("https://itunes.example/ok.m4a");
+    expect((await previewsFrom(res))[spId(1)].previewUrl).toBe("https://itunes.example/ok.m4a");
   });
 
   it("reads the whole game with a single mget", async () => {
@@ -1611,7 +1614,7 @@ describe("batch lookups", () => {
 
     expect(res.status).toBe(200);
     expect(kv.counts.mget).toBe(1);
-    expect(Object.keys(await previewsFrom(res))).toEqual(["sp1", "sp2", "sp3"]);
+    expect(Object.keys(await previewsFrom(res))).toEqual([spId(1), spId(2), spId(3)]);
   });
 
   it("answers a warm cache with no upstream calls at all", async () => {
@@ -1623,7 +1626,7 @@ describe("batch lookups", () => {
     const res = await POST(batchRequest([track(1), track(2)]));
 
     expect(probe.upstreamCalls()).toBe(0);
-    expect((await previewsFrom(res)).sp1.previewUrl).toBe("https://itunes.example/preview.m4a");
+    expect((await previewsFrom(res))[spId(1)].previewUrl).toBe("https://itunes.example/preview.m4a");
   });
 
   it("reports each track's own status rather than one verdict for the batch", async () => {
@@ -1651,8 +1654,8 @@ describe("batch lookups", () => {
 
     const previews = await previewsFrom(await POST(batchRequest([track(1), track(2)])));
 
-    expect(previews.sp1.status).toBe("found");
-    expect(previews.sp2.status).toBe("absent");
+    expect(previews[spId(1)].status).toBe("found");
+    expect(previews[spId(2)].status).toBe("absent");
   });
 
   it("defers the tail of an oversized game instead of eating the global budget", async () => {
@@ -1690,7 +1693,7 @@ describe("batch lookups", () => {
     for (const body of [
       [],
       [{ name: "No id" }],
-      [{ id: "sp1" }],
+      [{ id: "sp1xxxxxxxxxxxxxxxxxxx" }],
       Array.from({ length: 61 }, (_, i) => track(i)),
     ]) {
       const res = await POST(batchRequest(body));
@@ -1710,5 +1713,18 @@ describe("batch lookups", () => {
 
     expect(res.status).toBe(429);
     expect(probe.upstreamCalls()).toBe(0);
+  });
+});
+
+describe("only a Spotify-shaped id names a cache key", () => {
+  it("keys a real id by id, and anything else by the query it came with", () => {
+    // The id is the one field a caller sends uncapped. It used to be written
+    // verbatim under preview:id: for up to a year — a 90 KB id was a 90 KB key.
+    expect(previewCacheKey("4uLU6hMCjMI75M1A2tKUQC", "Song", "Artist")).toBe(
+      "preview:id:4uLU6hMCjMI75M1A2tKUQC"
+    );
+    for (const id of ["t1", "x".repeat(90_000), "4uLU6hMCjMI75M1A2tKUQ!", "4uLU6hMCjMI75M1A2tKUQCC"]) {
+      expect(previewCacheKey(id, "Song", "Artist")).toBe("preview:q:song|artist");
+    }
   });
 });
