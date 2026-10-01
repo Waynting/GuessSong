@@ -225,6 +225,26 @@ function hasUpstashEnv(): boolean {
   return Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
 }
 
+/**
+ * Whether this increment should also re-arm the key's expiry, for a window
+ * whose opening `expire` never landed.
+ *
+ * `incr` and `expire` are two commands. If the second is lost — a KV blip,
+ * the monthly command cap running out between them, the lambda killed — no
+ * later increment would ever set a TTL, and the counter is permanent: on
+ * `spotify:budget` that is every new playlist refused site-wide until someone
+ * deletes the key by hand, on a rate-limit key one address refused forever.
+ * Re-arming each time the count crosses a power of two costs log₂(n) commands
+ * a window instead of one per increment, and the counters that matter keep
+ * counting while they refuse, so a stuck one reaches its next power quickly.
+ */
+export function shouldRearmExpiry(count: number, by: number): boolean {
+  if (count <= by) return false;
+  const before = count - by;
+  // Is there a power of two in (before, count]?
+  return Math.floor(Math.log2(count)) > Math.floor(Math.log2(before));
+}
+
 let upstashStore: KvStore | null = null;
 
 async function getUpstashStore(): Promise<KvStore> {
@@ -259,6 +279,16 @@ async function getUpstashStore(): Promise<KvStore> {
         // rather than `=== 1`: a batch that opens a window with +12 is still
         // the first increment of it.
         if (count === by) await redis.expire(key, ttlSeconds);
+        else if (shouldRearmExpiry(count, by)) {
+          // See `shouldRearmExpiry`. NX: a key that has its TTL keeps it, so
+          // this never pushes a window back. Swallowed: the count is already
+          // the caller's answer, and this is repair, not the write.
+          try {
+            await redis.expire(key, ttlSeconds, "NX");
+          } catch {
+            // Next power of two tries again.
+          }
+        }
         return count;
       },
       async hgetall<T>(key: string) {

@@ -216,11 +216,40 @@ describe("getKvStore (Upstash backend)", () => {
     expect(first).toBe(1);
     expect(redisMock.expire).toHaveBeenCalledWith("counter", 60);
 
+    // Later increments never set a TTL outright. The ones that re-arm a
+    // missing expiry (see the next test) only do so with NX, which cannot
+    // touch a key that already has one.
     redisMock.expire.mockClear();
-    redisMock.incr.mockResolvedValueOnce(2);
-    const second = await store.incr("counter", 60);
-    expect(second).toBe(2);
+    redisMock.incr.mockResolvedValueOnce(3);
+    const third = await store.incr("counter", 60);
+    expect(third).toBe(3);
     expect(redisMock.expire).not.toHaveBeenCalled();
+  });
+
+  it("re-arms a missing expiry with NX each time the count crosses a power of two", async () => {
+    // incr and expire are two commands. A lost opening expire used to leave
+    // the counter permanent — spotify:budget refusing every new playlist
+    // site-wide until the key was deleted by hand.
+    const { getKvStore: freshGetKvStore } = await import("@/lib/kv");
+    const store = await freshGetKvStore();
+    redisMock.expire.mockClear();
+
+    const rearmedAt: number[] = [];
+    for (let count = 2; count <= 70; count++) {
+      redisMock.incr.mockResolvedValueOnce(count);
+      redisMock.expire.mockClear();
+      await store.incr("stuck", 60);
+      if (redisMock.expire.mock.calls.length) {
+        expect(redisMock.expire).toHaveBeenCalledWith("stuck", 60, "NX");
+        rearmedAt.push(count);
+      }
+    }
+    expect(rearmedAt).toEqual([2, 4, 8, 16, 32, 64]);
+
+    // A refused re-arm is not the caller's problem: the count still comes back.
+    redisMock.incr.mockResolvedValueOnce(128);
+    redisMock.expire.mockRejectedValueOnce(new Error("ERR cap reached"));
+    await expect(store.incr("stuck", 60)).resolves.toBe(128);
   });
 
   it("uses INCRBY for a bulk increment, and still recognises it opening the window", async () => {
@@ -236,8 +265,8 @@ describe("getKvStore (Upstash backend)", () => {
     expect(redisMock.expire).toHaveBeenCalledWith("budget", 60);
 
     redisMock.expire.mockClear();
-    redisMock.incrby.mockResolvedValueOnce(20);
-    expect(await store.incr("budget", 60, 8)).toBe(20);
+    redisMock.incrby.mockResolvedValueOnce(15);
+    expect(await store.incr("budget", 60, 3)).toBe(15);
     expect(redisMock.expire).not.toHaveBeenCalled();
   });
 
