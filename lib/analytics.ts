@@ -231,6 +231,18 @@ export type AnalyticsEvent =
       params: { stage: "shown" | "tapped" | "started" };
     }
   | {
+      /**
+       * A permanent playlist refusal shown on the setup page, and a game
+       * started after one. See `lib/refusal-recovery.ts`.
+       */
+      name: "refusal_recovery";
+      params: {
+        stage: "refused" | "recovered";
+        topic: "editorial" | "private" | "wrong_link" | "empty";
+        via?: "typed" | "restored" | "recent" | "starter" | "shared" | "mixed";
+      };
+    }
+  | {
       name: "preview_miss";
       params: {
         playlist_source: PlaylistSource;

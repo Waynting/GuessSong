@@ -7,6 +7,7 @@ import {
   recordGameLeft,
   recordGameOverTap,
   recordMixedNudge,
+  recordRefusalRecovery,
   recordGameStart,
   recordLoopImpression,
   recordQuizShare,
@@ -88,6 +89,9 @@ export async function POST(req: NextRequest) {
       break;
     case "mixed_nudge":
       await recordMixedNudge(event.stage);
+      break;
+    case "refusal_recovery":
+      await recordRefusalRecovery(event.stage, event.topic, event.stage === "recovered" ? event.via : undefined);
       break;
     case "quiz_shared":
       await recordQuizShare(event.by, event.outcome);

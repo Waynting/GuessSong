@@ -72,6 +72,7 @@ import {
 import { QUIZ_COPY_OUTCOMES, type QuizCopyOutcome } from "@/lib/loop-stats";
 import { SETUP_SOURCES, type SetupSource } from "@/lib/loop-stats";
 import { isSocialPlatform, type SocialPlatform } from "@/lib/social-share";
+import { isPlaylistHelpTopic, type PlaylistHelpTopic } from "@/lib/playlist-help";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
@@ -155,6 +156,8 @@ export type PulseEvent =
   | { kind: "game_left"; roundsPlayed: number; host?: GameHostKind }
   | { kind: "game_over_tap"; target: GameOverTap }
   | { kind: "mixed_nudge"; stage: MixedNudgeStage }
+  | { kind: "refusal_recovery"; stage: "refused"; topic: PlaylistHelpTopic }
+  | { kind: "refusal_recovery"; stage: "recovered"; topic: PlaylistHelpTopic; via: SetupSource }
   | { kind: "quiz_copied"; by: QuizShareBy; outcome: QuizCopyOutcome }
   | { kind: "quiz_shared"; by: QuizShareBy; outcome: QuizShareOutcome }
   | { kind: "quiz_social"; by: QuizShareBy; platform: SocialPlatform };
@@ -240,6 +243,17 @@ export function parsePulse(body: unknown): PulseEvent | null {
 
   if (raw.kind === "game_over_tap") {
     return isGameOverTap(raw.target) ? { kind: "game_over_tap", target: raw.target } : null;
+  }
+
+  if (raw.kind === "refusal_recovery") {
+    // Both tails closed; a recovery without a valid `via` says nothing about
+    // how the host got past the refusal, so it is dropped, not half-kept.
+    if (!isPlaylistHelpTopic(raw.topic)) return null;
+    if (raw.stage === "refused") return { kind: "refusal_recovery", stage: "refused", topic: raw.topic };
+    if (raw.stage === "recovered" && isSetupSource(raw.via)) {
+      return { kind: "refusal_recovery", stage: "recovered", topic: raw.topic, via: raw.via };
+    }
+    return null;
   }
 
   if (raw.kind === "mixed_nudge") {
