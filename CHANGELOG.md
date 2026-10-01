@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-10-01
+
+Mixed is the loop arm that converts (`join_submitted` 21.6% in the week to
+2026-10-01, several times any other arm) and about 1% of games, reached by a
+text link under Start. This puts it in front of the hosts it fits.
+
+### Added
+
+- **Mixed nudge on the setup page** (`lib/mixed-nudge.ts`). Under the
+  Single Playlist roster once `MIXED_NUDGE_MIN_PLAYERS` (3) names are typed,
+  never with Buzzer Mode on (no roster) or already in Mixed. One tap is
+  `chooseMode("mixed")`. Rendered at 390×844: absent at two names, shown at
+  three, switches the card to Mixed.
+- **`mixed_nudge:<shown|tapped|started>`** through `/api/pulse`
+  (`parsePulse`, closed set), GA4 `mixed_nudge`, and a line in `npm run stats`
+  after the Game Over taps. `shown` is once per page load; `started` is
+  credited in `recordHostedStart` for a Mixed start after a tap on the same
+  page, so it is a floor (a host who taps, leaves and comes back is not
+  credited).
+
+### Known gaps
+
+- Names typed before the tap are not carried into the Mixed roster, which
+  takes contributors instead; they are still there on "← Single playlist".
+- Read it after a full week: `started ÷ tapped` is the number, and
+  `Playlist came from … mixed` is what share of Mixed it brought.
+
 ## [1.18.0] - 2026-10-01
 
 Batch two of the 2026-10-01 bug sweep, plus the first starter playlists.
