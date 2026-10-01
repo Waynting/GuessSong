@@ -147,8 +147,34 @@ describe("displayTitle", () => {
     expect(displayTitle("(Sittin' On) The Dock of the Bay")).toBe("(Sittin' On) The Dock of the Bay");
   });
 
+  it("strips every trailing qualifier, not only the last one", () => {
+    // Spotify stacks them: one pass left "(feat. Ed Sheeran)" on, so the key
+    // no longer matched the pool's plain title and the playlist's own song
+    // could come back as the wrong answer.
+    expect(displayTitle("Bad Habits (feat. Ed Sheeran) [Remix]")).toBe("Bad Habits");
+    expect(displayTitle("Wonderwall (Live) [Remastered]")).toBe("Wonderwall");
+    expect(displayTitle("演员（Live）【Remastered】")).toBe("演员");
+    expect(displayTitle("光亮（主題歌）［Live］")).toBe("光亮");
+    expect(displayTitle("Song (feat. A) [Live] - Remastered 2011")).toBe("Song");
+    expect(titleKey("Bad Habits (feat. Ed Sheeran) [Remix]")).toBe(titleKey("Bad Habits"));
+    expect(titleKey("Wonderwall (Live) [Remastered]")).toBe(titleKey("Wonderwall"));
+    // A leading group is still part of the title.
+    expect(displayTitle("(Sittin' On) The Dock of the Bay (Live) [Remastered]")).toBe(
+      "(Sittin' On) The Dock of the Bay"
+    );
+  });
+
+  it("stays fast stripping stacked qualifiers off a pathological title", () => {
+    const pathological = "x" + " ".repeat(1500) + "-" + " ".repeat(1500) + "y\nz (a) [b] (c)";
+    const started = performance.now();
+    expect(displayTitle(pathological)).toBe("x");
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
   it("never returns an empty title", () => {
     expect(displayTitle("(Intro)")).toBe("(Intro)");
+    // Stacked groups with no title in front: keep what one pass left, as before.
+    expect(displayTitle("(Intro) [Live]")).toBe("(Intro)");
     expect(displayTitle("   ")).toBe("");
   });
 });
