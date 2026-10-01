@@ -273,6 +273,45 @@ describe("room lifecycle", () => {
     expect(status.total).toBe(1);
   });
 
+  it("keeps the winner's playlist in the pool when the loser of a name race cleans up", async () => {
+    // Both attempts used to write one per-name tracks key before the claim,
+    // and the loser's cleanup deleted it: the winner stayed in the roster with
+    // a track count while their playlist never reached the pool.
+    const { roomCode, hostToken } = await createRoom();
+    const { gates, waitFor } = gateLoadPlaylist();
+
+    const first = submitToRoom(roomCode, "Alex", "url-1");
+    const second = submitToRoom(roomCode, "alex", "url-2");
+    await waitFor(2);
+
+    gates[0](loaded([makeTrack({ id: "winner-track" })]));
+    gates[1](loaded([makeTrack({ id: "loser-track" })]));
+    const outcomes = await Promise.allSettled([first, second]);
+    expect(outcomes.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+
+    const pool = await consumeRoomPool(roomCode, 10, hostToken);
+    expect(pool.players).toHaveLength(1);
+    const winnerIndex = outcomes.findIndex((r) => r.status === "fulfilled");
+    const expected = winnerIndex === 0 ? "winner-track" : "loser-track";
+    expect(pool.tracks.map((t) => t.id)).toEqual([expected]);
+  });
+
+  it("still pools a slot written before tracks were keyed per attempt", async () => {
+    // A room open across the deploy holds slots with no `tracksId`, whose
+    // tracks sit under the old per-name key.
+    const { roomCode, hostToken } = await createRoom();
+    const store = await getKvStore();
+    await store.hsetnx(`room:v2:${roomCode}`, "p:alice", {
+      playerName: "Alice",
+      trackCount: 1,
+      joinedAt: Date.now(),
+    });
+    await store.set(`room:v2:${roomCode}:t:alice`, [makeTrack({ id: "legacy" })], 600);
+
+    const pool = await consumeRoomPool(roomCode, 10, hostToken);
+    expect(pool.tracks.map((t) => t.id)).toEqual(["legacy"]);
+  });
+
   it("lists the roster in arrival order", async () => {
     // Contributions live in hash fields, which have no order of their own. A
     // roster that reshuffled between polls would be a visible defect on the one
@@ -316,7 +355,8 @@ describe("room lifecycle", () => {
     await submitToRoom(roomCode, "Alice", "url-1");
 
     const store = await getKvStore();
-    await store.del(`room:v2:${roomCode}:t:alice`);
+    const room = await store.hgetall<{ tracksId?: string }>(`room:v2:${roomCode}`);
+    await store.del(`room:v2:${roomCode}:t:alice:${room["p:alice"].tracksId}`);
 
     await expect(consumeRoomPool(roomCode, 8, hostToken)).rejects.toMatchObject({
       status: 422,
