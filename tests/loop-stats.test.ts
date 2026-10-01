@@ -667,6 +667,44 @@ describe("the quiz's owner, copy and source counters", () => {
   });
 });
 
+describe("the quiz's social taps", () => {
+  // Added 2026-10-01: the post-to-a-platform links drawn where there is no
+  // share sheet. Imported here for the reason the block above gives.
+  const added = import("@/lib/loop-stats");
+  const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+
+  it("keys a tap by sharer and platform, for every pair, and nowhere else", async () => {
+    const { QUIZ_SOCIAL_PLATFORMS, recordQuizSocial } = await added;
+    expect(Object.keys(keys.quizSocial)).toHaveLength(QUIZ_SHARE_BYS.length);
+    for (const by of QUIZ_SHARE_BYS) {
+      expect(Object.keys(keys.quizSocial[by])).toHaveLength(QUIZ_SOCIAL_PLATFORMS.length);
+      for (const platform of QUIZ_SOCIAL_PLATFORMS) {
+        kv.incrs = [];
+        await recordQuizSocial(by, platform);
+        expect(keys.quizSocial[by][platform]).toBe(`loop:stats:2026-08-09:quiz_social:${by}:${platform}`);
+        expect(keysWritten()).toContain(keys.quizSocial[by][platform]);
+        expect(keysWritten().some((k) => k.includes("quiz_share:") || k.includes("quiz_copy:"))).toBe(false);
+      }
+    }
+  });
+
+  it("refuses an undeclared sharer or platform rather than clamping it onto one", async () => {
+    const { recordQuizSocial } = await added;
+    await recordQuizSocial("host" as never, "line");
+    await recordQuizSocial("owner", "twitter" as never);
+    await recordQuizSocial("taker", "LINE" as never);
+    await recordQuizSocial("board", "" as never);
+    await recordQuizSocial("owner", "__proto__" as never);
+    expect(kv.incrs).toEqual([]);
+  });
+
+  it("stays fail-soft", async () => {
+    const { recordQuizSocial } = await added;
+    kv.failWrites = true;
+    await expect(recordQuizSocial("owner", "x")).resolves.toBeUndefined();
+  });
+});
+
 describe("the quiz's length, hint and refusal counters", () => {
   const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
 
@@ -1053,6 +1091,28 @@ describe("the digest prints what the recorders write", () => {
     expect(script).toContain(`const GAME_ROUND_CEILING = ${GAME_ROUND_CEILING};`);
   });
 
+  it("prints a copy row and a social row for every sharer, the taker's included", async () => {
+    // `quiz_copy:taker:*` became writable on 2026-10-01 and `quiz_social:` is
+    // a new prefix: claimed with no reader, either is consumed and printed
+    // nowhere; read with no claim, the social one prints twice.
+    const { QUIZ_SOCIAL_PLATFORMS } = await import("@/lib/loop-stats");
+    const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
+    expect(rendered).toContain('"quiz_copy:"');
+    expect(rendered).toContain('"quiz_social:"');
+    const loops = [...script.matchAll(/for \(const by of \[([^\]]*)\]\) \{\s*const counts = (\w+)\.map\(\(\w\) => get\(`(quiz_\w+):/g)];
+    const byPrefix = new Map(loops.map((m) => [m[3], m[1]]));
+    for (const prefix of ["quiz_share", "quiz_copy", "quiz_social"]) {
+      const bys = byPrefix.get(prefix) ?? "";
+      for (const by of QUIZ_SHARE_BYS) expect(bys, `${prefix} omits ${by}`).toContain(`"${by}"`);
+    }
+    const platforms = script.match(/const socialPlatforms = \[([^\]]*)\]/)?.[1] ?? "";
+    for (const p of QUIZ_SOCIAL_PLATFORMS) expect(platforms).toContain(`"${p}"`);
+    expect(script).toMatch(/`\$\{by\} copy`/);
+    expect(script).toMatch(/`\$\{by\} social`/);
+    // And a day whose only quiz activity is a social tap still prints the block.
+    expect(script).toMatch(/m\.startsWith\("quiz_social:"\)/);
+  });
+
   it("reads and prints the owner's two stages, which sit under a prefix the fallback skips", async () => {
     // `quiz:owner_opened` starts with `quiz:`, so "Other counters" will never
     // show it. Without a read and a row of its own it is the counter that
@@ -1079,10 +1139,10 @@ describe("the digest prints what the recorders write", () => {
     const outcomes = script.match(/const copyOutcomes = \[([^\]]*)\]/)?.[1] ?? "";
     for (const outcome of QUIZ_COPY_OUTCOMES) expect(outcomes).toContain(`"${outcome}"`);
     expect(script).toMatch(/get\(`quiz_copy:\$\{by\}:\$\{o\}`\)/);
-    // Both loops name every `by` — the share loop is the first, the copy
-    // loop the second, and a `by` missing from either is a row never printed.
+    // Every loop names every `by` — share, copy, then (since 2026-10-01)
+    // social — and a `by` missing from any is a row never printed.
     const loops = [...script.matchAll(/for \(const by of \[([^\]]*)\]\)/g)].map((m) => m[1]);
-    expect(loops).toHaveLength(2);
+    expect(loops).toHaveLength(3);
     for (const loop of loops) {
       for (const by of QUIZ_SHARE_BYS) expect(loop).toContain(`"${by}"`);
     }
@@ -1104,7 +1164,7 @@ describe("the digest prints what the recorders write", () => {
     const guard = script.match(/if \(([^)]*) > 0\) \{\s*console\.log\("\\nPlaylist quiz/)?.[1] ?? "";
     expect(guard).toContain("quizTaps");
     expect(script).toMatch(
-      /const quizTaps = \[\.\.\.totals\]\s*\.filter\(\(\[m\]\) => m\.startsWith\("quiz_share:"\) \|\| m\.startsWith\("quiz_copy:"\)\)/
+      /const quizTaps = \[\.\.\.totals\]\s*\.filter\(\s*\(\[m\]\) => m\.startsWith\("quiz_share:"\) \|\| m\.startsWith\("quiz_copy:"\) \|\| m\.startsWith\("quiz_social:"\)\s*\)/
     );
   });
 

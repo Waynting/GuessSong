@@ -5,6 +5,48 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-10-01
+
+From the first full UTC day after 1.16.0: `Short links (spotify.link)` read 6
+pasted, 6 `could not be reached`; `owner share` 21 taps of which only 3
+opened a share sheet (most quiz makers are on a desktop); `owner copy` 9.
+
+### Fixed
+
+- **Short links resolved nowhere from production** (`lib/spotify-shortlink.ts`).
+  Branch.io answers by User-Agent: Node's default `node` is treated as a
+  browser and sent via `spotify.app.link` to a 200 "Launching Spotify" page,
+  which `follow()` classified as `unavailable` — every time. Every hop now
+  sends `SHORTLINK_USER_AGENT` (a declared bot UA, answered with one 307 to
+  `open.spotify.com`), and a 200 `text/html` hop is read up to
+  `INTERSTITIAL_MAX_BYTES` (64 KB) by `fromInterstitial`, resolving only when
+  every music address on the page agrees. A page naming none (a dead link)
+  stays `unavailable`, never `unusable`. Host allow-list, `redirect: "manual"`
+  and the 3s deadline unchanged.
+
+### Added
+
+- **Platform links on the quiz** (`lib/social-share.ts`,
+  `components/quiz-social-links.tsx`): LINE, Threads, X, Facebook, WhatsApp
+  intent URLs on the owner panel, the board and the taker result, rendered
+  only when `navigator.share` is missing (decided after mount). Counted by
+  `reportQuizSocial` → GA4 `quiz_social_tapped` and
+  `quiz_social:<owner|taker|board>:<platform>`, both tails closed.
+- **Taker Copy link** on the result screen, reporting
+  `quiz_copy:taker:<outcome>` — the row that was declared and never written.
+
+### Changed
+
+- The owner panel's Copy link is a solid secondary button (`.quiz-copy-btn`)
+  instead of the dashed add-player outline nobody read as a button.
+
+### Known gaps
+
+- Whether Branch answers Vercel's egress the way it answers a laptop is
+  unverified; the interstitial reader is the fallback. Read `Short links`
+  after deploy — `resolved` should be most of it.
+- Dead short links still count as `could not be reached`, deliberately.
+
 ## [1.16.0] - 2026-09-30
 
 From the `npm run stats` read of 2026-09-29: 5,027 games, 56.5% repeat
