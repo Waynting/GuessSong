@@ -514,7 +514,8 @@ function statsKey(kind: "hit" | "miss" | "negative"): string {
 const STATS_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /**
- * `negative` counts the subset of hits that replayed a cached 404. Those are
+ * `negative` counts the subset of hits that replayed a cached 404 or a cached
+ * empty playlist. Those are
  * real hits — the question was answered without touching Spotify, which is all
  * `rate` claims to measure — but they are the one kind a *broken* input
  * produces on repeat. A host retrying a playlist they made private pushes the
@@ -563,7 +564,7 @@ async function recordMiss(
 export async function getCacheStats(): Promise<{
   hits: number;
   misses: number;
-  /** Hits that replayed a cached 404, already included in `hits`. */
+  /** Hits that replayed a cached 404 or empty playlist, already in `hits`. */
   negativeHits: number;
   hitRate: number;
 }> {
@@ -752,13 +753,19 @@ async function fetchAndCache(
     // an order of magnitude smaller.
     const stripped = tracks.map(stripTrackForStorage);
 
-    if (stripped.length > 0) {
-      await writeCache(
-        playlistId,
-        { kind: "hit", name: playlist.name, tracks: stripped, truncated },
-        truncated ? SAMPLED_TTL_SECONDS : HIT_TTL_SECONDS
-      );
-    }
+    // An empty playlist is cached too, for the 404's ten minutes rather than a
+    // day: it is the same "fix it and come back" refusal (`playlist_empty`,
+    // raised by the callers from the empty list), and uncached every retry of
+    // it spent a full load and a daily-budget slot to be told it again.
+    await writeCache(
+      playlistId,
+      { kind: "hit", name: playlist.name, tracks: stripped, truncated },
+      stripped.length === 0
+        ? NOT_FOUND_TTL_SECONDS
+        : truncated
+          ? SAMPLED_TTL_SECONDS
+          : HIT_TTL_SECONDS
+    );
 
     return {
       name: playlist.name,
@@ -917,7 +924,10 @@ async function loadPlaylistUncounted(
 
   const cached = await readCache(playlistId);
   if (cached?.kind === "hit") {
-    await recordHit();
+    // A replayed empty playlist is a negative hit, like a replayed 404: the
+    // one kind of hit a broken input produces on repeat. `loadPlaylist` counts
+    // it as `playlist_refused:playlist_empty` from the empty list either way.
+    await recordHit(cached.tracks.length === 0);
     return toLoaded(cached);
   }
   if (cached?.kind === "missing") {

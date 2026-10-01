@@ -1055,6 +1055,10 @@ async function resolveAndStore(
         source: "itunes",
         itunesTrackId: outcome.trackId ?? existing.itunesTrackId,
       };
+    } else if (outcome.kind === "unavailable" && outcome.throttled) {
+      // The same 403 the search path parks iTunes on. Without this the full
+      // search below asks the host that just refused us, twice.
+      await startCooldown("itunes", outcome.retryAfterSeconds);
     }
     // An empty or failed lookup falls through to a full search: the id may have
     // been retired from the store entirely, which a search can still route
@@ -1062,6 +1066,14 @@ async function resolveAndStore(
   }
 
   resolution ??= await askUpstream(query);
+
+  // A refresh that could not ask is a fact about us, not the recording. The
+  // stored record (a year-long `found`, with the id that makes the next repair
+  // one call) must outlive a throttled minute rather than be replaced by 90s
+  // of `null` that then needs the full search fan-out to recover from.
+  if (existing && resolution.status === "unavailable") {
+    return { previewUrl: null, status: "unavailable" };
+  }
 
   await writeRecord(key, toRecord(resolution), resolution.status);
   return { previewUrl: resolution.previewUrl, status: resolution.status };

@@ -186,15 +186,26 @@ describe("playlist cache", () => {
     expect(upstreamCalls()).toBe(1);
   });
 
-  it("does not cache an empty playlist", async () => {
+  it("remembers an empty playlist for the 404's ten minutes, not a day", async () => {
     upstream().mockResolvedValue(upstreamResult([]));
 
     await loadPlaylist(URL_A);
     await loadPlaylist(URL_A);
+    await loadPlaylist(URL_A);
 
-    // A playlist the host is still filling shouldn't be remembered as empty
-    // for six hours.
-    expect(upstreamCalls()).toBe(2);
+    // `playlist_empty` is deterministic, so a host retrying it must not spend
+    // a load and a daily-budget slot each time — but a playlist the host is
+    // still filling shouldn't be remembered as empty for long either.
+    expect(upstreamCalls()).toBe(1);
+    expect(kv.writes.find((w) => w.key.startsWith("playlist:v"))?.ttlSeconds).toBe(10 * 60);
+
+    // Replayed like a cached 404: counted as a refusal every time, and as a
+    // negative hit so it cannot inflate the rate.
+    const day = new Date().toISOString().slice(0, 10);
+    expect(kv.mem.get(`loop:stats:${day}:playlist_refused:playlist_empty`)?.value).toBe(3);
+    const stats = await getCacheStats();
+    expect(stats.hits).toBe(2);
+    expect(stats.negativeHits).toBe(2);
   });
 
   it("rejects an unparseable URL without calling Spotify", async () => {
