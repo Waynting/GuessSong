@@ -54,6 +54,46 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.18.0",
+    date: "2026-10-01",
+    headline:
+      "No playlist to hand? Pick one of ours. Plus steadier Buzzer Mode and a final scoreboard that fits small phones.",
+    headlineZh:
+      "手邊沒有歌單？直接選我們準備的。搶答模式更穩定，小螢幕手機也看得到完整排行榜。",
+    changes: [
+      {
+        kind: "new",
+        text: "If you have no playlist ready, or the one you pasted won't load, the setup page now offers two to start with: party hits from 2010 to today, and old-school reggaetón.",
+        textZh: "如果手邊沒有歌單，或貼上的歌單載入不了，設定頁現在會提供兩個現成的：2010 年至今的派對金曲，以及經典老派雷鬼頓。",
+      },
+      {
+        kind: "fixed",
+        text: "In Buzzer Mode, if the host's connection dropped for a moment, phones could stay on \"Wait for the clip\" for a whole song. The round now opens on every phone once the host is back.",
+        textZh: "搶答模式中，主持人的網路短暫斷線時，手機可能整首歌都停在「等待片段」。現在主持人一連回來，每支手機就會開放搶答。",
+      },
+      {
+        kind: "fixed",
+        text: "A buzzer that was pressed last round could stay dead after a phone woke from sleep. It now resets every round, and an expired room says so instead of retrying forever.",
+        textZh: "手機休眠醒來後，上一輪按過的搶答鍵可能整輪按不動。現在每一輪都會重設；房間過期時也會直接說明，不會一直重試。",
+      },
+      {
+        kind: "fixed",
+        text: "On small phones, the final scoreboard could shrink to nothing below first place. It now keeps a few rows visible and the screen scrolls.",
+        textZh: "小螢幕手機上，最終排行榜第一名以下可能被擠到看不見。現在會保留幾列，畫面也可以往下捲。",
+      },
+      {
+        kind: "fixed",
+        text: "Mixed mode's taste card no longer blames a player for songs that had no audio and were skipped, and ending the game right after a reveal keeps that round's points in the summary.",
+        textZh: "混合歌單的品味卡不會再把沒聲音、被跳過的歌算在某位玩家頭上；揭曉後直接結束遊戲，那一輪的分數也會留在總結裡。",
+      },
+      {
+        kind: "fixed",
+        text: "In the taste quiz, a hint the browser refused to play could be replayed for free, and a song with two tags in its title (like a feature and a remix) could show up as its own wrong answer. Both are fixed.",
+        textZh: "品味測驗中，被瀏覽器擋下的提示可以免費重播；歌名同時帶兩個標註（例如合唱和 Remix）的歌，可能被當成自己的錯誤選項。兩個都修好了。",
+      },
+    ],
+  },
+  {
     version: "1.17.1",
     date: "2026-10-01",
     headline:

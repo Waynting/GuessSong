@@ -5,6 +5,61 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-10-01
+
+Batch two of the 2026-10-01 bug sweep, plus the first starter playlists.
+Each fix carries a test that fails without it; fixes were made by four
+worktree agents on top of 1.17.1 and merged here.
+
+### Added
+
+- **Starter playlists** (`lib/starter-playlists.ts`): Party Hits 2010–2026
+  (`5xS3Gi0fA3Uo6RScucyct6`) and Reggaetón Viejo (`5omiLK2rcAPMJXVTLZJ9d9`).
+  Both are third-party, by the owner's explicit choice, against the file's
+  own-account default; the second was already retitled "LOS DE HOTMAIL" by
+  its owner when added (contents still old-school reggaetón). Recorded beside
+  the list and in CLAUDE.md.
+
+### Fixed
+
+- **A refresh that could not ask overwrote a year-long `found`**
+  (`lib/preview-cache.ts` `resolveAndStore`): an `unavailable` re-resolution
+  now leaves an existing record alone. A throttled `lookupItunes` now starts
+  the iTunes cooldown like the search path.
+- **Empty playlists were never cached** (`lib/playlist-cache.ts`): each
+  retry spent a Spotify load and a daily-budget slot. Cached for
+  `NOT_FOUND_TTL_SECONDS` and counted as a negative hit, like a 404.
+- **`consumeRoomPool` stranded the room on a failed `mget`** (`lib/room.ts`):
+  the claim is released and the error rethrown, as the empty-pool branch did.
+- **Buzzer `host:open` lost during a reconnect**
+  (`components/buzzer-host-panel.tsx`, `hostOpenWasLost` in
+  `lib/buzzer-round.ts`): the host re-sends it when its own join's `state`
+  shows the room idle while the game is playing or guessing.
+- **Player's pressed latch outlived its round** (`components/buzzer-button.tsx`):
+  keyed to `roundIndex` + `roundOpenedAt`; the label is `describeBuzzer` and
+  no longer promises queueing to a player who cannot queue.
+- **`room_expired` reconnect loop** (`lib/use-buzzer-socket.ts`): no reconnect
+  is scheduled after the Worker says the room expired, and the error is kept;
+  `reconnect()` still works.
+- **Free replayed quiz hint** (`app/q/[code]/quiz-client.tsx`): both branches
+  go through `hintCharge` in `lib/quiz.ts`.
+- **Stacked trailing qualifiers** (`displayTitle` in `lib/quiz.ts`): stripped
+  until stable, at most three passes, never to empty.
+- **Mixed round history** (`closeRoundEntry` in `lib/round-history.ts`): one
+  helper for `nextTrack` and `endGame`; entries carry `revealed`, the taste
+  card ignores unrevealed rounds, End Game keeps a revealed round on screen.
+  Skipped rounds still count in `summarizeRounds` and `round_completed`.
+- **Final board collapsed on a short phone** (`.finished-overlay` scrolls
+  vertically, `.final-scoreboard` has a 132px floor). Rendered at 375×667:
+  board 2px before, 132px after; 390×844 and desktop unchanged.
+
+### Known gaps
+
+- After a quiz reload `heard` is not restored, so a heard-then-refused hint
+  replay can still be refunded (needs `lib/quiz-progress.ts` to store it).
+- A buzz dropped on a socket that reports open but is dead keeps that
+  player's latch for the rest of the round; it clears at the next round.
+
 ## [1.17.1] - 2026-10-01
 
 Batch one of a four-way read-only bug sweep (game flow, server and caches,
@@ -56,12 +111,7 @@ Taste Quiz, rooms and buzzer). Each fix carries a test that fails without it.
   a caller that sends both. Closing it needs the title in the key, which is a
   cold start of the whole preview cache (CLAUDE.md: the key is unversioned on
   purpose). Left until it is seen.
-- Batch two is still open: refresh overwriting a `found` entry during
-  throttling, `consumeRoomPool` leaving a room consumed when its `mget`
-  throws, buzzer `host:open` dropped during a reconnect, the buzzer latch
-  after a screen lock, `room_expired` overwritten by `no_answer`, the free
-  replayed hint, double trailing qualifiers in `displayTitle`, Mixed round
-  history, the short-phone final board, and empty playlists never cached.
+- Batch two shipped as 1.18.0.
 
 ## [1.17.0] - 2026-10-01
 
