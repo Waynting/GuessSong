@@ -145,6 +145,8 @@ const TRAILING_DASH_QUALIFIER = /\s+[-–—－‐‑]\s+[\s\S]*$/;
  * closer — so any opener may pair with any closer.
  */
 const TRAILING_BRACKET_QUALIFIER = /\s*[(\[（［【][^)\]）］】]*[)\]）］】]\s*$/;
+/** Stacked qualifiers seen on Spotify run to two or three; more is not a title. */
+const QUALIFIER_PASSES = 3;
 
 /**
  * The title as an answer option shows it.
@@ -152,17 +154,27 @@ const TRAILING_BRACKET_QUALIFIER = /\s*[(\[（［【][^)\]）］】]*[)\]）］�
  * Spotify stores "Karma Police - Remastered 2011" and "Señorita (feat. Camila
  * Cabello)"; the decoy pool stores plain titles. Left as-is, the qualifier is a
  * tell — the one option with " - Remastered" on it is the real one. Only a
- * trailing ` - …` and a trailing bracketed group come off, so "(Sittin' On)
+ * trailing ` - …` and trailing bracketed groups come off, so "(Sittin' On)
  * The Dock of the Bay" and "Hip-Hop Is Dead" keep their names. The stored
  * track keeps the full title, because the preview lookup wants it.
  */
 export function displayTitle(name: string): string {
   const trimmed = name.trim();
-  const stripped = trimmed
-    .replace(TRAILING_DASH_QUALIFIER, "")
-    .replace(TRAILING_BRACKET_QUALIFIER, "")
-    .trim();
-  return stripped || trimmed;
+  let title = trimmed;
+  // Spotify stacks qualifiers — "Bad Habits (feat. Ed Sheeran) [Remix]" — and
+  // one pass left the first on, so `titleKey` missed the pool's plain title
+  // and the playlist's own song could be offered as the decoy. Strip until
+  // stable, bounded so a title made of brackets costs a fixed number of
+  // linear passes, and stop before a pass would leave nothing.
+  for (let pass = 0; pass < QUALIFIER_PASSES; pass++) {
+    const next = title
+      .replace(TRAILING_DASH_QUALIFIER, "")
+      .replace(TRAILING_BRACKET_QUALIFIER, "")
+      .trim();
+    if (!next || next === title) break;
+    title = next;
+  }
+  return title || trimmed;
 }
 
 /** Whitespace, punctuation and symbols: nothing a title is identified by. */
@@ -657,6 +669,20 @@ export function isAnswerList(value: unknown, questionCount: number): value is nu
  */
 export function hintAllowance(questionCount: number): number {
   return Math.max(1, Math.round(questionCount / 10));
+}
+
+/**
+ * What tapping the hint on one question costs: nothing if that question is
+ * already charged, one hint if there is one left, otherwise the tap is
+ * refused. A clip URL the phone already holds is not a payment — a refunded
+ * hint (`play()` refused by the browser) keeps its URL, and a replay that
+ * skipped this rule was a free hint, which at two options is a free point.
+ */
+export type HintCharge = "free" | "charge" | "refuse";
+
+export function hintCharge(charged: boolean, hintsLeft: number): HintCharge {
+  if (charged) return "free";
+  return hintsLeft > 0 ? "charge" : "refuse";
 }
 
 /**
