@@ -16,60 +16,55 @@
  *    the send, never the verdict.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { BuzzerPhase, BuzzEntry } from "@/lib/buzzer-protocol";
+import { buzzerRoundKey, describeBuzzer } from "@/lib/buzzer-round";
 
 export interface BuzzerButtonProps {
   phase: BuzzerPhase;
   buzzes: BuzzEntry[];
+  /** The snapshot's round identity, which the local latch is scoped to. */
+  roundIndex: number | null;
+  roundOpenedAt: number | null;
   playerId: string;
   connected: boolean;
   onBuzz: () => void;
 }
 
-type Visual = {
-  label: string;
-  sub?: string;
-  bg: string;
-  fg: string;
-  disabled: boolean;
-};
-
 export function BuzzerButton({
   phase,
   buzzes,
+  roundIndex,
+  roundOpenedAt,
   playerId,
   connected,
   onBuzz,
 }: BuzzerButtonProps) {
   // Local half of the two-layer debounce. The room dedupes by playerId too, but
   // this is what stops a mobile long-press from firing a burst of frames in the
-  // first place.
-  const [pressed, setPressed] = useState(false);
+  // first place. It holds the round it was pressed in, not a boolean, so a new
+  // round clears it whatever shape that round's first snapshot has — see
+  // `buzzerRoundKey` in lib/buzzer-round.ts.
+  const round = buzzerRoundKey(roundIndex === null ? null : { roundIndex, roundOpenedAt });
+  const [pressedIn, setPressedIn] = useState<string | null>(null);
+  const pressed = pressedIn === round;
 
   const myBuzz = buzzes.find((b) => b.playerId === playerId);
   const winner = buzzes[0];
   const iWon = winner?.playerId === playerId;
 
-  // A new round clears the local latch. Without this the button stays dead
-  // after the first song.
-  useEffect(() => {
-    if (phase === "open" && buzzes.length === 0) setPressed(false);
-  }, [phase, buzzes.length]);
-
-
   const canBuzz = connected && !myBuzz && !pressed && phase !== "idle";
 
   function handlePointerDown() {
     if (!canBuzz) return;
-    setPressed(true);
+    setPressedIn(round);
     // Haptics land before the round-trip; on a phone in a loud room this is the
     // only feedback the player reliably notices.
     navigator.vibrate?.(30);
     onBuzz();
   }
 
-  const visual = describe({ connected, phase, myBuzz, iWon, winner, pressed });
+  const visual = describeBuzzer({ connected, phase, myBuzz, iWon, winner, pressed });
 
   return (
     <div className="flex flex-1 flex-col">
@@ -95,41 +90,4 @@ export function BuzzerButton({
       </button>
     </div>
   );
-}
-
-function describe(s: {
-  connected: boolean;
-  phase: BuzzerPhase;
-  myBuzz: BuzzEntry | undefined;
-  iWon: boolean;
-  winner: BuzzEntry | undefined;
-  pressed: boolean;
-}): Visual {
-  if (!s.connected) {
-    return { label: "Connecting…", sub: "Come back to this screen and it reconnects", bg: "#1a1a1a", fg: "#888", disabled: true };
-  }
-  if (s.iWon) {
-    return { label: "You buzzed first", sub: "Shout the answer", bg: "#1DB954", fg: "#04120a", disabled: true };
-  }
-  if (s.myBuzz) {
-    // Queued behind the winner. Worth showing the position, because a wrong
-    // answer passes the question down the line and they may still be up.
-    return {
-      label: `#${s.myBuzz.order} in line`,
-      sub: s.winner ? `${s.winner.name} was first — you are up if they miss` : undefined,
-      bg: "#1a2a1a",
-      fg: "#8fd6a5",
-      disabled: true,
-    };
-  }
-  if (s.winner) {
-    return { label: `${s.winner.name}`, sub: "buzzed first — you can still queue", bg: "#1a1a1a", fg: "#bbb", disabled: false };
-  }
-  if (s.pressed) {
-    return { label: "Sent…", bg: "#1a2a1a", fg: "#8fd6a5", disabled: true };
-  }
-  if (s.phase === "idle") {
-    return { label: "Wait for the clip", bg: "#141414", fg: "#666", disabled: true };
-  }
-  return { label: "BUZZ", bg: "#1DB954", fg: "#04120a", disabled: false };
 }
