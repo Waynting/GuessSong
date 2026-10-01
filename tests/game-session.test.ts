@@ -4,6 +4,10 @@ import {
   parseGamePayload,
   stripTrackForStorage,
   countRoundsPlayed,
+  findDuplicateName,
+  mergeRoomRoster,
+  nameKey,
+  scoreboardName,
   GAME_STORAGE_KEY,
 } from "@/lib/game-session";
 import type { Track } from "@/types";
@@ -304,5 +308,35 @@ describe("parseGamePayload track validation", () => {
       { name: "Alice", score: 3 },
       { name: "Bob", score: 0 },
     ]);
+  });
+});
+
+describe("one reading of a player's name", () => {
+  const players = [
+    { name: "Amy", score: 0 },
+    { name: "Ben", score: 0 },
+  ];
+
+  it("finds the scoreboard's spelling whatever case or padding the request used", () => {
+    // A phone that typed "amy" (or a keyboard that capitalised it the other
+    // way) is the scoreboard's "Amy", which the merge already decided.
+    expect(scoreboardName(players, "amy")).toBe("Amy");
+    expect(scoreboardName(players, "  AMY ")).toBe("Amy");
+    expect(scoreboardName(players, "Cleo")).toBeNull();
+  });
+
+  it("agrees with the roster merge: whoever the merge did not add, an award can reach", () => {
+    const merged = mergeRoomRoster(players, ["amy", "Cleo"]);
+    expect(merged.map((p) => p.name)).toEqual(["Amy", "Ben", "Cleo"]);
+    for (const phoneName of ["amy", "Cleo"]) {
+      expect(scoreboardName(merged, phoneName)).not.toBeNull();
+    }
+  });
+
+  it("refuses two setup rows that score as one", () => {
+    expect(findDuplicateName(["Alex", "Sam", "alex "])).toBe("alex ");
+    expect(findDuplicateName(["Alex", "Sam", ""])).toBeNull();
+    expect(findDuplicateName(["", "  "])).toBeNull();
+    expect(nameKey("  Alex ")).toBe("alex");
   });
 });

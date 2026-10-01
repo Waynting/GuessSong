@@ -407,6 +407,15 @@ export async function peekQuiz(code: string): Promise<QuizPeek | null> {
  * whose name matches a row — their own, from before this shipped — is not
  * refused it.
  */
+/**
+ * What the answer route gets back. `replayed` is for the route alone, and it
+ * strips it before replying, the way the check route keeps `owner` to itself:
+ * a replay is the row this taker already wrote, handed back to "See my result
+ * again" or to a resend whose first reply was lost, and counting it again put
+ * one finish into `quiz:completed` — and its verdict and length — once per tap.
+ */
+export type SubmittedAnswers = AnswerQuizResponse & { replayed?: true };
+
 export async function submitQuizAnswers(
   code: string,
   name: string,
@@ -414,7 +423,7 @@ export async function submitQuizAnswers(
   hintsUsed: unknown,
   submissionId?: string,
   hostToken?: string | null
-): Promise<AnswerQuizResponse> {
+): Promise<SubmittedAnswers> {
   const quiz = await requireQuiz(code);
   const owner = isQuizOwner(quiz, hostToken);
 
@@ -444,7 +453,7 @@ export async function submitQuizAnswers(
   const folded = foldQuizName(trimmedName);
   const sid = typeof submissionId === "string" && submissionId ? submissionId : undefined;
 
-  const replay = (scores: StoredScore[]): AnswerQuizResponse | null => {
+  const replay = (scores: StoredScore[]): SubmittedAnswers | null => {
     const mine = scores.find((s) => foldQuizName(s.name) === folded);
     if (!mine) return null;
     if (!sid || mine.sid !== sid) throw new QuizError("quiz_name_taken", 409);
@@ -458,6 +467,7 @@ export async function submitQuizAnswers(
       recorded: true,
       rank: rankOf(scoreboard, trimmedName),
       scoreboard: scoreboard.map(publicScore),
+      replayed: true,
     };
   };
 

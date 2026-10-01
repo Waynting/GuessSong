@@ -10,8 +10,8 @@
  *   room:v2:<CODE>              hash
  *     meta                      { code, hostToken, createdAt, expiresAt }
  *     consumed                  the attempt id that won the consume race
- *     p:<folded name>           { playerName, trackCount, joinedAt }
- *   room:v2:<CODE>:t:<folded name>   the contributor's tracks
+ *     p:<folded name>           { playerName, trackCount, joinedAt, tracksId }
+ *   room:v2:<CODE>:t:<folded name>:<tracksId>   the contributor's tracks
  *
  * It was one JSON blob under `room:<CODE>`, and the split fixes two separate
  * problems that the blob made into one.
@@ -81,6 +81,15 @@ interface RosterEntry {
    * watching. Arrival order is also the order everyone expects.
    */
   joinedAt: number;
+  /**
+   * Which submit attempt's tracks key this slot names. Per attempt, not per
+   * name: two phones submitting "Alex" and "alex" at once both wrote one
+   * `:t:alex` key before the claim, and the loser's cleanup `del` then removed
+   * the winner's tracks — a contributor in the roster whose playlist never
+   * reached the pool. Absent on slots written before it existed, which read
+   * the old per-name key.
+   */
+  tracksId?: string;
 }
 
 interface LoadedRoom {
@@ -141,8 +150,9 @@ function rosterField(playerName: string): string {
 }
 
 /** Tracks live outside the hash so the roster poll never carries them. */
-function tracksKey(code: string, folded: string): string {
-  return `${roomKey(code)}:t:${folded}`;
+function tracksKey(code: string, folded: string, tracksId?: string): string {
+  const base = `${roomKey(code)}:t:${folded}`;
+  return tracksId ? `${base}:${tracksId}` : base;
 }
 
 /**
@@ -168,7 +178,12 @@ async function loadRoom(code: string): Promise<LoadedRoom | null> {
     if (!field.startsWith(ROSTER_PREFIX)) continue;
     const entry = value as RosterEntry;
     if (!entry || typeof entry.playerName !== "string") continue;
-    roster.push({ ...entry, folded: field.slice(ROSTER_PREFIX.length) });
+    roster.push({
+      ...entry,
+      // Read back untyped; anything but a string names the legacy per-name key.
+      tracksId: typeof entry.tracksId === "string" ? entry.tracksId : undefined,
+      folded: field.slice(ROSTER_PREFIX.length),
+    });
   }
   roster.sort((a, b) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0));
 
@@ -350,21 +365,26 @@ export async function submitToRoom(
   const store = await getKvStore();
   const folded = fold(trimmedName);
   const ttl = remainingTtlSeconds(openRecord.meta);
+  // This attempt's own key, so losing the claim below can only ever delete
+  // what this request wrote — see `RosterEntry.tracksId`.
+  const tracksId = randomUUID();
+  const ownTracksKey = tracksKey(code, folded, tracksId);
 
   // Tracks before the roster slot, so the two are never out of order in the way
   // that matters: a slot with no tracks yet would show the host a contributor
   // whose playlist cannot be pooled, whereas tracks with no slot are invisible
   // and expire on their own.
-  await store.set(tracksKey(code, folded), strippedTracks, ttl);
+  await store.set(ownTracksKey, strippedTracks, ttl);
 
   if (!(await store.hsetnx(roomKey(code), rosterField(trimmedName), {
     playerName: trimmedName,
     trackCount: strippedTracks.length,
     joinedAt: Date.now(),
+    tracksId,
   } satisfies RosterEntry))) {
     // Someone else holds this name. Not a retryable race any more — the field
     // is claimed and will stay claimed for the life of the room.
-    await store.del(tracksKey(code, folded)).catch(() => {});
+    await store.del(ownTracksKey).catch(() => {});
     throw new RoomError("room_name_taken", 409);
   }
 
@@ -377,7 +397,7 @@ export async function submitToRoom(
   const after = await loadRoom(code);
   if (!after || after.consumedBy) {
     await store.hdel(roomKey(code), rosterField(trimmedName)).catch(() => {});
-    await store.del(tracksKey(code, folded)).catch(() => {});
+    await store.del(ownTracksKey).catch(() => {});
     throw after
       ? new RoomError("room_already_started", 410)
       : new RoomError("room_not_found", 404);
@@ -431,7 +451,7 @@ export async function consumeRoomPool(
   // Only now are the track lists worth fetching — one mget for the whole room,
   // rather than having dragged them along in every roster poll all evening.
   const lists = await store.mget<Track[]>(
-    room.roster.map((entry) => tracksKey(code, entry.folded))
+    room.roster.map((entry) => tracksKey(code, entry.folded, entry.tracksId))
   );
   const submissions = room.roster
     .map((entry, i) => ({ playerName: entry.playerName, tracks: lists[i] ?? [] }))

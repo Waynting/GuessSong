@@ -5,6 +5,64 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.1] - 2026-10-01
+
+Batch one of a four-way read-only bug sweep (game flow, server and caches,
+Taste Quiz, rooms and buzzer). Each fix carries a test that fails without it.
+
+### Fixed
+
+- **Single Playlist shuffle was biased toward the head of the playlist**
+  (`app/page.tsx`). `sort(() => Math.random() - 0.5)` then `slice(0, n)`:
+  simulated on V8, a 300-track playlist cut to 20 drew its first 50 tracks
+  1.48× as often as it should and its last 50 0.54×. One Fisher-Yates now
+  lives in `lib/shuffle.ts`, replacing the two private copies in
+  `lib/spotify.ts` and `lib/mixed-playlist.ts`; `tests/shuffle.test.ts`
+  checks uniformity and reads `app/`, `lib/`, `components/` for a random
+  comparator.
+- **Awards compared names exactly while the roster merge folded case**
+  (`app/game/page.tsx`). A buzz from "amy" against the scoreboard's "Amy" was
+  announced as +3, marked the round scored, and changed no score.
+  `nameKey` / `scoreboardName` in `lib/game-session.ts` are now the one
+  reading, used by `mergeRoomRoster` and all three award functions, which
+  award the scoreboard's spelling or nothing.
+- **Single mode accepted two players with one name**, and one tap scored both
+  rows. `handleStart` refuses with the new `players_duplicate_name` before any
+  request (`findDuplicateName`, same fold as the Mixed collector).
+- **A Mixed room name race deleted the winner's tracks** (`lib/room.ts`). Both
+  attempts wrote one `:t:<folded>` key before `hsetnx`, and the loser's
+  cleanup `del` removed it: the winner stayed on the roster, absent from the
+  pool. Tracks are keyed per attempt (`:t:<folded>:<tracksId>`, the id stored
+  in the roster entry); slots from before the deploy read the old key.
+- **Preview ids were keyed verbatim** (`lib/preview-cache.ts`). `id` is the
+  one uncapped field on both preview routes and was written under
+  `preview:id:` for up to a year. `previewCacheKey` now keys by id only for
+  22 base62 characters and falls back to the query key otherwise.
+- **A lost opening `expire` made a counter permanent** (`lib/kv.ts`). `incr`
+  and `expire` are two commands; on `spotify:budget` a lost second one would
+  refuse every new playlist until the key was deleted by hand.
+  `shouldRearmExpiry` re-arms with `EXPIRE … NX` each time the count crosses a
+  power of two — log₂(n) extra commands a window, swallowed on failure.
+- **Quiz replays counted as completions** (`app/api/quiz/[code]/answer`).
+  "See my result again" and a lost-reply resend re-POST one `submissionId`;
+  the store replayed the row and the route bumped `quiz:completed`, the
+  verdict and the length each time. The store marks a replay
+  (`SubmittedAnswers.replayed`), the route counts nothing for it and strips
+  the marker. The ~2026-10-06 quiz read should start after this deploy.
+
+### Known gaps
+
+- A real, uncached Spotify id can still be cached against the wrong title by
+  a caller that sends both. Closing it needs the title in the key, which is a
+  cold start of the whole preview cache (CLAUDE.md: the key is unversioned on
+  purpose). Left until it is seen.
+- Batch two is still open: refresh overwriting a `found` entry during
+  throttling, `consumeRoomPool` leaving a room consumed when its `mget`
+  throws, buzzer `host:open` dropped during a reconnect, the buzzer latch
+  after a screen lock, `room_expired` overwritten by `no_answer`, the free
+  replayed hint, double trailing qualifiers in `displayTitle`, Mixed round
+  history, the short-phone final board, and empty playlists never cached.
+
 ## [1.17.0] - 2026-10-01
 
 From the first full UTC day after 1.16.0: `Short links (spotify.link)` read 6

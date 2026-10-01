@@ -112,6 +112,7 @@ export type AppErrorCode =
   | "rate_limited_quiz_create"
   // Setup screen validation
   | "players_required"
+  | "players_duplicate_name"
   | "mixed_min_contributors"
   // The browser itself, not the playlist — see the note above their entries
   | "storage_blocked"
@@ -509,6 +510,11 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   players_required: {
     en: "Add at least one player.",
     zh: "至少要有一位玩家。",
+  },
+  // Scores are kept by name, so two rows that spell one name would score as one.
+  players_duplicate_name: {
+    en: "Two players have the same name. Give one of them a nickname.",
+    zh: "有兩位玩家同名，幫其中一位換個暱稱吧。",
   },
   mixed_min_contributors: {
     en: "Add at least {count} players' playlists to start.",

@@ -140,17 +140,49 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
  * a `setPlayers` updater on every snapshot can't loop.
  */
 export function mergeRoomRoster(players: GamePlayer[], roster: string[]): GamePlayer[] {
-  const seen = new Set(players.map((p) => p.name.toLowerCase()));
+  const seen = new Set(players.map((p) => nameKey(p.name)));
   const additions: GamePlayer[] = [];
   for (const raw of roster) {
     const name = raw.trim();
     if (!name) continue;
-    const key = name.toLowerCase();
+    const key = nameKey(name);
     if (seen.has(key)) continue;
     seen.add(key);
     additions.push({ name, score: 0 });
   }
   return additions.length ? [...players, ...additions] : players;
+}
+
+/**
+ * The one reading of "is this the same player". Scores are kept by name, so
+ * every place that compares one has to agree: the roster merge above folded
+ * case while the award buttons compared exactly, and a phone that capitalised
+ * "amy" to "Amy" buzzed in, was told "+3 pts", and scored nothing.
+ */
+export function nameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/** The first name that appears twice under `nameKey`, or null. */
+export function findDuplicateName(names: readonly string[]): string | null {
+  const seen = new Set<string>();
+  for (const name of names) {
+    const key = nameKey(name);
+    if (!key) continue;
+    if (seen.has(key)) return name;
+    seen.add(key);
+  }
+  return null;
+}
+
+/**
+ * The scoreboard's own spelling of `name`, or null when nobody on it answers
+ * to that name. An award goes to this, never to the spelling it arrived in
+ * (a buzz carries the phone's), so the card and the row agree.
+ */
+export function scoreboardName(players: readonly GamePlayer[], name: string): string | null {
+  const key = nameKey(name);
+  return players.find((p) => nameKey(p.name) === key)?.name ?? null;
 }
 
 /**

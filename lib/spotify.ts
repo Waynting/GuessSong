@@ -1,4 +1,5 @@
 import { Track } from "@/types";
+import { shuffle } from "@/lib/shuffle";
 import { errorMessage, type AppErrorCode } from "@/lib/error-messages";
 import { isEditorialPlaylistId, playlistIdFromLink } from "@/lib/spotify-link";
 
@@ -415,16 +416,6 @@ export async function fetchPlaylistHead(
 
   const playlist = (await response.json()) as SpotifyPlaylist;
   return { playlist, firstPage: readTrackPage(playlist.tracks, 0) };
-}
-
-/** Fisher-Yates. Array#sort with a random comparator is not a uniform shuffle. */
-function shuffle<T>(items: T[]): T[] {
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
 }
 
 /** `count` distinct values drawn from [min, max] without replacement. */

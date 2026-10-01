@@ -7,6 +7,7 @@
  */
 
 import type { Track } from "@/types";
+import { shuffle } from "@/lib/shuffle";
 
 export interface PlaylistContribution {
   playerName: string;
@@ -65,15 +66,6 @@ export function fingerprint(name: string, artists: string[]): string {
 
   const primaryArtist = artists[0] ?? "";
   return `${normalize(name)}::${normalize(primaryArtist)}`;
-}
-
-function shuffle<T>(items: T[]): T[] {
-  const copy = [...items];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
 }
 
 /**

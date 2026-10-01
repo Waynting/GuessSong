@@ -241,6 +241,39 @@ describe("the taker's routes", () => {
     expect(await count(keys.quiz.board)).toBe(before.board + 1);
   });
 
+  it("counts a finish once, however many times its row is replayed", async () => {
+    // "See my result again" and a resend whose reply was lost both re-POST the
+    // same submissionId, and the store hands the stored row back. The route
+    // used to count every one of those as another completion.
+    const quiz = await make(10);
+    const before = {
+      completed: await count(keys.quiz.completed),
+      soulmate: await count(keys.quizVerdict.soulmate),
+      done10: await count(keys.quizLength.completed[10]),
+    };
+    const answers = await keyFor(quiz.code);
+    const body = JSON.stringify({ name: "Bea", answers, submissionId: "sub-bea-1" });
+
+    const replies: AnswerQuizResponse[] = [];
+    for (let i = 0; i < 3; i++) {
+      const res = await answerQuiz(
+        request(`/api/quiz/${quiz.code}/answer`, { method: "POST", body }),
+        params(quiz.code)
+      );
+      expect(res.status).toBe(200);
+      replies.push((await res.json()) as AnswerQuizResponse);
+    }
+
+    expect(await count(keys.quiz.completed)).toBe(before.completed + 1);
+    expect(await count(keys.quizVerdict.soulmate)).toBe(before.soulmate + 1);
+    expect(await count(keys.quizLength.completed[10])).toBe(before.done10 + 1);
+    // The replay is the same answer, and the route's own marker stays on the server.
+    for (const reply of replies) {
+      expect(reply).toMatchObject({ correct: replies[0].correct, recorded: true });
+      expect(reply).not.toHaveProperty("replayed");
+    }
+  });
+
   it("counts a start on the first question's check, once, and no other question's", async () => {
     const quiz = await make(10);
     const before = await count(keys.quiz.started);
