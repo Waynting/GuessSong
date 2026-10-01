@@ -54,6 +54,31 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.17.0",
+    date: "2026-10-01",
+    headline:
+      "Spotify short links work again, and sending a taste quiz takes one tap from any device.",
+    headlineZh:
+      "Spotify 短連結可以用了，品味測驗也能一鍵傳出去。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "Pasting a spotify.link short link (the kind the Spotify app's Share button gives you) used to fail every time and ask for the full link. It now opens the playlist.",
+        textZh: "以前貼上 spotify.link 短連結（Spotify App 按「分享」拿到的那種）每次都會失敗，要你改貼完整連結。現在會直接打開歌單。",
+      },
+      {
+        kind: "new",
+        text: "On a computer, the taste quiz now has LINE, Threads, X, Facebook and WhatsApp buttons next to Send, so you can post the link without copying it first. Phones keep their own share sheet.",
+        textZh: "在電腦上，品味測驗的「傳給朋友」旁邊多了 LINE、Threads、X、Facebook、WhatsApp 按鈕，不用先複製就能直接貼出去。手機還是用原本的分享選單。",
+      },
+      {
+        kind: "better",
+        text: "Friends who finish your quiz get a Copy link button beside Share my score, and the quiz maker's Copy link now looks like a button.",
+        textZh: "朋友做完測驗後，「分享我的分數」旁邊多了「複製連結」；出題者那邊的「複製連結」也改成看得出是按鈕的樣子。",
+      },
+    ],
+  },
+  {
     version: "1.16.0",
     date: "2026-09-30",
     headline:
