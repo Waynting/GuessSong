@@ -432,10 +432,11 @@ under six rules:
   replayed refusal keeps its help. `lib/playlist-ref.ts` is names for
   `lib/spotify-link.ts`, not a parser; the recent-chip row never wraps, to keep
   Start on a 390×844 screen.
-- **`lib/starter-playlists.ts` ships empty and must only ever hold public
-  playlists from the site owner's own account.** A tested 22-character,
-  non-`37i9` id is enforced; someone else's playlist is one deletion away from
-  a dead button on the setup page.
+- **`lib/starter-playlists.ts` should hold public playlists from the site
+  owner's own account.** A tested 22-character, non-`37i9` id is enforced;
+  someone else's playlist is one deletion away from a dead button on the setup
+  page. The two it holds since 1.17.1 are third-party by the owner's explicit
+  choice (2026-10-01) — check them first if `playlist_not_found` jumps.
 
 ## Phones are the host's screen
 
