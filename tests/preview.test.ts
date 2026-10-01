@@ -1478,6 +1478,47 @@ describe("refresh", () => {
     expect(probe.upstreamCalls()).toBeGreaterThan(1);
   });
 
+  it("keeps the year-long record when the refresh itself could not ask", async () => {
+    installFetchMock({ itunes: { body: ITUNES_HIT } });
+    await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
+    const key = previewCacheKey("sp1xxxxxxxxxxxxxxxxxxx", "Song", "Artist");
+
+    vi.unstubAllGlobals();
+    kv.writes.length = 0;
+    // Every source refuses: the answer is "we do not know", not a fact about
+    // the recording, so it must not replace the stored `found` and its id.
+    installFetchMock({ lookup: { status: 403 }, itunes: { status: 403 }, deezer: { body: DEEZER_QUOTA } });
+    const res = await GET(
+      request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx", refresh: "1" })
+    );
+
+    expect(await statusOf(res)).toBe("unavailable");
+    expect(writeFor(key)).toBeUndefined();
+    const stored = kv.mem.get(key)?.value as { previewUrl: string; itunesTrackId: number };
+    expect(stored.previewUrl).toBe("https://itunes.example/preview.m4a");
+    expect(stored.itunesTrackId).toBe(4242);
+  });
+
+  it("parks iTunes when the lookup is refused, instead of searching it again", async () => {
+    installFetchMock({ itunes: { body: ITUNES_HIT } });
+    await GET(request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx" }));
+
+    vi.unstubAllGlobals();
+    const probe = installFetchMock({
+      lookup: { status: 403 },
+      itunes: { body: ITUNES_REFRESHED },
+      deezer: { body: DEEZER_HIT },
+    });
+    const res = await GET(
+      request({ track: "Song", artist: "Artist", id: "sp1xxxxxxxxxxxxxxxxxxx", refresh: "1" })
+    );
+
+    expect(writeFor("preview:cooldown:itunes")).toBeDefined();
+    // The lookup is the only iTunes call; the search goes straight to Deezer.
+    expect(probe.itunesCalls()).toBe(1);
+    expect(await previewUrlFrom(res)).toBe("https://deezer.example/preview.mp3");
+  });
+
   it("has its own, much tighter rate limit bucket", async () => {
     // It bypasses the cache by design, so it is the one parameter here that
     // can be turned into an upstream amplifier.
