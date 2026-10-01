@@ -39,6 +39,8 @@ import { SOCIAL_PLATFORMS, isSocialPlatform, type SocialPlatform } from "@/lib/s
 import { QUIZ_SOURCES, isQuizSource, type QuizSource } from "@/lib/quiz-source";
 import type { PreviewStatus } from "@/types/preview";
 import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
+import { isPlaylistHelpTopic, PLAYLIST_HELP_TOPIC_NAMES, type PlaylistHelpTopic } from "@/lib/playlist-help";
+import { RECOVERY_STAGES, type RecoveryStage } from "@/lib/refusal-recovery";
 
 /**
  * 30 days, not the 7 that `lib/playlist-cache.ts` uses for its own stats.
@@ -718,6 +720,8 @@ export function loopStatsKeys(
   firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
   gameOverTap: Record<GameOverTap, string>;
   mixedNudge: Record<MixedNudgeStage, string>;
+  refusalRecovery: Record<RecoveryStage, Record<PlaylistHelpTopic, string>>;
+  refusalRecoveryVia: Record<SetupSource, string>;
   playlistRefused: Record<PlaylistRefusalCode, string>;
 } {
   const impressions: Record<string, string> = {};
@@ -780,6 +784,17 @@ export function loopStatsKeys(
     mixedNudge: Object.fromEntries(
       MIXED_NUDGE_STAGES.map((s) => [s, key(day, `mixed_nudge:${s}`)])
     ) as Record<MixedNudgeStage, string>,
+    refusalRecovery: Object.fromEntries(
+      RECOVERY_STAGES.map((stage) => [
+        stage,
+        Object.fromEntries(
+          PLAYLIST_HELP_TOPIC_NAMES.map((t) => [t, key(day, `refusal_recovery:${stage}:${t}`)])
+        ),
+      ])
+    ) as Record<RecoveryStage, Record<PlaylistHelpTopic, string>>,
+    refusalRecoveryVia: Object.fromEntries(
+      SETUP_SOURCES.map((s) => [s, key(day, `refusal_recovery_via:${s}`)])
+    ) as Record<SetupSource, string>,
     playlistRefused: Object.fromEntries(
       PLAYLIST_REFUSAL_CODES.map((c) => [c, key(day, `playlist_refused:${c}`)])
     ) as Record<PlaylistRefusalCode, string>,
@@ -1067,6 +1082,22 @@ export async function recordGameLeft(roundsPlayed: number, host?: GameHostKind):
 export function recordGameOverTap(target: GameOverTap): Promise<void> {
   if (!GAME_OVER_TAPS.includes(target)) return Promise.resolve();
   return bump(`game_over_tap:${target}`);
+}
+
+/**
+ * A setup page showed a permanent refusal, or started a game after one. See
+ * `lib/refusal-recovery.ts`. `via` only on a recovery; both tails closed.
+ */
+export async function recordRefusalRecovery(
+  stage: RecoveryStage,
+  topic: PlaylistHelpTopic,
+  via?: SetupSource
+): Promise<void> {
+  if (!RECOVERY_STAGES.includes(stage) || !isPlaylistHelpTopic(topic)) return;
+  await bump(`refusal_recovery:${stage}:${topic}`);
+  if (stage === "recovered" && via && SETUP_SOURCES.includes(via)) {
+    await bump(`refusal_recovery_via:${via}`);
+  }
 }
 
 /** The setup page's Mixed nudge. See `MixedNudgeStage`. */

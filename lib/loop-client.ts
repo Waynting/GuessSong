@@ -33,6 +33,7 @@ import type {
   GameScreen,
 } from "@/lib/loop-stats";
 import { sendPulse } from "@/lib/pulse-client";
+import type { PlaylistHelpTopic } from "@/lib/playlist-help";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
 
@@ -178,6 +179,18 @@ export function reportGameLeft(
 export function reportGameOverTap(target: GameOverTap, screen: GameScreen | null): void {
   trackEvent("game_over_tap", screen ? { target, screen } : { target });
   sendPulse({ kind: "game_over_tap", target });
+}
+
+/** Call with what `lib/refusal-recovery.ts` returns to report. */
+export function reportRefusal(topic: PlaylistHelpTopic): void {
+  trackEvent("refusal_recovery", { stage: "refused", topic });
+  sendPulse({ kind: "refusal_recovery", stage: "refused", topic });
+}
+
+/** Before `router.push`, like `reportGameStart`, so it can be a beacon. */
+export function reportRefusalRecovered(topic: PlaylistHelpTopic, via: SetupSource): void {
+  trackEvent("refusal_recovery", { stage: "recovered", topic, via });
+  sendPulse({ kind: "refusal_recovery", stage: "recovered", topic, via });
 }
 
 /**

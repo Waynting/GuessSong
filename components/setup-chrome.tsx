@@ -139,6 +139,9 @@ export function SetupStyles() {
         .mode-links .text-link { color: #999; }
         @media (hover: hover) { .mode-links .text-link:hover { color: var(--green); } }
         .mode-links-sep { color: #444; font-size: 12px; }
+        /* On a phone the two links never fit one line, and a dot left at the
+           end of the first one reads as a stray mark. The row gap separates them. */
+        @media (max-width: 600px) { .mode-links-sep { display: none; } }
 
         /* Under the roster once three names are typed: the one moment Mixed
            plainly fits. A whole-row button, quieter than Start and the pills,

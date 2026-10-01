@@ -925,6 +925,8 @@ const RENDERED_PREFIXES = [
   "first_clip:",
   "game_over_tap:",
   "mixed_nudge:",
+  "refusal_recovery:",
+  "refusal_recovery_via:",
   "playlist_refused:",
   "playlist_invalid:",
   "playlist_shortlink:",
@@ -1125,6 +1127,38 @@ if (refusals.length > 0) {
         "  and the app cannot serve them (37i9… returns 404 to new apps)"
     );
   }
+}
+
+/**
+ * Whether a host shown a permanent refusal went on to play, per setup page
+ * load (lib/refusal-recovery.ts): `refusal_recovery:<refused|recovered>:<topic>`
+ * and, for a recovery, how — `refusal_recovery_via:<source>`. The topics
+ * mirror PLAYLIST_HELP_TOPIC_NAMES in lib/playlist-help.ts.
+ */
+const RECOVERY_TOPICS = [
+  ["private", "private or deleted"],
+  ["wrong_link", "not a playlist link"],
+  ["editorial", "Spotify's own"],
+  ["empty", "empty"],
+];
+const recRefused = RECOVERY_TOPICS.reduce((t, [k]) => t + get(`refusal_recovery:refused:${k}`), 0);
+const recRecovered = RECOVERY_TOPICS.reduce((t, [k]) => t + get(`refusal_recovery:recovered:${k}`), 0);
+if (recRefused + recRecovered > 0) {
+  console.log(
+    `\nAfter a refusal on setup — ${recRecovered} of ${recRefused} pages went on to start a game (${pct(recRecovered, recRefused).trim()})`
+  );
+  for (const [k, label] of RECOVERY_TOPICS) {
+    const r = get(`refusal_recovery:refused:${k}`);
+    const ok = get(`refusal_recovery:recovered:${k}`);
+    if (r + ok > 0) console.log(`  ${label.padEnd(22)} ${String(ok).padStart(5)} of ${String(r).padStart(5)}  ${pct(ok, r)}`);
+  }
+  const via = SETUP_SOURCE_ORDER.map((s) => [s, get(`refusal_recovery_via:${s}`)]).filter(([, n]) => n > 0);
+  if (via.length) console.log(`  got past it by: ${via.map(([s, n]) => `${s} ${n}`).join(" · ")}`);
+  console.log(
+    "  how to read it: per page load, not per host — a host who reloads and tries\n" +
+      "  again is two pages. `starter` here is the chips under the error doing their job;\n" +
+      "  a low private-or-deleted rate is the help line not getting people unstuck."
+  );
 }
 
 /**

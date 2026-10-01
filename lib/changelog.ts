@@ -54,6 +54,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.19.1",
+    date: "2026-10-01",
+    headline: "A small tidy-up on the setup page.",
+    headlineZh: "設定頁的小整理。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "On phones, the links under the Start button no longer leave a stray dot at the end of a line.",
+        textZh: "手機上，Start 按鈕下方的連結換行時，行尾不會再多出一個孤單的小點。",
+      },
+    ],
+  },
+  {
     version: "1.19.0",
     date: "2026-10-01",
     headline: "Got three or more players? The setup page now points you to Mixed mode.",

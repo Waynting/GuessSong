@@ -50,6 +50,18 @@ export const PLAYLIST_GUIDE_SLUG = "spotify-playlist-not-working";
 
 export type PlaylistHelpTopic = "editorial" | "private" | "wrong_link" | "empty";
 
+/** Every topic, for code that has to check one off the wire (`lib/refusal-recovery.ts`). */
+export const PLAYLIST_HELP_TOPIC_NAMES: readonly PlaylistHelpTopic[] = [
+  "editorial",
+  "private",
+  "wrong_link",
+  "empty",
+];
+
+export function isPlaylistHelpTopic(value: unknown): value is PlaylistHelpTopic {
+  return typeof value === "string" && (PLAYLIST_HELP_TOPIC_NAMES as readonly string[]).includes(value);
+}
+
 export interface PlaylistHelpCopy {
   /**
    * The `id` of the guide's section about this, or null to link to the top of

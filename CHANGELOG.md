@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.1] - 2026-10-01
+
+### Added
+
+- **Refusal recovery, per setup page load** (`lib/refusal-recovery.ts`).
+  `playlist_refused:<code>` counts refusals on the server, retries and replays
+  included, and said nothing about whether the host then played — 1,302 a
+  week were private or deleted. Now `refusal_recovery:refused:<topic>` is
+  counted the first time a page shows a permanent refusal and
+  `refusal_recovery:recovered:<topic>` when that page then starts a game,
+  with `refusal_recovery_via:<SetupSource>`. Keyed by help topic
+  (`PLAYLIST_HELP_TOPIC_NAMES`, new in `lib/playlist-help.ts`), which is what
+  the host was told and is browser-safe where `lib/loop-stats.ts` is not.
+  Both catch sites on `/` go through `showFailure`; the credit is in
+  `recordHostedStart`. GA4 `refusal_recovery`; a block in `npm run stats`.
+  Verified on a local build: an invalid link sends
+  `{"kind":"refusal_recovery","stage":"refused","topic":"wrong_link"}`.
+
+### Fixed
+
+- The `·` between the two links under Start dangled at the end of the first
+  line on phones; hidden under 600px, where the links always wrap.
+
+### Known gaps
+
+- Per page load, not per host: a reload after a refusal is a second page.
+  `/quiz` refusals are not counted here.
+
 ## [1.19.0] - 2026-10-01
 
 Mixed is the loop arm that converts (`join_submitted` 21.6% in the week to

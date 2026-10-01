@@ -9,7 +9,13 @@ import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolRe
 import { trackEvent } from "@/lib/analytics";
 import { arrivedFrom } from "@/lib/loop-links";
 import { bumpHostGameCount, recallLoopRef, rememberLoopRef } from "@/lib/host-session";
-import { reportGameStart, reportMixedNudge } from "@/lib/loop-client";
+import {
+  reportGameStart,
+  reportMixedNudge,
+  reportRefusal,
+  reportRefusalRecovered,
+} from "@/lib/loop-client";
+import { NO_REFUSAL, noteFailure, noteStart, type RecoveryState } from "@/lib/refusal-recovery";
 import { showMixedNudge } from "@/lib/mixed-nudge";
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
 import {
@@ -252,6 +258,17 @@ export default function SetupPage() {
   // remembered so a Mixed start from this page can be credited to it.
   const nudgeShownRef = useRef(false);
   const nudgeTappedRef = useRef(false);
+  // Whether this page showed a permanent refusal, and whether a game started
+  // after it. See lib/refusal-recovery.ts.
+  const recoveryRef = useRef<RecoveryState>(NO_REFUSAL);
+
+  /** Every failure the host is shown goes through here. */
+  function showFailure(failed: SetupFailure) {
+    setFailure(failed);
+    const noted = noteFailure(recoveryRef.current, failed.code);
+    recoveryRef.current = noted.state;
+    if (noted.report) reportRefusal(noted.report);
+  }
 
   // What the one room has to do, given the modes picked above. Pass-the-phone
   // with the buzzer off needs no room at all, and never opens one.
@@ -479,6 +496,9 @@ export default function SetupPage() {
     const hostGameIndex = bumpHostGameCount();
     const setupSource: SetupSource = mixed ? "mixed" : linkSource;
     reportGameStart(hostGameIndex, mixed, setupSource);
+    const recovery = noteStart(recoveryRef.current, setupSource);
+    recoveryRef.current = recovery.state;
+    if (recovery.report) reportRefusalRecovered(recovery.report.topic, recovery.report.via);
     if (mixed && nudgeTappedRef.current) {
       nudgeTappedRef.current = false;
       reportMixedNudge("started");
@@ -616,7 +636,7 @@ export default function SetupPage() {
       lastRejectedRef.current = shouldRememberRejection(e)
         ? { key: submissionKey, failure: failed }
         : null;
-      setFailure(failed);
+      showFailure(failed);
     } finally {
       setLoading(false);
     }
@@ -762,7 +782,7 @@ export default function SetupPage() {
       lastRejectedRef.current = allFailuresFinal
         ? { key: submissionKey, failure: failed }
         : null;
-      setFailure(failed);
+      showFailure(failed);
     } finally {
       setLoading(false);
     }
