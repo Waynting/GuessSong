@@ -140,6 +140,34 @@ export function SetupStyles() {
         @media (hover: hover) { .mode-links .text-link:hover { color: var(--green); } }
         .mode-links-sep { color: #444; font-size: 12px; }
 
+        /* Under the roster once three names are typed: the one moment Mixed
+           plainly fits. A whole-row button, quieter than Start and the pills,
+           louder than the text link under Start it points to. */
+        .mixed-nudge {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          width: 100%;
+          margin-top: 12px;
+          padding: 12px 14px;
+          background: rgba(29,185,84,0.06);
+          border: 1px solid rgba(29,185,84,0.25);
+          border-radius: 10px;
+          font-family: 'Outfit', sans-serif;
+          font-size: 14px;
+          line-height: 1.4;
+          color: #ccc;
+          text-align: left;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .mixed-nudge strong { color: var(--green); font-weight: 600; }
+        @media (hover: hover) {
+          .mixed-nudge:hover { background: rgba(29,185,84,0.12); border-color: rgba(29,185,84,0.45); }
+        }
+        .mixed-nudge:active { background: rgba(29,185,84,0.18); transition: none; }
+        .mixed-nudge:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
         .card {
           background: var(--surface);
           border: 1px solid var(--border);

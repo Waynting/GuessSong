@@ -29,6 +29,7 @@ const {
   GAME_ENDS,
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
+  MIXED_NUDGE_STAGES,
   GAME_ROUND_CEILING,
   GAME_ROUND_FLOOR,
   GAME_SCREENS,
@@ -36,6 +37,7 @@ const {
   recordFirstClip,
   recordGameLeft,
   recordGameOverTap,
+  recordMixedNudge,
   HOST_INDEX_CEILING,
   LOOP_STATS_TTL_SECONDS,
   MIXED_SUB_MODES,
@@ -208,6 +210,12 @@ describe("the key format is the contract between writer and reader", () => {
       kv.incrs = [];
       await recordGameOverTap(target);
       expect(keysWritten()).toContain(expected.gameOverTap[target]);
+    }
+
+    for (const stage of MIXED_NUDGE_STAGES) {
+      kv.incrs = [];
+      await recordMixedNudge(stage);
+      expect(keysWritten()).toContain(expected.mixedNudge[stage]);
     }
 
     for (const code of PLAYLIST_REFUSAL_CODES) {
@@ -448,6 +456,10 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
       expect(keys.gameOverTap[target]).toBe(`loop:stats:2026-08-09:game_over_tap:${target}`);
     }
     expect(Object.keys(keys.gameOverTap)).toHaveLength(GAME_OVER_TAPS.length);
+    for (const stage of MIXED_NUDGE_STAGES) {
+      expect(keys.mixedNudge[stage]).toBe(`loop:stats:2026-08-09:mixed_nudge:${stage}`);
+    }
+    expect(Object.keys(keys.mixedNudge)).toHaveLength(MIXED_NUDGE_STAGES.length);
   });
 
   it("refuses a first clip whose path or outcome is undeclared — both are key tails", async () => {
@@ -1188,6 +1200,7 @@ describe("the digest prints what the recorders write", () => {
       "game_left_host:",
       "first_clip:",
       "game_over_tap:",
+      "mixed_nudge:",
     ]) {
       expect(rendered, `${prefix} is not claimed`).toContain(`"${prefix}"`);
     }
@@ -1197,6 +1210,9 @@ describe("the digest prints what the recorders write", () => {
     }
     for (const target of GAME_OVER_TAPS) {
       expect(script, `${target} is never read`).toMatch(new RegExp(`get\\("game_over_tap:${target}"\\)`));
+    }
+    for (const stage of MIXED_NUDGE_STAGES) {
+      expect(script, `${stage} is never read`).toMatch(new RegExp(`get\\("mixed_nudge:${stage}"\\)`));
     }
     // The rest are read by template over lists the script mirrors by hand,
     // so the lists are what has to agree with the writer's.

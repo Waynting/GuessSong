@@ -223,6 +223,15 @@ export type GameOverTap = "play_again" | "mixed";
 export const GAME_OVER_TAPS: readonly GameOverTap[] = ["play_again", "mixed"];
 
 /**
+ * The setup page's nudge toward Mixed mode (`lib/mixed-nudge.ts`): `shown`
+ * once per page load, `tapped`, and `started` for a Mixed game started after
+ * a tap on this page. `started ÷ tapped` is whether it works.
+ */
+export type MixedNudgeStage = "shown" | "tapped" | "started";
+
+export const MIXED_NUDGE_STAGES: readonly MixedNudgeStage[] = ["shown", "tapped", "started"];
+
+/**
  * Who tapped a quiz's share button, and what came of it.
  *
  * `owner` is the panel on `/quiz` after a quiz is made — the step between
@@ -708,6 +717,7 @@ export function loopStatsKeys(
   gameLeftHost: Record<GameHostKind, Record<EarlyEndBand, string>>;
   firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
   gameOverTap: Record<GameOverTap, string>;
+  mixedNudge: Record<MixedNudgeStage, string>;
   playlistRefused: Record<PlaylistRefusalCode, string>;
 } {
   const impressions: Record<string, string> = {};
@@ -767,6 +777,9 @@ export function loopStatsKeys(
       play_again: key(day, "game_over_tap:play_again"),
       mixed: key(day, "game_over_tap:mixed"),
     },
+    mixedNudge: Object.fromEntries(
+      MIXED_NUDGE_STAGES.map((s) => [s, key(day, `mixed_nudge:${s}`)])
+    ) as Record<MixedNudgeStage, string>,
     playlistRefused: Object.fromEntries(
       PLAYLIST_REFUSAL_CODES.map((c) => [c, key(day, `playlist_refused:${c}`)])
     ) as Record<PlaylistRefusalCode, string>,
@@ -1054,6 +1067,12 @@ export async function recordGameLeft(roundsPlayed: number, host?: GameHostKind):
 export function recordGameOverTap(target: GameOverTap): Promise<void> {
   if (!GAME_OVER_TAPS.includes(target)) return Promise.resolve();
   return bump(`game_over_tap:${target}`);
+}
+
+/** The setup page's Mixed nudge. See `MixedNudgeStage`. */
+export function recordMixedNudge(stage: MixedNudgeStage): Promise<void> {
+  if (!MIXED_NUDGE_STAGES.includes(stage)) return Promise.resolve();
+  return bump(`mixed_nudge:${stage}`);
 }
 
 /**

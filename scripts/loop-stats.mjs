@@ -584,6 +584,25 @@ if (tapAgain + tapMixed > 0) {
 }
 
 /**
+ * The setup page's nudge toward Mixed mode (`lib/mixed-nudge.ts`), shown once
+ * a host has typed three names. `started` is a Mixed game begun after a tap.
+ */
+const nudgeShown = get("mixed_nudge:shown");
+const nudgeTapped = get("mixed_nudge:tapped");
+const nudgeStarted = get("mixed_nudge:started");
+if (nudgeShown + nudgeTapped + nudgeStarted > 0) {
+  console.log(
+    `\nMixed nudge on setup  shown ${nudgeShown} · tapped ${nudgeTapped} (${pct(nudgeTapped, nudgeShown).trim()})` +
+      ` · started a Mixed game ${nudgeStarted} (${pct(nudgeStarted, nudgeTapped).trim()} of taps)`
+  );
+  console.log(
+    "  how to read it: shown counts page loads where three names were typed, not hosts.\n" +
+      "  A tap that does not start is a host who looked at Mixed and went back; set\n" +
+      "  started beside `Playlist came from … mixed` to see what share of Mixed it brought."
+  );
+}
+
+/**
  * The playlist quiz funnel: created → opened → started → completed → board,
  * then the share surface's own row above. Each stage is a server-side count
  * (the route that did the thing bumps it), so unlike the surface table
@@ -905,6 +924,7 @@ const RENDERED_PREFIXES = [
   "game_left_host:",
   "first_clip:",
   "game_over_tap:",
+  "mixed_nudge:",
   "playlist_refused:",
   "playlist_invalid:",
   "playlist_shortlink:",
