@@ -54,6 +54,36 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.17.1",
+    date: "2026-10-01",
+    headline:
+      "Fairer song picks from big playlists, and points that always land on the right player.",
+    headlineZh:
+      "大歌單抽歌更平均，分數也一定會加到對的人身上。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "Songs from a big playlist were picked unevenly: the first songs came up far more often than the last ones. Every song now has the same chance.",
+        textZh: "從大歌單抽歌原本不平均，前面的歌出現的機會比後面多很多。現在每首歌被抽到的機會都一樣。",
+      },
+      {
+        kind: "fixed",
+        text: "In Buzzer Mode, a player whose phone name differed from the scoreboard only in capitals (\"amy\" and \"Amy\") could buzz first and get nothing for Correct. The points now go to them.",
+        textZh: "搶答模式中，如果手機上的名字和計分板只差大小寫（例如 amy 和 Amy），搶到也按了「答對」卻拿不到分。現在分數會正確加上去。",
+      },
+      {
+        kind: "fixed",
+        text: "Two players with the same name used to share every point. The setup page now asks you to tell them apart before the game starts.",
+        textZh: "兩位玩家同名時，原本會一起被加分。現在開始前會請你幫其中一位換個名字。",
+      },
+      {
+        kind: "fixed",
+        text: "In a Mixed room, two phones joining under the same name at the same moment could make the winner's playlist quietly disappear from the game. It now stays in.",
+        textZh: "混合歌單房間裡，兩支手機同時用同一個名字加入時，搶到名字的那位的歌單可能會從遊戲裡消失。現在不會了。",
+      },
+    ],
+  },
+  {
     version: "1.17.0",
     date: "2026-10-01",
     headline:
