@@ -379,6 +379,31 @@ unguarded browser calls in that file in a week: the rule is that nothing in the
 buzzer client may hand the browser a call it might not have, or trust storage
 to be there, without a fallback.
 
+### "The name came up but the music didn't stop"
+
+A player buzzes and their name appears on the host's screen, but the clip plays
+on under it. The clip is paused by the `buzz` frame (`onBuzz` → `pauseClip`),
+and a buzz that lands while the host's socket is down never sends one; the
+rejoin's `state` replay only shows the winner. A host on a phone drops the
+socket on every app switch and Wi-Fi blip, so this is ordinary, not a corner.
+
+Since 1.19.2 `stateMissedBuzz` (`lib/buzzer-round.ts`) pauses on a replay that
+is `locked` with a head the host has not seen, keyed by `floorKey` (round key
+plus the head's `order`). Two things to keep:
+
+- **`floorRef` in `components/buzzer-host-panel.tsx` is overwritten only by a
+  snapshot, never reset to null.** "Try again" nulls the snapshot before the
+  new socket's replay; resetting the floor there paused music the host had
+  deliberately resumed after a wrong answer.
+- **The key relies on the Worker never reusing `order` within a round**
+  (`buzzCount`, reset only by an open or Next). A Worker that numbered buzzes
+  by queue length again would let two heads share a key and miss the pause.
+
+The pause lands on the rejoin, about a second after the press (the reconnect
+backoff starts at 1s), not on the press: nothing reaches a host whose socket is
+down. Repro: a local Worker plus the production build in headless Chrome, drop
+the host's socket, buzz from a phone tab.
+
 ### "The room disappeared mid-game"
 
 Mixed Playlist rooms use `ROOM_TTL_SECONDS = 30 * 60`, counted from **creation**
