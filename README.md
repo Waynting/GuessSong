@@ -4,7 +4,7 @@ A local party music guessing game powered by Spotify playlists. Live at **[guess
 
 No login, no accounts. The host pastes a public Spotify playlist URL, everyone guesses out loud, and the host awards points.
 
-Current version: **1.13.0** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **1.20.0** — see [CHANGELOG.md](./CHANGELOG.md).
 
 ## How It Works
 
@@ -24,7 +24,6 @@ The host is the judge — there's no automated answer checking.
 | Correct song | +3 | Party & Buzzer modes |
 | Correct album | +1 | Party & Buzzer modes |
 | Correct "whose playlist is this?" | +2 | Mixed Playlist Mode only |
-| Correct guess | +1 | Trial mode (solo) |
 
 One award of each type per round.
 
@@ -37,29 +36,28 @@ Two orthogonal choices: **how you play** and **where the songs come from**.
 | Mode | What it is |
 |---|---|
 | **Party** (default) | Host types the player names, plays clips, and manually awards points. |
-| **Trial** | Zero-setup demo — tap one of the three bundled playlists and play solo, +1 per round. Never calls Spotify. |
 | **Buzzer** | Everyone scans one QR code and gets a full-screen buzzer on their own phone. A Cloudflare Durable Object decides who pressed first, so the host can stop refereeing and actually play. Only offered when `NEXT_PUBLIC_BUZZER_WS_URL` is set. |
 
 ### Where the songs come from
 
 | Source | What it is |
 |---|---|
-| **Own playlist** | The host pastes one public Spotify playlist URL. |
-| **Built-in** | Three bundled, preview-verified playlists (華語金曲, Western Classics, 2010s Pop Hits — 16 tracks each). No Spotify credentials needed. |
+| **Own playlist** | The host pastes one public Spotify playlist URL. The setup page remembers the last game's link, players and settings, so Play Again starts from where the host left off. |
+| **Starter playlists** | Two one-tap public playlists under the form (`lib/starter-playlists.ts`) for a host without a link to hand. They are ordinary Spotify playlists held on the site owner's account, loaded through the same path as a pasted one. |
 | **Mixed Playlist Mode** | Merge everyone's playlists into one pool. Either a **QR room** (players scan and submit their own playlist URL from their phone) or **phone mode** (pass one phone around). Tracks are deduped with provenance and fair-sampled per contributor, and a round-scoring history feeds a shareable "group taste card" at the end — most obscure picks, most mainstream picks, most shared tracks. |
 
 Buzzer Mode and Mixed Playlist Mode share a single room code and QR: the host claims the buzzer room first, then opens the playlist mailbox under the same code.
 
 ### Taste Quiz — its own page (`/quiz`), and not a game
 
-Paste a playlist, type your name, pick 10–50 questions, and you get a **link** to send to a group chat instead of a game to host. A friend opens it on their own phone and answers "which of these two songs is really in the playlist?" — one real, one decoy, no audio in the question. A 30s clip is a *hint*, rationed at one per ten questions, and using fewer only breaks ties. Every tap says right or wrong on the spot; at the end they get a score, a verdict (`soulmate` / `close` / `acquaintance` / `stranger`) and the public ranking. The results page (`/q/<code>/board`), which names the answers and shows who got each question, opens only on the device that made the quiz. A quiz lives seven days.
+Paste a playlist, type your name, pick 10–50 questions, and you get a **link** to send to a group chat instead of a game to host. A friend opens it on their own phone and answers "which of these two songs is really in the playlist?" — one real, one decoy, no audio in the question. A 30s clip is a *hint*, rationed at one per ten questions, and using fewer only breaks ties. Every tap says right or wrong on the spot; at the end they get a score, a verdict (`soulmate` / `close` / `acquaintance` / `guessing` / `stranger`; with two options a coin lands around 50%, which is `guessing`, so only below chance is `stranger`) and the public ranking. The results page (`/q/<code>/board`), which names the answers and shows who got each question, opens only on the device that made the quiz. **My quizzes** (`/q/mine`) lists every quiz that device made: who has answered, the top of each board, how long each link has left. Still no account: the device's stored host tokens are what prove the quizzes are yours. A quiz lives seven days.
 
 It is built as the first **link-shaped loop surface** rather than as a game mode — why, and what was rejected, is [decisions.md D9](docs/decisions.md#d9--the-quiz-is-a-loop-surface-not-a-game-mode).
 
 ## Features
 
 - Spotify playlist import via Client Credentials — no user auth, players never see a Spotify sign-in
-- Three game modes and three playlist sources (above)
+- Party and Buzzer modes, and three ways to bring the songs (above)
 - **Taste Quiz** — a playlist turned into a link: friends answer on their own phones, get a verdict, and land on a board of who knows the owner best (above)
 - 30s audio previews resolved from the **iTunes Search API**, falling back to **Deezer** — both keyless, so there is nothing to sign up for
 - Blurred album art hint system, live progress bar + countdown, replay from the guessing phase
@@ -158,6 +156,7 @@ ipconfig getifaddr en0            # macOS Wi-Fi — e.g. 10.107.0.98
 | `npm run start` | Start production server |
 | `npm run lint` | ESLint |
 | `npm test` | Vitest suite in `tests/` — does **not** include the Worker tests |
+| `npm run stats` | The viral-loop and cache counters from production KV (needs the Upstash variables). Last 7 UTC days by default; `-- --today`, `-- 30`, `-- --since 2026-09-30`, `-- --help`. How to read it: [docs/viral-loop.md](docs/viral-loop.md) |
 
 **`worker/` (Cloudflare buzzer Worker)**
 
@@ -178,11 +177,13 @@ app/
   game/page.tsx              The game — phase machine, playback, scoring, result images, the phone layout
   about/                     "How to play" page
   zh/                        Traditional-Chinese landing page (written natively, not translated)
-  guides/                    Guides index + eight articles (metadata declared in lib/guides.ts)
+  guides/                    Guides index + fourteen articles (metadata declared in lib/guides.ts)
   privacy/, terms/, contact/ Policy pages; zh/privacy and zh/terms are the Chinese halves
   j/[code]/                  Mixed Playlist Mode join page
   q/[code]/                  Taste Quiz — the taker's page; board/ is the owner's results page,
                              opengraph-image.tsx the per-quiz chat card (the one image rendered per request)
+  q/mine/                    My quizzes — the owner's dashboard for every quiz this device made
+  r/[surface]/               Counting redirect behind every loop link (disallowed in robots.ts)
   buzz/[code]/               Buzzer Mode player page (holds the live WebSocket)
   share/                     Web Share Target handler + /share/unsupported explainer
   icons/[size]/              PWA icons, prerendered at build (never per request)
@@ -195,7 +196,7 @@ components/                  Buzzer button + host panel, room panel, mixed colle
                              / and /quiz share), service notice, crash screen, ui/ (shadcn primitives)
 lib/                         All shared logic — see "Architecture" below
 worker/                      Cloudflare Worker + BuzzerRoom Durable Object
-tests/                       48 Vitest files, 994 cases
+tests/                       The Vitest suite (lib/ logic, route handlers, source-level rules)
 types/                       Track, room, quiz, preview, and service-status wire types
 ```
 
@@ -210,15 +211,18 @@ Every route is IP rate limited (`lib/rate-limit.ts`) with a fixed window; limits
 | `/api/preview/batch` | POST | `{tracks:[{id,name,artist,durationMs?}]}` (max 60) → previews for a whole game in one request. Same 300-code-point clamp on `name` and `artist`. | 20 / 10 min |
 | `/api/room` | POST | Optional `{code}` → `{roomCode, hostToken, expiresAt}`. Creates the Mixed Playlist mailbox. | 10 / 10 min |
 | `/api/room/[code]/submit` | POST | `{playerName, playlistUrl}` → `{ok, trackCount}`. | 20 / 10 min |
-| `/api/room/[code]/status` | GET | Who has submitted so far (host polls every 4s). | 200 / 10 min |
+| `/api/room/[code]/status` | GET | Who has submitted so far. The host polls every 4s while people are arriving and backs off when nothing changes (`lib/room-poll.ts`). | 200 / 10 min |
 | `/api/room/[code]/pool` | GET | `?sampledPerPlayer=N` + `x-host-token` header → the sampled, deduped pool. One-shot consume. | 20 / 10 min |
-| `/api/quiz` | POST | `{url, ownerName?, questionCount, locale?}` → `{code, hostToken, expiresAt, questionCount, playlistName}`. Turns a playlist into a Taste Quiz; the feature's only Spotify call, through the same cache as `/api/playlist`. | 10 / 10 min |
-| `/api/quiz/[code]` | GET | The quiz as a taker sees it — two titles per question, no answer key — plus the public ranking. Counts the open. | 60 / 10 min |
+| `/api/quiz` | POST | `{url, ownerName?, questionCount, locale?, from?}` → `{code, hostToken, expiresAt, questionCount, playlistName}`. Turns a playlist into a Taste Quiz; the feature's only Spotify call, through the same cache as `/api/playlist`. | 10 / 10 min |
+| `/api/quiz/mine` | POST | `{quizzes:[{code, token}]}` (max 10) → one summary per quiz for My quizzes: takers, mean, top three, last answer, expiry. Each token is checked against its own quiz; never returns the per-question rows. | 30 / 10 min |
+| `/api/quiz/[code]` | GET | The quiz as a taker sees it — two titles per question, no answer key — plus the public ranking. Counts the open. With the quiz's `x-host-token` it is the owner's preview, counted apart from friends. | 60 / 10 min |
 | `/api/quiz/[code]/check` | POST | `{q, pick}` → `{answer}` — one question's answer, the moment it is answered, against a pick for it; records nothing. `q=0` counts the start. | 600 / 10 min |
-| `/api/quiz/[code]/answer` | POST | `{name, answers, hintsUsed?, submissionId?}` → score, verdict and ranking. Graded server-side; a name is held once per quiz. | 60 / 10 min |
+| `/api/quiz/[code]/answer` | POST | `{name, answers, hintsUsed?, submissionId?}` → score, verdict and ranking. Graded server-side; a name is held once per quiz. The owner's own sheet (`x-host-token`) is graded and returned with `preview: true`, never written to the board. | 60 / 10 min |
 | `/api/quiz/[code]/hint` | GET | `?q=N` (zero-based) → a clip of question N's real track, so the phone never names the answer in a request. `&refresh=1` repairs a dead URL. | 60 / 10 min (refresh: 10) |
 | `/api/quiz/[code]/board` | GET | `x-host-token` header → ranking, mean, and per-question correct counts naming each real song. 403 `quiz_not_host` otherwise. | 60 / 10 min |
+| `/api/pulse` | POST | Fire-and-forget counters from the browser (game start and end, first clip, loop impressions, quiz shares) for `npm run stats`. Sent as a beacon, so it can outlive the page. | 240 / hour |
 | `/api/status` | GET | `{throttled, approachingLimit, code, retryAfterSeconds}` — how much of the shared Spotify allowance is left. One KV read, never touches Spotify. Drives the site notice. | 120 / 10 min |
+| `/r/[surface]` | GET | Counts a click on a loop link, then redirects to the site — on every branch, so a refused count never strands the visitor. | 120 / hour |
 | `/share` | GET | Web Share Target — extracts a playlist from shared text and redirects to `/?playlist=…`. | — |
 | `/icons/[size]` | GET | Generated PWA icons (`192`, `512`, `maskable`). | — |
 | `/q/[code]/opengraph-image` | GET | The quiz link's chat card, rendered per quiz — whose taste, how many questions, in the owner's language — and held at Vercel's edge for a day (`s-maxage`), so one render serves every unfurler. A malformed code or a refused render is redirected to the static site card, a non-canonical spelling to the canonical URL. | 60 / 10 min |
@@ -284,7 +288,7 @@ Two hand-written changelogs, and a release updates both: [`CHANGELOG.md`](./CHAN
 ## Testing
 
 ```bash
-npm test              # 48 files, 994 cases — vitest, jsdom
+npm test              # vitest, jsdom
 cd worker && npm test # Durable Object tests inside workerd
 ```
 
