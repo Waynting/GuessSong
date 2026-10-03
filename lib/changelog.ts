@@ -54,6 +54,34 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.20.0",
+    date: "2026-10-03",
+    headline: "Taste Quiz: one page to watch every quiz you've made, no login needed.",
+    headlineZh: "品味鑒定：一頁看完你做過的所有測驗，不用登入。",
+    changes: [
+      {
+        kind: "new",
+        text: "My quizzes lists every quiz made on this device: how many friends answered, who is on top, when the last answer came in, and how long the link has left. It says how many new answers arrived since you last looked. Find it under the Create button on the quiz page, or from any results page.",
+        textZh: "「我的測驗」會列出這台裝置做過的每一份測驗：幾位朋友作答、誰排第一、最近一次作答是什麼時候、連結還剩幾天，也會告訴你上次看完之後又多了幾個人。入口在品味鑒定頁的建立按鈕下方，或任何一份結果頁上。",
+      },
+      {
+        kind: "better",
+        text: "The quiz page now explains how the quiz works and answers the common questions, in your phone's language, so it's easier to find from a search and easier to show a friend.",
+        textZh: "品味鑒定頁現在會說明怎麼玩，也回答了常見問題，並且依你手機的語言顯示。更容易從搜尋找到，也更方便傳給朋友看。",
+      },
+      {
+        kind: "better",
+        text: "Links to the guides, the policy pages and the How to play page now show their own title and picture when you paste them into a chat, instead of the home page's.",
+        textZh: "把遊戲指南、隱私權與條款頁、玩法說明頁的連結貼到聊天室時，現在會顯示各自的標題和圖片，不會再全部顯示成首頁。",
+      },
+      {
+        kind: "better",
+        text: "The two suggested playlists under the setup form now live on GuessSong's own Spotify account, so they won't disappear if someone else deletes theirs.",
+        textZh: "設定頁下方的兩份推薦歌單，現在放在 GuessSong 自己的 Spotify 帳號上，不會因為別人刪掉歌單而失效。",
+      },
+    ],
+  },
+  {
     version: "1.19.2",
     date: "2026-10-03",
     headline: "Buzzer Mode: the music stops when someone buzzes, even after a dropped connection.",
