@@ -5,6 +5,87 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-10-03
+
+### Added
+
+- **My quizzes, an owner's dashboard with no account** (`/q/mine`). An owner
+  could reach the last quiz they made through the `/quiz` panel and any other
+  quiz only by its board URL, which nothing listed. The device already held
+  the host tokens for its last `QUIZ_TOKENS_MAX` quizzes; the page sends them
+  to the new `POST /api/quiz/mine` (≤ `QUIZ_MINE_MAX`, tokens in the body,
+  never the URL) and draws a card per quiz: takers, mean, the top three,
+  the last answer's time, days left, and "+N new" since the last visit
+  (`guesssong_quiz_seen`, through `withStorage`). `getQuizSummaries` checks
+  each token with `isQuizOwner` on its own row, so a stale entry is that row's
+  `gone` or `not_host` rather than a 403 for the page. It returns only what
+  the public ranking already shows, never the per-question rows. Fetched on
+  open, Refresh and tab return, never on a timer: 30 per 10 min per address,
+  each up to ten `hgetall`s. Counted as `quiz:owner_dashboard` (printed as
+  `owner checks` in `npm run stats`), with `quiz_throttled:mine`. It lives
+  under `/q` so the layout's `noindex` covers it; nothing under `app/quiz/`
+  may carry one. Linked from the `/quiz` form and every board.
+- **`npm run stats` takes a window** (`scripts/stats-window.mjs`):
+  `--today`, `--week`, `--month`/`--all`, `<n>`/`--days <n>`, and
+  `--since YYYY-MM-DD`, so a feature can be read from its release day. A
+  7-day window that starts before a counter existed averages zeros into it:
+  the first-clip row read 53% of games pressing Play that way on 2026-10-03,
+  and 78% for the days after the release. The header now prints the range.
+
+### Changed
+
+- **`/quiz` has words a search can land on.** The page was a client form,
+  so its indexable text was a heading and the field labels. A how-it-works
+  list and four FAQs now sit under the form, from `lib/quiz-about.ts` in
+  both languages. Like the form, they are prerendered in English and switch
+  after mount, and the footer switches with them (`QuizAboutAndFooter`).
+  JSON-LD (WebApplication, HowTo, FAQPage) is built from `QUIZ_ABOUT.en`, so
+  the schema says what the prerendered page says. The title and description
+  target "spotify playlist quiz" and "music taste quiz". `tests/quiz-mine.test.ts`
+  pins every rule the copy states (10–50 questions, two options, a week,
+  fifty takers) against the constants.
+- **Every content page sets its own social card** (`lib/page-metadata.ts`).
+  Next merges metadata shallowly. The five policy pages set no `openGraph`
+  and so unfurled as the home page: url, title and card. `/about`, `/guides`,
+  `/zh` and all fourteen guides set their own `openGraph`, which dropped the
+  root image, and their `twitter` tags were the home page's English. Now
+  `socialMetadata` always sets both blocks with the url and `/opengraph-image`,
+  plus `zh_TW` on the Chinese half. `/quiz` sets the same fields inline.
+  Guide `Article` JSON-LD gets the image too.
+- **`/about`'s `<h1>` is its topic**, "How to Play the Guess the Song Game".
+  It shared the homepage's brand-only h1. The wordmark is unchanged on screen;
+  the homepage keeps its brand h1.
+- **Guide descriptions are 160 characters or fewer.** All but one ran
+  170–212 and were cut off mid-sentence in search results.
+  `tests/guides.test.ts` now bounds them at 160 instead of 260.
+- **The sitemap's dates are real.** Every entry was the build's own clock,
+  which tells a crawler every page changed on every deploy. Each page now has
+  its content date (policy pages from `POLICY_LAST_UPDATED_ISO`, `/guides`
+  from its newest guide).
+- `/quiz` is linked from the site footer (both languages) and from every
+  guide's closing call to action; before, three pages linked to it.
+- The starter playlists are copies held by the site owner's account. From
+  1.18.0 they were third-party, and one had already been renamed by its owner.
+
+### Fixed
+
+- `/zh/privacy` and `/zh/terms` were Chinese text served as `lang="en"`.
+  `ArticleShell` now scopes `zh-Hant-TW`, the way `/zh` does.
+- `/share`, `/buzz`, `/j` and `/game` inherited the root's `index, follow`
+  and a canonical naming the home page. They are already disallowed in
+  `robots.ts`, but the pages contradicted that. Their layouts now set
+  `noindex` and `canonical: null`.
+
+### Known gaps
+
+- The dashboard is per browser. An owner on a second device, or after iOS
+  clears idle storage, sees nothing, by the same rule as the board. A
+  cross-device private link was not built.
+- `/quiz` is still one English-indexed URL. A Chinese `/zh/quiz` with its own
+  hreflang pair would capture Chinese searches; the copy for it now exists in
+  `QUIZ_ABOUT.zh`.
+- The root `WebApplication` JSON-LD is still emitted on every page.
+
 ## [1.19.2] - 2026-10-03
 
 ### Fixed

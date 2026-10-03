@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { socialMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { ArticleShell } from "@/components/article-shell";
 import { CONTACT_EMAIL } from "@/lib/contact";
@@ -12,6 +13,13 @@ export const metadata: Metadata = {
     canonical: "/zh/privacy",
     languages: { en: "/privacy", "zh-TW": "/zh/privacy", "x-default": "/privacy" },
   },
+  ...socialMetadata({
+    path: "/zh/privacy",
+    title: "隱私權政策 — GuessSong",
+    description:
+      "GuessSong 會存什麼、不存什麼，以及有哪些第三方服務參與。這個遊戲沒有帳號、不用登入，遊戲進度留在你自己的瀏覽器裡。",
+    locale: "zh_TW",
+  }),
 };
 
 export default function ZhPrivacyPage() {

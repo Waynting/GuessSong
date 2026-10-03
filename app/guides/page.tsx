@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { socialMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { SiteFooter } from "@/components/site-footer";
 import {
@@ -13,15 +14,14 @@ const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "https://www.guessong.app";
 export const metadata: Metadata = {
   title: "Guides — Music Quiz Hosting, Playlists and Troubleshooting",
   description:
-    "How to host a music quiz night, pick a playlist that plays well, set the right clip length, score a game so it stays close, and fix a Spotify playlist that will not load.",
+    "How to host a music quiz night, pick a playlist that plays well, choose a clip length, score a close game, and fix a Spotify playlist that will not load.",
   alternates: { canonical: "/guides" },
-  openGraph: {
-    type: "website",
-    url: `${BASE_URL}/guides`,
-    title: "GuessSong Guides",
+  ...socialMetadata({
+    path: "/guides",
+    title: "Music Quiz Guides — Hosting, Playlists and Troubleshooting",
     description:
       "Everything we have learned about running a music guessing game — hosting, playlists, scoring, and the technical bits that break.",
-  },
+  }),
 };
 
 // Keyed by the union, not by string: a new GuideCategory with no blurb here

@@ -78,9 +78,12 @@ describe("/quiz is a page of its own", () => {
     // `ServiceNotice` because creating a quiz is a Spotify-bearing step and
     // a host has to be told when the quota is gone. `SiteFooter` is pinned
     // beside the other landing pages in tests/site-policy.test.ts too.
-    for (const element of ["<SetupStyles />", "<SetupBackdrop />", "<ServiceNotice />", "<SiteFooter />", "<QuizCreate />"]) {
+    for (const element of ["<SetupStyles />", "<SetupBackdrop />", "<ServiceNotice />", "<QuizAboutAndFooter />", "<QuizCreate />"]) {
       expect(body, element).toContain(element);
     }
+    // The footer is drawn by the explainer, in the device's language, so the
+    // page is one language top to bottom (lib/quiz-about.ts).
+    expect(code(read("app/quiz/quiz-about.tsx"))).toContain("<SiteFooter locale={locale} />");
   });
 });
 

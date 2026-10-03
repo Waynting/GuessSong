@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { socialMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { ArticleShell } from "@/components/article-shell";
 import { CONTACT_EMAIL } from "@/lib/contact";
@@ -12,6 +13,12 @@ export const metadata: Metadata = {
     canonical: "/privacy",
     languages: { en: "/privacy", "zh-TW": "/zh/privacy", "x-default": "/privacy" },
   },
+  ...socialMetadata({
+    path: "/privacy",
+    title: "Privacy Policy — GuessSong",
+    description:
+      "What GuessSong stores, what it does not, and which third parties are involved. GuessSong has no accounts and no login: game state lives in your own browser.",
+  }),
 };
 
 export default function PrivacyPage() {

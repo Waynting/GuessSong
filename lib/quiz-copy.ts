@@ -185,6 +185,36 @@ export interface QuizCopy {
   panelResultsUntil: string;
   panelShareTitle: string;
   panelQrAlt: string;
+  /* The owner's dashboard on /q/mine: every quiz this device made */
+  mineTitle: string;
+  mineSubtitle: string;
+  /** On /quiz, under the form, when this device holds at least one token. `{count}` quizzes. */
+  mineLink: string;
+  /** No token on this device: the dashboard has nothing to ask about. */
+  mineEmpty: string;
+  mineCreate: string;
+  /** Badge on a card whose taker count grew since the last visit. */
+  mineNew: string;
+  /** Beside the big taker count on a card. */
+  mineTakersLabel: string;
+  mineLeader: string;
+  /** "Last answer 3h ago": `{when}` is a relative time from `relativeTime`. */
+  mineLatest: string;
+  /** Days left before the link stops working. */
+  mineExpiresIn: string;
+  /** Less than 24 hours left — not "today", which a late-evening quiz is not. */
+  mineExpiresToday: string;
+  mineResults: string;
+  mineOpen: string;
+  /** The quiz expired: still listed so the owner is told, not left wondering where it went. */
+  mineGone: string;
+  /** A token the server does not recognise — storage edited or a quiz recreated. */
+  mineNotHost: string;
+  /** Totals over every live quiz, at the top of the page. */
+  mineTotalQuizzes: string;
+  mineTotalTakers: string;
+  /** Under the list: why it is this device only, and what keeps it. */
+  mineDeviceNote: string;
 }
 
 export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
@@ -308,6 +338,24 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     panelResultsUntil: "Results show only on this device, until {date}.",
     panelShareTitle: "GuessSong taste quiz",
     panelQrAlt: "QR code for quiz {code}",
+    mineTitle: "My quizzes",
+    mineSubtitle: "Every quiz made on this device, with who has taken it so far. No account — this browser is the key.",
+    mineLink: "My quizzes ({count}) →",
+    mineEmpty: "This device hasn't made a quiz yet — or its storage was cleared. Quizzes show up here the moment you create one.",
+    mineCreate: "Make a quiz",
+    mineNew: "+{count} new",
+    mineTakersLabel: "took it",
+    mineLeader: "Top: {name} {correct}/{total}",
+    mineLatest: "Last answer {when}",
+    mineExpiresIn: "{days}d left",
+    mineExpiresToday: "Under a day left",
+    mineResults: "Results",
+    mineOpen: "Open",
+    mineGone: "Expired — quizzes last a week.",
+    mineNotHost: "This device can no longer open its results.",
+    mineTotalQuizzes: "live quizzes",
+    mineTotalTakers: "friends answered",
+    mineDeviceNote: "Only this browser can see this page — results are tied to the device that made the quiz, not to an account. Clearing site data removes it.",
   },
   zh: {
     introTitleOwner: "你有多懂 {owner} 的音樂品味？",
@@ -425,6 +473,24 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     panelResultsUntil: "結果只有這台裝置看得到，連結會在 {date} 失效。",
     panelShareTitle: "品味鑒定",
     panelQrAlt: "測驗 {code} 的行動條碼",
+    mineTitle: "我的測驗",
+    mineSubtitle: "這台裝置做過的每一份測驗，和目前有誰作答。不用登入，這個瀏覽器就是鑰匙。",
+    mineLink: "我的測驗（{count}）→",
+    mineEmpty: "這台裝置還沒做過測驗，或是儲存資料被清掉了。做好一份，它就會出現在這裡。",
+    mineCreate: "做一份測驗",
+    mineNew: "新增 {count} 人",
+    mineTakersLabel: "人作答",
+    mineLeader: "第一名：{name} {correct}/{total}",
+    mineLatest: "最近作答：{when}",
+    mineExpiresIn: "剩 {days} 天",
+    mineExpiresToday: "剩不到一天",
+    mineResults: "看結果",
+    mineOpen: "打開",
+    mineGone: "已到期，測驗只保留一週。",
+    mineNotHost: "這台裝置已經無法打開它的結果。",
+    mineTotalQuizzes: "份進行中",
+    mineTotalTakers: "位朋友作答",
+    mineDeviceNote: "只有這個瀏覽器看得到這一頁：結果綁在做測驗的那台裝置上，而不是帳號。清除網站資料就會不見。",
   },
 };
 
@@ -557,4 +623,20 @@ export function formatQuizDate(ms: number, locale: ErrorLocale): string {
 export function hintWord(locale: ErrorLocale, count: number): string {
   if (locale === "zh") return "次提示";
   return count === 1 ? "hint" : "hints";
+}
+
+/**
+ * "3h ago" / "3 小時前", for the dashboard's last-answer line. Coarse on
+ * purpose — the question is "has anyone answered since I last looked", not
+ * the minute — and computed against `now` so the suite can pin it.
+ */
+export function relativeTime(ms: number, locale: ErrorLocale, now = Date.now()): string {
+  const minutes = Math.max(0, Math.round((now - ms) / 60000));
+  const zh = locale === "zh";
+  if (minutes < 1) return zh ? "剛剛" : "just now";
+  if (minutes < 60) return zh ? `${minutes} 分鐘前` : `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return zh ? `${hours} 小時前` : `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return zh ? `${days} 天前` : `${days}d ago`;
 }

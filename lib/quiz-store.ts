@@ -79,6 +79,8 @@ import {
   type AnswerQuizResponse,
   type CheckQuizResponse,
   type QuizBoardResponse,
+  type QuizMineEntry,
+  type QuizMineItem,
   type QuizScore,
   type QuizView,
 } from "@/types/quiz";
@@ -597,6 +599,51 @@ export async function getQuizBoard(code: string, hostToken: string): Promise<Qui
       };
     }),
   };
+}
+
+/**
+ * The owner's dashboard: every quiz this device made, summarised, in one
+ * request.
+ *
+ * One `hgetall` per quiz — the same single read every other quiz route makes
+ * — and at most `QUIZ_MINE_MAX` of them, which the route bounds. Each entry is
+ * checked against its own token with `isQuizOwner`, the one comparison, and
+ * answered on its own: a quiz that expired or a token that does not match is
+ * that row's status, never the request's, so one stale entry in a device's
+ * storage cannot blank the page.
+ *
+ * Deliberately no per-question rows. The dashboard is the place an owner
+ * glances at; the board, behind the same token, is where the answers are
+ * named. What is here is what `/q/<code>` already shows any taker, so a
+ * second reading of "what may leave without the token" never appears.
+ */
+export async function getQuizSummaries(entries: readonly QuizMineEntry[]): Promise<QuizMineItem[]> {
+  return Promise.all(
+    entries.map(async ({ code, token }): Promise<QuizMineItem> => {
+      const canonical = normalizeQuizCode(code) ?? code;
+      const quiz = await loadQuiz(code);
+      if (!quiz) return { status: "gone", code: canonical };
+      if (!isQuizOwner(quiz, token)) return { status: "not_host", code: quiz.meta.code };
+      const summary = summarizeBoard(quiz.scores, quiz.questions.length);
+      const latestAt = quiz.scores.reduce<number | null>(
+        (latest, row) => (row.at > 0 && (latest === null || row.at > latest) ? row.at : latest),
+        null
+      );
+      return {
+        status: "ok",
+        code: quiz.meta.code,
+        ownerName: quiz.meta.ownerName ?? null,
+        playlistName: quiz.meta.playlistName,
+        questionCount: quiz.questions.length,
+        createdAt: quiz.meta.createdAt,
+        expiresAt: quiz.meta.expiresAt,
+        takers: summary.takers,
+        averageCorrect: summary.averageCorrect,
+        leaders: sortScoreboard(quiz.scores).slice(0, 3).map(publicScore),
+        latestAt,
+      };
+    })
+  );
 }
 
 /**

@@ -567,7 +567,7 @@ describe("the quiz's owner, copy and source counters", () => {
 
   it("writes the owner's two stages under the funnel's prefix, and nothing beside them", async () => {
     const { QUIZ_OWNER_STAGES, recordQuizOwnerStage } = await added;
-    expect([...QUIZ_OWNER_STAGES]).toEqual(["owner_opened", "owner_completed"]);
+    expect([...QUIZ_OWNER_STAGES]).toEqual(["owner_opened", "owner_completed", "owner_dashboard"]);
     expect(Object.keys(keys.quizOwner)).toHaveLength(QUIZ_OWNER_STAGES.length);
     for (const stage of QUIZ_OWNER_STAGES) {
       kv.incrs = [];

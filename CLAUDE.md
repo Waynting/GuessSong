@@ -53,6 +53,7 @@ There *is* server-side storage, but it is deliberately narrow: a KV layer (`lib/
 | `POST /api/quiz/[code]/answer` | `{name, answers, hintsUsed?, submissionId?}` → graded against the stored key, one `hsetnx` row on the board; a resend with the same `submissionId` replays the row instead of refusing the name. With a valid `x-host-token` the sheet is graded and returned with `preview: true` **before any write** — no row, no name claimed, no verdict or length counter, `quiz:owner_completed` instead. |
 | `GET /api/quiz/[code]/hint?q=N[&refresh=1]` | A clip of question N's real track, via `getPreview`. Exists so the phone never names the answer in a request; `refresh=1` is the rotted-URL repair path, on its own tighter limit. Counts its outcome (`quiz_hint:<status>`). |
 | `GET /api/quiz/[code]/board` | The owner's results page: ranking, mean, per-question correct counts naming each real song. Host-token gated via the `x-host-token` header (403 `quiz_not_host`) because it is the answer key. Counts the open (`quiz:board`), after the gate. |
+| `POST /api/quiz/mine` | `{quizzes:[{code,token}]}` (≤ `QUIZ_MINE_MAX`) → one summary per quiz for the owner's dashboard `/q/mine`: takers, mean, top three, last answer, expiry — what the public ranking already shows, never the per-question rows. Each token is checked against its own quiz; a stale one is that row's `gone`/`not_host`, not a 403. Counts `quiz:owner_dashboard` when at least one quiz is live. The page fetches on open, Refresh and tab return, never on a timer. It lives under `/q` so the layout's `noindex` covers it; nothing under `app/quiz/` may carry one. |
 
 **A room is a Redis hash, and its writers claim a field rather than rewriting the record.** `lib/room.ts` stores `meta`, `consumed` and one `p:<folded name>` per contributor under `room:v2:<CODE>`, with each contributor's tracks in their own `room:v2:<CODE>:t:<folded name>:<tracksId>` key — per submit attempt, named by the roster entry, so the loser of a name race can only delete what it wrote. Four rules hold it together, and each replaces something that was actively wrong:
 
@@ -435,8 +436,8 @@ under six rules:
 - **`lib/starter-playlists.ts` should hold public playlists from the site
   owner's own account.** A tested 22-character, non-`37i9` id is enforced;
   someone else's playlist is one deletion away from a dead button on the setup
-  page. The two it holds since 1.17.1 are third-party by the owner's explicit
-  choice (2026-10-01) — check them first if `playlist_not_found` jumps.
+  page. Both have been owner-held copies since 2026-10-03 (third-party from
+  1.18.0 until then) — still check them first if `playlist_not_found` jumps.
 
 ## Phones are the host's screen
 

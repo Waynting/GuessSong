@@ -5,8 +5,9 @@
  * list "my quizzes" under (docs/decisions.md D1), and a host who closes the tab
  * has lost it unless the device kept it. So the setup page keeps the last one,
  * and gives it back as the panel it was: QR, Send, Copy, results. One entry,
- * not a history: the question this answers is "where did my link go", not
- * "what have I made".
+ * not a history: the question this answers is "where did my link go". "What
+ * have I made" is the dashboard's (`/q/mine`), built on the token list
+ * below rather than on this.
  *
  * It used to come back as one grey line linking to the board, which answered
  * a different question — "where are my results" — for a quiz that, three
@@ -31,6 +32,7 @@ import {
 
 const LAST_QUIZ_KEY = "guesssong_last_quiz";
 const TOKENS_KEY = "guesssong_quiz_tokens";
+const SEEN_KEY = "guesssong_quiz_seen";
 /** Host tokens kept per device. Ten is well past "the quizzes still alive". */
 export const QUIZ_TOKENS_MAX = 10;
 
@@ -151,6 +153,51 @@ export function recallQuizToken(code: string): string | null {
     (storage) => parseQuizTokens(storage.getItem(TOKENS_KEY)).find((e) => e.code === upper)?.token ?? null,
     null
   );
+}
+
+/**
+ * Every quiz this device holds a token for, newest first — what the
+ * dashboard (`/q/mine`) asks the server about. At most `QUIZ_TOKENS_MAX`,
+ * which is `QUIZ_MINE_MAX` on the route's side.
+ */
+export function listQuizTokens(): QuizTokenEntry[] {
+  return withStorage(
+    (storage) => [...parseQuizTokens(storage.getItem(TOKENS_KEY))].sort((a, b) => b.at - a.at),
+    []
+  );
+}
+
+/**
+ * How many takers each quiz had the last time the dashboard showed it, so
+ * the next visit can say "+2 new". A convenience: storage that throws or was
+ * cleared shows no badges, never an error.
+ */
+export function recallSeenTakers(): Record<string, number> {
+  return withStorage((storage) => parseSeenTakers(storage.getItem(SEEN_KEY)), {});
+}
+
+export function rememberSeenTakers(seen: Record<string, number>): void {
+  withStorage((storage) => {
+    storage.setItem(SEEN_KEY, JSON.stringify(parseSeenTakers(JSON.stringify(seen))));
+  }, undefined);
+}
+
+/** Pure: well-formed code → non-negative integer pairs only. */
+export function parseSeenTakers(raw: string | null): Record<string, number> {
+  if (!raw) return {};
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const out: Record<string, number> = {};
+    for (const [code, n] of Object.entries(value as Record<string, unknown>)) {
+      if (!CODE_SHAPE.test(code)) continue;
+      if (typeof n !== "number" || !Number.isInteger(n) || n < 0) continue;
+      out[code] = n;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 /**

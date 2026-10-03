@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { socialMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { SiteFooter } from "@/components/site-footer";
 import { ServiceNotice } from "@/components/service-notice";
@@ -25,12 +26,13 @@ export const metadata: Metadata = {
     canonical: "/zh",
     languages: { en: "/", "zh-TW": "/zh", "x-default": "/" },
   },
-  openGraph: {
+  ...socialMetadata({
+    path: "/zh",
     title: "猜歌遊戲 — 用 Spotify 歌單玩的免費派對遊戲",
     description:
       "貼上 Spotify 歌單，播放歌曲片段，大家搶答歌名。不用登入、不用下載，打開就能玩。",
     locale: "zh_TW",
-  },
+  }),
 };
 
 const GITHUB_URL = "https://github.com/Waynting/GuessSong";

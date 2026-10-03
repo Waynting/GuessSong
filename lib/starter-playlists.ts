@@ -7,8 +7,7 @@
  * empty, `starterPlacement` returns null for every input and the page renders
  * exactly what it rendered before this file existed. A playlist somebody else
  * owns can go private or be deleted on any afternoon, and the first thing a
- * new visitor is offered becomes a refusal nobody here can fix — the list as
- * it stands is an exception the owner chose; see its note.
+ * new visitor is offered becomes a refusal nobody here can fix.
  *
  * ## This is not the built-in mode that was removed
  *
@@ -50,25 +49,23 @@ export interface StarterPlaylist {
  * characters of base62, none beginning `37i9` (Spotify's own, which no app
  * can load), none listed twice, and a name and a blurb on each.
  *
- * ## These two are not the site owner's, by the owner's choice (2026-10-01)
+ * ## Both are copies on the site owner's account (2026-10-03)
  *
- * The header's rule is own-account playlists only. The owner chose these two
- * as they stand instead, knowing the cost: either can go private, be emptied
- * or be deleted with no notice here, and the first thing a new host is
- * offered becomes a refusal. It has already moved once — the second was
- * found as "Reggaetón Viejo" and is titled "LOS DE HOTMAIL" by its owner as
- * of that day; the chip's name is ours, so only the contents matter. If
- * `playlist_refused:playlist_not_found` jumps after a deploy, check these
- * first, and prefer copies on the owner's own account when replacing them.
+ * From 1.18.0 to here they were two third-party playlists, by the owner's
+ * choice, and one had already been renamed by its owner. These are copies of
+ * the same tracks under the owner's account (titled "… _Guessong" on
+ * Spotify; the chip's name is ours). Replace them only with playlists the
+ * owner holds, and if `playlist_refused:playlist_not_found` jumps after a
+ * deploy, check these first.
  */
 export const STARTER_PLAYLISTS: readonly StarterPlaylist[] = [
   {
-    id: "5xS3Gi0fA3Uo6RScucyct6",
+    id: "28f48HyPfD0fPEGuCBD0kr",
     name: "Party Hits 2010–2026",
     blurb: "The songs everyone knows from the last fifteen years.",
   },
   {
-    id: "5omiLK2rcAPMJXVTLZJ9d9",
+    id: "2RkIQaN5IwRPUaFu2TZklb",
     name: "Reggaetón Viejo",
     blurb: "Old-school reggaetón: Don Omar, Wisin & Yandel, Arcángel.",
   },

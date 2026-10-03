@@ -34,9 +34,10 @@
  * nothing, for a reason with no connection to the loop. Anything that walks
  * this namespace must page a cursor.
  *
- * Usage:
- *   npm run stats            # last 7 complete days
- *   npm run stats -- 30      # last 30
+ * Usage (the full list is `npm run stats -- --help`, from scripts/stats-window.mjs):
+ *   npm run stats                       # last 7 UTC days, today included
+ *   npm run stats -- 30                 # last 30 (also --month / --all)
+ *   npm run stats -- --since 2026-09-30 # only the days after a release
  *
  * Credentials come from `.env.local` or `.env` (both gitignored), or from the
  * environment if you would rather export them.
@@ -44,6 +45,7 @@
 
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { USAGE, parseWindow, utcDay } from "./stats-window.mjs";
 
 const PREFIX = "loop:stats:";
 
@@ -60,6 +62,18 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
  * it precedence over `.env`, matching Next. Anything exported in the shell was
  * set before either call and still beats both.
  */
+// Read before the credentials, so --help and a mistyped flag answer without them.
+const parsed = parseWindow(process.argv.slice(2));
+if (parsed.help) {
+  console.log(USAGE);
+  process.exit(0);
+}
+if (parsed.error) {
+  console.error(`${parsed.error}\n\n${USAGE}`);
+  process.exit(1);
+}
+const { days, since } = parsed;
+
 for (const file of [".env.local", ".env"]) {
   try {
     process.loadEnvFile(join(repoRoot, file));
@@ -83,11 +97,6 @@ if (!url || !token) {
   process.exit(1);
 }
 
-const days = Number.parseInt(process.argv[2] ?? "7", 10);
-if (!Number.isInteger(days) || days < 1 || days > 30) {
-  console.error("Day count must be 1-30 (counters are held 30 days).");
-  process.exit(1);
-}
 
 /**
  * One Upstash REST command.
@@ -249,7 +258,7 @@ const games = get("games");
 const repeatHost = get("repeat_host");
 const throttled = get("throttled");
 
-console.log(`\nGuessSong loop — last ${days} days (UTC)`);
+console.log(`\nGuessSong loop — last ${days} ${days === 1 ? "day" : "days"} (UTC, ${since} → ${utcDay(new Date())}, today partial)`);
 console.log(`Days with any activity: ${liveDays.size}/${days}\n`);
 
 if (liveDays.size === 0) {
@@ -646,6 +655,7 @@ const quizBoard = get("quiz:board");
 // and no line here moves with them.
 const quizOwnerOpened = get("quiz:owner_opened");
 const quizOwnerCompleted = get("quiz:owner_completed");
+const quizOwnerDashboard = get("quiz:owner_dashboard");
 // Every tap on a quiz's share or Copy button in the window. In the guard
 // below so that a day whose only quiz activity is an owner coming back to
 // send a link made earlier still prints the block — the panel is drawn for a
@@ -682,7 +692,7 @@ function lengthsFor(stage) {
   return out;
 }
 
-if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwnerOpened + quizOwnerCompleted + quizTaps > 0) {
+if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwnerOpened + quizOwnerCompleted + quizOwnerDashboard + quizTaps > 0) {
   console.log("\nPlaylist quiz — the link-shaped surface");
 
   const locales = [...totals.keys()]
@@ -820,6 +830,13 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwn
   console.log(
     `  board       ${String(quizBoard).padStart(6)}   ${pct(quizBoard, quizCreated)} of quizzes had the owner back for results`
   );
+  // `/q/mine`, per fetch with at least one live quiz — Refresh and a
+  // returning tab each count, so a ceiling like the board row above.
+  if (quizOwnerDashboard > 0) {
+    console.log(
+      `  owner checks${String(quizOwnerDashboard).padStart(6)}   fetches of My quizzes (/q/mine) — a ceiling; an owner watching there may never open a board`
+    );
+  }
   if (verdicts.length > 0) {
     const most = Math.max(...verdicts.map((v) => get(`quiz_verdict:${v}`)));
     for (const v of verdicts) {

@@ -156,9 +156,11 @@ describe("site footer", () => {
     // The three landing pages each had their own <footer> before this; the
     // whole point of the shared one is that a page cannot lose the policy links
     // by being edited on its own.
-    for (const page of ["app/page.tsx", "app/about/page.tsx", "app/zh/page.tsx", "app/quiz/page.tsx"]) {
+    // /quiz draws it from its explainer, which knows the device's language.
+    for (const page of ["app/page.tsx", "app/about/page.tsx", "app/zh/page.tsx", "app/quiz/quiz-about.tsx"]) {
       expect(read(page), `${page} does not render SiteFooter`).toContain("SiteFooter");
     }
+    expect(read("app/quiz/page.tsx")).toContain("<QuizAboutAndFooter />");
   });
 
   it("keeps the Chinese footer in Chinese", () => {

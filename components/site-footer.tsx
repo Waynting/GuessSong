@@ -31,6 +31,9 @@ const LINKS: Record<FooterLocale, FooterLink[]> = {
   en: [
     { href: "/", label: "Play" },
     { href: "/about", label: "How to play" },
+    // The quiz's one indexable page. It was linked from three pages and none
+    // of the guides; the footer is on every content page at once.
+    { href: "/quiz", label: "Taste Quiz" },
     { href: "/guides", label: "Guides" },
     { href: "/privacy", label: "Privacy" },
     { href: "/terms", label: "Terms" },
@@ -39,6 +42,7 @@ const LINKS: Record<FooterLocale, FooterLink[]> = {
   ],
   zh: [
     { href: "/zh", label: "開始遊戲" },
+    { href: "/quiz", label: "品味鑒定" },
     { href: "/guides", label: "遊戲指南" },
     { href: "/zh/privacy", label: "隱私權政策" },
     { href: "/zh/terms", label: "服務條款" },

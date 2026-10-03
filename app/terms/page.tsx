@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { socialMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { ArticleShell } from "@/components/article-shell";
 import { CONTACT_EMAIL } from "@/lib/contact";
@@ -12,6 +13,12 @@ export const metadata: Metadata = {
     canonical: "/terms",
     languages: { en: "/terms", "zh-TW": "/zh/terms", "x-default": "/terms" },
   },
+  ...socialMetadata({
+    path: "/terms",
+    title: "Terms of Use — GuessSong",
+    description:
+      "The terms you accept by using GuessSong: what the game is, what it is not, how it relates to Spotify, iTunes and Deezer, and the limits of the service.",
+  }),
 };
 
 export default function TermsPage() {

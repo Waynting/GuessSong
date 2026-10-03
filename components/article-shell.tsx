@@ -241,7 +241,10 @@ export function ArticleShell({
         .link-btn:hover { color: var(--green); }
       `}</style>
 
-      <main className="article-main">
+      {/* The root layout owns <html lang="en">; the Chinese policy pages
+          scope their own, the way /zh does, or they are Chinese text that
+          search engines and screen readers are told is English. */}
+      <main className="article-main" lang={locale === "zh" ? "zh-Hant-TW" : undefined}>
         <div className="article-col">
           <Link href={backHref} className="article-back">
             {backLabel}

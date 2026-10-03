@@ -41,6 +41,9 @@ export function GuideShell({
     inLanguage: "en",
     author: { "@type": "Organization", name: "GuessSong", url: BASE_URL },
     publisher: { "@type": "Organization", name: "GuessSong", url: BASE_URL },
+    // The site card, which the page's og:image names too. Google's Article
+    // guidelines ask for an image, and a guide has no picture of its own.
+    image: `${BASE_URL}/opengraph-image`,
     mainEntityOfPage: {
       "@type": "WebPage",
       "@id": `${BASE_URL}/guides/${guide.slug}`,
@@ -71,6 +74,12 @@ export function GuideShell({
           <Link href="/" className="cta-primary">
             Start a game →
           </Link>
+          {/* The quiz's page had no inbound link from any guide; this is the
+              one place every guide shares. */}
+          <p style={{ marginTop: "12px", fontSize: "14px" }}>
+            Not in the same room? <Link href="/quiz">Send a taste quiz instead</Link> — friends
+            guess which songs are really in your playlist.
+          </p>
         </div>
 
         {related.length > 0 && (

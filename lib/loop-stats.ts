@@ -573,10 +573,19 @@ export const QUIZ_STAGES: readonly QuizStage[] = ["created", "opened", "started"
  * `owner_completed ÷ owner_opened` beside the friends' `completed ÷ opened`.
  * Before 2026-09-30 every one of these was inside `opened`, `started`,
  * `completed`, the verdicts and the length table, and on the public board.
+ *
+ * `owner_dashboard` is a fetch of `/q/mine` that found at least one live
+ * quiz — a ceiling, like `board`, since Refresh and a returning tab each
+ * fetch again. Read it beside `board`: an owner who watches from the
+ * dashboard may never open a board at all.
  */
-export type QuizOwnerStage = "owner_opened" | "owner_completed";
+export type QuizOwnerStage = "owner_opened" | "owner_completed" | "owner_dashboard";
 
-export const QUIZ_OWNER_STAGES: readonly QuizOwnerStage[] = ["owner_opened", "owner_completed"];
+export const QUIZ_OWNER_STAGES: readonly QuizOwnerStage[] = [
+  "owner_opened",
+  "owner_completed",
+  "owner_dashboard",
+];
 
 /**
  * The two ends of a quiz's length: how many questions it was built with, and
@@ -653,7 +662,15 @@ const HINT_STATUS_SET: ReadonlySet<string> = new Set<PreviewStatus>([
  * unlike most of this file's counters this one is written in exactly the
  * situation it describes.
  */
-export type QuizThrottledRoute = "create" | "read" | "check" | "answer" | "hint" | "board" | "card";
+export type QuizThrottledRoute =
+  | "create"
+  | "read"
+  | "check"
+  | "answer"
+  | "hint"
+  | "board"
+  | "card"
+  | "mine";
 
 export const QUIZ_THROTTLED_ROUTES: readonly QuizThrottledRoute[] = [
   "create",
@@ -663,6 +680,7 @@ export const QUIZ_THROTTLED_ROUTES: readonly QuizThrottledRoute[] = [
   "hint",
   "board",
   "card",
+  "mine",
 ];
 
 function key(day: string, metric: string): string {
