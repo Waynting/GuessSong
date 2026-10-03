@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BuzzEntry, RoomSnapshot, ServerMessage } from "@/lib/buzzer-protocol";
-import { buzzerRoundKey, describeBuzzer, hostOpenWasLost } from "@/lib/buzzer-round";
+import { buzzerRoundKey, describeBuzzer, floorKey, hostOpenWasLost, stateMissedBuzz } from "@/lib/buzzer-round";
 
 const entry = (playerId: string, order: number): BuzzEntry => ({
   playerId,
@@ -112,5 +112,68 @@ describe("a host:open that never reached the room is sent again", () => {
     expect(handler).toMatch(/if \(hostOpenWasLost\(msg, gamePhaseRef\.current\)\) hostOpenRef\.current\(\);/);
     expect(panel).toMatch(/gamePhaseRef\.current = gamePhase;/);
     expect(panel).toMatch(/hostOpenRef\.current = hostOpen;/);
+  });
+});
+
+describe("a buzz the host's socket missed still stops the music", () => {
+  const replay = (snapshot: RoomSnapshot): ServerMessage => ({
+    type: "state",
+    snapshot,
+    you: { playerId: "host", isHost: true },
+  });
+  const locked = (...buzzes: BuzzEntry[]) => snap({ phase: "locked", buzzes });
+
+  it("pauses when the rejoin's replay shows a winner the host never saw", () => {
+    // Clip running, room open, socket drops; Ann buzzes in the gap.
+    const before = floorKey(snap({ phase: "open" }));
+    expect(before).toBeNull();
+    expect(stateMissedBuzz(replay(locked(entry("ann", 1))), before)).toBe(true);
+  });
+
+  it("pauses for a new head the host missed, after a wrong answer it did see", () => {
+    const seen = floorKey(locked(entry("ann", 1), entry("bob", 2)));
+    expect(stateMissedBuzz(replay(locked(entry("bob", 2))), seen)).toBe(true);
+  });
+
+  it("leaves music the host resumed alone when the replay shows the same head", () => {
+    const seen = floorKey(locked(entry("bob", 2)));
+    expect(stateMissedBuzz(replay(locked(entry("bob", 2))), seen)).toBe(false);
+    // A re-keyed seat changes the id, not the buzz.
+    expect(stateMissedBuzz(replay(locked({ ...entry("bob", 2), playerId: "bob-new" })), seen)).toBe(false);
+  });
+
+  it("reads a replay after a manual reconnect against the floor from before it", () => {
+    // Host resumed for Bob after a wrong answer, then tapped "Try again": the
+    // snapshot is null in between, and the floor must survive it.
+    let floor: string | null = null;
+    const render = (s: RoomSnapshot | null) => {
+      if (s) floor = floorKey(s);
+    };
+    render(locked(entry("bob", 2)));
+    render(null);
+    expect(stateMissedBuzz(replay(locked(entry("bob", 2))), floor)).toBe(false);
+  });
+
+  it("tells the same order apart across rounds", () => {
+    const lastRound = floorKey(snap({ phase: "locked", roundIndex: 1, buzzes: [entry("ann", 1)] }));
+    const thisRound = snap({ phase: "locked", roundIndex: 2, roundOpenedAt: 7_000, buzzes: [entry("ann", 1)] });
+    expect(stateMissedBuzz(replay(thisRound), lastRound)).toBe(true);
+  });
+
+  it("ignores replays with nobody on the floor, and every other message", () => {
+    expect(stateMissedBuzz(replay(snap({ phase: "open" })), null)).toBe(false);
+    expect(stateMissedBuzz(replay(snap({ phase: "idle", buzzes: [entry("ann", 1)] })), null)).toBe(false);
+    expect(stateMissedBuzz({ type: "buzz", entry: entry("ann", 1), phase: "locked" }, null)).toBe(false);
+  });
+
+  it("is wired into the host panel, reading the floor from before the message", () => {
+    const panel = readFileSync(join(process.cwd(), "components/buzzer-host-panel.tsx"), "utf8");
+    const handler = panel.slice(panel.indexOf("const handleServerMessage = useCallback("), panel.indexOf("useBuzzerSocket({"));
+    expect(handler).toMatch(/if \(stateMissedBuzz\(msg, floorRef\.current\)\) onBuzz\?\.\(\);/);
+    // Only a snapshot overwrites the floor: "Try again" nulls the snapshot
+    // before the replay, and a floor reset to null there reads the same head
+    // as a new one and pauses music the host resumed.
+    expect(panel).toMatch(/if \(snapshot\) floorRef\.current = floorKey\(snapshot\);/);
+    expect(panel).not.toMatch(/floorRef\.current = snapshot \?/);
   });
 });

@@ -19,7 +19,7 @@ import { useBuzzerSocket } from "@/lib/use-buzzer-socket";
 import { buzzerJoinUrl } from "@/lib/buzzer-client";
 import { trackEvent } from "@/lib/analytics";
 import type { BuzzEntry, ServerMessage } from "@/lib/buzzer-protocol";
-import { hostOpenWasLost } from "@/lib/buzzer-round";
+import { floorKey, hostOpenWasLost, stateMissedBuzz } from "@/lib/buzzer-round";
 import { buzzerErrorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 
@@ -85,6 +85,11 @@ export function BuzzerHostPanel({
   const gamePhaseRef = useRef(gamePhase);
   gamePhaseRef.current = gamePhase;
   const hostOpenRef = useRef<() => void>(() => {});
+  // The floor as of the last snapshot, read from the message handler before
+  // the message it is handling is folded in. Kept across a null snapshot:
+  // "Try again" clears it before the new socket's replay, and forgetting the
+  // floor there paused music the host had resumed for the same head.
+  const floorRef = useRef<string | null>(null);
 
   const handleServerMessage = useCallback(
     (msg: ServerMessage) => {
@@ -105,6 +110,10 @@ export function BuzzerHostPanel({
         // pauseClip is a no-op unless a clip is actually running.
         onBuzz?.();
       }
+      // The same pause for a buzz that landed while this socket was down: the
+      // rejoin's replay names the winner, and without this the song played on
+      // under the name on screen.
+      if (stateMissedBuzz(msg, floorRef.current)) onBuzz?.();
       if (msg.type === "state" || msg.type === "players") {
         const list = msg.type === "state" ? msg.snapshot.players : msg.players;
         onPlayersChange?.(list.map((p) => p.name));
@@ -125,6 +134,7 @@ export function BuzzerHostPanel({
       onServerMessage: handleServerMessage,
     });
   hostOpenRef.current = hostOpen;
+  if (snapshot) floorRef.current = floorKey(snapshot);
   const locale = useErrorLocale();
 
   useEffect(() => {

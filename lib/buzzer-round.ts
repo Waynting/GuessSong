@@ -32,6 +32,38 @@ export function hostOpenWasLost(msg: ServerMessage, gamePhase: string): boolean 
   );
 }
 
+/**
+ * Who holds the floor in this snapshot, as a key that names one buzz: the
+ * round it landed in and its arrival order, which the room never reuses
+ * within a round (a wrong answer shifts the queue but does not reset the
+ * count). Null when nobody does.
+ */
+export function floorKey(
+  snapshot: Pick<RoomSnapshot, "phase" | "roundIndex" | "roundOpenedAt" | "buzzes">
+): string | null {
+  const head = snapshot.buzzes[0];
+  if (snapshot.phase !== "locked" || !head) return null;
+  return `${buzzerRoundKey(snapshot)}:${head.order}`;
+}
+
+/**
+ * True when a `state` replay shows someone holding the floor that the host
+ * never paused the music for — the buzz landed while the host's socket was
+ * down, so the `buzz` frame that pauses the clip never arrived.
+ *
+ * The replay still put the name on the host's screen, so the room saw a
+ * winner and heard the song play on under them. A host on a phone loses the
+ * socket on every app switch and Wi-Fi blip, which makes this ordinary.
+ *
+ * `lastFloor` is the floor the host last saw, so a reconnect that replays
+ * the same head — the host deliberately resumed after a wrong answer —
+ * leaves the music alone.
+ */
+export function stateMissedBuzz(msg: ServerMessage, lastFloor: string | null): boolean {
+  if (msg.type !== "state") return false;
+  const key = floorKey(msg.snapshot);
+  return key !== null && key !== lastFloor;
+}
 
 /**
  * Which round a buzz belongs to, as the phone can tell it. A new round from
