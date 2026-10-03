@@ -72,10 +72,11 @@ describe("guides index", () => {
       expect(guide.title.length).toBeGreaterThan(10);
       expect(guide.navTitle.length).toBeGreaterThan(5);
       expect(guide.lede.length).toBeGreaterThan(20);
-      // Google truncates well before 200; a description longer than that is one
-      // that gets cut mid-sentence in the only place it is ever read.
+      // Google cuts a snippet at roughly 155–160 characters, so a longer
+      // description is one that ends mid-sentence in the search result. Every
+      // guide ran 170–212 until 2026-10-03; the bound is what keeps them under.
       expect(guide.description.length).toBeGreaterThan(60);
-      expect(guide.description.length).toBeLessThan(260);
+      expect(guide.description.length, guide.slug).toBeLessThanOrEqual(160);
       expect(guide.minutes).toBeGreaterThan(0);
     }
   });

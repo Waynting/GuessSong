@@ -165,9 +165,19 @@ of this audience blocks analytics.
 ## 5. Running `npm run stats`
 
 ```bash
-npm run stats           # last 7 UTC days
-npm run stats -- 30     # last 30 (the cap — counters have a 30-day TTL)
+npm run stats                        # last 7 UTC days, today included
+npm run stats -- 3                   # last 3 (also --days 3)
+npm run stats -- --today             # today so far
+npm run stats -- --month             # last 30, the cap — counters have a 30-day TTL (also --all)
+npm run stats -- --since 2026-09-30  # that UTC day through today
+npm run stats -- --help
 ```
+
+Every window ends today, and today is a partial UTC day; the header prints the
+range. Use `--since` to read a feature from its release day: a 7-day window that
+starts before a counter existed averages days of zero into it (the
+first-clip row read "53% of games pressed Play" that way on 2026-10-03 — the
+days after the release said 78%).
 
 No setup needed. The script reads `.env.local` and `.env` (both gitignored) via
 Node's built-in `process.loadEnvFile`, the same files `next dev` reads.
@@ -297,6 +307,7 @@ after it against each other, not against the week before.
 | `Short links (spotify.link)` | `playlist_shortlink:<resolved\|unusable\|unavailable>`, from `resolveShortlink` in `lib/spotify-shortlink.ts`, for both doors (forms and Android's share sheet), cached answers included. **The resolver's only health check**: how `spotify.link` treats a datacentre address could not be tested before deploy. If `unavailable` is a quarter or more the script says so, and short links are not working from production — hosts are told to paste the full link, which is safe but means the feature does nothing |
 | `from` | `quiz_from:<source>`, from `recordQuizCreated` when the page sent a recognised source: a loop surface name (last loop touch within 60 days), `internal` (a full navigation from this site), `external` (another host — search, a chat app), `none` (no referrer). A floor per source; `Σ from ≤ created`, the gap being pages from before the deploy. The referrer belongs to the document, so a visitor who landed on `/` from search and clicked through to `/quiz` reads `external` |
 | `owner opened` / `owner played` | `quiz:owner_opened` / `quiz:owner_completed`, written **instead of** `opened` / `completed` when the request carries the quiz's host token (`x-host-token`, from the creating device's localStorage). The owner's preview is graded, never written to the board, and bumps no verdict and no length row. `owner_opened ÷ created` tests whether owners want to play their own quiz. A floor on owners: the owner on another device, in an in-app browser, or after iOS evicted storage is counted as a friend |
+| `owner checks` | `quiz:owner_dashboard`, one per fetch of My quizzes (`/q/mine`) that found at least one live quiz. **A ceiling**: Refresh and a tab coming back each fetch again. Read it beside `board`: an owner who watches from the dashboard may see enough there and never open a board, so a falling `board` after 1.20.0 is not by itself owners losing interest. Same floor on owners as the board — the tokens live in the creating browser |
 | `owner copy` / `board copy` | `quiz_copy:<owner\|taker\|board>:<copied\|failed>` — the explicit **Copy link** button, apart from Share. Read beside the share rows: together they are everyone who tried to send. `taker` is the result screen's Copy link, written from 1.17.0 (2026-10-01) |
 | `owner social` / `taker social` / `board social` | `quiz_social:<owner\|taker\|board>:<line\|threads\|x\|facebook\|whatsapp>`, from `reportQuizSocial`. The platform row renders **only where there is no share sheet** (mostly desktops), so its denominator is the share taps on the same row that fell back to `copied`, not every tap. A floor: the click opens a new tab, so it reaches the server, but the post itself is never seen |
 | `board share` | `quiz_share:board:<outcome>` — the results page's share button, which reported to GA4 only before. Read against `board` |

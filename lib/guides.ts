@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { socialMetadata } from "@/lib/page-metadata";
 
 /**
  * The guides index — one entry per article under `/guides`.
@@ -49,7 +50,7 @@ export const GUIDES: Guide[] = [
     title: "How to Host a Music Quiz Night That People Actually Enjoy",
     navTitle: "How to host a music quiz night",
     description:
-      "A practical guide to running a music quiz for friends: how long a round should be, how to seat the room, what to do about the person who knows every song, and the five mistakes that flatten a good night.",
+      "How to run a music quiz for friends: how long a round should be, how to seat the room, the person who knows every song, and five mistakes that flatten a night.",
     lede: "Most music quizzes fail for reasons that have nothing to do with the music. Here is what actually decides whether the room stays in it.",
     category: "Hosting",
     published: "2026-08-21",
@@ -81,7 +82,7 @@ export const GUIDES: Guide[] = [
     title: "Five Seconds or Thirty? How Clip Length Changes the Game",
     navTitle: "Clip length and difficulty",
     description:
-      "Clip length is the difficulty dial in a guess the song game. What each setting does to the room, why the intro is the hardest part of a song, and how to pick a length for the group in front of you.",
+      "Clip length is the difficulty dial in a guess the song game: what each setting does to the room, why intros are hardest, and how to pick one for your group.",
     lede: "It is the only setting that changes the game rather than the content, and it is the one most hosts leave on the default.",
     category: "Playing",
     published: "2026-08-21",
@@ -97,7 +98,7 @@ export const GUIDES: Guide[] = [
     title: "Scoring a Music Quiz: Rules That Keep It Close",
     navTitle: "Scoring rules that keep it close",
     description:
-      "Why 3 points for the title and 1 for the album, what a runaway leader does to a room, and five scoring variants — comeback rounds, steals, wagers — you can run without any extra equipment.",
+      "Why 3 points for the title and 1 for the album, what a runaway leader does to a room, and five scoring variants — comebacks, steals, wagers — to try.",
     lede: "Scoring is not bookkeeping. It is the mechanism that decides whether the last third of the night is worth playing.",
     category: "Playing",
     published: "2026-08-21",
@@ -113,7 +114,7 @@ export const GUIDES: Guide[] = [
     title: "Mixed Playlist Mode: When Everyone Brings Their Own Music",
     navTitle: "Mixed Playlist Mode explained",
     description:
-      "How to run a round where every player submits their own playlist: the two ways to collect them, why guessing whose song it is beats guessing the title, and how to read the Taste Card at the end.",
+      "Run a round where every player brings their own playlist: two ways to collect them, why guessing whose song it is beats the title, and reading the Taste Card.",
     lede: "The best question a music game can ask is not “what is this song”. It is “who in this room put it on a playlist”.",
     category: "Playing",
     published: "2026-08-21",
@@ -129,7 +130,7 @@ export const GUIDES: Guide[] = [
     title: "Why Your Spotify Playlist Will Not Load, and How to Fix It",
     navTitle: "Playlist will not load",
     description:
-      "Four causes account for nearly every playlist that fails to load in a Spotify-based game: editorial playlists, private playlists, the wrong kind of link, and rate limiting. How to tell them apart in seconds.",
+      "Four causes explain nearly every Spotify playlist that won't load in a game: editorial, private, the wrong kind of link, or rate limiting. Tell them apart.",
     lede: "Almost every failed playlist is one of four things, and three of them you can fix without leaving the page.",
     category: "Troubleshooting",
     published: "2026-08-21",
@@ -145,7 +146,7 @@ export const GUIDES: Guide[] = [
     title: "Spotify's Preview Clips Disappeared. Here Is What We Measured",
     navTitle: "Where the preview clips went",
     description:
-      "In late 2024 Spotify stopped returning 30-second preview URLs to new API applications. What we measured, what broke, and how a music game finds clips now that the obvious source is gone.",
+      "In late 2024 Spotify stopped giving new apps 30-second preview URLs. What we measured, what broke, and how a music game finds its clips now.",
     lede: "Zero previews out of twenty tracks, across four markets. This is what a whole category of music apps quietly worked around.",
     category: "Troubleshooting",
     published: "2026-08-21",
@@ -161,7 +162,7 @@ export const GUIDES: Guide[] = [
     title: "Party Games for Small Groups Where Nobody Ends Up Sitting Out",
     navTitle: "Party games for small groups",
     description:
-      "Games for four to twelve people, chosen by the one property that matters at that size: everyone stays in every round. Includes what to do when the group is too small, too loud, or does not know each other.",
+      "Games for four to twelve people, chosen so everyone stays in every round — plus what to do when the group is too small, too loud, or strangers to each other.",
     lede: "At four to twelve people, the failure mode is not boredom. It is elimination — the person knocked out first has nothing to do for forty minutes.",
     category: "Hosting",
     published: "2026-08-21",
@@ -177,7 +178,7 @@ export const GUIDES: Guide[] = [
     title: "Guess the Song: The Rules, and Nine Variants Worth Knowing",
     navTitle: "Guess the song: rules and variants",
     description:
-      "The base rules of a guess the song game written out properly, nine variants that each change one thing about it, and the four house rules that stop the arguments before they start.",
+      "The base rules of a guess the song game written out properly, nine variants that each change one thing, and four house rules that stop the arguments early.",
     lede: "Every argument at a quiz night is really about one of three questions: who may answer, when, and what counts as an answer.",
     category: "Playing",
     published: "2026-08-30",
@@ -193,7 +194,7 @@ export const GUIDES: Guide[] = [
     title: "Twelve Music Quiz Rounds That Are Not “Name That Tune”",
     navTitle: "Music quiz round ideas",
     description:
-      "Twelve rounds that need nothing but a playlist and a host, sorted by what they do to a room: what each one tests, who it lets win, and where it belongs in a running order.",
+      "Twelve music quiz rounds that need only a playlist and a host: what each one tests, who it lets win, and where it belongs in a running order.",
     lede: "A quiz made entirely of name-that-tune rounds is one round played eight times. It works for about twenty-five minutes.",
     category: "Hosting",
     published: "2026-08-30",
@@ -209,7 +210,7 @@ export const GUIDES: Guide[] = [
     title: "Running a Music Quiz Over Zoom, Meet or Discord",
     navTitle: "Music quiz over video call",
     description:
-      "Why music sounds destroyed over a video call, the exact setting to enable on each platform, and the one rule of the in-person game that has to be thrown away because audio delay makes it meaningless.",
+      "Why music sounds broken over a video call, the setting to turn on in each app, and the one in-person rule that audio delay makes meaningless online.",
     lede: "A remote music quiz fails in a specific, predictable way, and it is almost never the quiz’s fault. It is the audio.",
     category: "Hosting",
     published: "2026-08-30",
@@ -225,7 +226,7 @@ export const GUIDES: Guide[] = [
     title: "Running a Music Quiz for Twenty People or More",
     navTitle: "Music quiz for large groups",
     description:
-      "A quiz built for eight does not scale to thirty by adding chairs. The three things that break at size, why teams fix all of them at once, and which rounds survive a crowd.",
+      "A quiz built for eight does not scale to thirty by adding chairs. The three things that break at size, why teams fix all of them, and which rounds survive.",
     lede: "At twenty-five people the same six confident players take everything and the rest are an audience. That is structural, not a matter of trying harder.",
     category: "Hosting",
     published: "2026-08-30",
@@ -241,7 +242,7 @@ export const GUIDES: Guide[] = [
     title: "Why One Song Has No Clip When the Rest of the Playlist Does",
     navTitle: "When a song has no clip",
     description:
-      "Five reasons a single track goes silent in a Spotify-based music game — remaster suffixes, differently credited artists, rotated URLs, catalogue gaps and throttling — and how to tell which one you are looking at.",
+      "Five reasons one track goes silent in a Spotify music game — remasters, artist credits, rotated URLs, catalogue gaps, throttling — and how to tell which.",
     lede: "Forty-nine songs play and one is silent. It looks like a bug, and it is usually a structural fact about where preview clips come from.",
     category: "Troubleshooting",
     published: "2026-08-30",
@@ -257,7 +258,7 @@ export const GUIDES: Guide[] = [
     title: "Music Licensing and Quiz Nights: What Actually Applies",
     navTitle: "Licensing and quiz nights",
     description:
-      "The three separate questions people collapse into one: whether it is a public performance, who already holds the licence, and what a thirty-second preview clip does and does not permit.",
+      "Three questions people collapse into one: is it a public performance, who already holds the licence, and what a 30-second preview clip does and does not permit.",
     lede: "Nobody running a quiz in their living room needs this page. Anyone running one in a pub, a school or a hired hall probably does.",
     category: "Troubleshooting",
     published: "2026-08-30",
@@ -298,8 +299,6 @@ export function guidesByCategory(category: GuideCategory): Guide[] {
   return GUIDES.filter((g) => g.category === category);
 }
 
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "https://www.guessong.app";
-
 /**
  * Look a guide up, or throw.
  *
@@ -329,23 +328,17 @@ export function requireGuide(slug: string): Guide {
  */
 export function guideMetadata(slug: string): Metadata {
   const guide = requireGuide(slug);
-  const url = `${BASE_URL}/guides/${guide.slug}`;
   return {
     title: guide.navTitle,
     description: guide.description,
     alternates: { canonical: `/guides/${guide.slug}` },
-    openGraph: {
+    ...socialMetadata({
+      path: `/guides/${guide.slug}`,
+      title: guide.title,
+      description: guide.description,
       type: "article",
-      url,
-      title: guide.title,
-      description: guide.description,
       publishedTime: guide.published,
-    },
-    twitter: {
-      card: "summary_large_image",
-      title: guide.title,
-      description: guide.description,
-    },
+    }),
   };
 }
 

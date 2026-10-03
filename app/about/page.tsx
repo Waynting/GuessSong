@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { socialMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { SiteFooter } from "@/components/site-footer";
 import { GUIDES } from "@/lib/guides";
@@ -7,13 +8,14 @@ import { QUIZ_SETUP_HREF } from "@/lib/setup-arrival";
 export const metadata: Metadata = {
   title: "How to Play the Guess the Song Game",
   description:
-    "How to play the guess the song game with friends: paste any public Spotify playlist, add players, play short clips and name the track. Includes Mixed Playlist Mode and the Taste Quiz link. Free, open source, no login required.",
+    "How to play guess the song with friends: paste a public Spotify playlist, play short clips, name the track. Mixed Playlist Mode and a Taste Quiz too. Free, no login.",
   alternates: { canonical: "/about" },
-  openGraph: {
-    title: "How to Play the Guess the Song Game | GuessSong",
+  ...socialMetadata({
+    path: "/about",
+    title: "How to Play the Guess the Song Game",
     description:
-      "Paste a Spotify playlist, play short clips, guess the song. Now with Mixed Playlist Mode. Free, open source, no login required.",
-  },
+      "Paste a Spotify playlist, play short clips, guess the song. Mixed Playlist Mode and a Taste Quiz link too. Free, open source, no login required.",
+  }),
 };
 
 const GITHUB_URL = "https://github.com/Waynting/GuessSong";
@@ -409,13 +411,20 @@ export default function AboutPage() {
                 OPEN SOURCE PARTY GAME
               </span>
             </div>
-            <h1 className="hero-title">GuessSong</h1>
-            {/* Same trick as the homepage: the H1 is brand-only, so the
-                searchable phrase lives in an <h2> right under it. */}
-            <h2 style={{ color: "#999", fontSize: "17px", marginTop: "16px", fontWeight: 300, maxWidth: "520px", marginLeft: "auto", marginRight: "auto", lineHeight: 1.6 }}>
+            {/* The wordmark stays as big as it was, but it is not the heading.
+                This page used the homepage's brand-only <h1>, which gave two
+                URLs the same h1 and gave this one an h1 that was not its
+                topic; the h1 is now the page's own title, the phrase its
+                <title> and HowTo schema are already about. The homepage keeps
+                its brand h1 — it is the brand's page. */}
+            <p className="hero-title" style={{ margin: 0 }}>GuessSong</p>
+            <h1 style={{ fontSize: "clamp(20px, 3.4vw, 26px)", fontWeight: 600, color: "#f0f0f0", marginTop: "18px", lineHeight: 1.3 }}>
+              How to Play the Guess the Song Game
+            </h1>
+            <p style={{ color: "#999", fontSize: "17px", marginTop: "12px", fontWeight: 300, maxWidth: "520px", marginLeft: "auto", marginRight: "auto", lineHeight: 1.6 }}>
               Turn any Spotify playlist into a guess the song party game. Play a short
               clip, let everyone name the track, and crown the music champion of the room.
-            </h2>
+            </p>
             <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap", marginTop: "28px" }}>
               <Link href="/" className="cta-primary">
                 Play Now →

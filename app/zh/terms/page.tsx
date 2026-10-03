@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { socialMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { ArticleShell } from "@/components/article-shell";
 import { CONTACT_EMAIL } from "@/lib/contact";
@@ -12,6 +13,13 @@ export const metadata: Metadata = {
     canonical: "/zh/terms",
     languages: { en: "/terms", "zh-TW": "/zh/terms", "x-default": "/terms" },
   },
+  ...socialMetadata({
+    path: "/zh/terms",
+    title: "服務條款 — GuessSong",
+    description:
+      "使用 GuessSong 即代表你接受的條款：這個遊戲是什麼、不是什麼、它和 Spotify／iTunes／Deezer 的關係，以及服務的限制。",
+    locale: "zh_TW",
+  }),
 };
 
 export default function ZhTermsPage() {

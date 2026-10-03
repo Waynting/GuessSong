@@ -1,5 +1,17 @@
 import type { MetadataRoute } from "next";
 import { GUIDES } from "@/lib/guides";
+import { POLICY_LAST_UPDATED_ISO } from "@/lib/legal";
+
+/**
+ * When each page's *content* last changed, by hand. This was the build's clock on
+ * every entry, which told crawlers every page changed on every deploy — and a
+ * date that always moves is a date a crawler learns to ignore, including on
+ * the day it is true. Bump the one that matches the page you edited.
+ */
+const LANDING_UPDATED = "2026-10-01";
+const ABOUT_UPDATED = "2026-09-15";
+const QUIZ_UPDATED = "2026-10-03";
+const CONTACT_UPDATED = "2026-08-21";
 
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "https://www.guessong.app";
 
@@ -40,34 +52,37 @@ function languageCluster(
 }
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const now = new Date();
+  // The index changes when a guide is added, so it is as new as the newest.
+  const guidesUpdated = new Date(
+    GUIDES.reduce((latest, g) => (g.published > latest ? g.published : latest), GUIDES[0].published)
+  );
 
   // The landing pair. /zh keeps its slightly lower priority — it is the same
   // content for a smaller audience, not a different page.
   const landing = languageCluster(
     "",
     "/zh",
-    { lastModified: now, changeFrequency: "monthly", priority: 1 },
+    { lastModified: new Date(LANDING_UPDATED), changeFrequency: "monthly", priority: 1 },
     { priority: 0.9 }
   );
 
   const core: MetadataRoute.Sitemap = [
     {
       url: `${BASE_URL}/about`,
-      lastModified: now,
+      lastModified: new Date(ABOUT_UPDATED),
       changeFrequency: "monthly",
       priority: 0.8,
     },
     // The quiz's own page. English only, like the guides; no cluster.
     {
       url: `${BASE_URL}/quiz`,
-      lastModified: now,
+      lastModified: new Date(QUIZ_UPDATED),
       changeFrequency: "monthly",
       priority: 0.7,
     },
     {
       url: `${BASE_URL}/guides`,
-      lastModified: now,
+      lastModified: guidesUpdated,
       changeFrequency: "weekly",
       priority: 0.8,
     },
@@ -88,7 +103,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   // ad network's site review looks for them, and a page it cannot find reads
   // exactly like a page that does not exist.
   const policyOptions: EntryOptions = {
-    lastModified: now,
+    lastModified: new Date(POLICY_LAST_UPDATED_ISO),
     changeFrequency: "yearly",
     priority: 0.4,
   };
@@ -99,7 +114,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     // English only — there is one inbox behind it, and both footers point here.
     {
       url: `${BASE_URL}/contact`,
-      lastModified: now,
+      lastModified: new Date(CONTACT_UPDATED),
       changeFrequency: "yearly",
       priority: 0.5,
     },

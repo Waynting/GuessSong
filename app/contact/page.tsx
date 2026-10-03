@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { socialMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { ArticleShell } from "@/components/article-shell";
 import { CONTACT_EMAIL, REPORT_PROBLEM_MAILTO } from "@/lib/contact";
@@ -8,6 +9,12 @@ export const metadata: Metadata = {
   description:
     "How to reach the person who maintains GuessSong — bug reports, playlists that will not load, rights complaints, privacy requests and press.",
   alternates: { canonical: "/contact" },
+  ...socialMetadata({
+    path: "/contact",
+    title: "Contact GuessSong",
+    description:
+      "How to reach the person who maintains GuessSong — bug reports, playlists that will not load, rights complaints, privacy requests and press.",
+  }),
 };
 
 const GITHUB_URL = "https://github.com/Waynting/GuessSong";
