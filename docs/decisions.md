@@ -350,6 +350,51 @@ persist progress, not to loosen the refusal.
 
 ---
 
+## D11 — Mixed rooms stay on Upstash, not on a Durable Object
+
+**Decided:** 2026-07-12, when the QR room shipped on the stack that existed.
+Written down 2026-10-03, after D3 put a Durable Object next to it and the
+question "why not both?" came up.
+
+A Mixed Playlist room is a Redis hash behind `/api/room/*` (`lib/room.ts`),
+polled by the host. The buzzer room, two weeks younger, is a Durable Object
+holding WebSockets. They look like the same thing; they are not.
+
+**Rejected:** moving Mixed rooms onto the buzzer Worker as a second Durable
+Object class.
+
+**Why:**
+
+- **A submit loads a Spotify playlist, and that path lives on Vercel.**
+  `loadPlaylist` sits on the playlist cache, in-flight coalescing, the per-minute
+  and daily budgets and the 429 cooldown, all in Upstash. A room in a DO would
+  either call back into Vercel for every submit — one more hop, the room's logic
+  split across two platforms — or read Spotify from the Worker, which is the
+  "one uncached path" that puts the shared per-app quota back at risk.
+- **Nothing in it is latency-bound.** D3's argument was sub-second "who pressed
+  first". A Mixed room is each player submitting once and the host consuming
+  the pool once; a roster that updates four seconds late costs nothing.
+- **The concurrency problem is already one command.** A dozen phones submitting
+  in the same few seconds is handled by `hsetnx` on a per-name field — no lock,
+  no retry loop. The DO's single-threadedness would solve a problem that is
+  already solved.
+- **A second platform has a cost D3 only accepted because it had to.** The
+  Worker deploy is manual (operations.md §1); moving rooms there would put the
+  feature that converts behind that step too.
+
+**Cost accepted:** the roster is polled rather than pushed. Polling spends
+Upstash commands against the same monthly cap that once took the whole site
+down (operations.md §5). `lib/room-poll.ts` backs the interval off on silence
+(4s → 8s after a minute → 20s after five) so an idle lobby is cheap, and resets
+on every arrival so a filling one is not slower.
+
+**Would reopen if:** room polling shows up as a meaningful share of Upstash
+commands, or a Mixed feature needs the server to push mid-game (live voting,
+shared reveal). Either is a reason to move the *roster* to a DO; the playlist
+load should stay on Vercel regardless.
+
+---
+
 ## Rejected and still rejected
 
 Short entries, so they are not re-proposed as new ideas.

@@ -11,6 +11,8 @@ Two hosts, and the split is not arbitrary. Vercel serves the app and everything
 request-shaped. Cloudflare serves the one thing Vercel structurally cannot: a
 live room that several phones are connected to at once. See
 [decisions.md](decisions.md#d3--buzzer-rooms-run-on-cloudflare-durable-objects).
+Mixed Playlist rooms are rooms too, and stay on Vercel and Upstash on purpose —
+[D11](decisions.md#d11--mixed-rooms-stay-on-upstash-not-on-a-durable-object).
 
 ```
                     ┌───────────────────────────────────────┐
