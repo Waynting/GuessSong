@@ -26,6 +26,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { trackEvent } from "@/lib/analytics";
 import { reportQuizCopy, reportQuizShare } from "@/lib/loop-client";
@@ -239,9 +240,15 @@ export default function QuizBoardPage() {
     <Shell>
       <div className="flex w-full max-w-md flex-col gap-10 py-4 sm:max-w-lg">
         <header>
-          <p className="text-[11px] uppercase tracking-[0.25em] text-[#666]">
-            GuessSong · {copy.boardPageTitle}
-          </p>
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-[11px] uppercase tracking-[0.25em] text-[#666]">
+              GuessSong · {copy.boardPageTitle}
+            </p>
+            {/* Every quiz this device made — the board is one of them. */}
+            <Link href="/q/mine" className="shrink-0 text-xs text-[#999] underline-offset-4 hover:underline">
+              {copy.mineTitle} →
+            </Link>
+          </div>
           <h1
             style={{ ...display, fontSize: "clamp(40px, 12vw, 64px)", textWrap: "balance" }}
             className="mt-2 leading-[0.95] text-[#f0f0f0]"

@@ -10,7 +10,14 @@ import { useErrorLocale } from "@/lib/use-error-locale";
 import dynamic from "next/dynamic";
 import { CheckIcon, SpotifyIcon } from "@/components/setup-chrome";
 import { QUIZ_COPY, fillCopy } from "@/lib/quiz-copy";
-import { quizUrl, recallLastQuiz, rememberLastQuiz, rememberQuizToken, type LastQuiz } from "@/lib/quiz-session";
+import {
+  listQuizTokens,
+  quizUrl,
+  recallLastQuiz,
+  rememberLastQuiz,
+  rememberQuizToken,
+  type LastQuiz,
+} from "@/lib/quiz-session";
 import { currentQuizSource } from "@/lib/quiz-source";
 import { isEditorialPlaylistLink, isSubmittablePlaylistLink } from "@/lib/spotify-link";
 import {
@@ -117,6 +124,9 @@ export function QuizCreate() {
   // What this device made last time, given back as the panel it was — see
   // lib/quiz-session.ts.
   const [lastQuiz, setLastQuiz] = useState<LastQuiz | null>(null);
+  // How many quizzes this device holds a token for: the dashboard link shows
+  // only when there is something on it.
+  const [mineCount, setMineCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -144,6 +154,7 @@ export function QuizCreate() {
     if (ref) rememberLoopRef(ref);
     const last = recallLastQuiz();
     setLastQuiz(last);
+    setMineCount(listQuizTokens().length);
     // The remembered quiz is drawn with the panel, so its chunk is wanted
     // now rather than at the first Create.
     if (last) void loadQuizPanel().catch(() => {});
@@ -214,6 +225,7 @@ export function QuizCreate() {
       rememberLastQuiz(remembered);
       rememberQuizToken(created.code, created.hostToken);
       setLastQuiz(remembered);
+      setMineCount(listQuizTokens().length);
       trackEvent("quiz_created", {
         question_count: created.questionCount,
         arrived_from: arrivedFrom(loopRef),
@@ -414,6 +426,11 @@ export function QuizCreate() {
           )}
 
           <div className="mode-links">
+            {mineCount > 0 && (
+              <Link href="/q/mine" className="text-link">
+                {fillCopy(copy.mineLink, { count: mineCount })}
+              </Link>
+            )}
             <Link href="/" className="text-link">
               {copy.createBackToParty}
             </Link>

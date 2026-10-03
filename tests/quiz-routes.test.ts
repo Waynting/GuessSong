@@ -23,7 +23,15 @@ import { POST as answerQuiz } from "@/app/api/quiz/[code]/answer/route";
 import { POST as checkQuiz } from "@/app/api/quiz/[code]/check/route";
 import { GET as hintQuiz } from "@/app/api/quiz/[code]/hint/route";
 import { GET as boardQuiz } from "@/app/api/quiz/[code]/board/route";
-import type { AnswerQuizResponse, CheckQuizResponse, CreateQuizResponse, QuizView } from "@/types/quiz";
+import { POST as mineQuiz } from "@/app/api/quiz/mine/route";
+import type {
+  AnswerQuizResponse,
+  CheckQuizResponse,
+  CreateQuizResponse,
+  QuizMineResponse,
+  QuizMineSummary,
+  QuizView,
+} from "@/types/quiz";
 import type { Track } from "@/types";
 
 vi.mock("@/lib/playlist-cache", () => ({ loadPlaylist: vi.fn() }));
@@ -753,5 +761,54 @@ describe("the owner, on their own link", () => {
     for (const stray of [`quiz:v1:${segment}`, `quiz:v1:${quiz.code.toLowerCase()}`, `quiz:v1:${segment.toUpperCase()}`]) {
       expect(Object.keys(await store.hgetall<unknown>(stray)), stray).toEqual([]);
     }
+  });
+});
+
+describe("POST /api/quiz/mine — the owner's dashboard", () => {
+  async function mine(quizzes: { code: string; token: string }[]) {
+    return mineQuiz(request("/api/quiz/mine", { method: "POST", body: JSON.stringify({ quizzes }) }));
+  }
+
+  it("summarises each quiz against its own token, and never sends an answer", async () => {
+    const live = await make(10);
+    const other = await make(10);
+    const answers = await keyFor(live.code);
+    await answerQuiz(
+      request(`/api/quiz/${live.code}/answer`, {
+        method: "POST",
+        body: JSON.stringify({ name: "Bea", answers }),
+      }),
+      params(live.code)
+    );
+    const before = await count(keys.quizOwner.owner_dashboard);
+
+    const res = await mine([
+      { code: live.code, token: live.hostToken },
+      { code: other.code, token: "not-the-token" },
+      { code: "ZZZZZZ", token: "x" },
+    ]);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as QuizMineResponse;
+    expect(body.quizzes.map((q) => q.status)).toEqual(["ok", "not_host", "gone"]);
+    const summary = body.quizzes[0] as QuizMineSummary;
+    expect(summary).toMatchObject({ code: live.code, takers: 1, playlistName: "Late nights" });
+    expect(summary.leaders[0]).toMatchObject({ name: "Bea", correct: 10 });
+    expect(summary.latestAt).toEqual(expect.any(Number));
+    // The board's rows name the answers; none of them may ride along here.
+    const wire = JSON.stringify(body);
+    expect(wire).not.toContain('"right"');
+    expect(wire).not.toContain('"questions"');
+    expect(wire).not.toContain("hostToken");
+    expect(await count(keys.quizOwner.owner_dashboard)).toBe(before + 1);
+  });
+
+  it("counts nothing for a device with no live quiz, and refuses an oversized body", async () => {
+    const before = await count(keys.quizOwner.owner_dashboard);
+    const res = await mine([{ code: "ZZZZZZ", token: "x" }]);
+    expect(res.status).toBe(200);
+    expect(await count(keys.quizOwner.owner_dashboard)).toBe(before);
+
+    const tooMany = Array.from({ length: 11 }, () => ({ code: "ZZZZZZ", token: "x" }));
+    expect((await mine(tooMany)).status).toBe(400);
   });
 });

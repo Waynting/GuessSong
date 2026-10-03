@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 
 /**
- * Everything under /q is a code that stops resolving after a week: noindex,
- * the way app/game/layout.tsx does it. Robots.txt is deliberately *not* the
+ * Everything under /q is a code that stops resolving after a week, or the
+ * owner's dashboard (`/q/mine`), which is a different list in every browser:
+ * noindex, the way app/game/layout.tsx does it. Robots.txt is deliberately *not* the
  * tool — a disallow keeps the unfurlers that honour it (Facebook, X) from
  * reading the quiz's card at all, and the link in a group chat is the
  * feature's whole distribution. The quiz page sets its own `robots` too;

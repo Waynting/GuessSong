@@ -245,3 +245,54 @@ export interface AnswerQuizResponse {
    */
   preview?: true;
 }
+
+/**
+ * How many quizzes one dashboard request may ask about. Equal to
+ * `QUIZ_TOKENS_MAX` in lib/quiz-session.ts — the device never holds more —
+ * and declared here so the route can bound the body without importing a
+ * browser-storage module. `tests/quiz-mine.test.ts` pins the two together.
+ */
+export const QUIZ_MINE_MAX = 10;
+
+/** One quiz this device made, with the token that proves it. */
+export interface QuizMineEntry {
+  code: string;
+  token: string;
+}
+
+export interface QuizMineRequest {
+  quizzes: QuizMineEntry[];
+}
+
+/**
+ * One quiz on the owner's dashboard (`/q/mine`). Only what the public
+ * ranking on `/q/<code>` already shows anyone — names, scores, the mean —
+ * and never the per-question rows: those name the answers, and the board,
+ * one tap away, is where they stay behind the token.
+ */
+export interface QuizMineSummary {
+  status: "ok";
+  code: string;
+  ownerName: string | null;
+  playlistName: string;
+  questionCount: number;
+  createdAt: number;
+  expiresAt: number;
+  takers: number;
+  averageCorrect: number | null;
+  /** The top of the board, at most three rows, no `right`. */
+  leaders: QuizScore[];
+  /** When the newest row landed, or null with none. */
+  latestAt: number | null;
+}
+
+/**
+ * `gone` is expired, deleted or never existed; `not_host` is a token the
+ * store does not recognise. Both are said per quiz, so one stale entry does
+ * not cost the device the rest of its dashboard.
+ */
+export type QuizMineItem = QuizMineSummary | { status: "gone" | "not_host"; code: string };
+
+export interface QuizMineResponse {
+  quizzes: QuizMineItem[];
+}
