@@ -54,6 +54,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.19.2",
+    date: "2026-10-03",
+    headline: "Buzzer Mode: the music stops when someone buzzes, even after a dropped connection.",
+    headlineZh: "搶答模式：有人搶答時音樂一定會停，連線斷過也一樣。",
+    changes: [
+      {
+        kind: "fixed",
+        text: "If the host's screen lost its connection for a moment just as someone buzzed, their name still came up but the song kept playing. Now the music stops as soon as the host's screen reconnects.",
+        textZh: "主持人的畫面如果剛好在有人搶答時短暫斷線，搶到的人名雖然會出現，歌卻繼續播。現在主持人畫面一重新連上，音樂就會停下來。",
+      },
+    ],
+  },
+  {
     version: "1.19.1",
     date: "2026-10-01",
     headline: "A small tidy-up on the setup page.",

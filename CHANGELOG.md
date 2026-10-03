@@ -5,6 +5,39 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.2] - 2026-10-03
+
+### Fixed
+
+- **A buzz the host's socket missed now stops the music.** The clip is paused
+  by the `buzz` frame (`onBuzz` → `pauseClip`), and a buzz that landed while
+  the host's socket was down never sent one: the rejoin's `state` replay put
+  the winner's name on the host's screen while the song played on under it.
+  Reported from a real game as "the name came up but the music didn't stop";
+  a host on a phone drops the socket on every app switch and Wi-Fi blip.
+  `stateMissedBuzz` (`lib/buzzer-round.ts`) now pauses on a replay whose
+  snapshot is `locked` with a head the host has not seen, keyed by
+  `floorKey` — the round key plus the head's `order`, which the room never
+  reuses within a round — so a replay of the same head leaves music the host
+  resumed after a wrong answer alone. `floorRef` in
+  `components/buzzer-host-panel.tsx` holds the floor as of the last render;
+  the socket hook calls the handler before it folds the message in. Only a
+  snapshot overwrites it: "Try again" nulls the snapshot before the replay,
+  and a floor reset there paused music the host had resumed (found in
+  pre-landing review).
+  Reproduced against a local Worker and production build with headless
+  Chrome (host socket dropped, phone buzzes): before, the clip ran on for the
+  whole window; after, it pauses on the rejoin, about a second later.
+
+### Known gaps
+
+- The pause lands on the rejoin, not on the press: nothing reaches a host
+  whose socket is down. The reconnect backoff starts at 1s.
+- `wrangler dev` never acknowledges a client-initiated close, so a socket the
+  page closes itself sits in CLOSING and never reconnects. Seen only locally;
+  the hook closes a socket itself only on unmount, where no reconnect is
+  wanted. Unverified against the deployed Worker.
+
 ## [1.19.1] - 2026-10-01
 
 ### Added

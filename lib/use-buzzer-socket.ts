@@ -492,10 +492,11 @@ export function reduce(state: BuzzerSocketState, msg: ServerMessage): BuzzerSock
       // Matched on the id only. A seat taken over mid-round re-keys its
       // queued buzz (worker/src/buzzer-room.ts `takeSeat`), and the room
       // answers that with a full `state` replay, which is what keeps this
-      // queue in step — not `order`: the room numbers a buzz by the queue's
-      // length and does not renumber after a wrong verdict shifts it, so
-      // two entries in one round can share an `order`, and matching on it
-      // dropped a real buzz on the floor.
+      // queue in step — not `order`. The room used to number a buzz by the
+      // queue's length, so after a wrong verdict shifted it two entries in
+      // one round could share an `order`, and matching on it dropped a real
+      // buzz on the floor. It now counts per round (`buzzCount`, reset only
+      // by an open or Next), but the id is still the identity here.
       const known = state.snapshot.buzzes.findIndex((b) => b.playerId === msg.entry.playerId);
       const buzzes =
         known === -1
