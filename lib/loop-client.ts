@@ -128,7 +128,7 @@ export function reportGameStart(
 export function reportGameEnd(
   end: GameEnd,
   roundsPlayed: number,
-  details: { host?: GameHostKind; screen?: GameScreen } = {}
+  details: { host?: GameHostKind; screen?: GameScreen; source?: SetupSource } = {}
 ): void {
   sendPulse({
     kind: "game_finished",
@@ -136,6 +136,7 @@ export function reportGameEnd(
     roundsPlayed,
     ...(details.host ? { host: details.host } : {}),
     ...(details.screen ? { screen: details.screen } : {}),
+    ...(details.source ? { source: details.source } : {}),
   });
 }
 
@@ -162,10 +163,11 @@ export function reportFirstClip(path: FirstClipPath, outcome: FirstClipOutcome):
 export function reportGameLeft(
   roundsPlayed: number,
   host: GameHostKind,
-  via: "unload" | "navigation"
+  via: "unload" | "navigation",
+  source?: SetupSource
 ): void {
   trackEvent("game_left", { rounds_played: roundsPlayed, host_kind: host, via });
-  sendPulse({ kind: "game_left", roundsPlayed, host });
+  sendPulse({ kind: "game_left", roundsPlayed, host, ...(source ? { source } : {}) });
 }
 
 /**

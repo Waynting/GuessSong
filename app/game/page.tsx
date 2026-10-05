@@ -46,7 +46,7 @@ import {
   reportGameLeft,
   reportGameOverTap,
 } from "@/lib/loop-client";
-import type { FirstClipOutcome, GameHostKind, GameScreen } from "@/lib/loop-stats";
+import type { FirstClipOutcome, GameHostKind, GameScreen, SetupSource } from "@/lib/loop-stats";
 import { getHostGameCount } from "@/lib/host-session";
 import {
   CLIP_COPY,
@@ -243,6 +243,10 @@ export default function GamePage() {
   const firstClipRef = useRef(createFirstClipTracker());
   /** Read on mount; "unknown" until then and whenever storage will not say. */
   const hostKindRef = useRef<GameHostKind>("unknown");
+  // How the playlist got into the setup form, off the stored payload. Absent
+  // for a game stored before the payload carried it; the beacons then send
+  // none, as they always did.
+  const setupSourceRef = useRef<SetupSource | undefined>(undefined);
   /**
    * False when this page is a reload of a game that already had one. Null
    * until the game has loaded. See claimFirstPage in lib/game-beacons.ts for
@@ -357,6 +361,7 @@ export default function GamePage() {
     // its own game later must not change what this one reports at its end.
     const hostGames = getHostGameCount();
     hostKindRef.current = hostKindOf(hostGames);
+    setupSourceRef.current = data.setupSource;
     // Claimed once per page, not once per effect run — StrictMode runs this
     // twice in development, and the second run would find the first's marker
     // and read its own page as a reload.
@@ -491,7 +496,8 @@ export default function GamePage() {
       reportGameLeft(
         countRoundsPlayed(currentIndexRef.current, phaseRef.current),
         hostKindRef.current,
-        via
+        via,
+        setupSourceRef.current
       );
     },
     [settleFirstClip]
@@ -1062,6 +1068,7 @@ export default function GamePage() {
     reportGameEnd(endedEarly ? "ended_early" : "played_out", roundsPlayed, {
       host: hostKindRef.current,
       ...(layout ? { screen: layout } : {}),
+      ...(setupSourceRef.current ? { source: setupSourceRef.current } : {}),
     });
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,

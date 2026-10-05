@@ -146,14 +146,38 @@ describe("parsePulse — the setup source", () => {
     expect(parsePulse({ kind: "game_started", hostGameIndex: "3", source: "typed" })).toBeNull();
   });
 
-  it("does not let a source ride in on any other event", () => {
+  it("does not let a source ride in on an event that is not about one game", () => {
     expect(parsePulse({ kind: "loop_impression", surface: "share", source: "typed" })).toEqual({
       kind: "loop_impression",
       surface: "share",
     });
+    expect(parsePulse({ kind: "game_over_tap", target: "play_again", source: "typed" })).toEqual({
+      kind: "game_over_tap",
+      target: "play_again",
+    });
+  });
+
+  it("carries a known source on the end and leave beacons, and drops an unknown one", () => {
+    for (const source of SETUP_SOURCES) {
+      expect(
+        parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 2, source })
+      ).toEqual({ kind: "game_finished", end: "played_out", roundsPlayed: 2, source });
+      expect(parsePulse({ kind: "game_left", roundsPlayed: 1, host: "first", source })).toEqual({
+        kind: "game_left",
+        roundsPlayed: 1,
+        host: "first",
+        source,
+      });
+    }
+    // An unknown source costs the game its source, never the game: the tail
+    // would become a key, and the end or leave is real either way.
     expect(
-      parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 2, source: "typed" })
-    ).toEqual({ kind: "game_finished", end: "played_out", roundsPlayed: 2 });
+      parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: 1, source: "scanned" })
+    ).toEqual({ kind: "game_finished", end: "ended_early", roundsPlayed: 1 });
+    expect(parsePulse({ kind: "game_left", roundsPlayed: 1, source: "x".repeat(400) })).toEqual({
+      kind: "game_left",
+      roundsPlayed: 1,
+    });
   });
 
   it("fits in the route's body limit with every field at its longest", () => {

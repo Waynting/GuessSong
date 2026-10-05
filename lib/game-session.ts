@@ -7,6 +7,7 @@
 import type { Track } from "@/types";
 import type { PlaylistSource } from "@/lib/analytics";
 import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
+import { isSetupSource, type SetupSource } from "@/lib/setup-source";
 
 export const GAME_STORAGE_KEY = "guesssong_game";
 
@@ -57,6 +58,13 @@ export interface GamePayload {
   mode: GameMode;
   mixedPlaylistMeta?: MixedPlaylistMeta;
   buzzerRoom?: BuzzerRoomHandle;
+  /**
+   * How the playlist got into the setup form (`lib/setup-source.ts`), carried
+   * so the game page can put it on its end and leave beacons. Optional, and
+   * absent rather than defaulted when unreadable: a guessed source would be
+   * counted as a real one, and a game stored before it existed has none.
+   */
+  setupSource?: SetupSource;
 }
 
 const PLAYLIST_SOURCES: PlaylistSource[] = ["own", "mixed"];
@@ -102,6 +110,7 @@ export interface BuildGamePayloadInput {
   mode: GameMode;
   mixedPlaylistMeta?: MixedPlaylistMeta;
   buzzerRoom?: BuzzerRoomHandle;
+  setupSource?: SetupSource;
 }
 
 export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
@@ -115,6 +124,7 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
     mode: input.mode,
     ...(input.mixedPlaylistMeta ? { mixedPlaylistMeta: input.mixedPlaylistMeta } : {}),
     ...(input.buzzerRoom ? { buzzerRoom: input.buzzerRoom } : {}),
+    ...(input.setupSource ? { setupSource: input.setupSource } : {}),
   };
 }
 
@@ -311,5 +321,6 @@ export function parseGamePayload(raw: string): GamePayload | null {
     mode: isGameMode(d.mode) ? d.mode : "party",
     ...(mixedPlaylistMeta ? { mixedPlaylistMeta } : {}),
     ...(buzzerRoom ? { buzzerRoom } : {}),
+    ...(isSetupSource(d.setupSource) ? { setupSource: d.setupSource } : {}),
   };
 }

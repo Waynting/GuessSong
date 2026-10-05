@@ -192,6 +192,25 @@ describe("the key format is the contract between writer and reader", () => {
       }
     }
 
+    for (const source of SETUP_SOURCES) {
+      for (const end of GAME_ENDS) {
+        kv.incrs = [];
+        await recordGameEnd(end, 2, { source });
+        expect(keysWritten()).toContain(expected.gameEndSource[source][end]);
+      }
+      for (const [round, band] of [[0, "r0"], [2, "r1_2"], [9, "r3_plus"]] as const) {
+        kv.incrs = [];
+        await recordGameLeft(round, undefined, source);
+        expect(keysWritten()).toContain(expected.gameLeftSource[source][band]);
+      }
+    }
+    // No source, or one off the list, writes no source key at all — a game
+    // stored before the payload carried one must count exactly as it did.
+    kv.incrs = [];
+    await recordGameEnd("played_out", 9, { source: "scanned" as never });
+    await recordGameLeft(1, "first");
+    expect(keysWritten().filter((k) => k.includes("_source:"))).toEqual([]);
+
     for (const screen of GAME_SCREENS) {
       kv.incrs = [];
       await recordGameEnd("played_out", 20, { screen });
@@ -441,6 +460,14 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
       }
     }
     expect(Object.keys(keys.gameEndHost)).toHaveLength(GAME_HOST_KINDS.length);
+    for (const source of SETUP_SOURCES) {
+      for (const end of GAME_ENDS) {
+        expect(keys.gameEndSource[source][end]).toBe(`loop:stats:2026-08-09:game_end_source:${source}:${end}`);
+      }
+      for (const band of EARLY_END_BANDS) {
+        expect(keys.gameLeftSource[source][band]).toBe(`loop:stats:2026-08-09:game_left_source:${source}:${band}`);
+      }
+    }
     for (const path of FIRST_CLIP_PATHS) {
       expect(Object.keys(keys.firstClip[path])).toHaveLength(FIRST_CLIP_OUTCOMES.length);
       for (const outcome of FIRST_CLIP_OUTCOMES) {
@@ -1198,6 +1225,8 @@ describe("the digest prints what the recorders write", () => {
       "game_end_screen:",
       "game_left_round:",
       "game_left_host:",
+      "game_end_source:",
+      "game_left_source:",
       "first_clip:",
       "game_over_tap:",
       "mixed_nudge:",
@@ -1238,6 +1267,13 @@ describe("the digest prints what the recorders write", () => {
     expect(script).toMatch(/byHost\("game_end_host", "ended_early"\)/);
     expect(script).toMatch(/byHost\("game_end_early", band\)/);
     expect(script).toMatch(/byHost\("game_left_host", band\)/);
+    // The source table reads its columns off SETUP_SOURCE_ORDER, so that list
+    // has to be the writer's, and both prefixes have to be read by name.
+    expect(flat("SETUP_SOURCE_ORDER")).toEqual([...SETUP_SOURCES]);
+    expect(script).toContain("`${prefix}:${s}:${tail}`");
+    expect(script).toMatch(/bySource\("game_end_source", "played_out"\)/);
+    expect(script).toMatch(/bySource\("game_end_source", "ended_early"\)/);
+    expect(script).toMatch(/bySource\("game_left_source", band\)/);
   });
 
   it("labels round zero on its own row, in both histograms, so nobody reads it as a round", () => {

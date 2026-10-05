@@ -530,6 +530,56 @@ if ([...hostPlayedOut, ...hostEndedEarly, ...hostLeft].some((c) => c > 0)) {
 }
 
 /**
+ * The same outcomes, crossed with how the playlist got into the form —
+ * `game_end_source:<source>:<end>` and `game_left_source:<source>:<band>`,
+ * the source riding on the stored game payload to the end and leave beacons.
+ * Built on 2026-10-05 because the table above put the largest pile at
+ * first-time hosts leaving in rounds 1–2, and could not say whether that was
+ * someone tapping a starter chip to see what the site does or a host whose
+ * own playlist did not work for the room.
+ *
+ * `started` is `host_setup:<source>`, the denominator, and the percentages
+ * are of it. In a window that reaches back before 2026-10-05 the outcome
+ * rows are missing every game that was stored without a source, so the
+ * percentages read low there: read this with `--since 2026-10-05` or later.
+ * Columns print only for a source with any count; the order is
+ * SETUP_SOURCE_ORDER's, which mirrors SETUP_SOURCES.
+ */
+const sourceCols = SETUP_SOURCE_ORDER.filter((s) =>
+  [...totals.keys()].some(
+    (m) => m.startsWith(`game_end_source:${s}:`) || m.startsWith(`game_left_source:${s}:`)
+  )
+);
+const bySource = (prefix, tail) => sourceCols.map((s) => get(`${prefix}:${s}:${tail}`));
+const sourceRow = (label, counts) =>
+  `  ${label.padEnd(26)}${counts.map((c) => String(c).padStart(10)).join("")}`;
+const sourcePctRow = (label, counts, bases) =>
+  `  ${label.padEnd(26)}${counts.map((c, i) => pct(c, bases[i]).trim().padStart(10)).join("")}`;
+
+if (sourceCols.length > 0) {
+  const started = sourceCols.map((s) => get(`host_setup:${s}`));
+  const playedOut = bySource("game_end_source", "played_out");
+  const endedEarly = bySource("game_end_source", "ended_early");
+  const leftBands = earlyBands.map(([band]) => bySource("game_left_source", band));
+  const left = sourceCols.map((_, i) => leftBands.reduce((t, row) => t + row[i], 0));
+  const leftEarly = sourceCols.map((_, i) => leftBands[0][i] + leftBands[1][i]);
+  console.log("\nHow games ended, by where the playlist came from");
+  console.log(sourceRow("", sourceCols));
+  console.log(sourceRow("started", started));
+  console.log(sourceRow("played out", playedOut));
+  console.log(sourceRow("ended early", endedEarly));
+  console.log(sourceRow("left mid-game", left));
+  earlyBands.forEach(([, label], i) => console.log(sourceRow(`  ${label}`, leftBands[i])));
+  console.log(sourcePctRow("played out, % of started", playedOut, started));
+  console.log(sourcePctRow("left by round 2, %", leftEarly, started));
+  console.log(
+    "  how to read it: set `starter` beside `typed`. If the round 1–2 leaves pile under\n" +
+      "  `starter`, the drop in the table above is people trying the site with our\n" +
+      "  playlist; if `typed` leaves as early, it is the first rounds that lose them."
+  );
+}
+
+/**
  * The first Play press of each game: `first_clip:<path>:<outcome>`.
  *
  * The hypothesis it was built to test is in the two `rejected` cells. On the
@@ -939,6 +989,8 @@ const RENDERED_PREFIXES = [
   "game_end_screen:",
   "game_left_round:",
   "game_left_host:",
+  "game_end_source:",
+  "game_left_source:",
   "first_clip:",
   "game_over_tap:",
   "mixed_nudge:",
