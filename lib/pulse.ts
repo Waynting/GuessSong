@@ -70,16 +70,12 @@ import {
 // A statement of its own rather than two more names in the list above: that
 // list is the one line of this file every new event has to touch.
 import { QUIZ_COPY_OUTCOMES, type QuizCopyOutcome } from "@/lib/loop-stats";
-import { SETUP_SOURCES, type SetupSource } from "@/lib/loop-stats";
+import { isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { isSocialPlatform, type SocialPlatform } from "@/lib/social-share";
 import { isPlaylistHelpTopic, type PlaylistHelpTopic } from "@/lib/playlist-help";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
-}
-
-function isSetupSource(value: unknown): value is SetupSource {
-  return typeof value === "string" && (SETUP_SOURCES as readonly string[]).includes(value);
 }
 
 function isGameEnd(value: unknown): value is GameEnd {
@@ -151,9 +147,10 @@ export type PulseEvent =
       roundsPlayed: number;
       host?: GameHostKind;
       screen?: GameScreen;
+      source?: SetupSource;
     }
   | { kind: "first_clip"; path: FirstClipPath; outcome: FirstClipOutcome }
-  | { kind: "game_left"; roundsPlayed: number; host?: GameHostKind }
+  | { kind: "game_left"; roundsPlayed: number; host?: GameHostKind; source?: SetupSource }
   | { kind: "game_over_tap"; target: GameOverTap }
   | { kind: "mixed_nudge"; stage: MixedNudgeStage }
   | { kind: "refusal_recovery"; stage: "refused"; topic: PlaylistHelpTopic }
@@ -222,6 +219,10 @@ export function parsePulse(body: unknown): PulseEvent | null {
       roundsPlayed: clamped,
       ...(isGameHostKind(raw.host) ? { host: raw.host } : {}),
       ...(isGameScreen(raw.screen) ? { screen: raw.screen } : {}),
+      // How the playlist got into the field, carried from `game_started` on
+      // the stored payload. Same trade: a game stored before 2026-10-05 has
+      // none, and `game_end_source:${value}` is a key.
+      ...(isSetupSource(raw.source) ? { source: raw.source } : {}),
     };
   }
 
@@ -236,9 +237,12 @@ export function parsePulse(body: unknown): PulseEvent | null {
   if (raw.kind === "game_left") {
     const clamped = parseRound(raw.roundsPlayed);
     if (clamped === null) return null;
-    return isGameHostKind(raw.host)
-      ? { kind: "game_left", roundsPlayed: clamped, host: raw.host }
-      : { kind: "game_left", roundsPlayed: clamped };
+    return {
+      kind: "game_left",
+      roundsPlayed: clamped,
+      ...(isGameHostKind(raw.host) ? { host: raw.host } : {}),
+      ...(isSetupSource(raw.source) ? { source: raw.source } : {}),
+    };
   }
 
   if (raw.kind === "game_over_tap") {

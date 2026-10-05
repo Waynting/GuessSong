@@ -380,6 +380,7 @@ export default function SetupPage() {
         totalTracks: data.tracks.length,
         playlistSource: "mixed",
         mode: room ? "buzzer" : "party",
+        setupSource: setupSourceFor(true),
         mixedPlaylistMeta: {
           contributorNames: data.players,
           sampledPerPlayer: data.sampledPerPlayer,
@@ -469,6 +470,17 @@ export default function SetupPage() {
   }, [applySetup]);
 
   /**
+   * How the playlist got into the form, for a game about to start. One rule
+   * for the two places that need it — `recordHostedStart`, for the start
+   * beacon, and the payload, which carries it to the game page's end and
+   * leave beacons — so the start and the outcome cannot file one game under
+   * two sources.
+   */
+  function setupSourceFor(mixed: boolean): SetupSource {
+    return mixed ? "mixed" : linkSource;
+  }
+
+  /**
    * Everything a hosted start owes the funnel, in one place.
    *
    * Called by the three paths that begin a real party — own playlist, mixed
@@ -494,7 +506,7 @@ export default function SetupPage() {
    */
   function recordHostedStart(mixed?: MixedSubMode) {
     const hostGameIndex = bumpHostGameCount();
-    const setupSource: SetupSource = mixed ? "mixed" : linkSource;
+    const setupSource = setupSourceFor(Boolean(mixed));
     reportGameStart(hostGameIndex, mixed, setupSource);
     const recovery = noteStart(recoveryRef.current, setupSource);
     recoveryRef.current = recovery.state;
@@ -595,6 +607,7 @@ export default function SetupPage() {
         totalTracks: data.totalTracks,
         playlistSource: "own",
         mode: room ? "buzzer" : "party",
+        setupSource: setupSourceFor(false),
         ...(room ? { buzzerRoom: room } : {}),
       });
       // A browser that refuses to store this has not refused the playlist, and
@@ -740,6 +753,7 @@ export default function SetupPage() {
         totalTracks: pooled.length,
         playlistSource: "mixed",
         mode: room ? "buzzer" : "party",
+        setupSource: setupSourceFor(true),
         mixedPlaylistMeta: {
           contributorNames: mixedContributions.map((c) => c.name),
           sampledPerPlayer,

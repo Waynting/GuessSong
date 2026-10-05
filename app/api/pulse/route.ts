@@ -76,13 +76,14 @@ export async function POST(req: NextRequest) {
       await recordGameEnd(event.end, event.roundsPlayed, {
         host: event.host,
         screen: event.screen,
+        source: event.source,
       });
       break;
     case "first_clip":
       await recordFirstClip(event.path, event.outcome);
       break;
     case "game_left":
-      await recordGameLeft(event.roundsPlayed, event.host);
+      await recordGameLeft(event.roundsPlayed, event.host, event.source);
       break;
     case "game_over_tap":
       await recordGameOverTap(event.target);

@@ -41,6 +41,7 @@ import type { PreviewStatus } from "@/types/preview";
 import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
 import { isPlaylistHelpTopic, PLAYLIST_HELP_TOPIC_NAMES, type PlaylistHelpTopic } from "@/lib/playlist-help";
 import { RECOVERY_STAGES, type RecoveryStage } from "@/lib/refusal-recovery";
+import { SETUP_SOURCES, isSetupSource, type SetupSource } from "@/lib/setup-source";
 
 /**
  * 30 days, not the 7 that `lib/playlist-cache.ts` uses for its own stats.
@@ -449,42 +450,8 @@ export type MixedSubMode = "room" | "phone";
 
 export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
 
-/**
- * How the playlist a game started with got into the field.
- *
- *   typed     typed or pasted by hand — the only way in there was, bar the
- *             share target, before the form remembered anything
- *   restored  the form came back filled in from the last game on this device,
- *             and the host pressed Start without touching the link
- *   recent    a recent-playlist chip under the field
- *   starter   a starter chip (`lib/starter-playlists.ts`)
- *   shared    Android's share target, `/share` → `/?playlist=…`
- *   mixed     Mixed Playlist Mode, either route — there is no single link
- *
- * Exists because 56.5% of games in the week to 2026-09-29 came from a device
- * that had hosted before, every one of them retyped from an empty form, and
- * the form's memory was built on that number. This is what says whether the
- * memory is *used*: `restored + recent` is a returning host who did not
- * retype; `typed` from a repeat host is one whose storage was evicted (iOS,
- * seven idle days) or who wanted a different playlist tonight.
- *
- * Rides on `game_started` for the reason `MixedSubMode` does — it is a
- * property of the game that started, not a second thing that happened — and
- * lives here for the same reason too: these strings become the tail of a key.
- * A client that predates it sends none and is counted in `games` exactly as
- * before, so the six sum to at most `games`, never to it, in any window that
- * straddles the deploy.
- */
-export type SetupSource = "typed" | "restored" | "recent" | "starter" | "shared" | "mixed";
-
-export const SETUP_SOURCES: readonly SetupSource[] = [
-  "typed",
-  "restored",
-  "recent",
-  "starter",
-  "shared",
-  "mixed",
-];
+/** How the playlist got into the field. Declared in `lib/setup-source.ts`; see there. */
+export { SETUP_SOURCES, isSetupSource, type SetupSource };
 
 /**
  * The playlist quiz's funnel, one counter per stage.
@@ -735,6 +702,8 @@ export function loopStatsKeys(
   /** Indexed by round, like `gameEndRound`. */
   gameLeftRound: string[];
   gameLeftHost: Record<GameHostKind, Record<EarlyEndBand, string>>;
+  gameEndSource: Record<SetupSource, Record<GameEnd, string>>;
+  gameLeftSource: Record<SetupSource, Record<EarlyEndBand, string>>;
   firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
   gameOverTap: Record<GameOverTap, string>;
   mixedNudge: Record<MixedNudgeStage, string>;
@@ -766,6 +735,14 @@ export function loopStatsKeys(
         Object.fromEntries(tails.map((t) => [t, key(day, `${prefix}:${kind}:${t}`)])),
       ])
     ) as Record<GameHostKind, Record<T, string>>;
+  /** The same shape over the setup sources. */
+  const bySource = <T extends string>(prefix: string, tails: readonly T[]) =>
+    Object.fromEntries(
+      SETUP_SOURCES.map((source) => [
+        source,
+        Object.fromEntries(tails.map((t) => [t, key(day, `${prefix}:${source}:${t}`)])),
+      ])
+    ) as Record<SetupSource, Record<T, string>>;
   return {
     live: key(day, "live"),
     throttled: key(day, "throttled"),
@@ -787,6 +764,8 @@ export function loopStatsKeys(
     },
     gameLeftRound,
     gameLeftHost: byHost("game_left_host", EARLY_END_BANDS),
+    gameEndSource: bySource("game_end_source", GAME_ENDS),
+    gameLeftSource: bySource("game_left_source", EARLY_END_BANDS),
     firstClip: Object.fromEntries(
       FIRST_CLIP_PATHS.map((path) => [
         path,
@@ -1021,17 +1000,26 @@ export async function recordGameStart(
  * neither, and its end has to count exactly as it always did — the two
  * original keys, nothing else, and nothing filed under `unknown`, which
  * means "the page asked and storage would not say", not "the page was old".
+ *
+ * `source` is the game's `SetupSource`, read back off the stored payload, and
+ * it is what joins the end to `host_setup:*`: `game_end_source:<source>:<end>`.
+ * Added on 2026-10-05 because first-time hosts leaving at rounds 1–2 were the
+ * largest pile in the outcome table and nothing could say whether they were
+ * starter-chip tryouts or hosts with their own playlist. A game stored before
+ * then has no source and writes nothing here, so the rows sum to at most the
+ * totals above them.
  */
 export async function recordGameEnd(
   end: GameEnd,
   roundsPlayed: number,
-  details: { host?: GameHostKind; screen?: GameScreen } = {}
+  details: { host?: GameHostKind; screen?: GameScreen; source?: SetupSource } = {}
 ): Promise<void> {
   if (!GAME_ENDS.includes(end)) return;
   await bump(`game_end:${end}`);
   const host = isGameHostKind(details.host) ? details.host : null;
   const extras: Promise<void>[] = [];
   if (host) extras.push(bump(`game_end_host:${host}:${end}`));
+  if (isSetupSource(details.source)) extras.push(bump(`game_end_source:${details.source}:${end}`));
   if (isGameScreen(details.screen)) extras.push(bump(`game_end_screen:${details.screen}`));
   if (end !== "ended_early") {
     await Promise.all(extras);
@@ -1087,13 +1075,22 @@ export function recordFirstClip(path: FirstClipPath, outcome: FirstClipOutcome):
  *
  * The round is `countRoundsPlayed`'s figure at the moment of leaving, the
  * same arithmetic as the end beacon, so the two histograms can be read
- * against each other row for row. The host band is written only when the
- * page sent a kind, for the reason `recordGameEnd` gives.
+ * against each other row for row. The host band and the source band
+ * (`game_left_source:<source>:<band>`) are each written only when the page
+ * sent one, for the reason `recordGameEnd` gives.
  */
-export async function recordGameLeft(roundsPlayed: number, host?: GameHostKind): Promise<void> {
+export async function recordGameLeft(
+  roundsPlayed: number,
+  host?: GameHostKind,
+  source?: SetupSource
+): Promise<void> {
   const round = clampRound(roundsPlayed);
   await bump(`game_left_round:${round}`);
-  if (isGameHostKind(host)) await bump(`game_left_host:${host}:${earlyEndBand(round)}`);
+  const band = earlyEndBand(round);
+  await Promise.all([
+    isGameHostKind(host) ? bump(`game_left_host:${host}:${band}`) : undefined,
+    isSetupSource(source) ? bump(`game_left_source:${source}:${band}`) : undefined,
+  ]);
 }
 
 /** A tap on the Game Over screen. See `GameOverTap`. */

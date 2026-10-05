@@ -254,8 +254,13 @@ describe("the setup source follows the link into the field", () => {
     expect(body).toMatch(/onPick=\{\(playlist\) => pickPlaylist\(playlist\.id, "starter"\)\}/);
   });
 
-  it("is derived once, where the game is counted, and reaches both copies", () => {
-    expect(body).toMatch(/const setupSource: SetupSource = mixed \? "mixed" : linkSource;/);
+  it("is derived once, and reaches the start beacon, GA4 and the stored game", () => {
+    // One rule, so the start and the end beacons cannot file one game under
+    // two sources: the payload carries it to the game page's end and leave.
+    expect(body).toMatch(/return mixed \? "mixed" : linkSource;/);
+    expect(body).toMatch(/const setupSource = setupSourceFor\(Boolean\(mixed\)\);/);
+    expect(body.match(/setupSource: setupSourceFor\(true\),/g) ?? []).toHaveLength(2);
+    expect(body.match(/setupSource: setupSourceFor\(false\),/g) ?? []).toHaveLength(1);
     expect(body).toMatch(/reportGameStart\(hostGameIndex, mixed, setupSource\);/);
     expect(body).toMatch(/setup_source: setupSource,/);
     // The three callers still say only which mixed route it was.

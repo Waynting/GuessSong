@@ -11,6 +11,7 @@ import {
   GAME_STORAGE_KEY,
 } from "@/lib/game-session";
 import type { Track } from "@/types";
+import { SETUP_SOURCES } from "@/lib/setup-source";
 
 function makeTrack(overrides: Partial<Track> = {}): Track {
   return {
@@ -179,6 +180,30 @@ describe("parseGamePayload", () => {
     );
     expect(parsed!.playlistSource).toBe("own");
     expect(parsed!.mode).toBe("party");
+  });
+
+  it("round-trips the setup source, so the end and leave beacons can carry it", () => {
+    for (const setupSource of SETUP_SOURCES) {
+      const payload = buildGamePayload({
+        tracks: [makeTrack()],
+        players: [],
+        playlistName: "P",
+        clipDuration: 15,
+        playlistSource: setupSource === "mixed" ? "mixed" : "own",
+        mode: "party",
+        setupSource,
+      });
+      expect(parseGamePayload(JSON.stringify(payload))!.setupSource).toBe(setupSource);
+    }
+  });
+
+  it("leaves the setup source absent, never guessed, when it is missing or unknown", () => {
+    // A guess would be counted as a real source; a game stored before the
+    // field existed has to keep playing and report nothing.
+    expect(parseGamePayload(JSON.stringify({ tracks: [] }))).not.toHaveProperty("setupSource");
+    expect(
+      parseGamePayload(JSON.stringify({ tracks: [], setupSource: "scanned" }))
+    ).not.toHaveProperty("setupSource");
   });
 
   it("parses explicit mixed playlistSource", () => {
