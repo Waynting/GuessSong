@@ -205,6 +205,10 @@ describe("robots", () => {
     for (const path of ["/buzz", "/j", "/r", "/api/"]) {
       expect(disallowed, `robots.ts does not disallow ${path}`).toContain(`"${path}"`);
     }
+    // And the two game screens, which exist only with a payload in the tab.
+    for (const path of ["/game", "/order"]) {
+      expect(disallowed, `robots.ts does not disallow ${path}`).toContain(`"${path}"`);
+    }
   });
 
   it("lets the unfurlers read the quiz link: /q is noindex, never disallowed", () => {

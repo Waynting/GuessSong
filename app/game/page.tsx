@@ -354,6 +354,12 @@ export default function GamePage() {
     // so the throw took the whole page down. See lib/game-storage.ts.
     const data = loadGame();
     if (!data || data.tracks.length === 0) { router.push("/"); return; }
+    // A "put them in order" game has its own page and no audio. It must
+    // leave here before `setTracks`, because the prefetch effect below keys
+    // on `tracks.length` and would spend a batch of preview lookups on a
+    // game that will never press Play — the one cost that mode exists to
+    // avoid. `replace`, so Back does not land on this page again.
+    if (data.mode === "order") { router.replace("/order"); return; }
     setTracks(data.tracks);
     setPool(data.tracks);
     // The start on `/` bumped the count before it navigated here, so the

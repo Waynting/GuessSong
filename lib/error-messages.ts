@@ -114,6 +114,7 @@ export type AppErrorCode =
   | "players_required"
   | "players_duplicate_name"
   | "mixed_min_contributors"
+  | "order_too_few_dated"
   // The browser itself, not the playlist — see the note above their entries
   | "storage_blocked"
   | "client_error"
@@ -519,6 +520,14 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   mixed_min_contributors: {
     en: "Add at least {count} players' playlists to start.",
     zh: "至少要有 {count} 個人的歌單才能開始。",
+  },
+  // "Put them in order" needs cards with different release years. Not a
+  // playlist refusal — the same link plays the guess game fine — so it stays
+  // out of isDeterministicPlaylistFailure and of lib/playlist-help.ts, and
+  // it names the two ways out rather than the link.
+  order_too_few_dated: {
+    en: "This playlist doesn't have enough songs with different release years to put in order. Pick one that spans a few years, or switch back to Guess the song.",
+    zh: "這份歌單裡發行年份不同的歌太少，排不出先後順序。換一份橫跨幾年的歌單，或改回「猜歌」玩法。",
   },
 
   /*

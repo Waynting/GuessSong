@@ -80,6 +80,16 @@ GAME  app/game/page.tsx
                           finished
 ```
 
+**The other game, `app/order/page.tsx`, takes the same payload with
+`mode: "order"` and plays no audio at all**: `lib/order-game.ts` deals the
+stored list into rounds of four cards with distinct release years, the host
+reveals the years and awards the points. The guess page sends such a payload
+to `/order` before it reads the tracks, so the preview prefetch never runs
+for it; the order page never imports `lib/preview-client.ts`. The two share
+everything that is not about audio — the storage, the beacons, the Game Over
+rule, the result card — and duplicate the chrome.
+[D12](decisions.md#d12--put-them-in-order-is-a-second-page-a-gamemode-and-a-date-field-the-cache-was-not-versioned-for).
+
 The state machine lives entirely in React state. A reload loses the game, which
 is why `sessionStorage` holds the payload but not the score: recovering a
 half-played party would need a server-side game record, and that is the first
@@ -200,7 +210,7 @@ page is gated on "a round has resolved" rather than "the game ended" — see
 | Where | What | Lifetime |
 |---|---|---|
 | React state | the running game — phase, scores, current track | until reload |
-| `sessionStorage` | the game payload handed from `/` to `/game` | the tab |
+| `sessionStorage` | the game payload handed from `/` to `/game` or `/order` | the tab |
 | `localStorage` | player id, host name, host game count, last loop ref, last quiz code + host tokens, a taker's quiz in progress (answers, the verdicts already shown, hints charged) and the submission id a resend replays | the device, until ITP clears it |
 | Upstash KV | rooms, rate limits, playlist + preview caches, loop counters | 30s – 1 year, always a TTL |
 | Upstash KV | a quiz: its questions (answer key included) and its board, one hash | 7 days |

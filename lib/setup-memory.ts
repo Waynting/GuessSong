@@ -16,9 +16,10 @@
  * Two keys, both in `localStorage`, both per device and never per person:
  *
  *   - **the last setup** — the link and name of the last single playlist that
- *     loaded, the player names, clip length, song count, and the three
- *     switches a host would otherwise have to find again (mode, Mixed's
- *     sub-mode, the buzzer) plus Mixed's songs-per-player.
+ *     loaded, the player names, clip length, song count, the play style
+ *     (guess the song, or put them in order) and the three switches a host
+ *     would otherwise have to find again (mode, Mixed's sub-mode, the
+ *     buzzer) plus Mixed's songs-per-player.
  *   - **recent playlists** — the last five that loaded, newest first.
  *
  * Written when a game actually starts — the three `recordHostedStart` call
@@ -64,6 +65,7 @@ import {
   type SongCountState,
 } from "@/lib/song-count";
 import { SETUP_MODES, type SetupMode } from "@/lib/start-status";
+import { DEFAULT_PLAY_STYLE, isPlayStyle, type PlayStyle } from "@/lib/order-game";
 import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
 
 export const SETUP_MEMORY_KEY = "guesssong_last_setup";
@@ -120,6 +122,8 @@ export interface RememberedSetup {
   mixedSubMode: MixedSubMode;
   sampledPerPlayer: number;
   buzzer: boolean;
+  /** Guess the song, or put them in order (`lib/order-game.ts`). */
+  playStyle: PlayStyle;
 }
 
 export interface RecentPlaylist {
@@ -245,6 +249,7 @@ export function normalizeSetup(data: Record<string, unknown>): RememberedSetup {
     // Strictly `true`. "true", 1 and {} are all truthy, and the buzzer is the
     // one switch here that hides part of the form when it is on.
     buzzer: data.buzzer === true,
+    playStyle: isPlayStyle(data.playStyle) ? data.playStyle : DEFAULT_PLAY_STYLE,
   };
 }
 
@@ -385,6 +390,7 @@ export interface SetupForm {
   songCount: SongCountState;
   sampledPerPlayer: number;
   buzzer: boolean;
+  playStyle: PlayStyle;
 }
 
 /**
@@ -420,6 +426,7 @@ export function initialSetup(
   if (arrival.requestedMode === "mixed") setupMode = "mixed";
 
   const restoredUrl = remembered?.playlistUrl ?? "";
+  const playStyle = remembered?.playStyle ?? DEFAULT_PLAY_STYLE;
   return {
     setupMode,
     mixedSubMode: remembered?.mixedSubMode ?? "room",
@@ -431,7 +438,12 @@ export function initialSetup(
       ? songCountStateOf(remembered.songCount)
       : DEFAULT_SONG_COUNT_STATE,
     sampledPerPlayer: remembered?.sampledPerPlayer ?? DEFAULT_SAMPLED_PER_PLAYER,
-    buzzer: remembered?.buzzer ?? false,
+    // The buzzer has no round to buzz in when the cards are the game, and
+    // the page hides its toggle in that style — so a record that says both
+    // (one deploy's "order" over an older "buzzer: true") restores a form
+    // whose roster is hidden behind a room nothing can open. The style wins.
+    buzzer: playStyle === "order" ? false : (remembered?.buzzer ?? false),
+    playStyle,
   };
 }
 

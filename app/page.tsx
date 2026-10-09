@@ -61,7 +61,14 @@ import {
 } from "@/components/setup-assist";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { ServiceNotice } from "@/components/service-notice";
-import { buildGamePayload, findDuplicateName } from "@/lib/game-session";
+import { buildGamePayload, findDuplicateName, type GameMode } from "@/lib/game-session";
+import {
+  DEFAULT_PLAY_STYLE,
+  buildOrderRounds,
+  orderSummary,
+  usableOrderTracks,
+  type PlayStyle,
+} from "@/lib/order-game";
 import { saveGame } from "@/lib/game-storage";
 import { isBuzzerConfigured } from "@/lib/buzzer-client";
 import type { OpenRoom } from "@/lib/room-client";
@@ -200,6 +207,11 @@ export default function SetupPage() {
   // Buzzer Mode is opt-in per game, and only offered when the deployment has a
   // Worker to talk to — no point showing a toggle that can only fail.
   const [buzzerEnabled, setBuzzerEnabled] = useState(false);
+  // How tonight is played: guess the song from a clip, or put four songs in
+  // order of release year with no audio at all. The second has its own page
+  // (`/order`) and no use for the clip length or the buzzer, both of which
+  // the form hides while it is picked. The rules are in lib/order-game.ts.
+  const [playStyle, setPlayStyle] = useState<PlayStyle>(DEFAULT_PLAY_STYLE);
   // One room, opened BEFORE the game starts so players have time to scan in,
   // and carrying whichever backends the chosen modes need. Null until the host
   // opens it, and never opened at all for the flows that need no phones.
@@ -275,6 +287,25 @@ export default function SetupPage() {
   const collectsPlaylists = setupMode === "mixed" && mixedSubMode === "room";
   const needsRoom = collectsPlaylists || buzzerEnabled;
 
+  const isOrder = playStyle === "order";
+  /** The stored payload's mode for the game about to start, and the page that plays it. */
+  const gameMode = (hasBuzzerRoom: boolean): GameMode =>
+    isOrder ? "order" : hasBuzzerRoom ? "buzzer" : "party";
+  const gameHref = isOrder ? "/order" : "/game";
+
+  /**
+   * The one way the play style changes. Picking the order game turns the
+   * buzzer off and drops its room: that page has no round to buzz in, and the
+   * toggle that would turn it back off is hidden in this style.
+   */
+  function choosePlayStyle(style: PlayStyle) {
+    setPlayStyle(style);
+    if (style === "order" && buzzerEnabled) {
+      setBuzzerEnabled(false);
+      resetRoom();
+    }
+  }
+
   function addMixedContribution(c: MixedContribution) {
     setMixedContributions((prev) => [...prev, c]);
   }
@@ -323,6 +354,7 @@ export default function SetupPage() {
     setClipDuration(form.clipDuration);
     setSongCount(form.songCount);
     setSampledPerPlayer(form.sampledPerPlayer);
+    setPlayStyle(form.playStyle);
     setBuzzerEnabled(form.buzzer && isBuzzerConfigured());
   }, []);
 
@@ -371,15 +403,22 @@ export default function SetupPage() {
       // Durable Object before the code was ever shown, so there was nothing for
       // a guest to race for. See lib/room-client.ts.
       const room = openedRoom.buzzer;
+      // The order game deals only songs with a release year. A pool without
+      // enough of them across different years is refused here, before
+      // anything is stored or counted and with the room still open.
+      const tracks = isOrder ? usableOrderTracks(data.tracks) : data.tracks;
+      if (isOrder && buildOrderRounds(tracks).rounds.length === 0) {
+        throw new AppError("order_too_few_dated");
+      }
 
       const payload = buildGamePayload({
-        tracks: data.tracks,
+        tracks,
         players: data.players.map((name) => ({ name, score: 0 })),
         playlistName: `${data.players.length}-Player Mix`,
         clipDuration,
-        totalTracks: data.tracks.length,
+        totalTracks: tracks.length,
         playlistSource: "mixed",
-        mode: room ? "buzzer" : "party",
+        mode: gameMode(Boolean(room)),
         setupSource: setupSourceFor(true),
         mixedPlaylistMeta: {
           contributorNames: data.players,
@@ -393,10 +432,10 @@ export default function SetupPage() {
       trackEvent("game_started", {
         player_count: data.players.length,
         clip_duration: clipDuration,
-        song_count: data.tracks.length,
+        song_count: tracks.length,
         playlist_source: "mixed",
-        game_mode: room ? "buzzer" : "party",
-        ...recordHostedStart("room"),
+        game_mode: gameMode(Boolean(room)),
+        ...recordHostedStart("room", gameMode(Boolean(room))),
       });
       trackEvent("room_started", {
         contributor_count: data.players.length,
@@ -410,8 +449,9 @@ export default function SetupPage() {
         sampledPerPlayer,
         clipDuration,
         buzzer: Boolean(room),
+        playStyle,
       });
-      router.push("/game");
+      router.push(gameHref);
     } catch (e: unknown) {
       // The last step of the room funnel, and the one where a full room can still
       // end in no game at all — every playlist submitted and the pool refused.
@@ -503,11 +543,15 @@ export default function SetupPage() {
    * The setup source is derived here rather than passed, so the three callers
    * cannot disagree about it: a mixed game is `mixed` because it has no single
    * link, and every other game is however the link in the field got there.
+   *
+   * `mode` is which game is starting — the payload's `GameMode` — and is
+   * passed rather than read from state so the beacon and the payload cannot
+   * disagree; it is what lets `npm run stats` split the three games apart.
    */
-  function recordHostedStart(mixed?: MixedSubMode) {
+  function recordHostedStart(mixed: MixedSubMode | undefined, mode: GameMode) {
     const hostGameIndex = bumpHostGameCount();
     const setupSource = setupSourceFor(Boolean(mixed));
-    reportGameStart(hostGameIndex, mixed, setupSource);
+    reportGameStart(hostGameIndex, mixed, setupSource, mode);
     const recovery = noteStart(recoveryRef.current, setupSource);
     recoveryRef.current = recovery.state;
     if (recovery.report) reportRefusalRecovered(recovery.report.topic, recovery.report.via);
@@ -587,8 +631,15 @@ export default function SetupPage() {
       if (!res.ok) throw apiError(data, "playlist_load_failed");
 
       const shuffled = shuffle(data.tracks as Track[]);
+      // The order game deals only songs with a release year, so the count is
+      // taken from those — and a playlist without enough of them across
+      // different years is refused before anything is stored or counted.
+      const eligible = isOrder ? usableOrderTracks(shuffled) : shuffled;
       const limited =
-        songCount.count === "all" ? shuffled : shuffled.slice(0, songCount.count);
+        songCount.count === "all" ? eligible : eligible.slice(0, songCount.count);
+      if (isOrder && buildOrderRounds(limited).rounds.length === 0) {
+        throw new AppError("order_too_few_dated");
+      }
 
       // Opened from the room step before we got here, so players have already
       // had time to scan in. `undefined` when Buzzer Mode is off.
@@ -606,7 +657,7 @@ export default function SetupPage() {
         clipDuration,
         totalTracks: data.totalTracks,
         playlistSource: "own",
-        mode: room ? "buzzer" : "party",
+        mode: gameMode(Boolean(room)),
         setupSource: setupSourceFor(false),
         ...(room ? { buzzerRoom: room } : {}),
       });
@@ -621,8 +672,8 @@ export default function SetupPage() {
         clip_duration: clipDuration,
         song_count: limited.length,
         playlist_source: "own",
-        game_mode: room ? "buzzer" : "party",
-        ...recordHostedStart(),
+        game_mode: gameMode(Boolean(room)),
+        ...recordHostedStart(undefined, gameMode(Boolean(room))),
       });
       // Remembered here — once the playlist has loaded and the game is stored
       // — and nowhere earlier: a link is worth keeping when it has worked, and
@@ -638,9 +689,10 @@ export default function SetupPage() {
         clipDuration,
         songCount: songCount.count,
         buzzer: Boolean(room),
+        playStyle,
       });
       rememberPlaylist(playlistUrl, data.name);
-      router.push("/game");
+      router.push(gameHref);
     } catch (e: unknown) {
       const failed = failureOf(e, locale, "playlist_load_failed");
       // Only failures the URL itself determines are remembered. A throttled or
@@ -744,15 +796,21 @@ export default function SetupPage() {
       // Pass-the-phone collects its players here on this screen, so the only
       // reason it opens a room at all is the buzzer.
       const room = buzzerEnabled ? openedRoom?.buzzer : undefined;
+      // The order game's two rules again — dated songs only, and enough
+      // different years to deal a round — applied to the pool.
+      const tracks = isOrder ? usableOrderTracks(pooled) : pooled;
+      if (isOrder && buildOrderRounds(tracks).rounds.length === 0) {
+        throw new AppError("order_too_few_dated");
+      }
 
       const payload = buildGamePayload({
-        tracks: pooled,
+        tracks,
         players: mixedContributions.map((c) => ({ name: c.name, score: 0 })),
         playlistName: `${mixedContributions.length}-Player Mix`,
         clipDuration,
-        totalTracks: pooled.length,
+        totalTracks: tracks.length,
         playlistSource: "mixed",
-        mode: room ? "buzzer" : "party",
+        mode: gameMode(Boolean(room)),
         setupSource: setupSourceFor(true),
         mixedPlaylistMeta: {
           contributorNames: mixedContributions.map((c) => c.name),
@@ -766,10 +824,10 @@ export default function SetupPage() {
       trackEvent("game_started", {
         player_count: mixedContributions.length,
         clip_duration: clipDuration,
-        song_count: pooled.length,
+        song_count: tracks.length,
         playlist_source: "mixed",
-        game_mode: room ? "buzzer" : "party",
-        ...recordHostedStart("phone"),
+        game_mode: gameMode(Boolean(room)),
+        ...recordHostedStart("phone", gameMode(Boolean(room))),
       });
       trackEvent("mixed_pool_built", {
         contributor_count: mixedContributions.length,
@@ -786,8 +844,9 @@ export default function SetupPage() {
         sampledPerPlayer,
         clipDuration,
         buzzer: Boolean(room),
+        playStyle,
       });
-      router.push("/game");
+      router.push(gameHref);
     } catch (e: unknown) {
       const failed = failureOf(e, locale, "playlist_load_failed");
       // `allFailuresFinal` stays false for the throttled rethrow above and for
@@ -1067,6 +1126,37 @@ export default function SetupPage() {
                   </div>
             )}
 
+            {/* How to play — the one choice that changes which page the game
+                is on. Two pills, in both modes, and not behind "Change ▾":
+                the order game is the first way to play that needs no audio,
+                and a choice hidden in the settings is a choice nobody finds. */}
+            <div>
+              <p className="section-label">How to play</p>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className={`pill${!isOrder ? " active" : ""}`}
+                  onClick={() => choosePlayStyle("guess")}
+                  aria-pressed={!isOrder}
+                >
+                  Guess the song
+                </button>
+                <button
+                  type="button"
+                  className={`pill${isOrder ? " active" : ""}`}
+                  onClick={() => choosePlayStyle("order")}
+                  aria-pressed={isOrder}
+                >
+                  Put them in order
+                </button>
+              </div>
+              <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                {isOrder
+                  ? "Four songs at a time, oldest to newest. No audio, so it works anywhere."
+                  : "Play a clip, everyone shouts the title, you award the points."}
+              </p>
+            </div>
+
             {/* Settings — clip length, song count and the buzzer, behind one
                 line that reads the current values. Everything here has a
                 default, and the things a host must decide (playlist, players)
@@ -1079,13 +1169,17 @@ export default function SetupPage() {
               <div className="settings-row">
                 <p className="settings-summary">
                   {[
-                    `${clipDuration}s clips`,
+                    isOrder ? "Order by year" : `${clipDuration}s clips`,
                     setupMode === "mixed"
                       ? `${sampledPerPlayer} songs per player`
+                      : isOrder
+                      ? orderSummary(songCount.count)
                       : songCount.count === "all"
                       ? "All songs"
                       : `${songCount.count} songs`,
-                    ...(isBuzzerConfigured() ? [`Buzzer ${buzzerEnabled ? "on" : "off"}`] : []),
+                    ...(isBuzzerConfigured() && !isOrder
+                      ? [`Buzzer ${buzzerEnabled ? "on" : "off"}`]
+                      : []),
                   ].join(" · ")}
                 </p>
                 <button
@@ -1104,21 +1198,23 @@ export default function SetupPage() {
                   id="setup-settings"
                   style={{ display: "flex", flexDirection: "column", gap: "20px", marginTop: "16px" }}
                 >
-                  {/* Clip Duration */}
-                  <div>
-                    <p className="section-label">Clip Duration</p>
-                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                      {CLIP_DURATIONS.map((d) => (
-                        <button
-                          key={d}
-                          className={`pill${clipDuration === d ? " active" : ""}`}
-                          onClick={() => setClipDuration(d)}
-                        >
-                          {d}s
-                        </button>
-                      ))}
+                  {/* Clip Duration — the guess game's; the order game plays nothing */}
+                  {!isOrder && (
+                    <div>
+                      <p className="section-label">Clip Duration</p>
+                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                        {CLIP_DURATIONS.map((d) => (
+                          <button
+                            key={d}
+                            className={`pill${clipDuration === d ? " active" : ""}`}
+                            onClick={() => setClipDuration(d)}
+                          >
+                            {d}s
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Number of Songs — single-playlist mode only; mixed mode uses per-player sampling instead */}
                   {setupMode === "single" && (
@@ -1175,8 +1271,9 @@ export default function SetupPage() {
                     </div>
                   )}
 
-                  {/* Buzzer Mode — the reason the host gets to play too. */}
-                  {isBuzzerConfigured() && (
+                  {/* Buzzer Mode — the reason the host gets to play too. Not
+                      offered with the order game, which has no round to buzz in. */}
+                  {isBuzzerConfigured() && !isOrder && (
                     <div>
                       <p className="section-label">Buzzer Mode</p>
                       {/* Label says what the tap does, colour says what the state is.
@@ -1317,6 +1414,11 @@ export default function SetupPage() {
               Spotify playlist, and the host plays a short clip while everyone races to
               name the song. No login and no accounts — one screen and a room full of
               people is all you need.
+            </p>
+            <p className="seo-p" style={{ marginTop: "12px" }}>
+              Too loud for clips? Pick <strong>Put them in order</strong> instead: each
+              round shows four songs from the playlist and the room puts them in order
+              of release year, oldest first, with nothing played at all.
             </p>
             <p style={{ marginTop: "14px" }}>
               <a href="/about" className="link-btn">See how to play →</a>

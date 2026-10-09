@@ -54,6 +54,29 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.21.0",
+    date: "2026-10-09",
+    headline: "A new way to play: put four songs in order of release year, no audio needed.",
+    headlineZh: "新玩法：把四首歌依發行年份排出先後順序，完全不用播音樂。",
+    changes: [
+      {
+        kind: "new",
+        text: "Put them in order is a second way to play any playlist. Each round shows four songs — title, artist, cover — and the room has to put them in order from oldest to newest. The host reveals the years, gives 3 points to whoever called the whole order and 1 for naming the oldest song. Nothing is played, so it works in a loud bar, on a bad connection, or when a clip won't load. Pick it under How to play on the setup page.",
+        textZh: "「排順序」是任何歌單的第二種玩法。每回合顯示四首歌的歌名、歌手和封面，大家要把它們從最舊排到最新。主持人揭曉年份後，整個順序都說對的人得 3 分，說中最舊那首的得 1 分。全程不播音樂，所以在吵雜的酒吧、網路不好的地方，或片段載不出來的時候都能玩。在設定頁的「怎麼玩」選它。",
+      },
+      {
+        kind: "new",
+        text: "It works with Mixed Playlist Mode too: everyone brings a playlist, and the reveal says whose playlist each song came from.",
+        textZh: "混合歌單模式也能玩：每個人帶一份歌單，揭曉時會顯示每首歌來自誰的歌單。",
+      },
+      {
+        kind: "better",
+        text: "The setup page remembers which way you played last time, alongside the playlist and the names.",
+        textZh: "設定頁現在會連同歌單和名字一起記住你上次玩的是哪種玩法。",
+      },
+    ],
+  },
+  {
     version: "1.20.1",
     date: "2026-10-09",
     headline: "Groundwork for a new way to play: every song now carries its release year.",

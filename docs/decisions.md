@@ -395,6 +395,56 @@ load should stay on Vercel regardless.
 
 ---
 
+## D12 — "Put them in order" is a second page, a `GameMode`, and a date field the cache was not versioned for
+
+**Decided:** 2026-10-09, with the mode (1.21.0) and the field it reads (1.20.1).
+
+The first way to play that fetches no clip: four songs from the playlist as
+cards, the room puts them in order of release year, the host reveals and
+awards. `lib/order-game.ts` has the rules, `app/order/page.tsx` the screen.
+
+**Rejected:**
+
+- *A branch inside `app/game/page.tsx`.* That page is 2,700 lines around one
+  `<audio>` element — a round token, a request ledger for refused `play()`s,
+  a repair path, a batch prefetch keyed on `tracks.length` — every piece of
+  it pinned by a test that reads the file. A branch would have had to prove
+  on every render that none of it ran; a page that never imports
+  `lib/preview-client.ts` proves it by construction, and a one-line test
+  holds it. Cost accepted: the top bar, scoreboard and Game Over overlay are
+  duplicated for now.
+- *Ordering by playlist position or popularity.* Position is known to the
+  playlist's owner and nobody else; popularity is a Spotify-wide figure that
+  moves weekly, so last month's answer is wrong this month. Release year is
+  the one attribute a room can reason about from a title and a cover.
+- *Pass-the-phone with drag-to-order and automatic grading.* Real per-player
+  input, but every round becomes a minute of one person holding the screen,
+  and the point of the mode is that the whole room is looking at the same
+  four cards. The host stays the judge, as in the guess game.
+- *Bumping `CACHE_VERSION` for the new field.* `releaseDate` is an optional
+  addition, and a bump turns every warm playlist key into a miss at once:
+  ~2,900 extra Spotify loads a day against a ceiling of 2,000 that the real
+  misses already half fill. The field shipped as 1.20.1, the mode as 1.21.0
+  at least a day later, and the cache upgraded itself through `HIT_TTL_SECONDS`
+  turnover. A consumer that finds no date treats the track as undealable.
+- *Ties broken by month or by a hidden rule.* Two 2019 songs have no right
+  order at year level, and a point taken away for a reason nobody can see is
+  worse than a shorter game. Every card in a round has a distinct year; a
+  playlist that cannot make one is refused on the setup page.
+
+**Why a third `GameMode` and not a flag:** the stored payload has one field
+that decides which page plays it, and `parseGamePayload`'s allow-list
+fallback means a rollback mid-party reads `order` as `party` and lands on
+the guess game instead of failing to parse — the designed degradation.
+
+**Would reopen if:** `order_round:exact` dominates (four cards too easy —
+raise `ORDER_ROUND_SIZE` or add a hard variant), or `order_round:none` does
+(compilation dates — request `album.album_type`); or if `game_end_mode:order`
+shows the mode played out at a rate that justifies pulling the shared game
+chrome out of the guess page.
+
+---
+
 ## Rejected and still rejected
 
 Short entries, so they are not re-proposed as new ideas.

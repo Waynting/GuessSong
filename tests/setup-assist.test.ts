@@ -101,7 +101,11 @@ describe("the page remembers a game when it starts, and at no other time", () =>
   it("writes the setup on each of the three hosted starts, after the game is stored", () => {
     const starts = positions(body, "...recordHostedStart(");
     const writes = positions(body, "rememberSetup({");
-    const leaves = positions(body, 'router.push("/game")');
+    // `gameHref` is /game or /order by the play style; neither spelling may
+    // appear as a literal, or one path would take an order game to the clips.
+    const leaves = positions(body, "router.push(gameHref)");
+    expect(body).not.toContain('router.push("/game")');
+    expect(body).not.toContain('router.push("/order")');
     const stored = positions(body, "if (!saveGame(payload)) throw");
     expect(starts).toHaveLength(3);
     expect(writes).toHaveLength(3);
@@ -261,18 +265,21 @@ describe("the setup source follows the link into the field", () => {
     expect(body).toMatch(/const setupSource = setupSourceFor\(Boolean\(mixed\)\);/);
     expect(body.match(/setupSource: setupSourceFor\(true\),/g) ?? []).toHaveLength(2);
     expect(body.match(/setupSource: setupSourceFor\(false\),/g) ?? []).toHaveLength(1);
-    expect(body).toMatch(/reportGameStart\(hostGameIndex, mixed, setupSource\);/);
+    expect(body).toMatch(/reportGameStart\(hostGameIndex, mixed, setupSource, mode\);/);
     expect(body).toMatch(/setup_source: setupSource,/);
-    // The three callers still say only which mixed route it was.
-    expect(body).toMatch(/\.\.\.recordHostedStart\("room"\)/);
-    expect(body).toMatch(/\.\.\.recordHostedStart\("phone"\)/);
-    expect(body).toMatch(/\.\.\.recordHostedStart\(\)/);
+    // The three callers still say only which mixed route it was — and,
+    // since 1.21.0, which game: the mode the payload is stored with, passed
+    // rather than read, so the beacon and the payload cannot disagree.
+    expect(body).toMatch(/\.\.\.recordHostedStart\("room", gameMode\(Boolean\(room\)\)\)/);
+    expect(body).toMatch(/\.\.\.recordHostedStart\("phone", gameMode\(Boolean\(room\)\)\)/);
+    expect(body).toMatch(/\.\.\.recordHostedStart\(undefined, gameMode\(Boolean\(room\)\)\)/);
+    expect(body).not.toMatch(/\.\.\.recordHostedStart\(\)/);
   });
 
   it("types the GA4 param as the same closed union, and the route hands the source on", () => {
     expect(code(read("lib/analytics.ts"))).toMatch(/setup_source\?: SetupSource;/);
     expect(code(read("app/api/pulse/route.ts"))).toMatch(
-      /recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source\)/
+      /recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source, event\.mode\)/
     );
   });
 });

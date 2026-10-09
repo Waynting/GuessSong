@@ -215,7 +215,20 @@ export type AnalyticsEvent =
         rounds_played: number;
         host_kind: "first" | "repeat" | "unknown";
         via: "unload" | "navigation";
+        /** Which game it was. The KV twin is `game_left_mode:<mode>:<band>`. */
+        game_mode?: GameMode;
       };
+    }
+  | {
+      /**
+       * A "put them in order" round closed after its reveal, and how the host
+       * scored it: `exact` is the whole order called, `partial` the oldest
+       * song alone, `none` nobody. The KV twin is `order_round:<verdict>`
+       * (`recordOrderRound` in lib/loop-stats.ts), the difficulty gauge for
+       * `ORDER_ROUND_SIZE`; this copy is here to be cut by `round_index`.
+       */
+      name: "order_round_resolved";
+      params: { round_index: number; verdict: "exact" | "partial" | "none" };
     }
   | {
       /**

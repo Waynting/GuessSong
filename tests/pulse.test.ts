@@ -15,6 +15,8 @@ import {
   SETUP_SOURCES,
   QUIZ_SHARE_BYS,
   QUIZ_SHARE_OUTCOMES,
+  GAME_MODES,
+  ORDER_VERDICTS,
 } from "@/lib/loop-stats";
 import { LOOP_SURFACES } from "@/lib/loop-links";
 
@@ -188,6 +190,90 @@ describe("parsePulse — the setup source", () => {
       hostGameIndex: Number.MAX_SAFE_INTEGER,
       mixed: "phone",
       source: longest,
+    });
+    expect(body.length).toBeLessThan(512);
+  });
+});
+
+describe("parsePulse — the game mode", () => {
+  it("carries a known mode on the start, the end and the leave", () => {
+    for (const mode of GAME_MODES) {
+      expect(parsePulse({ kind: "game_started", hostGameIndex: 1, mode })).toEqual({
+        kind: "game_started",
+        hostGameIndex: 1,
+        mode,
+      });
+      expect(
+        parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 4, mode })
+      ).toEqual({ kind: "game_finished", end: "played_out", roundsPlayed: 4, mode });
+      expect(parsePulse({ kind: "game_left", roundsPlayed: 2, mode })).toEqual({
+        kind: "game_left",
+        roundsPlayed: 2,
+        mode,
+      });
+    }
+    expect(GAME_MODES).toContain("order");
+  });
+
+  it("parses a body with no mode exactly as it did before there was one", () => {
+    // Every page loaded before 1.21.0 sends this.
+    const parsed = parsePulse({ kind: "game_started", hostGameIndex: 1, source: "typed" });
+    expect(parsed).toEqual({ kind: "game_started", hostGameIndex: 1, source: "typed" });
+    expect(parsed && "mode" in parsed).toBe(false);
+  });
+
+  it("drops an undeclared mode rather than the game — `game_mode:${value}` is a key", () => {
+    for (const bad of ["Order", "timeline", "", "__proto__", 1, true, null, {}]) {
+      expect(parsePulse({ kind: "game_started", hostGameIndex: 1, mode: bad }), String(bad)).toEqual({
+        kind: "game_started",
+        hostGameIndex: 1,
+      });
+      expect(
+        parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: 1, mode: bad })
+      ).toEqual({ kind: "game_finished", end: "ended_early", roundsPlayed: 1 });
+      expect(parsePulse({ kind: "game_left", roundsPlayed: 1, mode: bad })).toEqual({
+        kind: "game_left",
+        roundsPlayed: 1,
+      });
+    }
+  });
+
+  it("judges the mode apart from the source and the sub-mode", () => {
+    expect(
+      parsePulse({ kind: "game_started", hostGameIndex: 1, mixed: "room", source: "mixed", mode: "order" })
+    ).toEqual({ kind: "game_started", hostGameIndex: 1, mixed: "room", source: "mixed", mode: "order" });
+    expect(
+      parsePulse({ kind: "game_started", hostGameIndex: 1, source: "scanned", mode: "party" })
+    ).toEqual({ kind: "game_started", hostGameIndex: 1, mode: "party" });
+  });
+});
+
+describe("parsePulse — an order round", () => {
+  it("accepts every declared verdict and nothing else", () => {
+    for (const verdict of ORDER_VERDICTS) {
+      expect(parsePulse({ kind: "order_round", verdict })).toEqual({ kind: "order_round", verdict });
+    }
+    for (const verdict of ["EXACT", "half", "", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "order_round", verdict })).toBeNull();
+    }
+  });
+
+  it("strips everything but the verdict", () => {
+    expect(
+      parsePulse({ kind: "order_round", verdict: "partial", round: 3, mode: "order", evil: 1 })
+    ).toEqual({ kind: "order_round", verdict: "partial" });
+  });
+
+  it("fits in the route's body limit with the mode on every event", () => {
+    const longest = [...GAME_MODES].sort((a, b) => b.length - a.length)[0];
+    const body = JSON.stringify({
+      kind: "game_finished",
+      end: "ended_early",
+      roundsPlayed: Number.MAX_SAFE_INTEGER,
+      host: "unknown",
+      screen: "desktop",
+      source: "restored",
+      mode: longest,
     });
     expect(body.length).toBeLessThan(512);
   });
@@ -507,6 +593,7 @@ describe("the route records every kind the parser accepts", () => {
     expect(kinds).toContain("quiz_copied");
     expect(kinds).toContain("quiz_shared");
     expect(kinds).toContain("quiz_social");
+    expect(kinds).toContain("order_round");
     expect(kinds.length).toBeGreaterThanOrEqual(5);
     const route = read("app/api/pulse/route.ts");
     for (const kind of kinds) {
@@ -521,6 +608,12 @@ describe("the route records every kind the parser accepts", () => {
     expect(route).toMatch(/case "quiz_copied":\s*await recordQuizCopy\(event\.by, event\.outcome\);/);
     expect(route).toMatch(/case "quiz_shared":\s*await recordQuizShare\(event\.by, event\.outcome\);/);
     expect(route).toMatch(/case "quiz_social":\s*await recordQuizSocial\(event\.by, event\.platform\);/);
+    expect(route).toMatch(/case "order_round":\s*await recordOrderRound\(event\.verdict\);/);
+    // The mode rides to all three game recorders, or the KV rows read as
+    // "no mode was ever sent".
+    expect(route).toMatch(/recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source, event\.mode\)/);
+    expect(route).toMatch(/recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode\)/);
+    expect(route).toMatch(/mode: event\.mode,\s*\}\);/);
   });
 
   it("has each button on the panel and the board report through its own function", () => {

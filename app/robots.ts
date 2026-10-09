@@ -22,7 +22,7 @@ export default function robots(): MetadataRoute.Robots {
       // whichever chat app a result card lands in, would report clicks nobody
       // made. Robots is a request rather than a guarantee, which is part of why
       // the counter is only ever read as a floor.
-      disallow: ["/game", "/api/", "/share", "/buzz", "/j", "/r"],
+      disallow: ["/game", "/order", "/api/", "/share", "/buzz", "/j", "/r"],
     },
     sitemap: `${BASE_URL}/sitemap.xml`,
   };

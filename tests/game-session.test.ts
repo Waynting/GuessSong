@@ -182,6 +182,16 @@ describe("parseGamePayload", () => {
     expect(parsed!.mode).toBe("party");
   });
 
+  it("round-trips the order mode, and no other spelling of it", () => {
+    // `/order` reads the mode to know the payload is its own; `/game` reads it
+    // to send such a payload away before the preview prefetch can run.
+    const parsed = parseGamePayload(JSON.stringify({ tracks: [], mode: "order" }));
+    expect(parsed!.mode).toBe("order");
+    for (const bad of ["Order", "timeline", "ORDER", "order "]) {
+      expect(parseGamePayload(JSON.stringify({ tracks: [], mode: bad }))!.mode, bad).toBe("party");
+    }
+  });
+
   it("round-trips the setup source, so the end and leave beacons can carry it", () => {
     for (const setupSource of SETUP_SOURCES) {
       const payload = buildGamePayload({

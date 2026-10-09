@@ -5,6 +5,95 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0] - 2026-10-09
+
+### Added
+
+- **"Put them in order" — the party game that plays no audio** (`/order`,
+  `app/order/page.tsx`, rules in `lib/order-game.ts`). Four songs from the
+  playlist face up — title, artist, cover, album — and the room puts them in
+  order of release year; the host reveals the years and awards
+  `ORDER_EXACT_POINTS` (3) to whoever called the whole order and
+  `ORDER_OLDEST_POINTS` (1) for the oldest song, one award of each per round.
+  The host is the judge, as in the guess game. It exists because every round
+  of the guess game is an upstream clip against two sources that throttle the
+  deployment as one client, 44% of games in the week to 2026-10-09 never
+  pressed Play, and the leave pile sat at rounds 1–2. Chosen under **How to
+  play** on `/`, remembered with the setup (`RememberedSetup.playStyle`,
+  `lib/setup-memory.ts`), and available on all three start paths — a single
+  playlist, a Mixed pool, and a Mixed QR room — because `lib/room.ts` stores
+  the whole stripped `Track` and the pool spreads it, so the date arrived with
+  1.20.1 and nothing on that path had to change. `GameMode` gains `"order"`;
+  the payload's track list is the deal's input, and `buildOrderRounds` is
+  deterministic over it, so a reload deals the same game.
+  - **Every card in a round has a different year, so a round has no ties.**
+    `releaseYear` reads the first four characters of `releaseDate` (Spotify's
+    precision is often `year`) and refuses anything before `ORDER_MIN_YEAR` or
+    after next year — Spotify sends `0000` for some local files. The deal
+    defers a same-year track to a later round (the `poolContributions`
+    pattern) and keeps a last round down to `ORDER_MIN_ROUND_SIZE` (2); what
+    could not be dealt is `leftover`, printed under the cards
+    (`orderLeftoverLine`). A list that deals nothing is refused on the setup
+    page as `order_too_few_dated` before anything is stored or counted — not
+    in `isDeterministicPlaylistFailure`, since the same link plays the guess
+    game.
+  - **The page never imports `lib/preview-client.ts` and has no `<audio>`.**
+    `tests/order-page.test.ts` reads the source for both, and
+    `app/game/page.tsx` sends an `order` payload to `/order` with `replace`
+    *before* `setTracks`, so its prefetch effect — keyed on `tracks.length` —
+    can never spend a batch on a game that will not press Play
+    (`tests/game-page.test.ts`). The clip-length pills and the buzzer toggle
+    are hidden in this style, and `initialSetup` refuses to restore the
+    buzzer beside it.
+  - **Counted on both sides, with a denominator.** `game_mode:<mode>` rides
+    on `game_started` for all three modes (until now KV could not tell a
+    buzzer game from a party), `game_end_mode:<mode>:<end>` and
+    `game_left_mode:<mode>:<band>` on the end and leave beacons, and
+    `order_round:<exact|partial|none>` once per revealed round
+    (`recordOrderRound`, `reportOrderRound`). `npm run stats` prints
+    `Played as`, a by-mode outcome table, an `Order rounds` line, and takes
+    order games out of the first-clip line's denominator. GA4 gets
+    `order_round_resolved` and `game_mode` on `game_left`. Every tail is
+    guarded in `parsePulse` and again in `lib/loop-stats.ts`.
+  - **The phone layout is the guess game's**: `minmax(0, 1fr)` columns, the
+    scoreboard as one sideways strip, every `:hover` behind `(hover: hover)`
+    with a `transition: none` `:active`, safe-area padding on the overlay,
+    the wake lock for the whole game, `pagehide` for the leave. The Game Over
+    screen is the same screen — QR on a desktop, the Mixed link on a phone,
+    Save Results with "Order by year" on the card. `tests/mobile.test.ts`
+    now scans this sheet too.
+
+### Changed
+
+- **The setup page has a "How to play" row** — two pills, visible in both
+  modes and not behind "Change ▾": a choice hidden in the settings is a
+  choice nobody finds. The settings line reads "Order by year · 20 songs
+  (5 rounds of 4)" in that style. The FAQ stays at four (the rich-result
+  rule); the mode is named in the prose under the form instead.
+- `recordHostedStart` takes the game's mode and passes it to the start
+  beacon, so the beacon and the stored payload cannot disagree about which
+  game started.
+
+### Known gaps
+
+- **The date is the album's.** A compilation or a remaster carries the
+  reissue's year, which is wrong in the direction this game notices. The
+  reveal shows the album name so the host can overrule; requesting
+  `album.album_type` and excluding `compilation` is the follow-up if
+  `order_round:none` piles up.
+- **Mixed's taste card is not offered from `/order`.** Its "most obscure"
+  award needs the guess game's per-round attribution history, which this
+  mode does not produce; Copy the Mix is there.
+- **Four cards is fixed.** `ORDER_ROUND_SIZE` moves on the `order_round`
+  distribution, not before it: a pile at `exact` is too easy, at `none` too
+  hard. Host-configurable sizes are a settings pill away once there is a
+  reason.
+- **The game chrome is duplicated**, not shared: the top bar, scoreboard,
+  Game Over overlay and their CSS exist in both pages. Extracting them from
+  the 2,700-line guess page is its own change.
+- **No `?mode=order` link.** Nothing links to the mode from outside yet; the
+  guides and `/about` still describe the guess game only.
+
 ## [1.20.1] - 2026-10-09
 
 ### Changed

@@ -32,8 +32,9 @@ There *is* server-side storage, but it is deliberately narrow: a KV layer (`lib/
 ### Data Flow
 
 1. **Setup** (`app/page.tsx`) — collects playlist URL, player names, clip duration (5–30s). On Start, calls `POST /api/playlist`, shuffles the returned tracks, writes the whole game payload to `sessionStorage` under the key `guesssong_game`, then navigates to `/game`.
-2. **Game** (`app/game/page.tsx`, ~1200 lines, the heart of the app) — reads `guesssong_game` from sessionStorage on mount (redirects to `/` if absent) and runs a phase state machine:
+2. **Game** (`app/game/page.tsx`, ~2700 lines, the heart of the app) — reads `guesssong_game` from sessionStorage on mount (redirects to `/` if absent, and to `/order` if the payload's mode is `order`) and runs a phase state machine:
    `waiting → playing → guessing → revealed → (next track | finished)`
+   **Order** (`app/order/page.tsx`) is the other game on the same payload: four cards, the room puts them in release-year order, the host reveals and awards. It plays no audio — see "Put them in order plays no audio" below.
 3. **Audio previews** — Spotify deprecated `preview_url` (Nov 2024) and now returns `null` for *every* track on Client Credentials — measured 0/20 across four markets, which is why `Track` carries no `previewUrl` field at all. Every clip the game plays comes from iTunes or Deezer, resolved through `lib/preview-client.ts`. On mount it prefetches the whole game with one `POST /api/preview/batch`; anything that comes back unresolved falls back to `GET /api/preview` lazily, at the moment the host presses Play. Both search the **iTunes Search API** first and fall back to **Deezer**. Settled results are cached per track id in a ref (`previewCache`); tracks with no clip anywhere show a "no audio" state.
 
 ### API Routes (the only server code)
@@ -149,7 +150,7 @@ Positive entries are held a year, because a recording does not change. What does
 
 ### Scoring
 
-The host is the judge — there is no automated answer checking. Correct song guess = host taps the player → **+3 pts**; album name = **+1 pt**. One award of each type per round, guarded by `pointsAwarded` / `albumPointsAwarded` flags.
+The host is the judge — there is no automated answer checking. Correct song guess = host taps the player → **+3 pts**; album name = **+1 pt**. One award of each type per round, guarded by `pointsAwarded` / `albumPointsAwarded` flags. The order game mirrors it: the whole order called → `ORDER_EXACT_POINTS` (3), the oldest song alone → `ORDER_OLDEST_POINTS` (1), one of each per round, the winner's name doubling as the flag.
 
 ### SEO / Metadata
 
@@ -373,6 +374,58 @@ Five things in that path are easy to undo by accident:
 
 Every surface name is declared once in `lib/loop-links.ts` and derived from there by the link, the analytics param, and the server-side validator. Hand-syncing those three fails silently: a stale validator still redirects, the counter just stops, and that arm reads as "nobody clicked it".
 
+## Put them in order plays no audio
+
+`app/order/page.tsx` is the second game on the stored payload (`mode:
+"order"`), and the first that fetches no clip: `lib/order-game.ts` deals the
+stored track list into rounds of `ORDER_ROUND_SIZE` cards with distinct
+release years, the host reveals the years and awards. It exists because a
+cold guess game is up to five upstream calls per track against sources that
+throttle the deployment as one client, and 44% of games never pressed Play.
+Five rules hold it together, and `tests/order-page.test.ts` reads the source
+for each:
+
+- **The page never imports `lib/preview-client.ts` and renders no
+  `<audio>`.** That is the mode's whole reason to exist, and a page proves it
+  by construction where a branch of `/game` would have to prove it on every
+  render. `app/game/page.tsx` sends an `order` payload to `/order` with
+  `replace` *before* `setTracks`: its prefetch effect keys on
+  `tracks.length`, and a check after it would spend a batch of lookups on a
+  game that will not press Play.
+- **Every card in a round has a different year.** Two 2019 songs have no
+  right order at year level, and a point taken away for a reason the room
+  cannot see is worse than a shorter game. `buildOrderRounds` defers a
+  same-year track to a later round and keeps a last round down to two cards;
+  a list that deals nothing is `order_too_few_dated` on the setup page,
+  before anything is stored or counted, and **not** in
+  `isDeterministicPlaylistFailure` — the same link plays the guess game.
+  `releaseYear` refuses anything before `ORDER_MIN_YEAR` (Spotify sends
+  `0000` for some local files) and reads the year only, because Spotify's
+  precision is often `year`.
+- **`releaseDate` reached `Track` one release before the mode, and
+  `CACHE_VERSION` in `lib/playlist-cache.ts` stayed at `v1`.** A bump would
+  have turned ~2,900 warm hits a day into cold loads against a 2,000-a-day
+  Spotify ceiling. Entries turn over within `HIT_TTL_SECONDS`, so the mode
+  deploys at least a day after the field and treats a dateless track as one
+  that cannot be dealt — never as a reason to refetch.
+- **The deal is derived from the stored list, never stored.** `buildOrderRounds`
+  is deterministic over the array, so a reload deals the same game; a payload
+  that deals no round sends the host to `/`.
+- **Counted on both sides, with a denominator.** `game_mode:<mode>` rides on
+  every `game_started` (all three modes — until 1.21.0 KV could not tell a
+  buzzer game from a party), the end and leave beacons carry `mode`, and
+  `order_round:<exact|partial|none>` is sent once per revealed round from
+  `closeRound`, the one place a revealed round closes. The first-clip line in
+  `npm run stats` subtracts `game_mode:order` from its denominator. The order
+  page calls `reportGameEnd` / `reportGameLeft` with `orderRoundsPlayed`,
+  never `countRoundsPlayed`, and never `recordHostedStart` or `reportFirstClip`.
+
+The setup page's "How to play" row is the only way in: picking it hides the
+clip-length pills and the buzzer toggle and turns the buzzer off
+(`choosePlayStyle`), `initialSetup` refuses to restore the buzzer beside a
+remembered `order`, and all three start paths filter through
+`usableOrderTracks` and push `gameHref` rather than a literal.
+
 ## Nothing on screen claims sound until the element reports it
 
 `playClip` used to call `audio.play().catch(() => {})`, set the phase to
@@ -500,7 +553,7 @@ desktop looking fine.
 
 ## Types
 
-`types/index.ts` contains only the `Track` interface — the shape stored in sessionStorage and returned by `/api/playlist`. Shared game types (`GamePayload`, `GamePlayer`, `GameMode`) live in `lib/game-session.ts`; room types and constants (`ROOM_TTL_SECONDS`, `ROOM_MAX_SUBMISSIONS`, and `ROOM_CODE_ALPHABET`, which the quiz's six-character codes share) live in `types/room.ts`; quiz wire types and caps (`QUIZ_QUESTION_COUNTS`, `QUIZ_MIN_QUESTIONS`/`QUIZ_MAX_QUESTIONS`, `QUIZ_OPTION_COUNT`, `QUIZ_MAX_ENTRIES`, `QUIZ_TTL_SECONDS`) live in `types/quiz.ts`, kept out of `lib/quiz-store.ts` for the same bundle reason; preview wire types and the two input caps (`PREVIEW_BATCH_MAX`, `PREVIEW_FIELD_MAX` with its `clampPreviewField`) live in `types/preview.ts`, kept out of `lib/preview-cache.ts` so the browser bundle doesn't pull in `lib/kv.ts` and the Upstash client; the game page defines its own local `Phase` type.
+`types/index.ts` contains only the `Track` interface — the shape stored in sessionStorage and returned by `/api/playlist`; `releaseDate` / `releaseDatePrecision` are optional on it because every playlist cached before 1.20.1 lacks them (see below). Shared game types (`GamePayload`, `GamePlayer`, `GameMode` — `party`, `buzzer`, `order`) live in `lib/game-session.ts`; the order game's rules and its `PlayStyle` (the setup page's remembered choice, not a `GameMode`) live in `lib/order-game.ts`; room types and constants (`ROOM_TTL_SECONDS`, `ROOM_MAX_SUBMISSIONS`, and `ROOM_CODE_ALPHABET`, which the quiz's six-character codes share) live in `types/room.ts`; quiz wire types and caps (`QUIZ_QUESTION_COUNTS`, `QUIZ_MIN_QUESTIONS`/`QUIZ_MAX_QUESTIONS`, `QUIZ_OPTION_COUNT`, `QUIZ_MAX_ENTRIES`, `QUIZ_TTL_SECONDS`) live in `types/quiz.ts`, kept out of `lib/quiz-store.ts` for the same bundle reason; preview wire types and the two input caps (`PREVIEW_BATCH_MAX`, `PREVIEW_FIELD_MAX` with its `clampPreviewField`) live in `types/preview.ts`, kept out of `lib/preview-cache.ts` so the browser bundle doesn't pull in `lib/kv.ts` and the Upstash client; the game page defines its own local `Phase` type.
 
 When adding a value to a union that `parseGamePayload` reads, extend that union's allow-list array alongside it (`GAME_MODES`, `PLAYLIST_SOURCES`). Both lines are guards rather than ternaries precisely so a forgotten entry is a value that reads back as the default instead of a member that silently changes behaviour.
 

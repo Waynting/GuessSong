@@ -13,6 +13,7 @@ import {
   recordQuizShare,
 } from "@/lib/loop-stats";
 import { recordQuizCopy, recordQuizSocial } from "@/lib/loop-stats";
+import { recordOrderRound } from "@/lib/loop-stats";
 
 /**
  * Fire-and-forget counters from the browser. See `lib/pulse.ts` for what the
@@ -70,20 +71,24 @@ export async function POST(req: NextRequest) {
       await recordLoopImpression(event.surface);
       break;
     case "game_started":
-      await recordGameStart(event.hostGameIndex, event.mixed, event.source);
+      await recordGameStart(event.hostGameIndex, event.mixed, event.source, event.mode);
       break;
     case "game_finished":
       await recordGameEnd(event.end, event.roundsPlayed, {
         host: event.host,
         screen: event.screen,
         source: event.source,
+        mode: event.mode,
       });
       break;
     case "first_clip":
       await recordFirstClip(event.path, event.outcome);
       break;
     case "game_left":
-      await recordGameLeft(event.roundsPlayed, event.host, event.source);
+      await recordGameLeft(event.roundsPlayed, event.host, event.source, event.mode);
+      break;
+    case "order_round":
+      await recordOrderRound(event.verdict);
       break;
     case "game_over_tap":
       await recordGameOverTap(event.target);

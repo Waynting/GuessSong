@@ -66,6 +66,7 @@ function phoneBlock(css: string): string {
 
 const LAYOUT = "app/layout.tsx";
 const GAME = "app/game/page.tsx";
+const ORDER = "app/order/page.tsx";
 const CHROME = "components/setup-chrome.tsx";
 
 describe("the viewport reaches the edges of the phone", () => {
@@ -147,6 +148,7 @@ describe("no focusable field is smaller than 16px", () => {
   it("the game's clipboard-fallback textarea sits on the floor too", () => {
     // It selects itself on focus, so it is focused by design.
     expect(px(read(GAME), ".mix-fallback")).toBeGreaterThanOrEqual(16);
+    expect(px(read(ORDER), ".mix-fallback")).toBeGreaterThanOrEqual(16);
   });
 
   it("the shadcn Input the join and quiz pages draw is text-base below md", () => {
@@ -242,6 +244,7 @@ describe("the game fits the phone it is played on", () => {
 /** The two sheets that strip the tap highlight, and the components rendered under them. */
 const TOUCH_SHEETS = [
   GAME,
+  ORDER,
   CHROME,
   // The chips, the recall note and the help link on `/`, drawn under CHROME.
   "components/setup-assist.tsx",
@@ -295,7 +298,7 @@ describe("hover is a mouse thing", () => {
     expect(eased, `:active without transition: none: ${eased.join(", ")}`).toEqual([]);
   });
 
-  it.each([GAME, CHROME])("%s switches off the tap highlight and double-tap zoom on buttons", (file) => {
+  it.each([GAME, ORDER, CHROME])("%s switches off the tap highlight and double-tap zoom on buttons", (file) => {
     const css = read(file);
     expect(css).toMatch(/-webkit-tap-highlight-color:\s*transparent/);
     expect(css).toMatch(/button\s*\{[^}]*touch-action:\s*manipulation/);

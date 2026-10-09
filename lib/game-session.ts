@@ -18,7 +18,13 @@ export const GAME_STORAGE_KEY = "guesssong_game";
  */
 export const DEFAULT_HOST_NAME = "Host";
 
-export type GameMode = "party" | "buzzer";
+/**
+ * `party` and `buzzer` are the guess game, with and without phones; `order`
+ * is "put them in order" (`lib/order-game.ts`), played on `/order` with no
+ * audio at all. A payload whose mode is `order` must never reach `/game`'s
+ * preview prefetch — `app/game/page.tsx` redirects it before `setTracks`.
+ */
+export type GameMode = "party" | "buzzer" | "order";
 
 export interface GamePlayer {
   name: string;
@@ -73,7 +79,7 @@ function isPlaylistSource(value: unknown): value is PlaylistSource {
   return typeof value === "string" && (PLAYLIST_SOURCES as string[]).includes(value);
 }
 
-const GAME_MODES: GameMode[] = ["party", "buzzer"];
+export const GAME_MODES: readonly GameMode[] = ["party", "buzzer", "order"];
 
 /**
  * Allow-list, not a ternary. A ternary that named one mode and sent everything
@@ -86,8 +92,8 @@ const GAME_MODES: GameMode[] = ["party", "buzzer"];
  * sessionStorage under a mode that no longer exists reads back as "party" and
  * keeps playing, rather than failing to parse and dumping the host at /.
  */
-function isGameMode(value: unknown): value is GameMode {
-  return typeof value === "string" && (GAME_MODES as string[]).includes(value);
+export function isGameMode(value: unknown): value is GameMode {
+  return typeof value === "string" && (GAME_MODES as readonly string[]).includes(value);
 }
 
 /**
