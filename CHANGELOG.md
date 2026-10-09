@@ -32,10 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known gaps
 
-- The date is the *album's*. A compilation or a remaster carries the
-  reissue's year, which is wrong in the direction an ordering game notices.
-  `album.album_type` is not requested yet; excluding `compilation` is the
-  follow-up if `order_round` verdicts say the host keeps overruling.
+- The date is the *album's*. Compilations are marked (`albumCompilation`)
+  and the order game skips them, but a remaster or deluxe reissue released
+  as a plain `album` still carries the reissue's year.
 
 ## [1.20.0] - 2026-10-03
 
