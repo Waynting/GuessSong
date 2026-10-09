@@ -54,6 +54,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.20.1",
+    date: "2026-10-09",
+    headline: "Groundwork for a new way to play: every song now carries its release year.",
+    headlineZh: "為新玩法打底：每首歌現在都帶著發行年份。",
+    changes: [
+      {
+        kind: "better",
+        text: "When a playlist is loaded, each song now remembers the year its album came out. Nothing changes on screen yet; a mode that asks you to put songs in order is coming in the next release, and it needs this to be in place a day ahead.",
+        textZh: "載入歌單時，每首歌現在都會記下專輯的發行年份。畫面上暫時沒有變化；下一版會推出「排出歌曲先後順序」的玩法，需要先把這個準備好一天。",
+      },
+    ],
+  },
+  {
     version: "1.20.0",
     date: "2026-10-03",
     headline: "Taste Quiz: one page to watch every quiz you've made, no login needed.",

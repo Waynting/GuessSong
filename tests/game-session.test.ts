@@ -320,6 +320,35 @@ describe("parseGamePayload track validation", () => {
     expect(parsed?.tracks[0].popularity).toBe(90);
   });
 
+  it("keeps a string releaseDate and its precision", () => {
+    const parsed = parseTracks([
+      { ...good, releaseDate: "1997-05-21", releaseDatePrecision: "day" },
+    ]);
+    expect(parsed?.tracks[0].releaseDate).toBe("1997-05-21");
+    expect(parsed?.tracks[0].releaseDatePrecision).toBe("day");
+  });
+
+  it("drops a releaseDate that is not a string, and an unknown precision, rather than the song", () => {
+    const parsed = parseTracks([
+      { ...good, releaseDate: 1997, releaseDatePrecision: "decade" },
+    ]);
+    expect(parsed?.tracks).toHaveLength(1);
+    expect(parsed?.tracks[0]).not.toHaveProperty("releaseDate");
+    expect(parsed?.tracks[0]).not.toHaveProperty("releaseDatePrecision");
+  });
+
+  it("keeps albumCompilation only when it is exactly true", () => {
+    expect(parseTracks([{ ...good, albumCompilation: true }])?.tracks[0].albumCompilation).toBe(true);
+    for (const junk of ["true", 1, false, null]) {
+      expect(parseTracks([{ ...good, albumCompilation: junk }])?.tracks[0], String(junk)).not.toHaveProperty("albumCompilation");
+    }
+  });
+
+  it("leaves releaseDate absent, not undefined, on a track that never had one", () => {
+    const parsed = parseTracks([good]);
+    expect(parsed?.tracks[0]).not.toHaveProperty("releaseDate");
+  });
+
   it("drops a malformed player rather than putting a blank row on the scoreboard", () => {
     const parsed = parseGamePayload(
       JSON.stringify({
