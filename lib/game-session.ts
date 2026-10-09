@@ -255,6 +255,7 @@ function normalizeTrack(value: unknown): Track | null {
   const rest = { ...(t as unknown as Track) };
   delete rest.releaseDate;
   delete rest.releaseDatePrecision;
+  delete rest.albumCompilation;
 
   return {
     ...rest,
@@ -266,6 +267,7 @@ function normalizeTrack(value: unknown): Track | null {
     ...(contributors ? { contributors } : {}),
     ...(releaseDate !== undefined ? { releaseDate } : {}),
     ...(releaseDatePrecision ? { releaseDatePrecision } : {}),
+    ...(t.albumCompilation === true ? { albumCompilation: true as const } : {}),
   };
 }
 

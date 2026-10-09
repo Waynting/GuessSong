@@ -35,4 +35,11 @@ export interface Track {
    */
   releaseDate?: string;
   releaseDatePrecision?: "year" | "month" | "day";
+  /**
+   * True when the album is a compilation ("Greatest Hits", "Now 47", a
+   * soundtrack sampler), whose `releaseDate` is the compilation's rather
+   * than the song's. Present only when true. Same optional-field rollout as
+   * `releaseDate`: no cache bump, absent on entries cached before 1.20.1.
+   */
+  albumCompilation?: true;
 }
