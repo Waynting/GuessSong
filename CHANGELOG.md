@@ -5,6 +5,36 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.1] - 2026-10-09
+
+### Changed
+
+- **Every track carries its album's release date.** `TRACK_PAGE_FIELDS` in
+  `lib/spotify.ts` now asks for `album(release_date,release_date_precision)`
+  and `convertSpotifyTrack` maps them to `Track.releaseDate` /
+  `releaseDatePrecision`, both optional and *absent* rather than `undefined`
+  when Spotify sent none, so the cached, stored and wire shapes agree on
+  whether the key exists. `normalizeTrack` keeps a string date and drops any
+  other type by omission. The Mixed room path needs nothing: `lib/room.ts`
+  stores the stripped `Track` whole and `poolContributions` spreads it.
+- **`CACHE_VERSION` in `lib/playlist-cache.ts` stays at `v1`, on purpose.**
+  Adding an optional field is not an incompatible shape. A bump would have
+  turned the week's ~20k warm hits into cold loads at once — ~2,900 extra
+  Spotify loads a day against a 2,000-a-day ceiling that the ~1,070 real
+  misses already half fill — and the daily gate would have refused hosts
+  from the first morning. Every entry lives at most `HIT_TTL_SECONDS`, so the
+  cache upgrades itself through turnover within a day. That is why this is
+  its own release: the mode that reads the field (1.21.0) must deploy at
+  least 24h after this one, so no warm entry is still dateless when the mode
+  first asks.
+
+### Known gaps
+
+- The date is the *album's*. A compilation or a remaster carries the
+  reissue's year, which is wrong in the direction an ordering game notices.
+  `album.album_type` is not requested yet; excluding `compilation` is the
+  follow-up if `order_round` verdicts say the host keeps overruling.
+
 ## [1.20.0] - 2026-10-03
 
 ### Added

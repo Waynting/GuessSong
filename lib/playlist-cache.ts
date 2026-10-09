@@ -56,8 +56,20 @@ import type { SpotifyServiceStatus } from "@/types/service-status";
 import type { Track } from "@/types";
 
 /**
- * Bump when the cached shape changes. Entries are TTL'd rather than migrated,
- * so an old-shape read would otherwise be handed to callers as a valid hit.
+ * Bump when the cached shape changes *incompatibly*. Entries are TTL'd rather
+ * than migrated, so an old-shape read would otherwise be handed to callers as
+ * a valid hit.
+ *
+ * Adding an optional field is not that, and must not bump it. 1.20.1 added
+ * `releaseDate` to every track and left this at v1: a bump turns every warm
+ * key into a miss at once, and the week it was measured the cache answered
+ * ~20k hits against ~7.5k misses (73%), i.e. ~2,900 extra cold loads a day on
+ * a daily ceiling of `DEFAULT_DAILY_LOAD_LIMIT` that the misses alone already
+ * fill halfway. Every entry lives at most `HIT_TTL_SECONDS`, so the cache
+ * upgrades itself through ordinary turnover within a day, and a consumer that
+ * needs the new field treats a track without it as unusable rather than as a
+ * reason to refetch (`lib/order-game.ts`). That is also why the mode that
+ * reads the field shipped one release after the field itself.
  */
 const CACHE_VERSION = "v1";
 

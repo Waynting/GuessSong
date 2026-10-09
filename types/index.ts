@@ -24,4 +24,15 @@ export interface Track {
   contributors?: string[];
   /** Spotify's 0-100 popularity score — used for the v2 "most mainstream" taste card award. */
   popularity?: number;
+  /**
+   * The album's release date as Spotify lists it: "1997", "1997-05" or
+   * "1997-05-21", with the precision beside it. Read by `lib/order-game.ts`
+   * at year level only. Optional twice over: Spotify omits it for some local
+   * files, and every playlist cached before 1.20.1 lacks it — those entries
+   * age out within a day (`lib/playlist-cache.ts`), which is why adding the
+   * field did not bump the cache version. A track without one simply cannot
+   * be dealt into an order round.
+   */
+  releaseDate?: string;
+  releaseDatePrecision?: "year" | "month" | "day";
 }

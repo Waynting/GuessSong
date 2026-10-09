@@ -239,16 +239,42 @@ function normalizeTrack(value: unknown): Track | null {
   const contributors = Array.isArray(t.contributors)
     ? t.contributors.filter((c): c is string => typeof c === "string")
     : undefined;
+  // Repaired by omission: a date that is not a string is no date, and the
+  // order page already has to cope with a track that has none.
+  const releaseDate = typeof t.releaseDate === "string" ? t.releaseDate : undefined;
+  const releaseDatePrecision = isReleaseDatePrecision(t.releaseDatePrecision)
+    ? t.releaseDatePrecision
+    : undefined;
+
+  const rest = { ...(t as unknown as Track) };
+  delete rest.releaseDate;
+  delete rest.releaseDatePrecision;
 
   return {
-    ...(t as unknown as Track),
+    ...rest,
     id: t.id,
     name: t.name,
     artists,
     durationMs: typeof t.durationMs === "number" ? t.durationMs : 0,
     createdAt: typeof t.createdAt === "string" ? t.createdAt : "",
     ...(contributors ? { contributors } : {}),
+    ...(releaseDate !== undefined ? { releaseDate } : {}),
+    ...(releaseDatePrecision ? { releaseDatePrecision } : {}),
   };
+}
+
+const RELEASE_DATE_PRECISIONS: NonNullable<Track["releaseDatePrecision"]>[] = [
+  "year",
+  "month",
+  "day",
+];
+
+function isReleaseDatePrecision(
+  value: unknown
+): value is NonNullable<Track["releaseDatePrecision"]> {
+  return (
+    typeof value === "string" && (RELEASE_DATE_PRECISIONS as string[]).includes(value)
+  );
 }
 
 /**

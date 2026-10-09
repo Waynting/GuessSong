@@ -320,6 +320,28 @@ describe("parseGamePayload track validation", () => {
     expect(parsed?.tracks[0].popularity).toBe(90);
   });
 
+  it("keeps a string releaseDate and its precision", () => {
+    const parsed = parseTracks([
+      { ...good, releaseDate: "1997-05-21", releaseDatePrecision: "day" },
+    ]);
+    expect(parsed?.tracks[0].releaseDate).toBe("1997-05-21");
+    expect(parsed?.tracks[0].releaseDatePrecision).toBe("day");
+  });
+
+  it("drops a releaseDate that is not a string, and an unknown precision, rather than the song", () => {
+    const parsed = parseTracks([
+      { ...good, releaseDate: 1997, releaseDatePrecision: "decade" },
+    ]);
+    expect(parsed?.tracks).toHaveLength(1);
+    expect(parsed?.tracks[0]).not.toHaveProperty("releaseDate");
+    expect(parsed?.tracks[0]).not.toHaveProperty("releaseDatePrecision");
+  });
+
+  it("leaves releaseDate absent, not undefined, on a track that never had one", () => {
+    const parsed = parseTracks([good]);
+    expect(parsed?.tracks[0]).not.toHaveProperty("releaseDate");
+  });
+
   it("drops a malformed player rather than putting a blank row on the scoreboard", () => {
     const parsed = parseGamePayload(
       JSON.stringify({

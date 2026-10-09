@@ -481,6 +481,9 @@ describe("playlist pagination cost", () => {
     const [metadataUrl] = probe.metadataUrls();
     expect(metadataUrl).toContain("fields=");
     expect(metadataUrl).toContain("items(track(");
+    // The order page sorts on this; a projection that drops it reads as
+    // "no song has a date" rather than as an error.
+    expect(metadataUrl).toContain("release_date,release_date_precision");
   });
 
   it("stops at MAX_PLAYLIST_TRACKS instead of following `next` forever", async () => {
@@ -624,5 +627,36 @@ describe("Spotify 429 handling", () => {
     const err = await getPlaylistWithTracks(PLAYLIST_URL).catch((e) => e);
 
     expect(err.retryAfterSeconds).toBeUndefined();
+  });
+});
+
+/**
+ * `releaseDate` is read at year level by lib/order-game.ts. It is optional
+ * on the way in (Spotify omits it for some local files) and must then be
+ * *absent* rather than `undefined` on the way out, so the cached, the stored
+ * and the wire shapes agree on whether the key exists.
+ */
+describe("convertSpotifyTrack release date", () => {
+  it("carries the album's date and precision through", async () => {
+    const { convertSpotifyTrack } = await freshSpotify();
+    const track = convertSpotifyTrack({
+      ...fakeSpotifyTrack(1),
+      album: {
+        name: "OK Computer",
+        images: [],
+        release_date: "1997-05-21",
+        release_date_precision: "day",
+      },
+    });
+    expect(track.releaseDate).toBe("1997-05-21");
+    expect(track.releaseDatePrecision).toBe("day");
+  });
+
+  it("leaves both keys out when Spotify sent none", async () => {
+    const { convertSpotifyTrack } = await freshSpotify();
+    const track = convertSpotifyTrack(fakeSpotifyTrack(1));
+    expect("releaseDate" in track).toBe(false);
+    expect("releaseDatePrecision" in track).toBe(false);
+    expect(JSON.parse(JSON.stringify(track))).not.toHaveProperty("releaseDate");
   });
 });
