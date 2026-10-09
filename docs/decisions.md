@@ -426,7 +426,9 @@ awards. `lib/order-game.ts` has the rules, `app/order/page.tsx` the screen.
   ~2,900 extra Spotify loads a day against a ceiling of 2,000 that the real
   misses already half fill. The field shipped as 1.20.1, the mode as 1.21.0
   at least a day later, and the cache upgraded itself through `HIT_TTL_SECONDS`
-  turnover. A consumer that finds no date treats the track as undealable.
+  turnover. A consumer that finds no date treats the track as undealable,
+  and a list mostly without dates is refused as `order_dates_pending` (our
+  cache, try later), never as a playlist with too few years.
 - *Ties broken by month or by a hidden rule.* Two 2019 songs have no right
   order at year level, and a point taken away for a reason nobody can see is
   worse than a shorter game. Every card in a round has a distinct year; a
@@ -439,7 +441,8 @@ the guess game instead of failing to parse — the designed degradation.
 
 **Would reopen if:** `order_round:exact` dominates (four cards too easy —
 raise `ORDER_ROUND_SIZE` or add a hard variant), or `order_round:none` does
-(compilation dates — request `album.album_type`); or if `game_end_mode:order`
+(reissue and remaster dates — compilations are already skipped through
+`album.album_type`, as `albumCompilation`); or if `game_end_mode:order`
 shows the mode played out at a rate that justifies pulling the shared game
 chrome out of the guess page.
 

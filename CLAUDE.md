@@ -395,10 +395,17 @@ for each:
 - **Every card in a round has a different year.** Two 2019 songs have no
   right order at year level, and a point taken away for a reason the room
   cannot see is worse than a shorter game. `buildOrderRounds` defers a
-  same-year track to a later round and keeps a last round down to two cards;
-  a list that deals nothing is `order_too_few_dated` on the setup page,
-  before anything is stored or counted, and **not** in
-  `isDeterministicPlaylistFailure` — the same link plays the guess game.
+  same-year track to a later round and keeps a last round down to two cards.
+  `usableOrderTracks` also drops every `albumCompilation` track: a
+  compilation's date is the compilation's, so the reveal would state the
+  wrong year with confidence. A list that deals nothing is refused on the
+  setup page by `orderRefusal`, before anything is stored or counted, and
+  the refusal names what has to change: `order_dates_pending` when more than
+  half the list has no date at all (our pre-1.20.1 cache, not the playlist),
+  `order_too_few_dated` when the playlist has too few distinct years, and
+  `order_count_too_small` when Number of Songs cut a dealable list short.
+  None of the three is in `isDeterministicPlaylistFailure` — the same link
+  plays the guess game, and the first clears by itself.
   `releaseYear` refuses anything before `ORDER_MIN_YEAR` (Spotify sends
   `0000` for some local files) and reads the year only, because Spotify's
   precision is often `year`.
@@ -413,7 +420,8 @@ for each:
   that deals no round sends the host to `/`.
 - **Counted on both sides, with a denominator.** `game_mode:<mode>` rides on
   every `game_started` (all three modes — until 1.21.0 KV could not tell a
-  buzzer game from a party), the end and leave beacons carry `mode`, and
+  buzzer game from a party), the end and leave beacons carry `mode` from
+  both `/game` and `/order`, and
   `order_round:<exact|partial|none>` is sent once per revealed round from
   `closeRound`, the one place a revealed round closes. The first-clip line in
   `npm run stats` subtracts `game_mode:order` from its denominator. The order
@@ -423,8 +431,13 @@ for each:
 The setup page's "How to play" row is the only way in: picking it hides the
 clip-length pills and the buzzer toggle and turns the buzzer off
 (`choosePlayStyle`), `initialSetup` refuses to restore the buzzer beside a
-remembered `order`, and all three start paths filter through
-`usableOrderTracks` and push `gameHref` rather than a literal.
+remembered `order`, and all three start paths refuse through
+`orderRefusal`, filter through `usableOrderTracks` and push `gameHref`
+rather than a literal. A Mixed room that also collects playlists survives the
+buzzer being switched off by the pill, and the order game leaves its buzzer
+handle out of the payload. A QR room's pool is held in `roomPoolRef` once
+fetched, because `GET /api/room/[code]/pool` consumes the room: a pool the
+order game refuses must still start a guess game on the next press.
 
 ## Nothing on screen claims sound until the element reports it
 
@@ -553,7 +566,7 @@ desktop looking fine.
 
 ## Types
 
-`types/index.ts` contains only the `Track` interface — the shape stored in sessionStorage and returned by `/api/playlist`; `releaseDate` / `releaseDatePrecision` are optional on it because every playlist cached before 1.20.1 lacks them (see below). Shared game types (`GamePayload`, `GamePlayer`, `GameMode` — `party`, `buzzer`, `order`) live in `lib/game-session.ts`; the order game's rules and its `PlayStyle` (the setup page's remembered choice, not a `GameMode`) live in `lib/order-game.ts`; room types and constants (`ROOM_TTL_SECONDS`, `ROOM_MAX_SUBMISSIONS`, and `ROOM_CODE_ALPHABET`, which the quiz's six-character codes share) live in `types/room.ts`; quiz wire types and caps (`QUIZ_QUESTION_COUNTS`, `QUIZ_MIN_QUESTIONS`/`QUIZ_MAX_QUESTIONS`, `QUIZ_OPTION_COUNT`, `QUIZ_MAX_ENTRIES`, `QUIZ_TTL_SECONDS`) live in `types/quiz.ts`, kept out of `lib/quiz-store.ts` for the same bundle reason; preview wire types and the two input caps (`PREVIEW_BATCH_MAX`, `PREVIEW_FIELD_MAX` with its `clampPreviewField`) live in `types/preview.ts`, kept out of `lib/preview-cache.ts` so the browser bundle doesn't pull in `lib/kv.ts` and the Upstash client; the game page defines its own local `Phase` type.
+`types/index.ts` contains only the `Track` interface — the shape stored in sessionStorage and returned by `/api/playlist`; `releaseDate` / `releaseDatePrecision` / `albumCompilation` are optional on it because every playlist cached before 1.20.1 lacks them (see below). Shared game types (`GamePayload`, `GamePlayer`, `GameMode` — `party`, `buzzer`, `order`) live in `lib/game-session.ts`; the order game's rules and its `PlayStyle` (the setup page's remembered choice, not a `GameMode`) live in `lib/order-game.ts`; room types and constants (`ROOM_TTL_SECONDS`, `ROOM_MAX_SUBMISSIONS`, and `ROOM_CODE_ALPHABET`, which the quiz's six-character codes share) live in `types/room.ts`; quiz wire types and caps (`QUIZ_QUESTION_COUNTS`, `QUIZ_MIN_QUESTIONS`/`QUIZ_MAX_QUESTIONS`, `QUIZ_OPTION_COUNT`, `QUIZ_MAX_ENTRIES`, `QUIZ_TTL_SECONDS`) live in `types/quiz.ts`, kept out of `lib/quiz-store.ts` for the same bundle reason; preview wire types and the two input caps (`PREVIEW_BATCH_MAX`, `PREVIEW_FIELD_MAX` with its `clampPreviewField`) live in `types/preview.ts`, kept out of `lib/preview-cache.ts` so the browser bundle doesn't pull in `lib/kv.ts` and the Upstash client; the game page defines its own local `Phase` type.
 
 When adding a value to a union that `parseGamePayload` reads, extend that union's allow-list array alongside it (`GAME_MODES`, `PLAYLIST_SOURCES`). Both lines are guards rather than ternaries precisely so a forgotten entry is a value that reads back as the default instead of a member that silently changes behaviour.
 

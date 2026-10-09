@@ -39,7 +39,7 @@ Two orthogonal choices: **how you play** and **where the songs come from**.
 |---|---|
 | **Party** (default) | Host types the player names, plays clips, and manually awards points. |
 | **Buzzer** | Everyone scans one QR code and gets a full-screen buzzer on their own phone. A Cloudflare Durable Object decides who pressed first, so the host can stop refereeing and actually play. Only offered when `NEXT_PUBLIC_BUZZER_WS_URL` is set. |
-| **Put them in order** | No audio. Each round shows four songs from the playlist — title, artist, cover — and the room puts them in order of release year; the host reveals the years and awards the points. Every card in a round has a different year, so there are no ties. Works with any source below, buzzer excluded. |
+| **Put them in order** | No audio. Each round shows four songs from the playlist — title, artist, cover — and the room puts them in order of release year; the host reveals the years and awards the points. Every card in a round has a different year, so there are no ties, and songs from compilation albums are left out because their date is the compilation's. Works with any source below, buzzer excluded. |
 
 ### Where the songs come from
 
