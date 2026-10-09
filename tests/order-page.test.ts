@@ -82,6 +82,12 @@ describe("the order page plays no audio", () => {
     expect(body.match(/buildOrderRounds\(/g) ?? []).toHaveLength(1);
   });
 
+  it("never names a year on a face-down card: cleaned title, album only after the reveal", () => {
+    expect(body).toMatch(/<p className="order-title">\{displayTitle\(t\.name\)\}<\/p>/);
+    expect(body).toMatch(/\{isRevealed && t\.albumName && <p className="order-album">/);
+    expect(body).not.toMatch(/round_completed/);
+  });
+
   it("keeps the host the judge: two awards, both through scoreboardName, one each per round", () => {
     for (const name of ["awardExact", "awardOldest"]) {
       const fn = member(name);
@@ -228,6 +234,15 @@ describe("the order page fits the phone it is played on", () => {
     expect(body).toMatch(/className="order-art"\s*draggable=\{false\}/);
   });
 
+  it("keeps Next Round on screen on a short phone, however many players there are", () => {
+    // 375×667 with four players ran the reveal ~60px past the fold.
+    const at = phone.indexOf("@media (max-height: 700px)");
+    expect(at, "no short-phone block").toBeGreaterThan(-1);
+    const next = rule(phone.slice(at), ".btn-primary.next");
+    expect(next).toMatch(/position:\s*sticky/);
+    expect(next).toMatch(/bottom:\s*\d+px/);
+  });
+
   it("keeps the primary control thumb-sized on a phone", () => {
     expect(Number(rule(phone, ".btn-primary").match(/min-height:\s*(\d+)px/)?.[1] ?? 0)).toBeGreaterThanOrEqual(44);
     expect(Number(rule(phone, ".player-pick-btn").match(/min-height:\s*(\d+)px/)?.[1] ?? 0)).toBeGreaterThanOrEqual(44);
@@ -243,10 +258,29 @@ describe("the order page fits the phone it is played on", () => {
 describe("the setup page starts an order game the same way on all three paths", () => {
   const setup = code(read(SETUP));
 
+  it("holds a QR room's consumed pool, so a refused order start can be retried", () => {
+    // The pool route consumes the room before it answers; fetching it again
+    // is room_already_started, and every friend's playlist is gone.
+    const start = setup.match(/async function handleRoomStart\(\) \{([\s\S]*?)\n  \}\n/)?.[1] ?? "";
+    expect(start).toMatch(/const held = roomPoolRef\.current;\s*if \(held && held\.code === openedRoom\.code\) \{\s*data = held\.data;/);
+    expect(start).toMatch(/roomPoolRef\.current = \{ code: openedRoom\.code, data \};/);
+    expect(start.indexOf("roomPoolRef.current = {")).toBeLessThan(start.indexOf("orderRefusal("));
+    expect(setup).toMatch(/function resetRoom\(\) \{\s*roomPoolRef\.current = null;/);
+  });
+
+  it("keeps a room that collects playlists when the order pill turns the buzzer off", () => {
+    const choose = setup.match(/function choosePlayStyle\(style: PlayStyle\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+    expect(choose).toMatch(/if \(!collectsPlaylists\) resetRoom\(\);/);
+    expect(setup).toMatch(/const room = isOrder \|\| !buzzerEnabled \? undefined : openedRoom\.buzzer;/);
+  });
+
   it("filters to dated songs, refuses a list that deals no round, and stores mode \"order\"", () => {
     expect(setup.match(/usableOrderTracks\(/g) ?? []).toHaveLength(3);
-    expect(setup.match(/buildOrderRounds\([a-z]+\)\.rounds\.length === 0/g) ?? []).toHaveLength(3);
-    expect(setup.match(/new AppError\("order_too_few_dated"\)/g) ?? []).toHaveLength(3);
+    // One refusal rule for the three paths — orderRefusal tells a cache with
+    // no dates yet apart from a playlist with too few years.
+    expect(setup.match(/= isOrder \? orderRefusal\((?:shuffled|pooled|data\.tracks)\) : null;/g) ?? []).toHaveLength(3);
+    expect(setup.match(/if \(refusal\) throw new AppError\(refusal\);/g) ?? []).toHaveLength(3);
+    expect(setup).not.toMatch(/buildOrderRounds/);
     expect(setup).toMatch(/isOrder \? "order" : hasBuzzerRoom \? "buzzer" : "party"/);
     expect(setup.match(/\bmode: gameMode\(Boolean\(room\)\),/g) ?? []).toHaveLength(3);
     expect(setup.match(/game_mode: gameMode\(Boolean\(room\)\),/g) ?? []).toHaveLength(3);
@@ -262,7 +296,7 @@ describe("the setup page starts an order game the same way on all three paths", 
     expect(setup).toMatch(/\{!isOrder && \(\s*<div>\s*<p className="section-label">Clip Duration<\/p>/);
     expect(setup).toMatch(/\{isBuzzerConfigured\(\) && !isOrder && \(/);
     const choose = setup.match(/function choosePlayStyle\(style: PlayStyle\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
-    expect(choose).toMatch(/if \(style === "order" && buzzerEnabled\) \{\s*setBuzzerEnabled\(false\);\s*resetRoom\(\);/);
+    expect(choose).toMatch(/if \(style === "order" && buzzerEnabled\) \{\s*setBuzzerEnabled\(false\);/);
     expect(setup).toMatch(/choosePlayStyle\("order"\)/);
     expect(setup).toMatch(/choosePlayStyle\("guess"\)/);
   });

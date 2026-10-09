@@ -96,11 +96,43 @@ export function releaseYear(
   return year;
 }
 
-/** The tracks that can be dealt at all, in the order given. */
-export function usableOrderTracks<T extends Pick<Track, "releaseDate">>(
+/**
+ * The tracks that can be dealt at all, in the order given: a usable year,
+ * and not from a compilation — "Greatest Hits 1970–2002" carries the
+ * compilation's date, so the reveal would state the wrong year with
+ * confidence and light a card green for it.
+ */
+export function usableOrderTracks<T extends Pick<Track, "releaseDate" | "albumCompilation">>(
   tracks: readonly T[]
 ): T[] {
-  return tracks.filter((t) => releaseYear(t) !== null);
+  return tracks.filter((t) => t.albumCompilation !== true && releaseYear(t) !== null);
+}
+
+/**
+ * True when not one track in the list carries a release date at all.
+ *
+ * That is not a playlist with too few years: it is a playlist answered from
+ * a cache entry written before 1.20.1 asked Spotify for the date (entries
+ * live up to a day; a room's stored tracks, up to its TTL). Telling that host
+ * their playlist has too few years would blame the playlist for our cache —
+ * the throttled-host mistake again — so the setup page raises
+ * `order_dates_pending` instead, which says to try again later.
+ */
+export function noReleaseDates(tracks: readonly Pick<Track, "releaseDate">[]): boolean {
+  return tracks.length > 0 && tracks.every((t) => typeof t.releaseDate !== "string");
+}
+
+/**
+ * The refusal for a list that deals no round, or null when it deals one.
+ * One rule for the three start paths on the setup page.
+ */
+export function orderRefusal(
+  tracks: readonly Pick<Track, "releaseDate" | "albumCompilation">[]
+): "order_dates_pending" | "order_too_few_dated" | null {
+  if (noReleaseDates(tracks)) return "order_dates_pending";
+  return buildOrderRounds(usableOrderTracks(tracks)).rounds.length === 0
+    ? "order_too_few_dated"
+    : null;
 }
 
 /** One round: its cards, in the order the host's screen shows them. */
@@ -120,7 +152,7 @@ export interface OrderRound<T = Track> {
  * no date, or a year every remaining card already had — and the page prints
  * it, because a 20-song game that turns out to be three rounds should say so.
  */
-export function buildOrderRounds<T extends Pick<Track, "releaseDate">>(
+export function buildOrderRounds<T extends Pick<Track, "releaseDate" | "albumCompilation">>(
   tracks: readonly T[],
   size: number = ORDER_ROUND_SIZE
 ): { rounds: OrderRound<T>[]; leftover: number } {

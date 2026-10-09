@@ -241,6 +241,12 @@ describe("known-silent upcoming tracks are skipped", () => {
 });
 
 describe("the game's beacons", () => {
+  it("sends the game's mode with the end and the leave, so the by-mode table has a party column", () => {
+    expect(member("trackGameFinished")).toMatch(/\bmode,\s*\}\);/);
+    expect(member("reportLeave")).toMatch(/setupSourceRef\.current,\s*modeRef\.current\s*\)/);
+    expect(body).toMatch(/modeRef\.current = mode;/);
+  });
+
   it("sends the host kind and the layout with the end, under the once-per-game guard", () => {
     const finished = member("trackGameFinished");
     expect(finished).toMatch(/if \(finishedTrackedRef\.current\) return;/);

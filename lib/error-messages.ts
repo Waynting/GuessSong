@@ -115,6 +115,7 @@ export type AppErrorCode =
   | "players_duplicate_name"
   | "mixed_min_contributors"
   | "order_too_few_dated"
+  | "order_dates_pending"
   // The browser itself, not the playlist — see the note above their entries
   | "storage_blocked"
   | "client_error"
@@ -528,6 +529,13 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   order_too_few_dated: {
     en: "This playlist doesn't have enough songs with different release years to put in order. Pick one that spans a few years, or switch back to Guess the song.",
     zh: "這份歌單裡發行年份不同的歌太少，排不出先後順序。換一份橫跨幾年的歌單，或改回「猜歌」玩法。",
+  },
+  // Not the playlist at all: the copy we hold of it was saved before we
+  // asked Spotify for release years, and refreshes within a day. Says so,
+  // and never tells the host to change the playlist.
+  order_dates_pending: {
+    en: "We don't have release years for this playlist yet — our saved copy is from before this mode existed and refreshes within a day. Play Guess the song for now, or try Put them in order again later.",
+    zh: "這份歌單我們還沒有發行年份：我們存的那份是這個玩法推出前存的，一天內會更新。先玩「猜歌」，或晚點再試「排順序」。",
   },
 
   /*

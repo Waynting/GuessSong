@@ -64,7 +64,7 @@ import { ServiceNotice } from "@/components/service-notice";
 import { buildGamePayload, findDuplicateName, type GameMode } from "@/lib/game-session";
 import {
   DEFAULT_PLAY_STYLE,
-  buildOrderRounds,
+  orderRefusal,
   orderSummary,
   usableOrderTracks,
   type PlayStyle,
@@ -266,6 +266,15 @@ export default function SetupPage() {
    * second press of Start the one that loses the link to the guide.
    */
   const lastRejectedRef = useRef<{ key: string; failure: SetupFailure } | null>(null);
+  /**
+   * A QR room's pool, once fetched. `GET /api/room/[code]/pool` consumes the
+   * room before it answers, so a pool the order game refuses cannot be
+   * fetched twice — the host who switches back to Guess the song and presses
+   * Start again would be told the room had already started, and every
+   * friend's playlist would be gone. Kept here by room code and reused; a
+   * new room replaces it (`resetRoom`).
+   */
+  const roomPoolRef = useRef<{ code: string; data: RoomPoolResponse } | null>(null);
   // The Mixed nudge: counted once per page load when first drawn, and its tap
   // remembered so a Mixed start from this page can be credited to it.
   const nudgeShownRef = useRef(false);
@@ -302,7 +311,11 @@ export default function SetupPage() {
     setPlayStyle(style);
     if (style === "order" && buzzerEnabled) {
       setBuzzerEnabled(false);
-      resetRoom();
+      // A room that also collects playlists is kept: friends may already
+      // have submitted to it, and the order game leaves its buzzer handle
+      // out of the payload instead. Only a buzzer-only room has nothing left
+      // to do.
+      if (!collectsPlaylists) resetRoom();
     }
   }
 
@@ -322,6 +335,7 @@ export default function SetupPage() {
    * behind it, so every scan lands on a form that cannot submit.
    */
   function resetRoom() {
+    roomPoolRef.current = null;
     setOpenedRoom(null);
     setRoomSubmissions([]);
     setBuzzerPlayerCount(0);
@@ -392,24 +406,36 @@ export default function SetupPage() {
     setRoomError(null);
     setRoomStarting(true);
     try {
-      const res = await fetch(
-        `/api/room/${openedRoom.code}/pool?sampledPerPlayer=${sampledPerPlayer}`,
-        { headers: { "x-host-token": openedRoom.playlistHostToken } }
-      );
-      const data: RoomPoolResponse & { error?: string } = await res.json();
-      if (!res.ok) throw apiError(data, "room_start_failed");
+      // The pool is consumed by the request that fetches it, so a pool this
+      // page already holds for this room is reused — see `roomPoolRef`.
+      let data: RoomPoolResponse;
+      const held = roomPoolRef.current;
+      if (held && held.code === openedRoom.code) {
+        data = held.data;
+      } else {
+        const res = await fetch(
+          `/api/room/${openedRoom.code}/pool?sampledPerPlayer=${sampledPerPlayer}`,
+          { headers: { "x-host-token": openedRoom.playlistHostToken } }
+        );
+        const body: RoomPoolResponse & { error?: string } = await res.json();
+        if (!res.ok) throw apiError(body, "room_start_failed");
+        data = body;
+        roomPoolRef.current = { code: openedRoom.code, data };
+      }
 
       // Already open, and sharing this room's single code — the host claimed the
       // Durable Object before the code was ever shown, so there was nothing for
-      // a guest to race for. See lib/room-client.ts.
-      const room = openedRoom.buzzer;
-      // The order game deals only songs with a release year. A pool without
-      // enough of them across different years is refused here, before
-      // anything is stored or counted and with the room still open.
+      // a guest to race for. See lib/room-client.ts. The order game has no
+      // round to buzz in, so it leaves the handle out.
+      // And only while the toggle says so: the style pill can switch the
+      // buzzer off and keep a mailbox room whose handle is still on it.
+      const room = isOrder || !buzzerEnabled ? undefined : openedRoom.buzzer;
+      // The order game deals only dated, non-compilation songs. A pool that
+      // deals no round is refused here, before anything is stored or counted;
+      // the pool is held above, so the host can switch style and start again.
+      const refusal = isOrder ? orderRefusal(data.tracks) : null;
+      if (refusal) throw new AppError(refusal);
       const tracks = isOrder ? usableOrderTracks(data.tracks) : data.tracks;
-      if (isOrder && buildOrderRounds(tracks).rounds.length === 0) {
-        throw new AppError("order_too_few_dated");
-      }
 
       const payload = buildGamePayload({
         tracks,
@@ -634,12 +660,14 @@ export default function SetupPage() {
       // The order game deals only songs with a release year, so the count is
       // taken from those — and a playlist without enough of them across
       // different years is refused before anything is stored or counted.
+      const refusal = isOrder ? orderRefusal(shuffled) : null;
+      if (refusal) throw new AppError(refusal);
       const eligible = isOrder ? usableOrderTracks(shuffled) : shuffled;
       const limited =
         songCount.count === "all" ? eligible : eligible.slice(0, songCount.count);
-      if (isOrder && buildOrderRounds(limited).rounds.length === 0) {
-        throw new AppError("order_too_few_dated");
-      }
+      // The count can still cut a dealable list down to one that is not.
+      const short = isOrder ? orderRefusal(limited) : null;
+      if (short) throw new AppError(short);
 
       // Opened from the room step before we got here, so players have already
       // had time to scan in. `undefined` when Buzzer Mode is off.
@@ -798,10 +826,9 @@ export default function SetupPage() {
       const room = buzzerEnabled ? openedRoom?.buzzer : undefined;
       // The order game's two rules again — dated songs only, and enough
       // different years to deal a round — applied to the pool.
+      const refusal = isOrder ? orderRefusal(pooled) : null;
+      if (refusal) throw new AppError(refusal);
       const tracks = isOrder ? usableOrderTracks(pooled) : pooled;
-      if (isOrder && buildOrderRounds(tracks).rounds.length === 0) {
-        throw new AppError("order_too_few_dated");
-      }
 
       const payload = buildGamePayload({
         tracks,

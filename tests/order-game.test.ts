@@ -10,6 +10,8 @@ import {
   buildOrderRounds,
   isOrderVerdict,
   isPlayStyle,
+  noReleaseDates,
+  orderRefusal,
   orderLeftoverLine,
   orderRoundCount,
   orderRoundsPlayed,
@@ -63,6 +65,30 @@ describe("usableOrderTracks", () => {
     const c = track("1988-02");
     const d = track("0000");
     expect(usableOrderTracks([a, b, c, d])).toEqual([a, c]);
+  });
+});
+
+describe("compilations and a cache with no dates yet", () => {
+  it("never deals a compilation track, whose date is the compilation's", () => {
+    const comp = { ...track("2011"), albumCompilation: true as const };
+    const real = track("1997");
+    expect(usableOrderTracks([comp, real])).toEqual([real]);
+  });
+
+  it("tells a dateless list (an old cache entry) apart from one with too few years", () => {
+    expect(noReleaseDates([track(undefined), track(undefined)])).toBe(true);
+    expect(noReleaseDates([track(undefined), track("0000")])).toBe(false);
+    expect(noReleaseDates([])).toBe(false);
+    expect(orderRefusal([track(undefined), track(undefined), track(undefined)])).toBe("order_dates_pending");
+    expect(orderRefusal([track("2023"), track("2023"), track(undefined)])).toBe("order_too_few_dated");
+    expect(orderRefusal([track("2023"), track("1999")])).toBeNull();
+    // Compilations only: dated, but nothing dealable — a real refusal, not the cache.
+    expect(
+      orderRefusal([
+        { ...track("2001"), albumCompilation: true as const },
+        { ...track("2002"), albumCompilation: true as const },
+      ])
+    ).toBe("order_too_few_dated");
   });
 });
 

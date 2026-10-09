@@ -60,6 +60,7 @@ import {
   trueOrder,
   type OrderRound,
 } from "@/lib/order-game";
+import { displayTitle } from "@/lib/quiz";
 
 /**
  * "Put them in order": four songs face up, the room argues about which came
@@ -274,15 +275,12 @@ export default function OrderPage() {
    */
   function closeRound() {
     if (phase !== "revealed") return;
+    // GA4's round_completed is the guess game's and carries no mode, so it
+    // is not sent from here; order_round_resolved is this game's round.
     reportOrderRound(
       orderVerdict({ exact: exactWinner !== null, oldest: oldestWinner !== null }),
       currentIndex + 1
     );
-    trackEvent("round_completed", {
-      round_index: currentIndex + 1,
-      skipped: false,
-      playlist_source: playlistSource,
-    });
   }
 
   /**
@@ -1031,6 +1029,40 @@ export default function OrderPage() {
           .player-name-score { font-size: 13px; max-width: 120px; }
           .score-chip { font-size: 18px; line-height: 1; color: #aaa; }
 
+          /* A short phone (375×667, an iPhone SE: ~550px of viewport in
+             Safari). Four full cards, the picker and Next Round did not fit
+             without a scroll, so everything gives a little: smaller art,
+             tighter rows, the album line and the artist line one size down.
+             Measured with four players at the reveal. */
+          @media (max-height: 700px) {
+            .main-area { padding: 10px 12px 12px; }
+            .game-card { padding: 12px 12px 12px; }
+            .order-prompt { margin-bottom: 8px; font-size: 12px; }
+            .order-list { gap: 6px; margin-bottom: 10px; }
+            .order-card { padding: 5px 10px 5px 8px; }
+            .order-art { width: 40px; height: 40px; }
+            .order-title { font-size: 13.5px; }
+            .order-artist { font-size: 12px; margin-top: 0; }
+            .order-album, .order-from { display: none; }
+            .order-year { font-size: 22px; }
+            .who-scored { margin-bottom: 6px; }
+            .player-picker { margin-bottom: 8px; }
+            .player-pick-btn { min-height: 44px; padding: 8px 14px; }
+            .score-row-compact { margin-bottom: 8px; }
+            .btn-primary { min-height: 46px; }
+            /* Four players' names wrap the picker to two rows and the reveal
+               ran ~60px past the fold. Rather than shrink the scoring rows
+               further, Next Round rides the bottom edge until its own slot
+               scrolls into view: however many players, it is never a scroll
+               away. */
+            .btn-primary.next {
+              position: sticky;
+              bottom: 6px;
+              z-index: 2;
+              box-shadow: 0 -10px 18px rgba(20,20,20,0.95);
+            }
+          }
+
           /* Fixed to the viewport, so body's side insets do not reach it. */
           .finished-overlay {
             padding:
@@ -1083,9 +1115,12 @@ export default function OrderPage() {
                       draggable={false}
                     />
                     <div className="order-text">
-                      <p className="order-title">{t.name}</p>
+                      {/* The cleaned title, and the album only once the years
+                          are up: "Karma Police - Remastered 2011" and an album
+                          called "1989" both name a year on a face-down card. */}
+                      <p className="order-title">{displayTitle(t.name)}</p>
                       <p className="order-artist">{t.artists.join(", ")}</p>
-                      {t.albumName && <p className="order-album">{t.albumName}</p>}
+                      {isRevealed && t.albumName && <p className="order-album">{t.albumName}</p>}
                       {isRevealed && t.contributors && t.contributors.length > 0 && (
                         <p className="order-from">
                           {t.contributors.length > 1

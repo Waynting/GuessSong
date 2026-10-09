@@ -167,6 +167,9 @@ export default function GamePage() {
   const [mixCopied, setMixCopied] = useState(false);
   const [mixFallback, setMixFallback] = useState<string | null>(null);
   const [mode, setMode] = useState<GameMode>("party");
+  // Read by the leave beacon, which fires from a listener registered once.
+  const modeRef = useRef<GameMode>("party");
+  modeRef.current = mode;
   const [installCta, setInstallCta] = useState(false);
   // Buzzer Mode only. Null in every other mode, which is also how the panel
   // stays entirely out of the party render path.
@@ -503,7 +506,8 @@ export default function GamePage() {
         countRoundsPlayed(currentIndexRef.current, phaseRef.current),
         hostKindRef.current,
         via,
-        setupSourceRef.current
+        setupSourceRef.current,
+        modeRef.current
       );
     },
     [settleFirstClip]
@@ -1075,6 +1079,7 @@ export default function GamePage() {
       host: hostKindRef.current,
       ...(layout ? { screen: layout } : {}),
       ...(setupSourceRef.current ? { source: setupSourceRef.current } : {}),
+      mode,
     });
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,

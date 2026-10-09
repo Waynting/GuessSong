@@ -63,6 +63,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Save Results with "Order by year" on the card. `tests/mobile.test.ts`
     now scans this sheet too.
 
+- **Found in the pre-landing review and fixed before it shipped.** A QR room's
+  pool is consumed by the request that fetches it, so the setup page now holds
+  it (`roomPoolRef`) and a refused order start can be retried in either style
+  instead of reading `room_already_started`. The style pill keeps a room that
+  collects playlists when it turns the buzzer off. A card shows
+  `displayTitle(name)` and no album until the reveal ("Remastered 2011", an
+  album called "1989"). Compilation tracks are not dealt (`albumCompilation`,
+  1.20.1). A list with no dates at all is `order_dates_pending` — our cache,
+  not the playlist — rather than `order_too_few_dated`. `/game` now sends its
+  mode with the end and leave beacons, so the by-mode table has a `party`
+  column. On a short phone Next Round is sticky. `/order` no longer sends
+  GA4's `round_completed`, which carries no mode.
+
 ### Changed
 
 - **The setup page has a "How to play" row** — two pills, visible in both
@@ -79,11 +92,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known gaps
 
-- **The date is the album's.** A compilation or a remaster carries the
-  reissue's year, which is wrong in the direction this game notices. The
-  reveal shows the album name so the host can overrule; requesting
-  `album.album_type` and excluding `compilation` is the follow-up if
-  `order_round:none` piles up.
+- **The date is the album's.** Compilations are now skipped, but a remaster
+  or a deluxe reissue released as a plain `album` still carries the
+  reissue's year. The reveal shows the album name so the host can overrule.
+- **GA4's `song_count` and `clip_duration` on an order game's
+  `game_started` are approximate**: the first counts dated songs before the
+  deal drops same-year ones, the second is a clip length nothing plays. KV's
+  `game_mode:order` is the number to read.
+- **A rollback after hosts have order games open** sends a reload of
+  `/order` to a 404; an order payload opened on `/game` plays as the guess
+  game. Roll back off-peak.
 - **Mixed's taste card is not offered from `/order`.** Its "most obscure"
   award needs the guess game's per-round attribution history, which this
   mode does not produce; Copy the Mix is there.
