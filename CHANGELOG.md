@@ -99,6 +99,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `game_started` are approximate**: the first counts dated songs before the
   deal drops same-year ones, the second is a clip length nothing plays. KV's
   `game_mode:order` is the number to read.
+- **A Mixed QR room kept through the style switch still acts as a buzzer
+  room on its panel** (`components/room-panel.tsx` keys on `room.buzzer`):
+  phones that scan in get a buzzer page for a game that has none, and
+  turning the buzzer back on resets the room. Only reachable by opening a
+  Mixed QR room with the buzzer on and then picking Put them in order.
+- **A held room pool ignores a later Songs Per Player change**, and a
+  friend who submits after the first attempt is told the room has started
+  while the QR is still on screen. The pool cannot be read twice, so holding
+  it is right; the panel should say it is fixed.
 - **A rollback after hosts have order games open** sends a reload of
   `/order` to a 404; an order payload opened on `/game` plays as the guess
   game. Roll back off-peak.

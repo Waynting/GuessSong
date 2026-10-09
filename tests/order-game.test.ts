@@ -78,6 +78,8 @@ describe("compilations and a cache with no dates yet", () => {
   it("tells a dateless list (an old cache entry) apart from one with too few years", () => {
     expect(noReleaseDates([track(undefined), track(undefined)])).toBe(true);
     expect(noReleaseDates([track(undefined), track("0000")])).toBe(false);
+    // Most dateless is a stale cache, even with one fresh contributor.
+    expect(noReleaseDates([track(undefined), track(undefined), track("1999")])).toBe(true);
     expect(noReleaseDates([])).toBe(false);
     expect(orderRefusal([track(undefined), track(undefined), track(undefined)])).toBe("order_dates_pending");
     expect(orderRefusal([track("2023"), track("2023"), track(undefined)])).toBe("order_too_few_dated");

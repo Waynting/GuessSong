@@ -280,6 +280,8 @@ describe("the setup page starts an order game the same way on all three paths", 
     // no dates yet apart from a playlist with too few years.
     expect(setup.match(/= isOrder \? orderRefusal\((?:shuffled|pooled|data\.tracks)\) : null;/g) ?? []).toHaveLength(3);
     expect(setup.match(/if \(refusal\) throw new AppError\(refusal\);/g) ?? []).toHaveLength(3);
+    // A list the count cut too short names the count, not the playlist.
+    expect(setup).toMatch(/if \(isOrder && orderRefusal\(limited\)\) throw new AppError\("order_count_too_small"\);/);
     expect(setup).not.toMatch(/buildOrderRounds/);
     expect(setup).toMatch(/isOrder \? "order" : hasBuzzerRoom \? "buzzer" : "party"/);
     expect(setup.match(/\bmode: gameMode\(Boolean\(room\)\),/g) ?? []).toHaveLength(3);

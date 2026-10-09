@@ -116,6 +116,7 @@ export type AppErrorCode =
   | "mixed_min_contributors"
   | "order_too_few_dated"
   | "order_dates_pending"
+  | "order_count_too_small"
   // The browser itself, not the playlist — see the note above their entries
   | "storage_blocked"
   | "client_error"
@@ -533,6 +534,11 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   // Not the playlist at all: the copy we hold of it was saved before we
   // asked Spotify for release years, and refreshes within a day. Says so,
   // and never tells the host to change the playlist.
+  // The playlist could deal rounds; the Number of Songs setting cut it too short.
+  order_count_too_small: {
+    en: "That number of songs is too few to put in order. Raise Number of Songs in the settings, or pick All.",
+    zh: "歌曲數太少，排不出順序。在設定裡把「歌曲數」調高，或選「全部」。",
+  },
   order_dates_pending: {
     en: "We don't have release years for this playlist yet — our saved copy is from before this mode existed and refreshes within a day. Play Guess the song for now, or try Put them in order again later.",
     zh: "這份歌單我們還沒有發行年份：我們存的那份是這個玩法推出前存的，一天內會更新。先玩「猜歌」，或晚點再試「排順序」。",

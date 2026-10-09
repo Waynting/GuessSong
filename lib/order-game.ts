@@ -109,7 +109,11 @@ export function usableOrderTracks<T extends Pick<Track, "releaseDate" | "albumCo
 }
 
 /**
- * True when not one track in the list carries a release date at all.
+ * True when most of the list carries no release date at all — more than half.
+ *
+ * Most, not every: a Mixed pool can mix a contributor whose playlist was
+ * cached before the field existed with one loaded fresh, and blaming "the
+ * playlists" for a gap in our cache is the mistake this exists to avoid.
  *
  * That is not a playlist with too few years: it is a playlist answered from
  * a cache entry written before 1.20.1 asked Spotify for the date (entries
@@ -119,7 +123,9 @@ export function usableOrderTracks<T extends Pick<Track, "releaseDate" | "albumCo
  * `order_dates_pending` instead, which says to try again later.
  */
 export function noReleaseDates(tracks: readonly Pick<Track, "releaseDate">[]): boolean {
-  return tracks.length > 0 && tracks.every((t) => typeof t.releaseDate !== "string");
+  if (tracks.length === 0) return false;
+  const dateless = tracks.filter((t) => typeof t.releaseDate !== "string").length;
+  return dateless * 2 > tracks.length;
 }
 
 /**

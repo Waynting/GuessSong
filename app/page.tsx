@@ -665,9 +665,9 @@ export default function SetupPage() {
       const eligible = isOrder ? usableOrderTracks(shuffled) : shuffled;
       const limited =
         songCount.count === "all" ? eligible : eligible.slice(0, songCount.count);
-      // The count can still cut a dealable list down to one that is not.
-      const short = isOrder ? orderRefusal(limited) : null;
-      if (short) throw new AppError(short);
+      // The count can still cut a dealable list down to one that is not, and
+      // then it is the count, not the playlist, that has to change.
+      if (isOrder && orderRefusal(limited)) throw new AppError("order_count_too_small");
 
       // Opened from the room step before we got here, so players have already
       // had time to scan in. `undefined` when Buzzer Mode is off.
