@@ -483,7 +483,7 @@ describe("playlist pagination cost", () => {
     expect(metadataUrl).toContain("items(track(");
     // The order page sorts on this; a projection that drops it reads as
     // "no song has a date" rather than as an error.
-    expect(metadataUrl).toContain("release_date,release_date_precision");
+    expect(metadataUrl).toContain("release_date,release_date_precision,album_type");
   });
 
   it("stops at MAX_PLAYLIST_TRACKS instead of following `next` forever", async () => {
@@ -650,6 +650,17 @@ describe("convertSpotifyTrack release date", () => {
     });
     expect(track.releaseDate).toBe("1997-05-21");
     expect(track.releaseDatePrecision).toBe("day");
+  });
+
+  it("marks a compilation, and only a compilation", async () => {
+    const { convertSpotifyTrack } = await freshSpotify();
+    const base = fakeSpotifyTrack(1);
+    const comp = convertSpotifyTrack({ ...base, album: { ...base.album, album_type: "compilation" } });
+    expect(comp.albumCompilation).toBe(true);
+    for (const type of ["album", "single", undefined]) {
+      const t = convertSpotifyTrack({ ...base, album: { ...base.album, album_type: type } });
+      expect("albumCompilation" in t, String(type)).toBe(false);
+    }
   });
 
   it("leaves both keys out when Spotify sent none", async () => {

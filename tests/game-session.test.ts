@@ -337,6 +337,13 @@ describe("parseGamePayload track validation", () => {
     expect(parsed?.tracks[0]).not.toHaveProperty("releaseDatePrecision");
   });
 
+  it("keeps albumCompilation only when it is exactly true", () => {
+    expect(parseTracks([{ ...good, albumCompilation: true }])?.tracks[0].albumCompilation).toBe(true);
+    for (const junk of ["true", 1, false, null]) {
+      expect(parseTracks([{ ...good, albumCompilation: junk }])?.tracks[0], String(junk)).not.toHaveProperty("albumCompilation");
+    }
+  });
+
   it("leaves releaseDate absent, not undefined, on a track that never had one", () => {
     const parsed = parseTracks([good]);
     expect(parsed?.tracks[0]).not.toHaveProperty("releaseDate");

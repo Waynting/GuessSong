@@ -179,6 +179,8 @@ export interface SpotifyTrack {
      */
     release_date?: string;
     release_date_precision?: SpotifyReleaseDatePrecision;
+    /** `album`, `single` or `compilation`. A compilation's date is the compilation's. */
+    album_type?: string;
   };
 }
 
@@ -262,7 +264,7 @@ const MAX_TRACK_PAGES = Math.ceil(MAX_PLAYLIST_TRACKS / TRACKS_PAGE_LIMIT);
  * the default response is mostly fields nothing here has ever looked at.
  */
 const TRACK_PAGE_FIELDS =
-  "total,next,items(track(id,name,duration_ms,popularity,artists(name),album(name,images(url),release_date,release_date_precision)))";
+  "total,next,items(track(id,name,duration_ms,popularity,artists(name),album(name,images(url),release_date,release_date_precision,album_type)))";
 
 /**
  * The same projection, reached through the playlist object.
@@ -546,6 +548,9 @@ export function convertSpotifyTrack(spotifyTrack: SpotifyTrack): Track {
     ...(spotifyTrack.album.release_date_precision
       ? { releaseDatePrecision: spotifyTrack.album.release_date_precision }
       : {}),
+    // Only the one value anything reads: a compilation's release date is the
+    // compilation's, so the order game will not deal it.
+    ...(spotifyTrack.album.album_type === "compilation" ? { albumCompilation: true } : {}),
     rawJson: spotifyTrack as unknown as Record<string, unknown>,
     createdAt: new Date().toISOString(),
   };

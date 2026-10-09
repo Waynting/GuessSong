@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `releaseDatePrecision`, both optional and *absent* rather than `undefined`
   when Spotify sent none, so the cached, stored and wire shapes agree on
   whether the key exists. `normalizeTrack` keeps a string date and drops any
-  other type by omission. The Mixed room path needs nothing: `lib/room.ts`
+  other type by omission. `album_type` comes along too, kept only as
+  `albumCompilation: true` — a compilation's date is the compilation's, and
+  the order game skips those tracks. The Mixed room path needs nothing: `lib/room.ts`
   stores the stripped `Track` whole and `poolContributions` spreads it.
 - **`CACHE_VERSION` in `lib/playlist-cache.ts` stays at `v1`, on purpose.**
   Adding an optional field is not an incompatible shape. A bump would have
