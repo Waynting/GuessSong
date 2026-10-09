@@ -55,7 +55,7 @@ export interface ChangelogEntry {
 export const CHANGELOG: ChangelogEntry[] = [
   {
     version: "1.21.0",
-    date: "2026-10-09",
+    date: "2026-10-10",
     headline: "A new way to play: put four songs in order of release year, no audio needed.",
     headlineZh: "新玩法：把四首歌依發行年份排出先後順序，完全不用播音樂。",
     changes: [
