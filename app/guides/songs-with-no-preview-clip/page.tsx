@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { GuideShell, guideMetadata } from "@/app/guides/guide-shell";
 
 const SLUG = "songs-with-no-preview-clip";
@@ -158,6 +159,11 @@ export default function Page() {
           <strong>Have a second playlist ready.</strong> The cheapest insurance there is.
           If the first one turns out to be half silent, you switch instead of ending the
           night.
+        </li>
+        <li>
+          <strong>Or play without clips.</strong> <Link href="/">Put them in order</Link> on the
+          setup page deals four songs a round for the room to sort by release year, and
+          plays nothing — so a song with no clip anywhere costs it nothing.
         </li>
       </ol>
       <p>

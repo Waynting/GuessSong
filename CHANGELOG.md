@@ -70,6 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   choice nobody finds. The settings line reads "Order by year · 20 songs
   (5 rounds of 4)" in that style. The FAQ stays at four (the rich-result
   rule); the mode is named in the prose under the form instead.
+- **`/about` has a "Put them in order" section**, and the round-ideas,
+  rules-and-variants and no-clip guides each point to it where they already
+  discuss guessing the year or a song with no clip.
 - `recordHostedStart` takes the game's mode and passes it to the start
   beacon, so the beacon and the stored payload cannot disagree about which
   game started.
@@ -91,8 +94,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The game chrome is duplicated**, not shared: the top bar, scoreboard,
   Game Over overlay and their CSS exist in both pages. Extracting them from
   the 2,700-line guess page is its own change.
-- **No `?mode=order` link.** Nothing links to the mode from outside yet; the
-  guides and `/about` still describe the guess game only.
+- **No `?mode=order` link.** `/about` and three guides (round ideas, rules and
+  variants, songs with no clip) link to `/`, where the host still has to tap
+  the pill; a deep link that preselects the style is not built.
 
 ## [1.20.1] - 2026-10-09
 

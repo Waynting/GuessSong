@@ -480,6 +480,23 @@ export default function AboutPage() {
             </div>
           </section>
 
+          {/* Put them in order — the no-audio game. It is a play style on the
+              setup page, so the link goes to `/`, where the pill is. */}
+          <section className="fade-in fade-in-3">
+            <p className="eyebrow" style={{ marginBottom: "8px" }}>New · No audio</p>
+            <h2 className="section-title" style={{ marginBottom: "12px" }}>Put them in order 📅</h2>
+            <p style={{ color: "#999", fontSize: "14px", fontWeight: 300, lineHeight: 1.6, marginBottom: "16px", maxWidth: "560px" }}>
+              A second way to play any playlist. Each round shows four songs — title, artist,
+              cover — and the room puts them in order of release year, oldest first. The host
+              reveals the years: 3 points for the whole order, 1 for naming the oldest song.
+              Nothing is played, so it works in a loud bar or on a bad connection, and it works
+              with Mixed Playlist Mode too.
+            </p>
+            <Link href="/" className="link-btn">
+              Pick “Put them in order” on the setup page →
+            </Link>
+          </section>
+
           {/* Taste Quiz — the one thing here that is not a party. It has its
               own page; `QUIZ_SETUP_HREF` is where that lives. */}
           <section className="fade-in fade-in-3">
