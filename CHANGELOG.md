@@ -5,6 +5,35 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A "play online" fake door under Start** (`lib/remote-door.ts`). Online
+  rooms — players in different places, each hearing the clip on their own
+  phone — do not exist, and building them is a different product: a clip per
+  listener against iTunes/Deezer, an autoplay unlock on every phone, an answer
+  that would have to travel to the player without naming itself, and a host
+  who can no longer hear the room they judge. So the question is asked before
+  it is built. "Friends in different places? Play online →" sits under the
+  Mixed and Taste Quiz links; tapped, it says the rooms are not built, that
+  the tap was counted, and points at the Taste Quiz, the one thing that works
+  at a distance today. No date is promised. Written in English and Traditional
+  Chinese, chosen by device language (`useErrorLocale`), and drawn only after
+  mount so it never switches language under the reader.
+  - Counted as `remote_door:<shown|tapped>` through `/api/pulse`, both once per
+    page load, and as GA4's `remote_door`. `npm run stats` prints it beside
+    `game_mode:buzzer` and Mixed games. `shown` is every setup page load, so
+    the rate is not comparable to the Mixed nudge's (which counts only pages
+    with three names typed).
+  - First read: a week after deploy, together with the first full week of
+    `game_mode:*` from 1.21.0.
+
+### Known gaps
+
+- The door is a question with an expiry. Take it down once it has answered;
+  left up, it reads as a promise.
+
 ## [1.21.0] - 2026-10-10
 
 ### Added

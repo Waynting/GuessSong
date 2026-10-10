@@ -244,6 +244,11 @@ export type AnalyticsEvent =
       params: { stage: "shown" | "tapped" | "started" };
     }
   | {
+      /** The setup page's "play online" fake door. See `lib/remote-door.ts`. */
+      name: "remote_door";
+      params: { stage: "shown" | "tapped" };
+    }
+  | {
       /**
        * A permanent playlist refusal shown on the setup page, and a game
        * started after one. See `lib/refusal-recovery.ts`.

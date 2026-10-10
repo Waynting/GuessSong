@@ -30,6 +30,7 @@ const {
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
   MIXED_NUDGE_STAGES,
+  REMOTE_DOOR_STAGES,
   GAME_ROUND_CEILING,
   GAME_ROUND_FLOOR,
   GAME_SCREENS,
@@ -41,6 +42,7 @@ const {
   ORDER_VERDICTS,
   recordGameOverTap,
   recordMixedNudge,
+  recordRemoteDoor,
   HOST_INDEX_CEILING,
   LOOP_STATS_TTL_SECONDS,
   MIXED_SUB_MODES,
@@ -250,6 +252,12 @@ describe("the key format is the contract between writer and reader", () => {
       kv.incrs = [];
       await recordMixedNudge(stage);
       expect(keysWritten()).toContain(expected.mixedNudge[stage]);
+    }
+
+    for (const stage of REMOTE_DOOR_STAGES) {
+      kv.incrs = [];
+      await recordRemoteDoor(stage);
+      expect(keysWritten()).toContain(expected.remoteDoor[stage]);
     }
 
     for (const code of PLAYLIST_REFUSAL_CODES) {
@@ -502,6 +510,10 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
       expect(keys.mixedNudge[stage]).toBe(`loop:stats:2026-08-09:mixed_nudge:${stage}`);
     }
     expect(Object.keys(keys.mixedNudge)).toHaveLength(MIXED_NUDGE_STAGES.length);
+    for (const stage of REMOTE_DOOR_STAGES) {
+      expect(keys.remoteDoor[stage]).toBe(`loop:stats:2026-08-09:remote_door:${stage}`);
+    }
+    expect(Object.keys(keys.remoteDoor)).toHaveLength(REMOTE_DOOR_STAGES.length);
   });
 
   it("names a key for every game mode, alone and crossed with the ends and the bands", () => {
@@ -1307,6 +1319,7 @@ describe("the digest prints what the recorders write", () => {
       "first_clip:",
       "game_over_tap:",
       "mixed_nudge:",
+      "remote_door:",
     ]) {
       expect(rendered, `${prefix} is not claimed`).toContain(`"${prefix}"`);
     }
@@ -1319,6 +1332,9 @@ describe("the digest prints what the recorders write", () => {
     }
     for (const stage of MIXED_NUDGE_STAGES) {
       expect(script, `${stage} is never read`).toMatch(new RegExp(`get\\("mixed_nudge:${stage}"\\)`));
+    }
+    for (const stage of REMOTE_DOOR_STAGES) {
+      expect(script, `${stage} is never read`).toMatch(new RegExp(`get\\("remote_door:${stage}"\\)`));
     }
     // The rest are read by template over lists the script mirrors by hand,
     // so the lists are what has to agree with the writer's.
