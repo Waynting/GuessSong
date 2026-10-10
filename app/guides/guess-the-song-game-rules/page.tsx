@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { GuideShell, guideMetadata } from "@/app/guides/guide-shell";
 
 const SLUG = "guess-the-song-game-rules";
@@ -149,7 +150,9 @@ export default function Page() {
       <p>
         Nobody names the song. Everyone writes down the year, or the decade, and the
         closest guess scores. Turns unfamiliar music into a playable round, which means
-        you can finally use the playlist nobody in the room knows.
+        you can finally use the playlist nobody in the room knows. In GuessSong the
+        closest thing is <Link href="/">Put them in order</Link>: four songs at a time, sorted by
+        release year, with no clip played.
       </p>
 
       <div className="callout">

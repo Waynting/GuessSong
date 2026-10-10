@@ -63,6 +63,7 @@ const BLANK_FORM = {
   songCount: DEFAULT_SONG_COUNT_STATE,
   sampledPerPlayer: DEFAULT_SAMPLED_PER_PLAYER,
   buzzer: false,
+  playStyle: "guess",
 };
 
 const NOTHING_ASKED: SetupArrival = { sharedUrl: null, requestedMode: null };
@@ -77,6 +78,7 @@ const remembered = (over: Partial<RememberedSetup> = {}): RememberedSetup => ({
   mixedSubMode: "room",
   sampledPerPlayer: 8,
   buzzer: false,
+  playStyle: "guess",
   ...over,
 });
 
@@ -104,6 +106,7 @@ describe("parseSetupMemory — what counts as nothing remembered", () => {
       mixedSubMode: "room",
       sampledPerPlayer: DEFAULT_SAMPLED_PER_PLAYER,
       buzzer: false,
+      playStyle: "guess",
     });
   });
 });
@@ -121,6 +124,7 @@ describe("every field is repaired on its own", () => {
       mixedSubMode: 7,
       sampledPerPlayer: null,
       buzzer: "yes",
+      playStyle: "timeline",
     });
     expect(damaged).toEqual(
       remembered({
@@ -130,8 +134,17 @@ describe("every field is repaired on its own", () => {
         mixedSubMode: "room",
         sampledPerPlayer: DEFAULT_SAMPLED_PER_PLAYER,
         buzzer: false,
+        playStyle: "guess",
       })
     );
+  });
+
+  it("reads the play style back through its allow-list, and falls back to guessing", () => {
+    expect(store({ playStyle: "order" })?.playStyle).toBe("order");
+    expect(store({ playStyle: "guess" })?.playStyle).toBe("guess");
+    for (const junk of ["Order", "timeline", "", 1, null, {}, true]) {
+      expect(normalizeSetup({ playStyle: junk }).playStyle, String(junk)).toBe("guess");
+    }
   });
 
   it("snaps a clip length that is not offered to the nearest one that is", () => {
@@ -542,7 +555,35 @@ describe("initialSetup — the URL outranks the memory, and the memory outranks 
       songCount: { count: 30, field: "" },
       sampledPerPlayer: 8,
       buzzer: false,
+      playStyle: "guess",
     });
+  });
+
+  it("restores the play style, and never the buzzer beside an order game", () => {
+    // The order page has no round to buzz in and the form hides the toggle
+    // in that style; a record that says both would restore a hidden roster
+    // behind a room nothing can open.
+    expect(initialSetup(NOTHING_ASKED, remembered({ playStyle: "order" }))).toMatchObject({
+      playStyle: "order",
+      buzzer: false,
+    });
+    expect(
+      initialSetup(NOTHING_ASKED, remembered({ playStyle: "order", buzzer: true }))
+    ).toMatchObject({ playStyle: "order", buzzer: false });
+    expect(
+      initialSetup(NOTHING_ASKED, remembered({ playStyle: "guess", buzzer: true }))
+    ).toMatchObject({ playStyle: "guess", buzzer: true });
+  });
+
+  it("keeps the play style through a Mixed game's merge, which knows nothing about it", () => {
+    const after = mergeSetup(remembered({ playStyle: "order" }), {
+      mode: "mixed",
+      mixedSubMode: "phone",
+      sampledPerPlayer: 10,
+      clipDuration: 10,
+      buzzer: false,
+    });
+    expect(after.playStyle).toBe("order");
   });
 
   it("lets a shared playlist beat the remembered one, and keeps everything else", () => {

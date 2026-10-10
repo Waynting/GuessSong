@@ -313,6 +313,15 @@ after it against each other, not against the week before.
 | `owner social` / `taker social` / `board social` | `quiz_social:<owner\|taker\|board>:<line\|threads\|x\|facebook\|whatsapp>`, from `reportQuizSocial`. The platform row renders **only where there is no share sheet** (mostly desktops), so its denominator is the share taps on the same row that fell back to `copied`, not every tap. A floor: the click opens a new tab, so it reaches the server, but the post itself is never seen |
 | `board share` | `quiz_share:board:<outcome>` — the results page's share button, which reported to GA4 only before. Read against `board` |
 
+### Added 2026-10-09 (1.21.0) — the game mode, and the order game
+
+| Field | Meaning |
+|---|---|
+| `Played as` | `game_mode:<party\|buzzer\|order>` on the `game_started` pulse (`recordGameStart`). The first time KV can tell the three games apart — `game_mode` had been a GA4 param only. A floor per mode; pages from before the deploy send none, so the three sum to at most `games` |
+| `How games ended, by how they were played` | `game_end_mode:<mode>:<end>` and `game_left_mode:<mode>:<band>`, the mode riding on the end and leave beacons. Percentages are of `game_mode:<mode>`. **The question it exists for**: the order game has no clip to fail, so its round 1–2 leaves are the room not liking the game, where the guess game's are a game that could not play. Rounds there are rounds of four cards, so its histogram sits low against `GAME_ROUND_CEILING` |
+| `Order rounds` | `order_round:<exact\|partial\|none>`, once per revealed round (`recordOrderRound`), as the host scored it: the whole order called, the oldest song alone, nobody. The difficulty gauge for `ORDER_ROUND_SIZE` — a pile at `exact` is four cards too easy, at `none` the years too close or a remaster's reissue date (compilations are not dealt at all). Exact, like a tap: the beacon is sent from Next Round and End Game, with the document alive |
+| the first-clip line's denominator | from this release `games − game_mode:order`, because an order game has no Play to press. A window straddling the deploy reads its first days against every game, as before, and the line says how many were left out |
+
 **What stepped down on 2026-09-30, and why:**
 
 - `quiz_share:owner:copied` now means only "the share button had no share sheet and fell back to the clipboard". Copy-button taps moved to `quiz_copy:owner:copied`. Before this date the two were one number.

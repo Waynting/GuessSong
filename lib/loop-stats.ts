@@ -42,6 +42,8 @@ import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
 import { isPlaylistHelpTopic, PLAYLIST_HELP_TOPIC_NAMES, type PlaylistHelpTopic } from "@/lib/playlist-help";
 import { RECOVERY_STAGES, type RecoveryStage } from "@/lib/refusal-recovery";
 import { SETUP_SOURCES, isSetupSource, type SetupSource } from "@/lib/setup-source";
+import { GAME_MODES, isGameMode, type GameMode } from "@/lib/game-session";
+import { ORDER_VERDICTS, isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
 
 /**
  * 30 days, not the 7 that `lib/playlist-cache.ts` uses for its own stats.
@@ -454,6 +456,34 @@ export const MIXED_SUB_MODES: readonly MixedSubMode[] = ["room", "phone"];
 export { SETUP_SOURCES, isSetupSource, type SetupSource };
 
 /**
+ * Which game a hosted start was — `party`, `buzzer` or `order` — keyed
+ * `game_mode:<mode>` on the start, `game_end_mode:<mode>:<end>` on the end
+ * and `game_left_mode:<mode>:<band>` on a leave. Declared in
+ * `lib/game-session.ts` (`GameMode`, `GAME_MODES`), because that module is
+ * what reads the mode back off a stored payload; re-exported here so the
+ * reader's test can hold the key map to it.
+ *
+ * Until 1.21.0 the mode lived in GA4 alone (`game_mode` on `game_started`),
+ * so `npm run stats` could not say how many games were buzzer games, and the
+ * first-clip line's denominator was every game. An order game has no Play
+ * button, so from 1.21.0 that denominator is `games − game_mode:order`, and
+ * a window straddling the deploy reads the line against the old denominator
+ * for its first days. Pages from before it send no mode and are counted in
+ * `games` exactly as before; the three mode rows sum to at most `games`.
+ */
+export { GAME_MODES, isGameMode, type GameMode };
+
+/**
+ * How a "put them in order" round came out, as the host scored it. Declared
+ * in `lib/order-game.ts` (`OrderVerdict`, `ORDER_VERDICTS`) beside the rule
+ * that produces it; keyed `order_round:<verdict>`. The distribution is the
+ * difficulty gauge for `ORDER_ROUND_SIZE`: a pile at `exact` is a round too
+ * easy at four cards, a pile at `none` is one too hard. Sent once per
+ * revealed round, so the three sum to rounds played in that mode.
+ */
+export { ORDER_VERDICTS, isOrderVerdict, type OrderVerdict };
+
+/**
  * The playlist quiz's funnel, one counter per stage.
  *
  *   created    a host turned a playlist into a link       POST /api/quiz
@@ -704,6 +734,10 @@ export function loopStatsKeys(
   gameLeftHost: Record<GameHostKind, Record<EarlyEndBand, string>>;
   gameEndSource: Record<SetupSource, Record<GameEnd, string>>;
   gameLeftSource: Record<SetupSource, Record<EarlyEndBand, string>>;
+  gameMode: Record<GameMode, string>;
+  gameEndMode: Record<GameMode, Record<GameEnd, string>>;
+  gameLeftMode: Record<GameMode, Record<EarlyEndBand, string>>;
+  orderRound: Record<OrderVerdict, string>;
   firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
   gameOverTap: Record<GameOverTap, string>;
   mixedNudge: Record<MixedNudgeStage, string>;
@@ -743,6 +777,14 @@ export function loopStatsKeys(
         Object.fromEntries(tails.map((t) => [t, key(day, `${prefix}:${source}:${t}`)])),
       ])
     ) as Record<SetupSource, Record<T, string>>;
+  /** And over the game modes. */
+  const byMode = <T extends string>(prefix: string, tails: readonly T[]) =>
+    Object.fromEntries(
+      GAME_MODES.map((mode) => [
+        mode,
+        Object.fromEntries(tails.map((t) => [t, key(day, `${prefix}:${mode}:${t}`)])),
+      ])
+    ) as Record<GameMode, Record<T, string>>;
   return {
     live: key(day, "live"),
     throttled: key(day, "throttled"),
@@ -766,6 +808,14 @@ export function loopStatsKeys(
     gameLeftHost: byHost("game_left_host", EARLY_END_BANDS),
     gameEndSource: bySource("game_end_source", GAME_ENDS),
     gameLeftSource: bySource("game_left_source", EARLY_END_BANDS),
+    gameMode: Object.fromEntries(
+      GAME_MODES.map((m) => [m, key(day, `game_mode:${m}`)])
+    ) as Record<GameMode, string>,
+    gameEndMode: byMode("game_end_mode", GAME_ENDS),
+    gameLeftMode: byMode("game_left_mode", EARLY_END_BANDS),
+    orderRound: Object.fromEntries(
+      ORDER_VERDICTS.map((v) => [v, key(day, `order_round:${v}`)])
+    ) as Record<OrderVerdict, string>,
     firstClip: Object.fromEntries(
       FIRST_CLIP_PATHS.map((path) => [
         path,
@@ -966,7 +1016,8 @@ export function recordLoopThrottled(): Promise<void> {
 export async function recordGameStart(
   hostGameIndex: number,
   mixed?: MixedSubMode,
-  source?: SetupSource
+  source?: SetupSource,
+  mode?: GameMode
 ): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
@@ -984,6 +1035,9 @@ export async function recordGameStart(
   // game with no source — an older client, or a value outside the list — is
   // still a game: everything above has already counted it.
   if (source && SETUP_SOURCES.includes(source)) await bump(`host_setup:${source}`);
+  // And which game it was, under the same rule: guarded here whatever the
+  // parser did, absent on an older page, and never a reason to lose the game.
+  if (isGameMode(mode)) await bump(`game_mode:${mode}`);
 }
 
 /**
@@ -1012,7 +1066,12 @@ export async function recordGameStart(
 export async function recordGameEnd(
   end: GameEnd,
   roundsPlayed: number,
-  details: { host?: GameHostKind; screen?: GameScreen; source?: SetupSource } = {}
+  details: {
+    host?: GameHostKind;
+    screen?: GameScreen;
+    source?: SetupSource;
+    mode?: GameMode;
+  } = {}
 ): Promise<void> {
   if (!GAME_ENDS.includes(end)) return;
   await bump(`game_end:${end}`);
@@ -1020,6 +1079,8 @@ export async function recordGameEnd(
   const extras: Promise<void>[] = [];
   if (host) extras.push(bump(`game_end_host:${host}:${end}`));
   if (isSetupSource(details.source)) extras.push(bump(`game_end_source:${details.source}:${end}`));
+  // Which game it was, joined to the end — `game_mode:*` is the denominator.
+  if (isGameMode(details.mode)) extras.push(bump(`game_end_mode:${details.mode}:${end}`));
   if (isGameScreen(details.screen)) extras.push(bump(`game_end_screen:${details.screen}`));
   if (end !== "ended_early") {
     await Promise.all(extras);
@@ -1082,7 +1143,8 @@ export function recordFirstClip(path: FirstClipPath, outcome: FirstClipOutcome):
 export async function recordGameLeft(
   roundsPlayed: number,
   host?: GameHostKind,
-  source?: SetupSource
+  source?: SetupSource,
+  mode?: GameMode
 ): Promise<void> {
   const round = clampRound(roundsPlayed);
   await bump(`game_left_round:${round}`);
@@ -1090,7 +1152,19 @@ export async function recordGameLeft(
   await Promise.all([
     isGameHostKind(host) ? bump(`game_left_host:${host}:${band}`) : undefined,
     isSetupSource(source) ? bump(`game_left_source:${source}:${band}`) : undefined,
+    isGameMode(mode) ? bump(`game_left_mode:${mode}:${band}`) : undefined,
   ]);
+}
+
+/**
+ * A "put them in order" round closed after its reveal. `reportOrderRound` in
+ * `lib/loop-client.ts` sends it; the verdict is a key tail and is refused
+ * when undeclared, because the body reached `/api/pulse` from the open
+ * internet. One per revealed round, so the three keys sum to rounds played.
+ */
+export function recordOrderRound(verdict: OrderVerdict): Promise<void> {
+  if (!isOrderVerdict(verdict)) return Promise.resolve();
+  return bump(`order_round:${verdict}`);
 }
 
 /** A tap on the Game Over screen. See `GameOverTap`. */

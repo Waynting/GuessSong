@@ -189,6 +189,16 @@ describe("unavailable is not absent on screen", () => {
   });
 });
 
+describe("an order payload never reaches the prefetch", () => {
+  it("sends it to /order before setTracks, so the batch effect cannot run", () => {
+    // The prefetch keys on `tracks.length`; a mode check after `setTracks`
+    // would spend a batch of lookups on a game that never presses Play.
+    const mount = body.match(/const data = loadGame\(\);[\s\S]*?setTracks\(data\.tracks\);/)?.[0] ?? "";
+    expect(mount).toMatch(/if \(data\.mode === "order"\) \{ router\.replace\("\/order"\); return; \}/);
+    expect(mount.indexOf('data.mode === "order"')).toBeLessThan(mount.indexOf("setTracks(data.tracks)"));
+  });
+});
+
 describe("known-silent upcoming tracks are skipped", () => {
   it("asks the rule with where the host is now, not where they were when the batch was sent", () => {
     expect(body).toMatch(
@@ -231,6 +241,12 @@ describe("known-silent upcoming tracks are skipped", () => {
 });
 
 describe("the game's beacons", () => {
+  it("sends the game's mode with the end and the leave, so the by-mode table has a party column", () => {
+    expect(member("trackGameFinished")).toMatch(/\bmode,\s*\}\);/);
+    expect(member("reportLeave")).toMatch(/setupSourceRef\.current,\s*modeRef\.current\s*\)/);
+    expect(body).toMatch(/modeRef\.current = mode;/);
+  });
+
   it("sends the host kind and the layout with the end, under the once-per-game guard", () => {
     const finished = member("trackGameFinished");
     expect(finished).toMatch(/if \(finishedTrackedRef\.current\) return;/);

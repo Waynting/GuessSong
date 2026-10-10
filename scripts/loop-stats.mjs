@@ -289,6 +289,33 @@ console.log(
 );
 
 /**
+ * Which game each start was: `game_mode:<party|buzzer|order>`, riding on the
+ * `game_started` pulse since 1.21.0 (`recordGameStart` in lib/loop-stats.ts).
+ * Until then KV could not tell a buzzer game from a party, and the order
+ * game — four cards, no clip — is the first mode whose games cannot press
+ * Play, so the first-clip block below takes them out of its denominator.
+ *
+ * Floors, like the setup line under it: a page from before the deploy
+ * sends no mode and is in `Games started` as it always was, so the three
+ * sum to at most `games`. The order mirrors `GAME_MODES`.
+ */
+const GAME_MODE_ORDER = ["party", "buzzer", "order"];
+const gameModes = [...totals.keys()]
+  .filter((m) => m.startsWith("game_mode:"))
+  .map((m) => m.slice("game_mode:".length))
+  .sort((a, b) => {
+    const [ia, ib] = [GAME_MODE_ORDER.indexOf(a), GAME_MODE_ORDER.indexOf(b)];
+    return (ia === -1 ? Infinity : ia) - (ib === -1 ? Infinity : ib) || a.localeCompare(b);
+  });
+const modeSaid = gameModes.reduce((t, m) => t + get(`game_mode:${m}`), 0);
+const orderGames = get("game_mode:order");
+
+if (modeSaid > 0) {
+  const parts = gameModes.map((m) => `${m} ${get(`game_mode:${m}`)}`).join(" · ");
+  console.log(`Played as           ${parts}   (${modeSaid} of ${games} games said)`);
+}
+
+/**
  * How the playlist got into the field, for the games that said.
  *
  * `host_setup:<source>` rides on the same beacon as `Games started` and is
@@ -580,6 +607,68 @@ if (sourceCols.length > 0) {
 }
 
 /**
+ * The same outcomes once more, crossed with which game it was —
+ * `game_end_mode:<mode>:<end>` and `game_left_mode:<mode>:<band>`, the mode
+ * riding on the end and leave beacons since 1.21.0. `started` is
+ * `game_mode:<mode>`, the denominator. The question it exists for: does the
+ * order game, which has no clip to fail, lose fewer rooms at rounds 1–2
+ * than the guess game — and does it get played out at all.
+ */
+const modeCols = GAME_MODE_ORDER.filter((m) =>
+  [...totals.keys()].some(
+    (k) => k.startsWith(`game_end_mode:${m}:`) || k.startsWith(`game_left_mode:${m}:`)
+  )
+);
+const byMode = (prefix, tail) => modeCols.map((m) => get(`${prefix}:${m}:${tail}`));
+
+if (modeCols.length > 0) {
+  const started = modeCols.map((m) => get(`game_mode:${m}`));
+  const playedOut = byMode("game_end_mode", "played_out");
+  const endedEarly = byMode("game_end_mode", "ended_early");
+  const leftBands = earlyBands.map(([band]) => byMode("game_left_mode", band));
+  const left = modeCols.map((_, i) => leftBands.reduce((t, row) => t + row[i], 0));
+  const leftEarly = modeCols.map((_, i) => leftBands[0][i] + leftBands[1][i]);
+  console.log("\nHow games ended, by how they were played");
+  console.log(sourceRow("", modeCols));
+  console.log(sourceRow("started", started));
+  console.log(sourceRow("played out", playedOut));
+  console.log(sourceRow("ended early", endedEarly));
+  console.log(sourceRow("left mid-game", left));
+  earlyBands.forEach(([, label], i) => console.log(sourceRow(`  ${label}`, leftBands[i])));
+  console.log(sourcePctRow("played out, % of started", playedOut, started));
+  console.log(sourcePctRow("left by round 2, %", leftEarly, started));
+  console.log(
+    "  how to read it: `order` has no clip to fail, so its round 1–2 leaves are the\n" +
+      "  room not liking the game, not the game not playing. Set its played-out rate\n" +
+      "  beside `party`'s. Rounds are rounds of cards there, not songs."
+  );
+}
+
+/**
+ * The order game's rounds: `order_round:<exact|partial|none>`, one per
+ * revealed round, as the host scored it (`recordOrderRound`). The difficulty
+ * gauge for four cards a round: a pile at `full order` is a game too easy,
+ * a pile at `nobody` one too hard — the number that decides whether
+ * ORDER_ROUND_SIZE in lib/order-game.ts moves.
+ */
+const orderVerdicts = [
+  ["exact", "full order called"],
+  ["partial", "oldest song only"],
+  ["none", "nobody"],
+];
+const orderRounds = orderVerdicts.reduce((t, [v]) => t + get(`order_round:${v}`), 0);
+if (orderRounds > 0) {
+  const parts = orderVerdicts
+    .map(([v, label]) => `${label} ${get(`order_round:${v}`)} (${pct(get(`order_round:${v}`), orderRounds).trim()})`)
+    .join(" · ");
+  console.log(`\nOrder rounds        ${orderRounds} revealed — ${parts}`);
+  console.log(
+    "  how to read it: the host's two awards, bucketed. Most rounds at `full order` is\n" +
+      "  four cards being too easy; most at `nobody` is the years too close together."
+  );
+}
+
+/**
  * The first Play press of each game: `first_clip:<path>:<outcome>`.
  *
  * The hypothesis it was built to test is in the two `rejected` cells. On the
@@ -614,8 +703,13 @@ if (firstClips > 0) {
     });
     console.log(`  ${label.padEnd(26)}${cells.join("")}`);
   }
+  // An order game has no Play button. Taken out of the denominator, from
+  // the day the mode was counted; a window straddling 1.21.0 reads its first
+  // days against every game, as before.
+  const playable = games - orderGames;
   console.log(
-    `  ${firstClips} games had Play pressed, ${pct(firstClips, games).trim()} of games started`
+    `  ${firstClips} games had Play pressed, ${pct(firstClips, playable).trim()} of games started` +
+      (orderGames > 0 ? ` (${orderGames} order games, which have no Play, left out)` : "")
   );
   console.log(
     "  how to read it: `refused` much higher under lazy than under prefetched is the\n" +
@@ -991,6 +1085,10 @@ const RENDERED_PREFIXES = [
   "game_left_host:",
   "game_end_source:",
   "game_left_source:",
+  "game_mode:",
+  "game_end_mode:",
+  "game_left_mode:",
+  "order_round:",
   "first_clip:",
   "game_over_tap:",
   "mixed_nudge:",

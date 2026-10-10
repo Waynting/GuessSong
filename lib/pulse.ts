@@ -73,6 +73,8 @@ import { QUIZ_COPY_OUTCOMES, type QuizCopyOutcome } from "@/lib/loop-stats";
 import { isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { isSocialPlatform, type SocialPlatform } from "@/lib/social-share";
 import { isPlaylistHelpTopic, type PlaylistHelpTopic } from "@/lib/playlist-help";
+import { isGameMode, type GameMode } from "@/lib/game-session";
+import { isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
@@ -140,7 +142,13 @@ function isQuizCopyOutcome(value: unknown): value is QuizCopyOutcome {
 
 export type PulseEvent =
   | { kind: "loop_impression"; surface: LoopSurface }
-  | { kind: "game_started"; hostGameIndex: number; mixed?: MixedSubMode; source?: SetupSource }
+  | {
+      kind: "game_started";
+      hostGameIndex: number;
+      mixed?: MixedSubMode;
+      source?: SetupSource;
+      mode?: GameMode;
+    }
   | {
       kind: "game_finished";
       end: GameEnd;
@@ -148,9 +156,17 @@ export type PulseEvent =
       host?: GameHostKind;
       screen?: GameScreen;
       source?: SetupSource;
+      mode?: GameMode;
     }
   | { kind: "first_clip"; path: FirstClipPath; outcome: FirstClipOutcome }
-  | { kind: "game_left"; roundsPlayed: number; host?: GameHostKind; source?: SetupSource }
+  | {
+      kind: "game_left";
+      roundsPlayed: number;
+      host?: GameHostKind;
+      source?: SetupSource;
+      mode?: GameMode;
+    }
+  | { kind: "order_round"; verdict: OrderVerdict }
   | { kind: "game_over_tap"; target: GameOverTap }
   | { kind: "mixed_nudge"; stage: MixedNudgeStage }
   | { kind: "refusal_recovery"; stage: "refused"; topic: PlaylistHelpTopic }
@@ -199,7 +215,11 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // hazard: `host_setup:${value}` is a key. Absent is the ordinary case for
     // a while — every page loaded before this shipped sends none — and must
     // parse exactly as it always did.
-    return isSetupSource(raw.source) ? { ...started, source: raw.source } : started;
+    const sourced = isSetupSource(raw.source) ? { ...started, source: raw.source } : started;
+    // And once more for which game it was: `game_mode:${value}` is a key, a
+    // page from before 1.21.0 sends none, and a game with an unknown mode is
+    // still a game.
+    return isGameMode(raw.mode) ? { ...sourced, mode: raw.mode } : sourced;
   }
 
   if (raw.kind === "game_finished") {
@@ -223,6 +243,8 @@ export function parsePulse(body: unknown): PulseEvent | null {
       // the stored payload. Same trade: a game stored before 2026-10-05 has
       // none, and `game_end_source:${value}` is a key.
       ...(isSetupSource(raw.source) ? { source: raw.source } : {}),
+      // Which game it was. `game_end_mode:${value}:${end}` is a key.
+      ...(isGameMode(raw.mode) ? { mode: raw.mode } : {}),
     };
   }
 
@@ -242,7 +264,14 @@ export function parsePulse(body: unknown): PulseEvent | null {
       roundsPlayed: clamped,
       ...(isGameHostKind(raw.host) ? { host: raw.host } : {}),
       ...(isSetupSource(raw.source) ? { source: raw.source } : {}),
+      ...(isGameMode(raw.mode) ? { mode: raw.mode } : {}),
     };
+  }
+
+  if (raw.kind === "order_round") {
+    // The verdict is the whole event and a key tail; an undeclared one is
+    // refused, never filed under a neighbour.
+    return isOrderVerdict(raw.verdict) ? { kind: "order_round", verdict: raw.verdict } : null;
   }
 
   if (raw.kind === "game_over_tap") {

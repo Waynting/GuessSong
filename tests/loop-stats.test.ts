@@ -36,6 +36,9 @@ const {
   earlyEndBand,
   recordFirstClip,
   recordGameLeft,
+  recordOrderRound,
+  GAME_MODES,
+  ORDER_VERDICTS,
   recordGameOverTap,
   recordMixedNudge,
   HOST_INDEX_CEILING,
@@ -113,6 +116,18 @@ describe("the key format is the contract between writer and reader", () => {
       kv.incrs = [];
       await recordGameStart(1, undefined, source);
       expect(keysWritten()).toContain(expected.hostSetup[source]);
+    }
+
+    for (const mode of GAME_MODES) {
+      kv.incrs = [];
+      await recordGameStart(1, undefined, undefined, mode);
+      expect(keysWritten()).toContain(expected.gameMode[mode]);
+    }
+
+    for (const verdict of ORDER_VERDICTS) {
+      kv.incrs = [];
+      await recordOrderRound(verdict);
+      expect(keysWritten()).toContain(expected.orderRound[verdict]);
     }
 
     for (const stage of QUIZ_STAGES) {
@@ -487,6 +502,68 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
       expect(keys.mixedNudge[stage]).toBe(`loop:stats:2026-08-09:mixed_nudge:${stage}`);
     }
     expect(Object.keys(keys.mixedNudge)).toHaveLength(MIXED_NUDGE_STAGES.length);
+  });
+
+  it("names a key for every game mode, alone and crossed with the ends and the bands", () => {
+    expect(GAME_MODES).toContain("order");
+    for (const mode of GAME_MODES) {
+      expect(keys.gameMode[mode]).toBe(`loop:stats:2026-08-09:game_mode:${mode}`);
+      for (const end of GAME_ENDS) {
+        expect(keys.gameEndMode[mode][end]).toBe(`loop:stats:2026-08-09:game_end_mode:${mode}:${end}`);
+      }
+      for (const band of EARLY_END_BANDS) {
+        expect(keys.gameLeftMode[mode][band]).toBe(`loop:stats:2026-08-09:game_left_mode:${mode}:${band}`);
+      }
+    }
+    expect(Object.keys(keys.gameMode)).toHaveLength(GAME_MODES.length);
+    for (const verdict of ORDER_VERDICTS) {
+      expect(keys.orderRound[verdict]).toBe(`loop:stats:2026-08-09:order_round:${verdict}`);
+    }
+    expect(Object.keys(keys.orderRound)).toHaveLength(ORDER_VERDICTS.length);
+  });
+
+  it("joins the mode to the start, the end and the leave, and refuses one it does not know", async () => {
+    await recordGameStart(2, undefined, "typed", "order");
+    expect(keysWritten()).toContain(keys.gameMode.order);
+    expect(keysWritten()).toContain(keys.hostSetup.typed);
+
+    kv.incrs = [];
+    await recordGameEnd("played_out", 5, { host: "repeat", mode: "order" });
+    expect(keysWritten()).toContain(keys.gameEndMode.order.played_out);
+    expect(keysWritten()).toContain(keys.gameEndHost.repeat.played_out);
+
+    kv.incrs = [];
+    await recordGameEnd("ended_early", 1, { mode: "buzzer" });
+    expect(keysWritten()).toContain(keys.gameEndMode.buzzer.ended_early);
+    expect(keysWritten()).toContain(keys.gameEndRound[1]);
+
+    kv.incrs = [];
+    await recordGameLeft(2, "first", "starter", "party");
+    expect(keysWritten()).toContain(keys.gameLeftMode.party.r1_2);
+    expect(keysWritten()).toContain(keys.gameLeftHost.first.r1_2);
+
+    // `game_mode:${value}` is a key: an unknown mode writes no mode key and
+    // costs the game nothing else.
+    kv.incrs = [];
+    await recordGameStart(1, undefined, undefined, "timeline" as never);
+    expect(keysWritten()).toContain(keys.games);
+    expect(keysWritten().some((k) => k.includes("game_mode:"))).toBe(false);
+    kv.incrs = [];
+    await recordGameEnd("played_out", 3, { mode: "Order" as never });
+    expect(keysWritten()).toContain(keys.gameEnd.played_out);
+    expect(keysWritten().some((k) => k.includes("game_end_mode:"))).toBe(false);
+    kv.incrs = [];
+    await recordGameLeft(0, undefined, undefined, "" as never);
+    expect(keysWritten().some((k) => k.includes("game_left_mode:"))).toBe(false);
+  });
+
+  it("counts an order round's verdict once, and refuses one it does not know", async () => {
+    await recordOrderRound("exact");
+    expect(keysWritten()).toEqual([keys.orderRound.exact, keys.live]);
+    kv.incrs = [];
+    await recordOrderRound("EXACT" as never);
+    await recordOrderRound("half" as never);
+    expect(kv.incrs).toEqual([]);
   });
 
   it("refuses a first clip whose path or outcome is undeclared — both are key tails", async () => {

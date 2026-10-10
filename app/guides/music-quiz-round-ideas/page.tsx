@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { GuideShell, guideMetadata } from "@/app/guides/guide-shell";
 
 const SLUG = "music-quiz-round-ideas";
@@ -46,6 +47,12 @@ export default function Page() {
         unfamiliar music playable. A playlist that would be dead as a naming round is a
         perfectly good guessing round, which means you can finally use somebody’s obscure
         favourites without stranding the rest of the table.
+      </p>
+      <p>
+        GuessSong has a version of this built in that needs no audio at all:{" "}
+        <Link href="/">pick “Put them in order” on the setup page</Link> and each round deals four
+        songs from the playlist for the room to sort by release year, oldest first. The host
+        reveals the years and awards the points.
       </p>
 
       <h3>4. One-word summary</h3>

@@ -34,6 +34,8 @@ import type {
 } from "@/lib/loop-stats";
 import { sendPulse } from "@/lib/pulse-client";
 import type { PlaylistHelpTopic } from "@/lib/playlist-help";
+import type { GameMode } from "@/lib/game-session";
+import type { OrderVerdict } from "@/lib/order-game";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
 
@@ -98,17 +100,24 @@ export function reportLoopClick(surface: LoopSurface): void {
  * `source` is how the playlist got into the field (`SetupSource` in
  * `lib/loop-stats.ts`). Optional for the same reason: a caller that does not
  * know sends nothing, and the game is counted as it always was.
+ *
+ * `mode` is which game it is (`GameMode`), since 1.21.0: until then KV could
+ * not say how many games were buzzer games, let alone order games, and the
+ * first-clip line's denominator — "games in which Play could be pressed" —
+ * needs the order games taken out of it.
  */
 export function reportGameStart(
   hostGameIndex: number,
   mixed?: MixedSubMode,
-  source?: SetupSource
+  source?: SetupSource,
+  mode?: GameMode
 ): void {
   sendPulse({
     kind: "game_started",
     hostGameIndex,
     ...(mixed ? { mixed } : {}),
     ...(source ? { source } : {}),
+    ...(mode ? { mode } : {}),
   });
 }
 
@@ -128,7 +137,12 @@ export function reportGameStart(
 export function reportGameEnd(
   end: GameEnd,
   roundsPlayed: number,
-  details: { host?: GameHostKind; screen?: GameScreen; source?: SetupSource } = {}
+  details: {
+    host?: GameHostKind;
+    screen?: GameScreen;
+    source?: SetupSource;
+    mode?: GameMode;
+  } = {}
 ): void {
   sendPulse({
     kind: "game_finished",
@@ -137,6 +151,7 @@ export function reportGameEnd(
     ...(details.host ? { host: details.host } : {}),
     ...(details.screen ? { screen: details.screen } : {}),
     ...(details.source ? { source: details.source } : {}),
+    ...(details.mode ? { mode: details.mode } : {}),
   });
 }
 
@@ -164,10 +179,33 @@ export function reportGameLeft(
   roundsPlayed: number,
   host: GameHostKind,
   via: "unload" | "navigation",
-  source?: SetupSource
+  source?: SetupSource,
+  mode?: GameMode
 ): void {
-  trackEvent("game_left", { rounds_played: roundsPlayed, host_kind: host, via });
-  sendPulse({ kind: "game_left", roundsPlayed, host, ...(source ? { source } : {}) });
+  trackEvent("game_left", {
+    rounds_played: roundsPlayed,
+    host_kind: host,
+    via,
+    ...(mode ? { game_mode: mode } : {}),
+  });
+  sendPulse({
+    kind: "game_left",
+    roundsPlayed,
+    host,
+    ...(source ? { source } : {}),
+    ...(mode ? { mode } : {}),
+  });
+}
+
+/**
+ * Call as a "put them in order" round closes after its reveal, with how the
+ * host scored it. Both destinations, behind one function, for the reason at
+ * the top of this file. Sent from Next Round and from End Game on a revealed
+ * round — the document survives both, so this is a beacon like the taps.
+ */
+export function reportOrderRound(verdict: OrderVerdict, roundIndex: number): void {
+  trackEvent("order_round_resolved", { round_index: roundIndex, verdict });
+  sendPulse({ kind: "order_round", verdict });
 }
 
 /**

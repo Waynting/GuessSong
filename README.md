@@ -24,6 +24,8 @@ The host is the judge — there's no automated answer checking.
 | Correct song | +3 | Party & Buzzer modes |
 | Correct album | +1 | Party & Buzzer modes |
 | Correct "whose playlist is this?" | +2 | Mixed Playlist Mode only |
+| Called the full order | +3 | Put them in order |
+| Named the oldest song | +1 | Put them in order |
 
 One award of each type per round.
 
@@ -37,6 +39,7 @@ Two orthogonal choices: **how you play** and **where the songs come from**.
 |---|---|
 | **Party** (default) | Host types the player names, plays clips, and manually awards points. |
 | **Buzzer** | Everyone scans one QR code and gets a full-screen buzzer on their own phone. A Cloudflare Durable Object decides who pressed first, so the host can stop refereeing and actually play. Only offered when `NEXT_PUBLIC_BUZZER_WS_URL` is set. |
+| **Put them in order** | No audio. Each round shows four songs from the playlist — title, artist, cover — and the room puts them in order of release year; the host reveals the years and awards the points. Every card in a round has a different year, so there are no ties, and songs from compilation albums are left out because their date is the compilation's. Works with any source below, buzzer excluded. |
 
 ### Where the songs come from
 
@@ -175,6 +178,7 @@ app/
   page.tsx                   Setup — playlist, players, a folded settings row, Mixed mode
   quiz/                      Taste Quiz creation page (page.tsx + quiz-create.tsx)
   game/page.tsx              The game — phase machine, playback, scoring, result images, the phone layout
+  order/page.tsx             Put them in order — the no-audio game (rules in lib/order-game.ts)
   about/                     "How to play" page
   zh/                        Traditional-Chinese landing page (written natively, not translated)
   guides/                    Guides index + fourteen articles (metadata declared in lib/guides.ts)
