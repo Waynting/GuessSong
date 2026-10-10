@@ -142,6 +142,16 @@ export function SetupStyles() {
         /* On a phone the two links never fit one line, and a dot left at the
            end of the first one reads as a stray mark. The row gap separates them. */
         @media (max-width: 600px) { .mode-links-sep { display: none; } }
+        .remote-door { margin-top: 10px; text-align: center; }
+        .remote-door .text-link { color: #777; }
+        @media (hover: hover) { .remote-door .text-link:hover { color: var(--green); } }
+        .remote-door-note {
+          font-size: 13px;
+          line-height: 1.55;
+          color: #aaa;
+          max-width: 440px;
+          margin: 0 auto;
+        }
 
         /* Under the roster once three names are typed: the one moment Mixed
            plainly fits. A whole-row button, quieter than Start and the pills,

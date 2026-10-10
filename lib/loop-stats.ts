@@ -237,6 +237,15 @@ export type MixedNudgeStage = "shown" | "tapped" | "started";
 export const MIXED_NUDGE_STAGES: readonly MixedNudgeStage[] = ["shown", "tapped", "started"];
 
 /**
+ * The setup page's "play online" fake door (`lib/remote-door.ts`): `shown`
+ * once per page load, `tapped` once per page load. Nothing is started from
+ * it, because there is nothing to start.
+ */
+export type RemoteDoorStage = "shown" | "tapped";
+
+export const REMOTE_DOOR_STAGES: readonly RemoteDoorStage[] = ["shown", "tapped"];
+
+/**
  * Who tapped a quiz's share button, and what came of it.
  *
  * `owner` is the panel on `/quiz` after a quiz is made — the step between
@@ -741,6 +750,7 @@ export function loopStatsKeys(
   firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
   gameOverTap: Record<GameOverTap, string>;
   mixedNudge: Record<MixedNudgeStage, string>;
+  remoteDoor: Record<RemoteDoorStage, string>;
   refusalRecovery: Record<RecoveryStage, Record<PlaylistHelpTopic, string>>;
   refusalRecoveryVia: Record<SetupSource, string>;
   playlistRefused: Record<PlaylistRefusalCode, string>;
@@ -831,6 +841,9 @@ export function loopStatsKeys(
     mixedNudge: Object.fromEntries(
       MIXED_NUDGE_STAGES.map((s) => [s, key(day, `mixed_nudge:${s}`)])
     ) as Record<MixedNudgeStage, string>,
+    remoteDoor: Object.fromEntries(
+      REMOTE_DOOR_STAGES.map((s) => [s, key(day, `remote_door:${s}`)])
+    ) as Record<RemoteDoorStage, string>,
     refusalRecovery: Object.fromEntries(
       RECOVERY_STAGES.map((stage) => [
         stage,
@@ -1193,6 +1206,12 @@ export async function recordRefusalRecovery(
 export function recordMixedNudge(stage: MixedNudgeStage): Promise<void> {
   if (!MIXED_NUDGE_STAGES.includes(stage)) return Promise.resolve();
   return bump(`mixed_nudge:${stage}`);
+}
+
+/** The setup page's "play online" fake door. See `RemoteDoorStage`. */
+export function recordRemoteDoor(stage: RemoteDoorStage): Promise<void> {
+  if (!REMOTE_DOOR_STAGES.includes(stage)) return Promise.resolve();
+  return bump(`remote_door:${stage}`);
 }
 
 /**

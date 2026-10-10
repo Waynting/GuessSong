@@ -756,6 +756,28 @@ if (nudgeShown + nudgeTapped + nudgeStarted > 0) {
 }
 
 /**
+ * The setup page's "play online" fake door (`lib/remote-door.ts`). There is no
+ * online room; the tap is the question. `shown` is every setup page load, so
+ * the rate is not the Mixed nudge's — the taps are read beside the games that
+ * already put phones in the room.
+ */
+const doorShown = get("remote_door:shown");
+const doorTapped = get("remote_door:tapped");
+if (doorShown + doorTapped > 0) {
+  const phoneGames = get("game_mode:buzzer");
+  console.log(
+    `\nPlay online (fake door)  shown ${doorShown} · tapped ${doorTapped} (${pct(doorTapped, doorShown).trim()})` +
+      ` · buzzer games ${phoneGames} · Mixed games ${get("host_setup:mixed")}`
+  );
+  console.log(
+    "  how to read it: there is no online room; a tap is a host asking for one. shown is\n" +
+      "  every setup page load, not a host with a room's worth of names, so the rate sits\n" +
+      "  below the Mixed nudge's by construction. Set the taps beside the buzzer and Mixed\n" +
+      "  games — the hosts who already put a phone in every player's hand."
+  );
+}
+
+/**
  * The playlist quiz funnel: created → opened → started → completed → board,
  * then the share surface's own row above. Each stage is a server-side count
  * (the route that did the thing bumps it), so unlike the surface table
@@ -1092,6 +1114,7 @@ const RENDERED_PREFIXES = [
   "first_clip:",
   "game_over_tap:",
   "mixed_nudge:",
+  "remote_door:",
   "refusal_recovery:",
   "refusal_recovery_via:",
   "playlist_refused:",
