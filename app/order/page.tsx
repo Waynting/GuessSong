@@ -5,7 +5,9 @@ import {
   useEffect,
   useRef,
   useCallback,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useRouter } from "next/navigation";
 import type { Track } from "@/types";
@@ -54,6 +56,9 @@ import {
   ORDER_EXACT_POINTS,
   ORDER_OLDEST_POINTS,
   buildOrderRounds,
+  dropSlot,
+  moveCard,
+  readArrangement,
   orderLeftoverLine,
   orderRoundsPlayed,
   orderVerdict,
@@ -121,6 +126,13 @@ export default function OrderPage() {
   /** Who called the whole order this round, or null; doubles as the awarded flag. */
   const [exactWinner, setExactWinner] = useState<string | null>(null);
   const [oldestWinner, setOldestWinner] = useState<string | null>(null);
+  // The room's answer: the cards in the order they have been dragged into,
+  // for the round it belongs to. A new round starts from its deal.
+  const [arrangement, setArrangement] = useState<{ round: number; ids: string[]; moved: boolean } | null>(null);
+  // The card under a finger, and how far it sits from its slot.
+  const [drag, setDrag] = useState<{ id: string; dy: number } | null>(null);
+  const dragRef = useRef<{ id: string; startY: number; origin: number; centres: number[] } | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [scorePulse, setScorePulse] = useState<string | null>(null);
   /** Null until an effect has asked — see gameScreenFor in lib/game-over.ts. */
   const [screen, setScreen] = useState<GameScreen | null>(null);
@@ -271,7 +283,71 @@ export default function OrderPage() {
   }
 
   function reveal() {
+    setDrag(null);
+    dragRef.current = null;
     setPhase("revealed");
+    // One player has nobody to argue with and nobody to judge them: the
+    // arrangement on the screen is their answer, so it is scored as one.
+    // A room keeps the host's two award rows — the screen holds one order,
+    // and only the room knows whose it was.
+    const round = rounds[currentIndex];
+    if (players.length === 1 && round) {
+      const result = readArrangement(arrangedIds, round);
+      if (result.exact) awardExact(players[0].name);
+      if (result.oldest) awardOldest(players[0].name);
+    }
+  }
+
+  function setIds(ids: string[]) {
+    setArrangement({ round: currentIndex, ids, moved: true });
+  }
+
+  /**
+   * A drag, by pointer — mouse, finger or pen, without a library. The slots'
+   * centres are measured once when the card is picked up; the card follows
+   * the pointer, and when its centre is nearer another slot the list
+   * reorders under it and the offset is re-based on the new slot, so the
+   * card stays under the finger.
+   */
+  function pickUp(event: ReactPointerEvent<HTMLDivElement>, id: string) {
+    if (phase !== "showing" || !listRef.current) return;
+    const index = arrangedIds.indexOf(id);
+    if (index < 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const centres = Array.from(listRef.current.children).map((el) => {
+      const r = el.getBoundingClientRect();
+      return r.top + r.height / 2;
+    });
+    dragRef.current = { id, startY: event.clientY, origin: centres[index], centres };
+    setDrag({ id, dy: 0 });
+  }
+
+  function dragMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const d = dragRef.current;
+    if (!d) return;
+    const centre = d.origin + (event.clientY - d.startY);
+    const from = arrangedIds.indexOf(d.id);
+    const to = dropSlot(centre, d.centres);
+    if (from >= 0 && to !== from) setIds(moveCard(arrangedIds, from, to));
+    setDrag({ id: d.id, dy: centre - d.centres[to] });
+  }
+
+  function putDown() {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    setDrag(null);
+  }
+
+  /** The same move from the keyboard: arrow keys shift the focused card. */
+  function keyMove(event: ReactKeyboardEvent<HTMLDivElement>, id: string) {
+    if (phase !== "showing") return;
+    const step = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+    if (step === 0) return;
+    event.preventDefault();
+    const from = arrangedIds.indexOf(id);
+    const to = from + step;
+    if (from < 0 || to < 0 || to >= arrangedIds.length) return;
+    setIds(moveCard(arrangedIds, from, to));
   }
 
   /**
@@ -285,7 +361,8 @@ export default function OrderPage() {
     // is not sent from here; order_round_resolved is this game's round.
     reportOrderRound(
       orderVerdict({ exact: exactWinner !== null, oldest: oldestWinner !== null }),
-      currentIndex + 1
+      currentIndex + 1,
+      arrangement?.round === currentIndex && arrangement.moved
     );
   }
 
@@ -436,8 +513,18 @@ export default function OrderPage() {
   // slot in the deal beside it so a card that was already in the right
   // place lights up — the room's own reading of how close it was.
   const dealt = round?.tracks ?? [];
-  const cards = isRevealed && round ? trueOrder(round) : dealt;
-  const slotOf = new Map(dealt.map((t, i) => [t.id, i]));
+  // The room's order for this round: the drag's, or the deal until someone
+  // moves a card. Revealed, the cards go up oldest first and each is marked
+  // against the slot the room had put it in.
+  const arrangedIds =
+    arrangement?.round === currentIndex ? arrangement.ids : dealt.map((t) => t.id);
+  const byId = new Map(dealt.map((t) => [t.id, t]));
+  const arranged = arrangedIds.map((id) => byId.get(id)).filter((t): t is Track => t !== undefined);
+  const cards = isRevealed && round ? trueOrder(round) : arranged;
+  const slotOf = new Map(arrangedIds.map((id, i) => [id, i]));
+  const letterOf = new Map(dealt.map((t, i) => [t.id, String.fromCharCode(65 + i)]));
+  const result = round ? readArrangement(arrangedIds, round) : null;
+  const solo = players.length === 1;
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
   const maxScore = sortedPlayers[0]?.score ?? 0;
   const leftoverLine = orderLeftoverLine(leftover);
@@ -587,6 +674,37 @@ export default function OrderPage() {
           letter-spacing: 0.04em;
         }
         .order-card.in-place .order-slot { color: #1DB954; }
+        /* Face down, a card is something to pick up: grab it anywhere. The
+           list is four cards on a screen that does not scroll, so taking
+           the touch from the page costs nothing. */
+        .order-card.movable {
+          cursor: grab;
+          touch-action: none;
+          user-select: none;
+          -webkit-user-select: none;
+        }
+        @media (hover: hover) { .order-card.movable:hover { border-color: #3a3a3a; } }
+        .order-card.movable:active { border-color: #1DB954; transition: none; }
+        .order-card.movable:focus-visible { outline: 2px solid #1DB954; outline-offset: 2px; }
+        .order-card.lifted {
+          position: relative;
+          z-index: 2;
+          cursor: grabbing;
+          border-color: #1DB954;
+          background: #1c1c1c;
+          box-shadow: 0 10px 28px rgba(0,0,0,0.55);
+        }
+        .order-card.missed { border-color: rgba(239,68,68,0.35); }
+        .order-mark { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; }
+        .order-was { font-size: 11px; color: #f87171; white-space: nowrap; }
+        .order-result {
+          text-align: center;
+          font-size: 14px;
+          color: #bbb;
+          margin-bottom: 12px;
+        }
+        .order-result.exact { color: #1DB954; font-weight: 600; }
+        .score-row-done.missed { color: #666; }
         .order-art {
           width: 56px;
           height: 56px;
@@ -1103,17 +1221,37 @@ export default function OrderPage() {
         <main className="main-area">
           <div className="game-card">
             <p className={`order-prompt${isRevealed ? " revealed" : ""}`}>
-              {isRevealed ? "Oldest to newest — the real order" : "Oldest → newest. Agree on an order, then reveal"}
+              {isRevealed ? "Oldest to newest — the real order" : "Oldest on top. Drag the cards into order, then reveal"}
             </p>
 
-            <div className="order-list">
+            <div className="order-list" ref={listRef} role="list">
               {cards.map((t, i) => {
                 const slot = slotOf.get(t.id) ?? i;
                 const inPlace = isRevealed && slot === i;
+                const missed = isRevealed && slot !== i;
+                const lifted = drag?.id === t.id;
                 return (
-                  <div key={t.id} className={`order-card${inPlace ? " in-place" : ""}`}>
-                    <span className="order-slot" aria-label={isRevealed ? `Rank ${i + 1}` : `Card ${i + 1}`}>
-                      {isRevealed ? i + 1 : String.fromCharCode(65 + i)}
+                  <div
+                    key={t.id}
+                    className={`order-card${inPlace ? " in-place" : ""}${missed ? " missed" : ""}${
+                      isRevealed ? "" : " movable"
+                    }${lifted ? " lifted" : ""}`}
+                    style={lifted ? { transform: `translateY(${drag.dy}px)` } : undefined}
+                    {...(isRevealed
+                      ? {}
+                      : {
+                          tabIndex: 0,
+                          role: "listitem",
+                          "aria-label": `${displayTitle(t.name)}, position ${i + 1} of ${cards.length}. Arrow keys move it.`,
+                          onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => pickUp(e, t.id),
+                          onPointerMove: dragMove,
+                          onPointerUp: putDown,
+                          onPointerCancel: putDown,
+                          onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => keyMove(e, t.id),
+                        })}
+                  >
+                    <span className="order-slot" aria-label={isRevealed ? `Rank ${i + 1}` : `Card ${letterOf.get(t.id)}`}>
+                      {isRevealed ? i + 1 : letterOf.get(t.id)}
                     </span>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -1137,7 +1275,13 @@ export default function OrderPage() {
                         </p>
                       )}
                     </div>
-                    {isRevealed && <span className="order-year">{releaseYear(t)}</span>}
+                    {isRevealed && (
+                      <span className="order-mark">
+                        <span className="order-year">{releaseYear(t)}</span>
+                        {/* Where the room had it, when that was not here. */}
+                        {missed && <span className="order-was">yours #{slot + 1}</span>}
+                      </span>
+                    )}
                   </div>
                 );
               })}
@@ -1154,8 +1298,23 @@ export default function OrderPage() {
 
             {phase === "revealed" && (
               <div>
-                {/* The whole order, the round's question. One award. */}
-                {exactWinner === null ? (
+                {result && (
+                  <p className={`order-result${result.exact ? " exact" : ""}`} role="status">
+                    {result.exact
+                      ? "Every card in the right place"
+                      : `${result.inPlace} of ${cards.length} in the right place · oldest ${
+                          result.oldest ? "✓" : "✗"
+                        }`}
+                  </p>
+                )}
+                {/* The whole order, the round's question. One award. A
+                    one-player game was scored from the screen at the reveal,
+                    so it gets the outcome, not buttons to award itself. */}
+                {solo ? (
+                  <p className="awarded-line">
+                    {exactWinner !== null ? `+${ORDER_EXACT_POINTS} pts → ${exactWinner}` : `Full order +${ORDER_EXACT_POINTS} — not this time`}
+                  </p>
+                ) : exactWinner === null ? (
                   <>
                     <p className="who-scored">Who called the full order? (+{ORDER_EXACT_POINTS} pts)</p>
                     <div className="player-picker">
@@ -1174,7 +1333,9 @@ export default function OrderPage() {
                     guess game's album row: the order is the question. */}
                 <div className="score-row-compact">
                   <span className="score-row-label">Oldest song +{ORDER_OLDEST_POINTS}</span>
-                  {oldestWinner === null ? (
+                  {solo && oldestWinner === null ? (
+                    <span className="score-row-done missed">not this time</span>
+                  ) : oldestWinner === null ? (
                     players.map((p) => (
                       <button
                         key={p.name}

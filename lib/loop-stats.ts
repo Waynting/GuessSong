@@ -770,6 +770,7 @@ export function loopStatsKeys(
   gameLeftPlayers: Record<PlayerBand, Record<EarlyEndBand, string>>;
   gameEndScored: Record<GameScored, Record<GameEnd, string>>;
   gameLeftScored: Record<GameScored, Record<EarlyEndBand, string>>;
+  orderArranged: Record<"moved" | "untouched", Record<OrderVerdict, string>>;
   orderRound: Record<OrderVerdict, string>;
   firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
   gameOverTap: Record<GameOverTap, string>;
@@ -866,6 +867,7 @@ export function loopStatsKeys(
     gameLeftPlayers: byList("game_left_players", PLAYER_BANDS, EARLY_END_BANDS),
     gameEndScored: byList("game_end_scored", GAME_SCORED, GAME_ENDS),
     gameLeftScored: byList("game_left_scored", GAME_SCORED, EARLY_END_BANDS),
+    orderArranged: byList("order_arranged", ["moved", "untouched"] as const, ORDER_VERDICTS),
     orderRound: Object.fromEntries(
       ORDER_VERDICTS.map((v) => [v, key(day, `order_round:${v}`)])
     ) as Record<OrderVerdict, string>,
@@ -1229,9 +1231,16 @@ export async function recordGameLeft(
  * when undeclared, because the body reached `/api/pulse` from the open
  * internet. One per revealed round, so the three keys sum to rounds played.
  */
-export function recordOrderRound(verdict: OrderVerdict): Promise<void> {
-  if (!isOrderVerdict(verdict)) return Promise.resolve();
-  return bump(`order_round:${verdict}`);
+export async function recordOrderRound(verdict: OrderVerdict, arranged?: boolean): Promise<void> {
+  if (!isOrderVerdict(verdict)) return;
+  await bump(`order_round:${verdict}`);
+  // Whether the cards were dragged before the reveal, joined to how the round
+  // came out: `order_arranged:<moved|untouched>:<verdict>`. The question is
+  // whether the drag gets used at all, and whether rounds that used it come
+  // out better. An older page sends nothing and writes nothing here.
+  if (typeof arranged === "boolean") {
+    await bump(`order_arranged:${arranged ? "moved" : "untouched"}:${verdict}`);
+  }
 }
 
 /** A tap on the Game Over screen. See `GameOverTap`. */

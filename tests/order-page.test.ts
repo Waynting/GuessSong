@@ -78,7 +78,7 @@ describe("the order page plays no audio", () => {
     // The deal is derived, not stored, so a reload deals the same game.
     expect(body).toMatch(/const built = buildOrderRounds\(data\.tracks\);/);
     expect(body).toMatch(/if \(built\.rounds\.length === 0\) \{ router\.push\("\/"\); return; \}/);
-    expect(body).toMatch(/const cards = isRevealed && round \? trueOrder\(round\) : dealt;/);
+    expect(body).toMatch(/const cards = isRevealed && round \? trueOrder\(round\) : arranged;/);
     expect(body.match(/buildOrderRounds\(/g) ?? []).toHaveLength(1);
   });
 
@@ -306,5 +306,36 @@ describe("the setup page starts an order game the same way on all three paths", 
   it("says what the song count means in this style, and never a clip length", () => {
     expect(setup).toMatch(/isOrder \? "Order by year" : `\$\{clipDuration\}s clips`/);
     expect(setup).toMatch(/orderSummary\(songCount\.count\)/);
+  });
+});
+
+describe("the order page's drag", () => {
+  const src = readFileSync(join(process.cwd(), "app/order/page.tsx"), "utf8");
+
+  it("reads the reveal against the room's arrangement, not the deal", () => {
+    expect(src).toMatch(/const slotOf = new Map\(arrangedIds\.map/);
+    expect(src).toMatch(/readArrangement\(arrangedIds, round\)/);
+  });
+
+  it("scores a one-player game from the screen, and leaves a room to the host", () => {
+    expect(src).toMatch(/if \(players\.length === 1 && round\) \{[\s\S]*?if \(result\.exact\) awardExact\(players\[0\]\.name\);\s*if \(result\.oldest\) awardOldest\(players\[0\]\.name\);/);
+  });
+
+  it("moves by pointer and by arrow key, only while the cards are face down", () => {
+    expect(src).toMatch(/onPointerDown:/);
+    expect(src).toMatch(/onKeyDown:/);
+    expect(src).toMatch(/function pickUp[\s\S]*?if \(phase !== "showing"/);
+    expect(src).toMatch(/function keyMove[\s\S]*?if \(phase !== "showing"\) return;/);
+    expect(src).toMatch(/\.order-card\.movable \{[^}]*touch-action: none/);
+  });
+
+  it("gives a one-player game no buttons to award itself", () => {
+    expect(src).toMatch(/const solo = players\.length === 1;/);
+    expect(src).toMatch(/\{solo \? \(\s*<p className="awarded-line">/);
+    expect(src).toMatch(/solo && oldestWinner === null \? \(/);
+  });
+
+  it("reports whether the round was dragged", () => {
+    expect(src).toMatch(/arrangement\?\.round === currentIndex && arrangement\.moved\s*\);/);
   });
 });

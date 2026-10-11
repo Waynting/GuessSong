@@ -214,3 +214,34 @@ describe("the setup page's words", () => {
     expect(orderLeftoverLine(3)).toMatch(/^3 songs left out/);
   });
 });
+
+describe("the drag: an arrangement, and how it reads at the reveal", async () => {
+  const { moveCard, dropSlot, readArrangement } = await import("@/lib/order-game");
+  const card = (id: string, year: string) => ({ id, releaseDate: year });
+  // Dealt C, A, D, B; the truth is A(1970) B(1980) C(1990) D(2000).
+  const round = { tracks: [card("C", "1990"), card("A", "1970"), card("D", "2000"), card("B", "1980")] };
+
+  it("moves a card and shifts the rest, without touching the input", () => {
+    const ids = ["C", "A", "D", "B"];
+    expect(moveCard(ids, 1, 0)).toEqual(["A", "C", "D", "B"]);
+    expect(moveCard(ids, 0, 3)).toEqual(["A", "D", "B", "C"]);
+    expect(moveCard(ids, 2, 2)).toEqual(ids);
+    expect(moveCard(ids, 9, 0)).toEqual(ids);
+    expect(moveCard(ids, 3, -5)).toEqual(["B", "C", "A", "D"]);
+    expect(ids).toEqual(["C", "A", "D", "B"]);
+  });
+
+  it("drops onto the nearest slot", () => {
+    const centres = [50, 130, 210, 290];
+    expect(dropSlot(0, centres)).toBe(0);
+    expect(dropSlot(95, centres)).toBe(1);
+    expect(dropSlot(171, centres)).toBe(2);
+    expect(dropSlot(999, centres)).toBe(3);
+  });
+
+  it("marks the whole order, the oldest card, and how many sit in place", () => {
+    expect(readArrangement(["A", "B", "C", "D"], round)).toEqual({ inPlace: 4, exact: true, oldest: true });
+    expect(readArrangement(["A", "C", "B", "D"], round)).toEqual({ inPlace: 2, exact: false, oldest: true });
+    expect(readArrangement(["C", "A", "D", "B"], round)).toEqual({ inPlace: 0, exact: false, oldest: false });
+  });
+});

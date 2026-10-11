@@ -448,9 +448,16 @@ function samplePageIndices(min: number, max: number, count: number): number[] {
  *
  * The sample is by page, not by track — a page is what a request buys, so
  * sampling any finer would cost more requests, which is the one thing this
- * whole change exists to avoid. Page 0 is always among the candidates because
- * reading it is how we learn the length, so the first 100 tracks are slightly
- * over-represented; everything after them is uniform.
+ * whole change exists to avoid. Page 0 arrives with the playlist object, so it
+ * is always in hand, and keeping all of it made the first 100 tracks the
+ * likeliest on the site: on a 4,000-track playlist each of them was in every
+ * sample, against 4 in 39 for any other track — about 10× as likely to be
+ * played, the "it always opens with the same songs" effect lib/shuffle.ts
+ * was written to remove. So the head is thinned to the same odds every
+ * sampled page has: each of its tracks is kept with probability
+ * pages-sampled ÷ pages-to-choose-from. That costs no request (the page is
+ * already here) and a sample of about 400 rather than 500, which is still
+ * eight times the longest game.
  *
  * Takes the first page rather than fetching it: it arrives with the playlist
  * object (see PLAYLIST_FIELDS), so page zero costs nothing here. That also
@@ -511,7 +518,10 @@ export async function fetchPlaylistTracks(
   const lastPageIndex = Math.ceil(head.total / TRACKS_PAGE_LIMIT) - 1;
   const sampledPages = samplePageIndices(1, lastPageIndex, MAX_TRACK_PAGES - 1);
 
-  const tracks = [...head.tracks];
+  // Each of pages 1..last is drawn with probability sampled ÷ lastPageIndex,
+  // so each head track is kept with the same probability.
+  const keep = Math.min(1, sampledPages.length / lastPageIndex);
+  const tracks = head.tracks.filter(() => Math.random() < keep);
   for (const pageIndex of sampledPages) {
     const page = await fetchTrackPage(
       playlistId,

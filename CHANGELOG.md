@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Put them in order: drag the cards, and the reveal marks them**
+  (`app/order/page.tsx`, rules in `lib/order-game.ts`: `moveCard`, `dropSlot`,
+  `readArrangement`). Face down, a card is picked up anywhere and dragged by
+  finger, mouse or pen — pointer events, no library — or moved with the arrow
+  keys; each card keeps its dealt letter while it moves. At the reveal every
+  card is marked against the slot the room had put it in (`yours #3`), with
+  "N of 4 in the right place · oldest ✓/✗" under the list. A one-player game
+  (65% of games on 2026-10-11) is scored from the screen — the same +3 for
+  the full order and +1 for the oldest — and is shown the outcome rather than
+  buttons to award itself; a room keeps the host's two award rows, because the
+  screen holds one order and only the room knows whose it was. 69% of
+  revealed rounds that day came back "nobody", which is why the answer now
+  goes on the screen.
+  - Counted: `order_arranged:<moved|untouched>:<verdict>` beside
+    `order_round:*`, and `arranged` on GA4's `order_round_resolved`.
+    `npm run stats` prints both rows under the order line.
+
+### Fixed
+
+- **Shuffling: albums spread out, big playlists sampled fairly, Mixed keeps
+  the better copy.** (`lib/shuffle.ts`, `lib/spotify.ts`,
+  `lib/mixed-playlist.ts`)
+  - `pickSpread` takes one track per album before a second from any, fair per
+    album and uniform inside one, and `spreadByAlbum` spaces each album's
+    tracks across the game, then repairs any back-to-back pair the list
+    allows. Album identity is the cover URL, then name + primary artist.
+    Single-playlist Start and the Mixed pool both use it.
+  - A playlist over 500 tracks kept every page-0 track while sampling four
+    other pages, so on 4,000 tracks the first 100 were ~10× as likely to be
+    played. The head is thinned to the sampled pages' odds: no extra request,
+    about 400 tracks sampled instead of 500.
+  - Mixed dedupe kept whichever copy was submitted first, so a remaster or a
+    compilation could stand in for the original and give the order game the
+    wrong year (or drop the song). `preferVersion`: album over compilation,
+    dated over undated, earlier over later.
+  - Pass-the-phone Mixed in the order game pooled before dropping undated
+    songs, which spent each player's quota and shortened the game. It pools
+    from dated songs now.
+  - `lib/quiz.ts` carried its own Fisher–Yates; it uses the shared one, and
+    the random-comparator scan catches `(a, b) =>` and `function` forms.
+
+### Known gaps
+
+- The QR-room Mixed path still filters undated songs after the server pools
+  them (`consumeRoomPool` does not know the play style, and the pool is
+  consumed once). The order game from a QR room can come out short.
+
 - **Who a game was for, and whether anyone scored, on every start, end and
   leave** (`lib/game-players.ts`). The largest pile in `npm run stats` is games
   left at rounds 1–2, mostly first-time hosts and heaviest on a starter
