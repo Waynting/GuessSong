@@ -492,12 +492,38 @@ describe("playlist pagination cost", () => {
 
     const { tracks, truncated } = await getPlaylistWithTracks(PLAYLIST_URL);
 
-    expect(tracks).toHaveLength(MAX_PLAYLIST_TRACKS);
+    // Four sampled pages plus the thinned head: never more than the cap, and
+    // never fewer than the four pages it paid for.
+    expect(tracks.length).toBeLessThanOrEqual(MAX_PLAYLIST_TRACKS);
+    expect(tracks.length).toBeGreaterThanOrEqual(MAX_PLAYLIST_TRACKS - 100);
     expect(truncated).toBe(true);
     // Uncapped, a 5,000-track playlist was 50 requests against a quota shared
     // by every user of the site. Counted end to end, head included, so the
     // merge cannot quietly move a request out of this budget and into another.
     expect(probe.upstreamRequests()).toBe(MAX_PLAYLIST_TRACKS / 100);
+  });
+
+  it("gives the first page's tracks the same odds as everyone else's", async () => {
+    // 4,000 tracks is 40 pages; four are sampled from pages 1–39, so any track
+    // past the head is in the sample 4/39 of the time. The head used to be in
+    // it every time — the first 100 songs of a big playlist ten times as
+    // likely to be played as the rest.
+    const { getPlaylistWithTracks } = await freshSpotify();
+    let head = 0;
+    let rest = 0;
+    const runs = 300;
+    for (let i = 0; i < runs; i++) {
+      installFetchMock({ totalTracks: 4000 });
+      const { tracks } = await getPlaylistWithTracks(PLAYLIST_URL);
+      for (const t of tracks) {
+        if (Number(t.id.slice("track-".length)) < 100) head++;
+        else rest++;
+      }
+    }
+    const headRate = head / (runs * 100);
+    const restRate = rest / (runs * 3900);
+    expect(headRate / restRate).toBeGreaterThan(0.8);
+    expect(headRate / restRate).toBeLessThan(1.2);
   });
 
   it("samples an oversized playlist across its whole length, not just the front", async () => {

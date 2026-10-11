@@ -56,6 +56,7 @@ import type { CountControl, SongCountState } from "@/lib/song-count";
 // `bucketPool` or `foldText` at module scope here (a memoised
 // `bucketPool(QUIZ_DECOY_POOL)` is the obvious one); do that in the route.
 import { foldHan } from "@/lib/cjk-fold";
+import { shuffle } from "@/lib/shuffle";
 
 /* ------------------------------------------------------------------ */
 /* Script buckets                                                      */
@@ -376,15 +377,6 @@ interface DecoyTarget {
   name: string;
   artist: string;
   popularity?: number;
-}
-
-function shuffle<T>(items: T[], rng: () => number): T[] {
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rng() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
 }
 
 /**

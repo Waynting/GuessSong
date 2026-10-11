@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Track } from "@/types";
-import { shuffle } from "@/lib/shuffle";
+import { pickSpread, shuffle } from "@/lib/shuffle";
 import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolResponse } from "@/types/room";
 import { trackEvent } from "@/lib/analytics";
 import { arrivedFrom } from "@/lib/loop-links";
@@ -673,8 +673,12 @@ export default function SetupPage() {
       const refusal = isOrder ? orderRefusal(shuffled) : null;
       if (refusal) throw new AppError(refusal);
       const eligible = isOrder ? usableOrderTracks(shuffled) : shuffled;
-      const limited =
-        songCount.count === "all" ? eligible : eligible.slice(0, songCount.count);
+      // As few songs from one album as the playlist allows, and those few
+      // spread apart rather than back to back. lib/shuffle.ts.
+      const limited = pickSpread(
+        eligible,
+        songCount.count === "all" ? eligible.length : songCount.count
+      );
       // The count can still cut a dealable list down to one that is not, and
       // then it is the count, not the playlist, that has to change.
       if (isOrder && orderRefusal(limited)) throw new AppError("order_count_too_small");
@@ -842,7 +846,19 @@ export default function SetupPage() {
       // different years to deal a round — applied to the pool.
       const refusal = isOrder ? orderRefusal(pooled) : null;
       if (refusal) throw new AppError(refusal);
-      const tracks = isOrder ? usableOrderTracks(pooled) : pooled;
+      // The order game pools again from dated songs only. Filtering the pool
+      // after the fact let undated songs spend each player's quota and then
+      // vanish, so the game came out short and the player with the fewest
+      // dates lost their share. The refusal above still reads the full pool,
+      // because "most of these have no date yet" is a fact about it.
+      const tracks = isOrder
+        ? poolContributions(
+            contributions.map((c) => ({ ...c, tracks: usableOrderTracks(c.tracks) })),
+            sampledPerPlayer
+          )
+        : pooled;
+      const thinned = isOrder ? orderRefusal(tracks) : null;
+      if (thinned) throw new AppError(thinned);
 
       const payload = buildGamePayload({
         tracks,

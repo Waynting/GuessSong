@@ -5,6 +5,7 @@ import {
   poolContributions,
   type PlaylistContribution,
 } from "@/lib/mixed-playlist";
+import { preferVersion } from "@/lib/mixed-playlist";
 import type { Track } from "@/types";
 
 function makeTrack(overrides: Partial<Track> = {}): Track {
@@ -239,5 +240,39 @@ describe("mixedRosterKey", () => {
     const urls = ["c", "a", "b"];
     mixedRosterKey(urls);
     expect(urls).toEqual(["c", "a", "b"]);
+  });
+});
+
+describe("preferVersion — which copy of a shared song is played", () => {
+  const t = (over: Partial<Track>): Track => ({ id: "x", name: "Song", artists: ["A"], durationMs: 1, createdAt: "", ...over }) as Track;
+
+  it("keeps the original over a remaster, whoever submitted first", () => {
+    expect(preferVersion(t({ releaseDate: "1997-05-21" }), t({ releaseDate: "2011" }))).toBe(true);
+    expect(preferVersion(t({ releaseDate: "2011" }), t({ releaseDate: "1997" }))).toBe(false);
+  });
+
+  it("prefers an album release to a compilation, and a date to none", () => {
+    expect(preferVersion(t({ releaseDate: "2005" }), t({ releaseDate: "1990", albumCompilation: true }))).toBe(true);
+    expect(preferVersion(t({ releaseDate: "1990", albumCompilation: true }), t({ releaseDate: "2005" }))).toBe(false);
+    expect(preferVersion(t({ releaseDate: "2001" }), t({}))).toBe(true);
+    expect(preferVersion(t({}), t({ releaseDate: "2001" }))).toBe(false);
+  });
+
+  it("keeps what was there on a tie", () => {
+    expect(preferVersion(t({ releaseDate: "2001" }), t({ releaseDate: "2001-02" }))).toBe(false);
+    expect(preferVersion(t({}), t({}))).toBe(false);
+  });
+
+  it("is what the pool plays", () => {
+    const pooled = poolContributions(
+      [
+        { playerName: "Ann", tracks: [t({ id: "remaster", name: "Karma Police - Remastered 2011", releaseDate: "2011" })] },
+        { playerName: "Ben", tracks: [t({ id: "original", name: "Karma Police", releaseDate: "1997" })] },
+      ],
+      5
+    );
+    expect(pooled).toHaveLength(1);
+    expect(pooled[0].id).toBe("original");
+    expect(pooled[0].contributors).toEqual(["Ann", "Ben"]);
   });
 });

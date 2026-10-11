@@ -7,7 +7,7 @@
  */
 
 import type { Track } from "@/types";
-import { shuffle } from "@/lib/shuffle";
+import { shuffle, spreadByAlbum } from "@/lib/shuffle";
 
 export interface PlaylistContribution {
   playerName: string;
@@ -115,6 +115,11 @@ export function poolContributions(
         if (!existing.contributors.includes(playerName)) {
           existing.contributors.push(playerName);
         }
+        // Two people's copies of one song: keep the better recording to
+        // play, whoever submitted first. See `preferVersion`.
+        if (preferVersion(track, existing)) {
+          byFingerprint.set(fp, { ...track, contributors: existing.contributors });
+        }
       } else {
         byFingerprint.set(fp, { ...track, contributors: [playerName] });
       }
@@ -161,6 +166,32 @@ export function poolContributions(
 
   // Still shuffled at the end: `sampled` is grouped by the round that admitted
   // each track, so the backfilled ones would otherwise all land together at the
-  // back of the game.
-  return shuffle(sampled);
+  // back of the game. Spread by album while at it — two friends who both love
+  // one record should not hear it three songs in a row.
+  return spreadByAlbum(sampled);
+}
+
+/**
+ * Whether `candidate` is a better copy of a song than `current`, when two
+ * contributors added it.
+ *
+ * The fingerprint folds "Remastered", "Live", "Deluxe" and the like away, so
+ * one person's 2011 remaster and another's 1997 original are one song — and
+ * whichever was submitted first used to win, carrying its date and its album
+ * into the game. In the order game that is the wrong year, stated with
+ * confidence, and a compilation's copy is dropped outright. So: an album
+ * release beats a compilation, a dated copy beats an undated one, and the
+ * earlier year beats the later. A tie keeps what was there.
+ */
+export function preferVersion(candidate: Track, current: Track): boolean {
+  const compilation = (t: Track) => t.albumCompilation === true;
+  if (compilation(candidate) !== compilation(current)) return compilation(current);
+  const year = (t: Track) => {
+    const y = Number.parseInt(t.releaseDate?.slice(0, 4) ?? "", 10);
+    return Number.isFinite(y) && y > 0 ? y : null;
+  };
+  const a = year(candidate);
+  const b = year(current);
+  if (a === null || b === null) return a !== null && b === null;
+  return a < b;
 }
