@@ -15,6 +15,7 @@ import {
   type GamePlayer as Player,
   type MixedPlaylistMeta,
 } from "@/lib/game-session";
+import { gameScored, playerBand } from "@/lib/game-players";
 import { loadGame } from "@/lib/game-storage";
 import { useScreenWakeLock } from "@/lib/wake-lock";
 import { LoopQr } from "@/components/loop-qr";
@@ -130,6 +131,9 @@ export default function OrderPage() {
   // listener registered once.
   const phaseRef = useRef<Phase>("showing");
   phaseRef.current = phase;
+  // Read by the leave beacon, which runs from `pagehide` and so off the render.
+  const playersRef = useRef<Player[]>([]);
+  playersRef.current = players;
   const currentIndexRef = useRef(0);
   currentIndexRef.current = currentIndex;
   const roundCountRef = useRef(0);
@@ -214,7 +218,9 @@ export default function OrderPage() {
       hostKindRef.current,
       via,
       setupSourceRef.current,
-      "order"
+      "order",
+      playerBand(playersRef.current.length),
+      gameScored(playersRef.current)
     );
   }, []);
 
@@ -300,6 +306,8 @@ export default function OrderPage() {
       ...(layout ? { screen: layout } : {}),
       ...(setupSourceRef.current ? { source: setupSourceRef.current } : {}),
       mode: "order",
+      players: playerBand(players.length),
+      scored: gameScored(players),
     });
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,

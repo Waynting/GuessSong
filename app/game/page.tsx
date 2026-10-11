@@ -20,6 +20,7 @@ import {
   type BuzzerRoomHandle,
   type MixedPlaylistMeta,
 } from "@/lib/game-session";
+import { gameScored, playerBand } from "@/lib/game-players";
 import { loadGame } from "@/lib/game-storage";
 import { useScreenWakeLock } from "@/lib/wake-lock";
 import { fetchPreview, fetchPreviewBatch } from "@/lib/preview-client";
@@ -195,6 +196,9 @@ export default function GamePage() {
   // Read by the buzz handler, which must not re-subscribe on every phase change.
   const phaseRef = useRef<Phase>("waiting");
   phaseRef.current = phase;
+  // Read by the leave beacon, which runs from `pagehide` and so off the render.
+  const playersRef = useRef<Player[]>([]);
+  playersRef.current = players;
   // Read by what outlives a render: the prefetch's answer, which lands
   // seconds after the effect that asked, and the leave beacon, which fires
   // from a listener registered once.
@@ -507,7 +511,9 @@ export default function GamePage() {
         hostKindRef.current,
         via,
         setupSourceRef.current,
-        modeRef.current
+        modeRef.current,
+        playerBand(playersRef.current.length),
+        gameScored(playersRef.current)
       );
     },
     [settleFirstClip]
@@ -1080,6 +1086,8 @@ export default function GamePage() {
       ...(layout ? { screen: layout } : {}),
       ...(setupSourceRef.current ? { source: setupSourceRef.current } : {}),
       mode,
+      players: playerBand(players.length),
+      scored: gameScored(players),
     });
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,

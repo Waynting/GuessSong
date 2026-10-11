@@ -74,6 +74,8 @@ const {
   recordLoopImpression,
   recordLoopThrottled,
   __resetLivenessForTests,
+  PLAYER_BANDS,
+  GAME_SCORED,
 } = await import("@/lib/loop-stats");
 
 beforeEach(() => {
@@ -1382,5 +1384,44 @@ describe("the digest prints what the recorders write", () => {
       /if \(leftMidGame > 0\) \{[\s\S]*?sent neither beacon[\s\S]*?\} else if \(games > reachedEnd\) \{[\s\S]*?closed the tab mid-game/
     );
     expect(script).toMatch(/const unaccounted = games - reachedEnd - leftMidGame;/);
+  });
+});
+
+describe("players on the scoreboard, and whether anyone scored", () => {
+  const expected = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+
+  it("writes exactly the keys the reader reads, on start, end and leave", async () => {
+    for (const band of PLAYER_BANDS) {
+      kv.incrs = [];
+      await recordGameStart(1, undefined, undefined, "party", band);
+      expect(keysWritten()).toContain(expected.gamePlayers[band]);
+      for (const end of ["played_out", "ended_early"] as const) {
+        kv.incrs = [];
+        await recordGameEnd(end, 2, { players: band });
+        expect(keysWritten()).toContain(expected.gameEndPlayers[band][end]);
+      }
+      kv.incrs = [];
+      await recordGameLeft(2, "first", undefined, undefined, band);
+      expect(keysWritten()).toContain(expected.gameLeftPlayers[band].r1_2);
+    }
+    for (const scored of GAME_SCORED) {
+      kv.incrs = [];
+      await recordGameEnd("ended_early", 1, { scored });
+      expect(keysWritten()).toContain(expected.gameEndScored[scored].ended_early);
+      kv.incrs = [];
+      await recordGameLeft(5, "repeat", undefined, undefined, undefined, scored);
+      expect(keysWritten()).toContain(expected.gameLeftScored[scored].r3_plus);
+    }
+    expect(expected.gamePlayers.p3_4).toBe("loop:stats:2026-08-09:game_players:p3_4");
+    expect(expected.gameLeftScored.unscored.r1_2).toBe(
+      "loop:stats:2026-08-09:game_left_scored:unscored:r1_2"
+    );
+  });
+
+  it("writes nothing for a page that sent neither, or sent junk", async () => {
+    await recordGameStart(1, undefined, undefined, "party", "p9" as never);
+    await recordGameEnd("played_out", 3, { players: "__proto__" as never, scored: "yes" as never });
+    await recordGameLeft(1, "first", undefined, undefined, undefined, undefined);
+    expect(keysWritten().filter((k) => /_players:|_scored:/.test(k))).toEqual([]);
   });
 });

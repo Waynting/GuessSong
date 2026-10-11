@@ -19,6 +19,7 @@ import {
 import { NO_REFUSAL, noteFailure, noteStart, type RecoveryState } from "@/lib/refusal-recovery";
 import { showMixedNudge } from "@/lib/mixed-nudge";
 import { REMOTE_DOOR_COPY } from "@/lib/remote-door";
+import { playerBand } from "@/lib/game-players";
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
 import {
   AppError,
@@ -467,7 +468,7 @@ export default function SetupPage() {
         song_count: tracks.length,
         playlist_source: "mixed",
         game_mode: gameMode(Boolean(room)),
-        ...recordHostedStart("room", gameMode(Boolean(room))),
+        ...recordHostedStart("room", gameMode(Boolean(room)), data.players.length),
       });
       trackEvent("room_started", {
         contributor_count: data.players.length,
@@ -579,11 +580,14 @@ export default function SetupPage() {
    * `mode` is which game is starting — the payload's `GameMode` — and is
    * passed rather than read from state so the beacon and the payload cannot
    * disagree; it is what lets `npm run stats` split the three games apart.
+   *
+   * `playerCount` is the same figure GA4's `player_count` gets, passed by each
+   * caller beside it so the two cannot disagree; it goes out as a band.
    */
-  function recordHostedStart(mixed: MixedSubMode | undefined, mode: GameMode) {
+  function recordHostedStart(mixed: MixedSubMode | undefined, mode: GameMode, playerCount: number) {
     const hostGameIndex = bumpHostGameCount();
     const setupSource = setupSourceFor(Boolean(mixed));
-    reportGameStart(hostGameIndex, mixed, setupSource, mode);
+    reportGameStart(hostGameIndex, mixed, setupSource, mode, playerBand(playerCount));
     const recovery = noteStart(recoveryRef.current, setupSource);
     recoveryRef.current = recovery.state;
     if (recovery.report) reportRefusalRecovered(recovery.report.topic, recovery.report.via);
@@ -707,7 +711,11 @@ export default function SetupPage() {
         song_count: limited.length,
         playlist_source: "own",
         game_mode: gameMode(Boolean(room)),
-        ...recordHostedStart(undefined, gameMode(Boolean(room))),
+        ...recordHostedStart(
+          undefined,
+          gameMode(Boolean(room)),
+          room ? buzzerPlayerCount + 1 : validPlayers.length
+        ),
       });
       // Remembered here — once the playlist has loaded and the game is stored
       // — and nowhere earlier: a link is worth keeping when it has worked, and
@@ -860,7 +868,7 @@ export default function SetupPage() {
         song_count: tracks.length,
         playlist_source: "mixed",
         game_mode: gameMode(Boolean(room)),
-        ...recordHostedStart("phone", gameMode(Boolean(room))),
+        ...recordHostedStart("phone", gameMode(Boolean(room)), mixedContributions.length),
       });
       trackEvent("mixed_pool_built", {
         contributor_count: mixedContributions.length,

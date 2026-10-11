@@ -623,9 +623,13 @@ describe("the route records every kind the parser accepts", () => {
     expect(route).toMatch(/case "order_round":\s*await recordOrderRound\(event\.verdict\);/);
     // The mode rides to all three game recorders, or the KV rows read as
     // "no mode was ever sent".
-    expect(route).toMatch(/recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source, event\.mode\)/);
-    expect(route).toMatch(/recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode\)/);
-    expect(route).toMatch(/mode: event\.mode,\s*\}\);/);
+    expect(route).toMatch(
+      /recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source, event\.mode, event\.players\)/
+    );
+    expect(route).toMatch(
+      /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored\)/
+    );
+    expect(route).toMatch(/mode: event\.mode,\s*players: event\.players,\s*scored: event\.scored,\s*\}\);/);
   });
 
   it("has each button on the panel and the board report through its own function", () => {
@@ -712,5 +716,37 @@ describe("parsePulse — everything else", () => {
   it("is not fooled by a prototype-polluting body", () => {
     const parsed = parsePulse(JSON.parse('{"__proto__":{"kind":"game_started"}}'));
     expect(parsed).toBeNull();
+  });
+});
+
+describe("parsePulse — players and whether anyone scored", () => {
+  it("carries a known band on the start, the end and the leave", () => {
+    expect(parsePulse({ kind: "game_started", hostGameIndex: 1, players: "p3_4" })).toEqual({
+      kind: "game_started",
+      hostGameIndex: 1,
+      players: "p3_4",
+    });
+    expect(
+      parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: 2, players: "p1", scored: "unscored" })
+    ).toEqual({ kind: "game_finished", end: "ended_early", roundsPlayed: 2, players: "p1", scored: "unscored" });
+    expect(parsePulse({ kind: "game_left", roundsPlayed: 1, players: "p5_plus", scored: "scored" })).toEqual({
+      kind: "game_left",
+      roundsPlayed: 1,
+      players: "p5_plus",
+      scored: "scored",
+    });
+  });
+
+  it("drops an unknown band rather than losing the game", () => {
+    for (const junk of ["p0", "3", "", "__proto__", 4, null]) {
+      expect(parsePulse({ kind: "game_started", hostGameIndex: 1, players: junk })).toEqual({
+        kind: "game_started",
+        hostGameIndex: 1,
+      });
+      expect(parsePulse({ kind: "game_left", roundsPlayed: 1, players: junk, scored: junk })).toEqual({
+        kind: "game_left",
+        roundsPlayed: 1,
+      });
+    }
   });
 });

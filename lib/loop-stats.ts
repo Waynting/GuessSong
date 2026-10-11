@@ -44,6 +44,14 @@ import { RECOVERY_STAGES, type RecoveryStage } from "@/lib/refusal-recovery";
 import { SETUP_SOURCES, isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { GAME_MODES, isGameMode, type GameMode } from "@/lib/game-session";
 import { ORDER_VERDICTS, isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
+import {
+  GAME_SCORED,
+  PLAYER_BANDS,
+  isGameScored,
+  isPlayerBand,
+  type GameScored,
+  type PlayerBand,
+} from "@/lib/game-players";
 
 /**
  * 30 days, not the 7 that `lib/playlist-cache.ts` uses for its own stats.
@@ -493,6 +501,17 @@ export { GAME_MODES, isGameMode, type GameMode };
 export { ORDER_VERDICTS, isOrderVerdict, type OrderVerdict };
 
 /**
+ * The scoreboard's size and whether anyone scored — `game_players:<band>` on
+ * the start, `game_end_players:<band>:<end>` / `game_end_scored:<s>:<end>` on
+ * the end and `game_left_players:<band>:<band>` / `game_left_scored:<s>:<band>`
+ * on a leave. Declared in `lib/game-players.ts`, which says what question
+ * they are for; re-exported so the key map holds to the same lists. A page
+ * from before they shipped sends neither, and its game counts exactly as it
+ * always did, so these rows sum to at most the totals above them.
+ */
+export { GAME_SCORED, PLAYER_BANDS, isGameScored, isPlayerBand, type GameScored, type PlayerBand };
+
+/**
  * The playlist quiz's funnel, one counter per stage.
  *
  *   created    a host turned a playlist into a link       POST /api/quiz
@@ -746,6 +765,11 @@ export function loopStatsKeys(
   gameMode: Record<GameMode, string>;
   gameEndMode: Record<GameMode, Record<GameEnd, string>>;
   gameLeftMode: Record<GameMode, Record<EarlyEndBand, string>>;
+  gamePlayers: Record<PlayerBand, string>;
+  gameEndPlayers: Record<PlayerBand, Record<GameEnd, string>>;
+  gameLeftPlayers: Record<PlayerBand, Record<EarlyEndBand, string>>;
+  gameEndScored: Record<GameScored, Record<GameEnd, string>>;
+  gameLeftScored: Record<GameScored, Record<EarlyEndBand, string>>;
   orderRound: Record<OrderVerdict, string>;
   firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
   gameOverTap: Record<GameOverTap, string>;
@@ -795,6 +819,18 @@ export function loopStatsKeys(
         Object.fromEntries(tails.map((t) => [t, key(day, `${prefix}:${mode}:${t}`)])),
       ])
     ) as Record<GameMode, Record<T, string>>;
+  /** `<prefix>:<head>:<tail>` over any closed list of heads. */
+  const byList = <H extends string, T extends string>(
+    prefix: string,
+    heads: readonly H[],
+    tails: readonly T[]
+  ) =>
+    Object.fromEntries(
+      heads.map((h) => [
+        h,
+        Object.fromEntries(tails.map((t) => [t, key(day, `${prefix}:${h}:${t}`)])),
+      ])
+    ) as Record<H, Record<T, string>>;
   return {
     live: key(day, "live"),
     throttled: key(day, "throttled"),
@@ -823,6 +859,13 @@ export function loopStatsKeys(
     ) as Record<GameMode, string>,
     gameEndMode: byMode("game_end_mode", GAME_ENDS),
     gameLeftMode: byMode("game_left_mode", EARLY_END_BANDS),
+    gamePlayers: Object.fromEntries(
+      PLAYER_BANDS.map((b) => [b, key(day, `game_players:${b}`)])
+    ) as Record<PlayerBand, string>,
+    gameEndPlayers: byList("game_end_players", PLAYER_BANDS, GAME_ENDS),
+    gameLeftPlayers: byList("game_left_players", PLAYER_BANDS, EARLY_END_BANDS),
+    gameEndScored: byList("game_end_scored", GAME_SCORED, GAME_ENDS),
+    gameLeftScored: byList("game_left_scored", GAME_SCORED, EARLY_END_BANDS),
     orderRound: Object.fromEntries(
       ORDER_VERDICTS.map((v) => [v, key(day, `order_round:${v}`)])
     ) as Record<OrderVerdict, string>,
@@ -1030,7 +1073,8 @@ export async function recordGameStart(
   hostGameIndex: number,
   mixed?: MixedSubMode,
   source?: SetupSource,
-  mode?: GameMode
+  mode?: GameMode,
+  players?: PlayerBand
 ): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
@@ -1051,6 +1095,8 @@ export async function recordGameStart(
   // And which game it was, under the same rule: guarded here whatever the
   // parser did, absent on an older page, and never a reason to lose the game.
   if (isGameMode(mode)) await bump(`game_mode:${mode}`);
+  // How many the game was for — the denominator for the end and leave rows.
+  if (isPlayerBand(players)) await bump(`game_players:${players}`);
 }
 
 /**
@@ -1084,6 +1130,8 @@ export async function recordGameEnd(
     screen?: GameScreen;
     source?: SetupSource;
     mode?: GameMode;
+    players?: PlayerBand;
+    scored?: GameScored;
   } = {}
 ): Promise<void> {
   if (!GAME_ENDS.includes(end)) return;
@@ -1095,6 +1143,8 @@ export async function recordGameEnd(
   // Which game it was, joined to the end — `game_mode:*` is the denominator.
   if (isGameMode(details.mode)) extras.push(bump(`game_end_mode:${details.mode}:${end}`));
   if (isGameScreen(details.screen)) extras.push(bump(`game_end_screen:${details.screen}`));
+  if (isPlayerBand(details.players)) extras.push(bump(`game_end_players:${details.players}:${end}`));
+  if (isGameScored(details.scored)) extras.push(bump(`game_end_scored:${details.scored}:${end}`));
   if (end !== "ended_early") {
     await Promise.all(extras);
     return;
@@ -1157,7 +1207,9 @@ export async function recordGameLeft(
   roundsPlayed: number,
   host?: GameHostKind,
   source?: SetupSource,
-  mode?: GameMode
+  mode?: GameMode,
+  players?: PlayerBand,
+  scored?: GameScored
 ): Promise<void> {
   const round = clampRound(roundsPlayed);
   await bump(`game_left_round:${round}`);
@@ -1166,6 +1218,8 @@ export async function recordGameLeft(
     isGameHostKind(host) ? bump(`game_left_host:${host}:${band}`) : undefined,
     isSetupSource(source) ? bump(`game_left_source:${source}:${band}`) : undefined,
     isGameMode(mode) ? bump(`game_left_mode:${mode}:${band}`) : undefined,
+    isPlayerBand(players) ? bump(`game_left_players:${players}:${band}`) : undefined,
+    isGameScored(scored) ? bump(`game_left_scored:${scored}:${band}`) : undefined,
   ]);
 }
 
