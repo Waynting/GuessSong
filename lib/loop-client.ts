@@ -37,6 +37,7 @@ import { sendPulse } from "@/lib/pulse-client";
 import type { PlaylistHelpTopic } from "@/lib/playlist-help";
 import type { GameMode } from "@/lib/game-session";
 import type { OrderVerdict } from "@/lib/order-game";
+import type { GameScored, PlayerBand } from "@/lib/game-players";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
 
@@ -111,7 +112,8 @@ export function reportGameStart(
   hostGameIndex: number,
   mixed?: MixedSubMode,
   source?: SetupSource,
-  mode?: GameMode
+  mode?: GameMode,
+  players?: PlayerBand
 ): void {
   sendPulse({
     kind: "game_started",
@@ -119,6 +121,7 @@ export function reportGameStart(
     ...(mixed ? { mixed } : {}),
     ...(source ? { source } : {}),
     ...(mode ? { mode } : {}),
+    ...(players ? { players } : {}),
   });
 }
 
@@ -143,6 +146,8 @@ export function reportGameEnd(
     screen?: GameScreen;
     source?: SetupSource;
     mode?: GameMode;
+    players?: PlayerBand;
+    scored?: GameScored;
   } = {}
 ): void {
   sendPulse({
@@ -153,6 +158,8 @@ export function reportGameEnd(
     ...(details.screen ? { screen: details.screen } : {}),
     ...(details.source ? { source: details.source } : {}),
     ...(details.mode ? { mode: details.mode } : {}),
+    ...(details.players ? { players: details.players } : {}),
+    ...(details.scored ? { scored: details.scored } : {}),
   });
 }
 
@@ -181,7 +188,9 @@ export function reportGameLeft(
   host: GameHostKind,
   via: "unload" | "navigation",
   source?: SetupSource,
-  mode?: GameMode
+  mode?: GameMode,
+  players?: PlayerBand,
+  scored?: GameScored
 ): void {
   trackEvent("game_left", {
     rounds_played: roundsPlayed,
@@ -195,6 +204,8 @@ export function reportGameLeft(
     host,
     ...(source ? { source } : {}),
     ...(mode ? { mode } : {}),
+    ...(players ? { players } : {}),
+    ...(scored ? { scored } : {}),
   });
 }
 

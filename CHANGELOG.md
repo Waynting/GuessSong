@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Who a game was for, and whether anyone scored, on every start, end and
+  leave** (`lib/game-players.ts`). The largest pile in `npm run stats` is games
+  left at rounds 1–2, mostly first-time hosts and heaviest on a starter
+  playlist (30.6% of starter games gone by round 2, 45% of all round 1–2
+  leaves in the week to 2026-10-10). That reads either as one person trying the
+  site or as a party the first rounds lost, which call for opposite work, and
+  neither the host kind nor the source could tell them apart.
+  - `game_players:<p1|p2|p3_4|p5_plus>` on the start, from the same count GA4's
+    `player_count` gets (`recordHostedStart` now takes it from all three
+    callers); `game_end_players:<band>:<end>` and
+    `game_left_players:<band>:<r0|r1_2|r3_plus>` from the scoreboard on
+    `/game` and `/order`.
+  - `game_end_scored:<scored|unscored>:<end>` and
+    `game_left_scored:<s>:<band>`: whether any award had landed. Scores only go
+    up, so this is "the host pressed an award at least once".
+  - Both are optional on the wire and dropped when unknown, like the source and
+    the mode: a page from before this counts exactly as it did. `npm run stats`
+    prints two new tables beside the by-source and by-mode ones.
+  - Verified on the local production build: an End Game after one award sent
+    `players: "p3_4", scored: "scored"`; a one-player game left from the
+    waiting screen sent `players: "p1", scored: "unscored"` on `pagehide`.
+
 - **A "play online" fake door under Start** (`lib/remote-door.ts`). Online
   rooms — players in different places, each hearing the clip on their own
   phone — do not exist, and building them is a different product: a clip per

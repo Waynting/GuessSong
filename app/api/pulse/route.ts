@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
       await recordLoopImpression(event.surface);
       break;
     case "game_started":
-      await recordGameStart(event.hostGameIndex, event.mixed, event.source, event.mode);
+      await recordGameStart(event.hostGameIndex, event.mixed, event.source, event.mode, event.players);
       break;
     case "game_finished":
       await recordGameEnd(event.end, event.roundsPlayed, {
@@ -80,13 +80,15 @@ export async function POST(req: NextRequest) {
         screen: event.screen,
         source: event.source,
         mode: event.mode,
+        players: event.players,
+        scored: event.scored,
       });
       break;
     case "first_clip":
       await recordFirstClip(event.path, event.outcome);
       break;
     case "game_left":
-      await recordGameLeft(event.roundsPlayed, event.host, event.source, event.mode);
+      await recordGameLeft(event.roundsPlayed, event.host, event.source, event.mode, event.players, event.scored);
       break;
     case "order_round":
       await recordOrderRound(event.verdict);

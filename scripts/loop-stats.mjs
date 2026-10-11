@@ -645,6 +645,82 @@ if (modeCols.length > 0) {
 }
 
 /**
+ * The same outcomes, crossed with how many were on the scoreboard —
+ * `game_players:<band>` on the start (the denominator),
+ * `game_end_players:<band>:<end>` and `game_left_players:<band>:<band>` —
+ * and then with whether anyone had scored when it ended or was left
+ * (`game_end_scored:<s>:<end>`, `game_left_scored:<s>:<band>`). Bands and
+ * the reason are in lib/game-players.ts: the pile at rounds 1–2 is either
+ * one person trying the site or a party the first rounds lost, and those
+ * call for opposite work. Read with `--since` the deploy day; before it no
+ * page sent either, so the rows sum to well under the totals.
+ */
+const PLAYER_BAND_ORDER = [
+  ["p1", "1"],
+  ["p2", "2"],
+  ["p3_4", "3–4"],
+  ["p5_plus", "5+"],
+];
+const playerCols = PLAYER_BAND_ORDER.filter(([b]) =>
+  [...totals.keys()].some(
+    (k) =>
+      k === `game_players:${b}` ||
+      k.startsWith(`game_end_players:${b}:`) ||
+      k.startsWith(`game_left_players:${b}:`)
+  )
+);
+if (playerCols.length > 0) {
+  const byBand = (prefix, tail) => playerCols.map(([b]) => get(`${prefix}:${b}:${tail}`));
+  const started = playerCols.map(([b]) => get(`game_players:${b}`));
+  const playedOut = byBand("game_end_players", "played_out");
+  const endedEarly = byBand("game_end_players", "ended_early");
+  const leftBands = earlyBands.map(([band]) => byBand("game_left_players", band));
+  const left = playerCols.map((_, i) => leftBands.reduce((t, row) => t + row[i], 0));
+  const leftEarly = playerCols.map((_, i) => leftBands[0][i] + leftBands[1][i]);
+  console.log("\nHow games ended, by how many were playing");
+  console.log(sourceRow("players", playerCols.map(([, label]) => label)));
+  console.log(sourceRow("started", started));
+  console.log(sourceRow("played out", playedOut));
+  console.log(sourceRow("ended early", endedEarly));
+  console.log(sourceRow("left mid-game", left));
+  earlyBands.forEach(([, label], i) => console.log(sourceRow(`  ${label}`, leftBands[i])));
+  console.log(sourcePctRow("played out, % of started", playedOut, started));
+  console.log(sourcePctRow("left by round 2, %", leftEarly, started));
+  console.log(
+    "  how to read it: `1` is nobody to play against — a buzzer room nobody joined\n" +
+      "  folds in there too. If the round 1–2 leaves pile under `1`, that drop is people\n" +
+      "  trying the site alone; if `3–4` leaves as early, the first rounds are losing rooms."
+  );
+}
+
+const scoredCols = [
+  ["scored", "scored"],
+  ["unscored", "no points"],
+].filter(([s]) =>
+  [...totals.keys()].some(
+    (k) => k.startsWith(`game_end_scored:${s}:`) || k.startsWith(`game_left_scored:${s}:`)
+  )
+);
+if (scoredCols.length > 0) {
+  const byScored = (prefix, tail) => scoredCols.map(([s]) => get(`${prefix}:${s}:${tail}`));
+  const playedOut = byScored("game_end_scored", "played_out");
+  const endedEarly = byScored("game_end_scored", "ended_early");
+  const leftBands = earlyBands.map(([band]) => byScored("game_left_scored", band));
+  const left = scoredCols.map((_, i) => leftBands.reduce((t, row) => t + row[i], 0));
+  console.log("\nHow games ended, by whether anyone had scored");
+  console.log(sourceRow("", scoredCols.map(([, label]) => label)));
+  console.log(sourceRow("played out", playedOut));
+  console.log(sourceRow("ended early", endedEarly));
+  console.log(sourceRow("left mid-game", left));
+  earlyBands.forEach(([, label], i) => console.log(sourceRow(`  ${label}`, leftBands[i])));
+  console.log(
+    "  how to read it: a point is the host pressing an award — someone guessed and\n" +
+      "  someone judged. A round 1–2 leave with no points is someone looking, not a\n" +
+      "  game that lost its room; set the rounds 1–2 row's two columns side by side."
+  );
+}
+
+/**
  * The order game's rounds: `order_round:<exact|partial|none>`, one per
  * revealed round, as the host scored it (`recordOrderRound`). The difficulty
  * gauge for four cards a round: a pile at `full order` is a game too easy,
@@ -1110,6 +1186,11 @@ const RENDERED_PREFIXES = [
   "game_mode:",
   "game_end_mode:",
   "game_left_mode:",
+  "game_players:",
+  "game_end_players:",
+  "game_left_players:",
+  "game_end_scored:",
+  "game_left_scored:",
   "order_round:",
   "first_clip:",
   "game_over_tap:",

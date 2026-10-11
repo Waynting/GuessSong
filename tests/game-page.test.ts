@@ -242,8 +242,8 @@ describe("known-silent upcoming tracks are skipped", () => {
 
 describe("the game's beacons", () => {
   it("sends the game's mode with the end and the leave, so the by-mode table has a party column", () => {
-    expect(member("trackGameFinished")).toMatch(/\bmode,\s*\}\);/);
-    expect(member("reportLeave")).toMatch(/setupSourceRef\.current,\s*modeRef\.current\s*\)/);
+    expect(member("trackGameFinished")).toMatch(/\bmode,\s*players:/);
+    expect(member("reportLeave")).toMatch(/setupSourceRef\.current,\s*modeRef\.current,/);
     expect(body).toMatch(/modeRef\.current = mode;/);
   });
 

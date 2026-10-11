@@ -143,7 +143,7 @@ describe("the order page's beacons", () => {
     expect(leave).toMatch(/if \(phaseRef\.current === "finished"\) return;/);
     expect(leave).toMatch(/if \(firstPageRef\.current === false\) return;/);
     expect(leave).toMatch(/orderRoundsPlayed\(currentIndexRef\.current, phaseRef\.current\)/);
-    expect(leave).toMatch(/"order"\s*\);/);
+    expect(leave).toMatch(/setupSourceRef\.current,\s*"order",/);
     expect(body.match(/reportGameLeft\(/g) ?? []).toHaveLength(1);
   });
 

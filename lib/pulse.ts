@@ -77,6 +77,7 @@ import { isSocialPlatform, type SocialPlatform } from "@/lib/social-share";
 import { isPlaylistHelpTopic, type PlaylistHelpTopic } from "@/lib/playlist-help";
 import { isGameMode, type GameMode } from "@/lib/game-session";
 import { isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
+import { isGameScored, isPlayerBand, type GameScored, type PlayerBand } from "@/lib/game-players";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
@@ -154,6 +155,7 @@ export type PulseEvent =
       mixed?: MixedSubMode;
       source?: SetupSource;
       mode?: GameMode;
+      players?: PlayerBand;
     }
   | {
       kind: "game_finished";
@@ -163,6 +165,8 @@ export type PulseEvent =
       screen?: GameScreen;
       source?: SetupSource;
       mode?: GameMode;
+      players?: PlayerBand;
+      scored?: GameScored;
     }
   | { kind: "first_clip"; path: FirstClipPath; outcome: FirstClipOutcome }
   | {
@@ -171,6 +175,8 @@ export type PulseEvent =
       host?: GameHostKind;
       source?: SetupSource;
       mode?: GameMode;
+      players?: PlayerBand;
+      scored?: GameScored;
     }
   | { kind: "order_round"; verdict: OrderVerdict }
   | { kind: "game_over_tap"; target: GameOverTap }
@@ -226,7 +232,10 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // And once more for which game it was: `game_mode:${value}` is a key, a
     // page from before 1.21.0 sends none, and a game with an unknown mode is
     // still a game.
-    return isGameMode(raw.mode) ? { ...sourced, mode: raw.mode } : sourced;
+    const moded = isGameMode(raw.mode) ? { ...sourced, mode: raw.mode } : sourced;
+    // And the scoreboard's band, under the same trade: `game_players:${value}`
+    // is a key, and an older page sends none.
+    return isPlayerBand(raw.players) ? { ...moded, players: raw.players } : moded;
   }
 
   if (raw.kind === "game_finished") {
@@ -252,6 +261,9 @@ export function parsePulse(body: unknown): PulseEvent | null {
       ...(isSetupSource(raw.source) ? { source: raw.source } : {}),
       // Which game it was. `game_end_mode:${value}:${end}` is a key.
       ...(isGameMode(raw.mode) ? { mode: raw.mode } : {}),
+      // How many it was for, and whether anyone scored. Both are keys.
+      ...(isPlayerBand(raw.players) ? { players: raw.players } : {}),
+      ...(isGameScored(raw.scored) ? { scored: raw.scored } : {}),
     };
   }
 
@@ -272,6 +284,8 @@ export function parsePulse(body: unknown): PulseEvent | null {
       ...(isGameHostKind(raw.host) ? { host: raw.host } : {}),
       ...(isSetupSource(raw.source) ? { source: raw.source } : {}),
       ...(isGameMode(raw.mode) ? { mode: raw.mode } : {}),
+      ...(isPlayerBand(raw.players) ? { players: raw.players } : {}),
+      ...(isGameScored(raw.scored) ? { scored: raw.scored } : {}),
     };
   }
 

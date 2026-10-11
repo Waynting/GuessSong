@@ -265,21 +265,21 @@ describe("the setup source follows the link into the field", () => {
     expect(body).toMatch(/const setupSource = setupSourceFor\(Boolean\(mixed\)\);/);
     expect(body.match(/setupSource: setupSourceFor\(true\),/g) ?? []).toHaveLength(2);
     expect(body.match(/setupSource: setupSourceFor\(false\),/g) ?? []).toHaveLength(1);
-    expect(body).toMatch(/reportGameStart\(hostGameIndex, mixed, setupSource, mode\);/);
+    expect(body).toMatch(/reportGameStart\(hostGameIndex, mixed, setupSource, mode, /);
     expect(body).toMatch(/setup_source: setupSource,/);
     // The three callers still say only which mixed route it was — and,
     // since 1.21.0, which game: the mode the payload is stored with, passed
     // rather than read, so the beacon and the payload cannot disagree.
-    expect(body).toMatch(/\.\.\.recordHostedStart\("room", gameMode\(Boolean\(room\)\)\)/);
-    expect(body).toMatch(/\.\.\.recordHostedStart\("phone", gameMode\(Boolean\(room\)\)\)/);
-    expect(body).toMatch(/\.\.\.recordHostedStart\(undefined, gameMode\(Boolean\(room\)\)\)/);
+    expect(body).toMatch(/\.\.\.recordHostedStart\("room", gameMode\(Boolean\(room\)\),/);
+    expect(body).toMatch(/\.\.\.recordHostedStart\("phone", gameMode\(Boolean\(room\)\),/);
+    expect(body).toMatch(/\.\.\.recordHostedStart\(\s*undefined,\s*gameMode\(Boolean\(room\)\),/);
     expect(body).not.toMatch(/\.\.\.recordHostedStart\(\)/);
   });
 
   it("types the GA4 param as the same closed union, and the route hands the source on", () => {
     expect(code(read("lib/analytics.ts"))).toMatch(/setup_source\?: SetupSource;/);
     expect(code(read("app/api/pulse/route.ts"))).toMatch(
-      /recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source, event\.mode\)/
+      /recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source, event\.mode[,)]/
     );
   });
 });
