@@ -246,3 +246,59 @@ export function orderLeftoverLine(leftover: number): string | null {
     ? "1 song left out — no release year, or the same year as every other card"
     : `${leftover} songs left out — no release year, or the same year as every other card`;
 }
+
+/**
+ * The cards as the room has arranged them, by id. Starts as the deal and is
+ * what a drag or an arrow key changes; the reveal is read against it.
+ *
+ * The arrangement exists because the host's screen was a picture of four
+ * cards and nothing more — the room argued, the host judged who had called
+ * it, and 69% of revealed rounds on 2026-10-11 came back "nobody". A one
+ * player game, which is most games, had no one to argue with and no way to
+ * say what they thought. Dragging puts the answer on the screen, and the
+ * reveal can then mark it card by card.
+ */
+export function moveCard(ids: readonly string[], from: number, to: number): string[] {
+  const out = [...ids];
+  if (from < 0 || from >= out.length) return out;
+  const target = Math.max(0, Math.min(to, out.length - 1));
+  const [moved] = out.splice(from, 1);
+  out.splice(target, 0, moved);
+  return out;
+}
+
+/**
+ * Where a dragged card lands: the slot whose centre is nearest the card's
+ * centre. `centres` are the slots' vertical centres at the start of the
+ * drag, top to bottom.
+ */
+export function dropSlot(centre: number, centres: readonly number[]): number {
+  let best = 0;
+  for (let i = 1; i < centres.length; i++) {
+    if (Math.abs(centres[i] - centre) < Math.abs(centres[best] - centre)) best = i;
+  }
+  return best;
+}
+
+/** How an arrangement reads against the real order. */
+export interface ArrangementResult {
+  /** Cards sitting in their true slot. */
+  inPlace: number;
+  /** Every card in its true slot — the round's full answer. */
+  exact: boolean;
+  /** The oldest card first — the consolation answer. */
+  oldest: boolean;
+}
+
+export function readArrangement<T extends Pick<Track, "id" | "releaseDate">>(
+  arranged: readonly string[],
+  round: OrderRound<T>
+): ArrangementResult {
+  const truth = trueOrder(round).map((t) => t.id);
+  const inPlace = truth.filter((id, i) => arranged[i] === id).length;
+  return {
+    inPlace,
+    exact: truth.length > 0 && inPlace === truth.length,
+    oldest: truth.length > 0 && arranged[0] === truth[0],
+  };
+}

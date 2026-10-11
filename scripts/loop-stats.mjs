@@ -742,6 +742,28 @@ if (orderRounds > 0) {
     "  how to read it: the host's two awards, bucketed. Most rounds at `full order` is\n" +
       "  four cards being too easy; most at `nobody` is the years too close together."
   );
+  /**
+   * Whether the cards were dragged before the reveal, crossed with the
+   * verdict: `order_arranged:<moved|untouched>:<verdict>`. Pages before the
+   * drag send nothing, so the two rows sum to at most the line above.
+   */
+  const arrangedRow = (state) => {
+    const counts = orderVerdicts.map(([v]) => get(`order_arranged:${state}:${v}`));
+    const total = counts.reduce((t, c) => t + c, 0);
+    const parts = orderVerdicts.map(([, label], i) => `${label} ${counts[i]}`).join(" · ");
+    return { total, line: `${total} — ${parts}` };
+  };
+  const moved = arrangedRow("moved");
+  const untouched = arrangedRow("untouched");
+  if (moved.total + untouched.total > 0) {
+    console.log(`  dragged first      ${moved.line}`);
+    console.log(`  left as dealt      ${untouched.line}`);
+    console.log(
+      "  how to read it: `dragged first` is a round whose cards were moved on the host's\n" +
+        "  screen before the reveal. Few of those and the drag is not being found; set its\n" +
+        "  full-order share beside the other row's to see whether it helps."
+    );
+  }
 }
 
 /**
@@ -1192,6 +1214,7 @@ const RENDERED_PREFIXES = [
   "game_end_scored:",
   "game_left_scored:",
   "order_round:",
+  "order_arranged:",
   "first_clip:",
   "game_over_tap:",
   "mixed_nudge:",

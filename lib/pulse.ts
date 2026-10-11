@@ -178,7 +178,7 @@ export type PulseEvent =
       players?: PlayerBand;
       scored?: GameScored;
     }
-  | { kind: "order_round"; verdict: OrderVerdict }
+  | { kind: "order_round"; verdict: OrderVerdict; arranged?: boolean }
   | { kind: "game_over_tap"; target: GameOverTap }
   | { kind: "mixed_nudge"; stage: MixedNudgeStage }
   | { kind: "remote_door"; stage: RemoteDoorStage }
@@ -292,7 +292,12 @@ export function parsePulse(body: unknown): PulseEvent | null {
   if (raw.kind === "order_round") {
     // The verdict is the whole event and a key tail; an undeclared one is
     // refused, never filed under a neighbour.
-    return isOrderVerdict(raw.verdict) ? { kind: "order_round", verdict: raw.verdict } : null;
+    if (!isOrderVerdict(raw.verdict)) return null;
+    // Whether the cards were moved before the reveal. Only a real boolean
+    // survives; an older page sends none and its round counts as before.
+    return typeof raw.arranged === "boolean"
+      ? { kind: "order_round", verdict: raw.verdict, arranged: raw.arranged }
+      : { kind: "order_round", verdict: raw.verdict };
   }
 
   if (raw.kind === "game_over_tap") {

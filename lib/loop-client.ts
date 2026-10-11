@@ -215,9 +215,9 @@ export function reportGameLeft(
  * the top of this file. Sent from Next Round and from End Game on a revealed
  * round — the document survives both, so this is a beacon like the taps.
  */
-export function reportOrderRound(verdict: OrderVerdict, roundIndex: number): void {
-  trackEvent("order_round_resolved", { round_index: roundIndex, verdict });
-  sendPulse({ kind: "order_round", verdict });
+export function reportOrderRound(verdict: OrderVerdict, roundIndex: number, arranged: boolean): void {
+  trackEvent("order_round_resolved", { round_index: roundIndex, verdict, arranged });
+  sendPulse({ kind: "order_round", verdict, arranged });
 }
 
 /**

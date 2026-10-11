@@ -228,7 +228,7 @@ export type AnalyticsEvent =
        * `ORDER_ROUND_SIZE`; this copy is here to be cut by `round_index`.
        */
       name: "order_round_resolved";
-      params: { round_index: number; verdict: "exact" | "partial" | "none" };
+      params: { round_index: number; verdict: "exact" | "partial" | "none"; arranged?: boolean };
     }
   | {
       /**

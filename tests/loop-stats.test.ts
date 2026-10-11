@@ -1425,3 +1425,25 @@ describe("players on the scoreboard, and whether anyone scored", () => {
     expect(keysWritten().filter((k) => /_players:|_scored:/.test(k))).toEqual([]);
   });
 });
+
+describe("order rounds that were dragged", () => {
+  it("writes the arranged key the reader reads, and nothing for an older page", async () => {
+    const expected = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    for (const verdict of ORDER_VERDICTS) {
+      for (const [arranged, state] of [[true, "moved"], [false, "untouched"]] as const) {
+        kv.incrs = [];
+        await recordOrderRound(verdict, arranged);
+        expect(keysWritten()).toContain(expected.orderArranged[state][verdict]);
+      }
+    }
+    kv.incrs = [];
+    await recordOrderRound("exact");
+    expect(keysWritten().filter((k) => k.includes("order_arranged:"))).toEqual([]);
+  });
+
+  it("is rendered by the digest", () => {
+    const script = readFileSync(join(process.cwd(), "scripts/loop-stats.mjs"), "utf8");
+    expect(script).toContain('"order_arranged:",');
+    expect(script).toMatch(/get\(`order_arranged:\$\{state\}:\$\{v\}`\)/);
+  });
+});

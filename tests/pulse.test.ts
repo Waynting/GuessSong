@@ -620,7 +620,7 @@ describe("the route records every kind the parser accepts", () => {
     expect(route).toMatch(/case "quiz_copied":\s*await recordQuizCopy\(event\.by, event\.outcome\);/);
     expect(route).toMatch(/case "quiz_shared":\s*await recordQuizShare\(event\.by, event\.outcome\);/);
     expect(route).toMatch(/case "quiz_social":\s*await recordQuizSocial\(event\.by, event\.platform\);/);
-    expect(route).toMatch(/case "order_round":\s*await recordOrderRound\(event\.verdict\);/);
+    expect(route).toMatch(/case "order_round":\s*await recordOrderRound\(event\.verdict, event\.arranged\);/);
     // The mode rides to all three game recorders, or the KV rows read as
     // "no mode was ever sent".
     expect(route).toMatch(
@@ -746,6 +746,27 @@ describe("parsePulse — players and whether anyone scored", () => {
       expect(parsePulse({ kind: "game_left", roundsPlayed: 1, players: junk, scored: junk })).toEqual({
         kind: "game_left",
         roundsPlayed: 1,
+      });
+    }
+  });
+});
+
+describe("parsePulse — an order round, and whether it was dragged", () => {
+  it("carries a real boolean and drops anything else", () => {
+    expect(parsePulse({ kind: "order_round", verdict: "exact", arranged: true })).toEqual({
+      kind: "order_round",
+      verdict: "exact",
+      arranged: true,
+    });
+    expect(parsePulse({ kind: "order_round", verdict: "none", arranged: false })).toEqual({
+      kind: "order_round",
+      verdict: "none",
+      arranged: false,
+    });
+    for (const junk of ["true", 1, null, undefined, {}]) {
+      expect(parsePulse({ kind: "order_round", verdict: "partial", arranged: junk })).toEqual({
+        kind: "order_round",
+        verdict: "partial",
       });
     }
   });

@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
       await recordGameLeft(event.roundsPlayed, event.host, event.source, event.mode, event.players, event.scored);
       break;
     case "order_round":
-      await recordOrderRound(event.verdict);
+      await recordOrderRound(event.verdict, event.arranged);
       break;
     case "game_over_tap":
       await recordGameOverTap(event.target);
