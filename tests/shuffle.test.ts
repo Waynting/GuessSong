@@ -96,7 +96,10 @@ describe("spreadByAlbum", () => {
   });
 
   it("puts no album back to back when the list allows it", () => {
-    for (let r = 0; r < 300; r++) expect(adjacentPairs(spreadByAlbum(playlist()))).toBe(0);
+    // 5,000, not 300: the repair used to search forward only, so a clash on
+    // the last track (~1 run in 2,000) could not be fixed, and 300 runs caught
+    // it one time in seven — a flake, not a test.
+    for (let r = 0; r < 5000; r++) expect(adjacentPairs(spreadByAlbum(playlist()))).toBe(0);
   });
 
   it("does what it can when one album is most of the list", () => {
