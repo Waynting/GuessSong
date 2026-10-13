@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Put them in order, on every phone** (`lib/order-phone.ts`,
+  `components/order-phone.tsx`, `lib/use-card-drag.ts`). With a buzzer room
+  ("Play on phones" beside the order game on `/`), `/order` deals each round to
+  the Durable Object without years (`host:order:deal`, via `orderCardsFor`);
+  phones arrange with the drag pulled out of the host screen and send
+  `order:lock`, re-sendable until the reveal. The host page grades every seat
+  (`gradeArrangement`: full order 3, oldest card 1, every scorer scores) and
+  sends `host:order:reveal`; points land on the scoreboard by name. Order frames
+  and `RoomSnapshot.order` go only to sockets that joined with
+  `caps: ["order"]`, because the old phone reducer had no `default` and crashed
+  on an unknown frame (`reduce` has one now). Worker deployed ahead of the app.
+  - Counted: `order_phone:<all|some|none>` and
+    `order_phone_verdict:<exact|oldest|none>` via the `order_phone` pulse;
+    phone rounds still send `order_round` (the room's best answer, no
+    `arranged`). Printed under "Order rounds".
+  - Known gaps: no per-player score correction on the phone screen; a lock
+    that arrives after the host has graded counts as not locked; the join form
+    still says "the host's screen shows who buzzed first".
+
 - **A loaded playlist is kept a week, and served past its 24h when Spotify
   cannot be asked** (`lib/playlist-cache.ts`, `STALE_GRACE_SECONDS`). From
   2026-10-07 the site ran ~5,000 games a day against the 2,000-load daily
@@ -43,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tiktok, chatgpt, perplexity, external, internal, none); the referrer itself
   never leaves the module. `npm run stats` prints it under the host-number
   histogram. One extra command on ~40% of starts.
+||||||| parent of cd95acd (docs(changelog): per-phone order round under Unreleased)
 
 - **Put them in order: drag the cards, and the reveal marks them**
   (`app/order/page.tsx`, rules in `lib/order-game.ts`: `moveCard`, `dropSlot`,
