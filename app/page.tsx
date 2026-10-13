@@ -215,8 +215,9 @@ export default function SetupPage() {
   const [buzzerEnabled, setBuzzerEnabled] = useState(false);
   // How tonight is played: guess the song from a clip, or put four songs in
   // order of release year with no audio at all. The second has its own page
-  // (`/order`) and no use for the clip length or the buzzer, both of which
-  // the form hides while it is picked. The rules are in lib/order-game.ts.
+  // (`/order`) and no use for the clip length, which the form hides while it
+  // is picked; the buzzer stays, and there puts the cards on every phone.
+  // The rules are in lib/order-game.ts and lib/order-phone.ts.
   const [playStyle, setPlayStyle] = useState<PlayStyle>(DEFAULT_PLAY_STYLE);
   // One room, opened BEFORE the game starts so players have time to scan in,
   // and carrying whichever backends the chosen modes need. Null until the host
@@ -317,20 +318,12 @@ export default function SetupPage() {
   const gameHref = isOrder ? "/order" : "/game";
 
   /**
-   * The one way the play style changes. Picking the order game turns the
-   * buzzer off and drops its room: that page has no round to buzz in, and the
-   * toggle that would turn it back off is hidden in this style.
+   * The one way the play style changes. The buzzer and its room survive it:
+   * with the order game, a buzzer room is what puts the cards on every phone
+   * (lib/order-phone.ts), and phones already scanned in stay in.
    */
   function choosePlayStyle(style: PlayStyle) {
     setPlayStyle(style);
-    if (style === "order" && buzzerEnabled) {
-      setBuzzerEnabled(false);
-      // A room that also collects playlists is kept: friends may already
-      // have submitted to it, and the order game leaves its buzzer handle
-      // out of the payload instead. Only a buzzer-only room has nothing left
-      // to do.
-      if (!collectsPlaylists) resetRoom();
-    }
   }
 
   function addMixedContribution(c: MixedContribution) {
@@ -439,11 +432,11 @@ export default function SetupPage() {
 
       // Already open, and sharing this room's single code — the host claimed the
       // Durable Object before the code was ever shown, so there was nothing for
-      // a guest to race for. See lib/room-client.ts. The order game has no
-      // round to buzz in, so it leaves the handle out.
-      // And only while the toggle says so: the style pill can switch the
+      // a guest to race for. See lib/room-client.ts. In the order game the
+      // handle is what puts the cards on every phone.
+      // And only while the toggle says so: the settings can switch the
       // buzzer off and keep a mailbox room whose handle is still on it.
-      const room = isOrder || !buzzerEnabled ? undefined : openedRoom.buzzer;
+      const room = !buzzerEnabled ? undefined : openedRoom.buzzer;
       // The order game deals only dated, non-compilation songs. A pool that
       // deals no round is refused here, before anything is stored or counted;
       // the pool is held above, so the host can switch style and start again.
@@ -1275,8 +1268,8 @@ export default function SetupPage() {
                       : songCount.count === "all"
                       ? "All songs"
                       : `${songCount.count} songs`,
-                    ...(isBuzzerConfigured() && !isOrder
-                      ? [`Buzzer ${buzzerEnabled ? "on" : "off"}`]
+                    ...(isBuzzerConfigured()
+                      ? [`${isOrder ? "Phones" : "Buzzer"} ${buzzerEnabled ? "on" : "off"}`]
                       : []),
                   ].join(" · ")}
                 </p>
@@ -1369,11 +1362,12 @@ export default function SetupPage() {
                     </div>
                   )}
 
-                  {/* Buzzer Mode — the reason the host gets to play too. Not
-                      offered with the order game, which has no round to buzz in. */}
-                  {isBuzzerConfigured() && !isOrder && (
+                  {/* Buzzer Mode — the reason the host gets to play too. With
+                      the order game the same room puts the cards on every
+                      phone instead, so the switch says that. */}
+                  {isBuzzerConfigured() && (
                     <div>
-                      <p className="section-label">Buzzer Mode</p>
+                      <p className="section-label">{isOrder ? "Play on phones" : "Buzzer Mode"}</p>
                       {/* Label says what the tap does, colour says what the state is.
                           A grey button reading "Off" was reporting status where a
                           control belongs — you couldn't tell whether it meant "it is
@@ -1389,7 +1383,9 @@ export default function SetupPage() {
                         {buzzerEnabled ? "✓ On" : "Turn on"}
                       </button>
                       <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                        Everyone buzzes from their phone.
+                        {isOrder
+                          ? "Everyone puts the cards in order on their own phone, and each phone is scored for itself."
+                          : "Everyone buzzes from their phone."}
                       </p>
                     </div>
                   )}
@@ -1409,6 +1405,7 @@ export default function SetupPage() {
                 <RoomPanel
                   collectsPlaylists={collectsPlaylists}
                   buzzer={buzzerEnabled}
+                  orderGame={isOrder}
                   room={openedRoom}
                   onOpened={setOpenedRoom}
                   onPhoneCountChange={setBuzzerPlayerCount}

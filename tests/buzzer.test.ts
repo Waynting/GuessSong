@@ -699,6 +699,9 @@ describe("parseClientMessage", () => {
       "host:verdict",
       "host:reveal",
       "host:next",
+      "host:order:deal",
+      "host:order:reveal",
+      "order:lock",
       "ping",
     ];
     for (const type of types) {
@@ -717,6 +720,45 @@ describe("parseClientMessage", () => {
 });
 
 describe("client reducer", () => {
+  it("adopts the order round the room sends, and keeps the rest of the snapshot", () => {
+    const order = {
+      round: 2,
+      cards: [
+        { id: "a", title: "A", artist: "x", art: "" },
+        { id: "b", title: "B", artist: "y", art: "" },
+      ],
+      phase: "arranging" as const,
+      locked: ["p-2"],
+      mine: null,
+      reveal: null,
+    };
+    const s = reduce({ ...emptyState, snapshot: snapshot({ roundIndex: 4 }) }, { type: "order", order });
+    expect(s.snapshot?.order).toEqual(order);
+    expect(s.snapshot?.roundIndex).toBe(4);
+    // Before any snapshot there is nothing to hang it on.
+    expect(reduce(emptyState, { type: "order", order })).toBe(emptyState);
+  });
+
+  it("keeps its state on a frame it does not know, rather than losing it", () => {
+    // Without a default the reducer returned undefined, and the next frame
+    // threw on `state.snapshot`: the crash screen, on a phone, for a message
+    // from a newer Worker the page had no use for.
+    const s = { ...emptyState, snapshot: snapshot({ phase: "open" }) };
+    const next = reduce(s, { type: "from:the:future" } as never);
+    expect(next).toBe(s);
+    expect(reduce(next, { type: "round:resolved", roundIndex: 0, verdict: "revealed" }).snapshot?.phase).toBe("idle");
+  });
+
+  it("declares the order capability on join only for a page that asked for it", () => {
+    const src = readFileSync(join(process.cwd(), "lib/use-buzzer-socket.ts"), "utf8");
+    expect(src).toMatch(/\.\.\.\(capsRef\.current\?\.length \? \{ caps: capsRef\.current \} : \{\}\),/);
+    // The two pages that render the round ask for it; the setup page's room
+    // panel and the guess game's host panel do not.
+    expect(readFileSync(join(process.cwd(), "app/buzz/[code]/page.tsx"), "utf8")).toMatch(/caps: ORDER_CAPS,/);
+    expect(readFileSync(join(process.cwd(), "app/order/page.tsx"), "utf8")).toMatch(/caps: ORDER_CAPS,/);
+    expect(readFileSync(join(process.cwd(), "components/buzzer-host-panel.tsx"), "utf8")).not.toMatch(/caps:/);
+  });
+
   it("adopts the server snapshot wholesale on join", () => {
     const next = reduce(emptyState, {
       type: "state",

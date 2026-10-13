@@ -13,10 +13,27 @@ import { useRouter } from "next/navigation";
 import type { Track } from "@/types";
 import { trackEvent, type PlaylistSource } from "@/lib/analytics";
 import {
+  mergeRoomRoster,
+  nameKey,
   scoreboardName,
+  type BuzzerRoomHandle,
   type GamePlayer as Player,
   type MixedPlaylistMeta,
 } from "@/lib/game-session";
+import type { BuzzerCapability, OrderReveal, ServerMessage } from "@/lib/buzzer-protocol";
+import { useBuzzerSocket } from "@/lib/use-buzzer-socket";
+import { useCardDrag } from "@/lib/use-card-drag";
+import {
+  orderCardsFor,
+  orderRevealFor,
+  phoneCoverage,
+  phoneVerdictCounts,
+  phonesInPlay,
+  roomVerdict,
+  sameDeal,
+} from "@/lib/order-phone";
+import { buzzerErrorMessage } from "@/lib/error-messages";
+import { useErrorLocale } from "@/lib/use-error-locale";
 import { gameScored, playerBand } from "@/lib/game-players";
 import { loadGame } from "@/lib/game-storage";
 import { useScreenWakeLock } from "@/lib/wake-lock";
@@ -34,6 +51,7 @@ import {
   reportGameEnd,
   reportGameLeft,
   reportGameOverTap,
+  reportOrderPhoneRound,
   reportOrderRound,
 } from "@/lib/loop-client";
 import type { GameHostKind, GameScreen, SetupSource } from "@/lib/loop-stats";
@@ -56,14 +74,13 @@ import {
   ORDER_EXACT_POINTS,
   ORDER_OLDEST_POINTS,
   buildOrderRounds,
-  dropSlot,
-  moveCard,
   readArrangement,
   orderLeftoverLine,
   orderRoundsPlayed,
   orderVerdict,
   releaseYear,
   trueOrder,
+  type OrderPhoneCoverage,
   type OrderRound,
 } from "@/lib/order-game";
 import { displayTitle } from "@/lib/quiz";
@@ -99,9 +116,33 @@ import { displayTitle } from "@/lib/quiz";
  * not graded. Pass-the-phone with drag-to-order would make every round a
  * minute of one person holding the screen, and the point of this mode is
  * that the whole room is looking at the same four cards.
+ *
+ * ## …unless the game has a buzzer room: then every phone plays
+ *
+ * Started with the buzzer on, the payload carries the room's handle and the
+ * round goes to every phone as well (`lib/order-phone.ts`). This page deals
+ * each round to the room without its years, each player arranges their own
+ * copy and locks in, and at the reveal this page grades every lock and sends
+ * the years and the results back. Nobody judges; the scoreboard moves on its
+ * own. The cards on this screen stay draggable, and once one has been moved
+ * they are the host's own answer. Without a room — or with one this page
+ * never reached — the round is the shared-screen game above, unchanged.
  */
 
 type Phase = "showing" | "revealed" | "finished";
+
+/** What this page can render beyond a buzzer: the round on the phones. */
+const ORDER_CAPS: BuzzerCapability[] = ["order"];
+
+/** A round played on the phones, as this page graded it at the reveal. */
+interface PhoneRound {
+  round: number;
+  reveal: OrderReveal;
+  /** Null when no phone was in play: the beacon has nothing to say. */
+  coverage: OrderPhoneCoverage | null;
+  /** playerId → name, as the room had them at the reveal. */
+  names: Record<string, string>;
+}
 
 const ALBUM_PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Crect width='200' height='200' fill='%231a1a1a'/%3E%3Ccircle cx='100' cy='100' r='40' fill='%23222'/%3E%3Ccircle cx='100' cy='100' r='10' fill='%23111'/%3E%3C/svg%3E";
@@ -129,11 +170,22 @@ export default function OrderPage() {
   // The room's answer: the cards in the order they have been dragged into,
   // for the round it belongs to. A new round starts from its deal.
   const [arrangement, setArrangement] = useState<{ round: number; ids: string[]; moved: boolean } | null>(null);
-  // The card under a finger, and how far it sits from its slot.
-  const [drag, setDrag] = useState<{ id: string; dy: number } | null>(null);
-  const dragRef = useRef<{ id: string; startY: number; origin: number; centres: number[] } | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
   const [scorePulse, setScorePulse] = useState<string | null>(null);
+  /**
+   * The buzzer room, when the game was started with one: the round is on
+   * every phone too. Null is the shared-screen game, exactly as it was.
+   */
+  const [buzzerRoom, setBuzzerRoom] = useState<BuzzerRoomHandle | null>(null);
+  /** The reveal this page graded and sent, for the round it belongs to. */
+  const [phoneRound, setPhoneRound] = useState<PhoneRound | null>(null);
+  /**
+   * What this page last sent the room, so a snapshot that changes before the
+   * room's answer lands does not send it again. Cleared by every `state`
+   * replay, which is the room's word on what it actually holds.
+   */
+  const dealtRef = useRef<string | null>(null);
+  const revealSentRef = useRef<number | null>(null);
+  const locale = useErrorLocale();
   /** Null until an effect has asked — see gameScreenFor in lib/game-over.ts. */
   const [screen, setScreen] = useState<GameScreen | null>(null);
   const [mixCopied, setMixCopied] = useState(false);
@@ -192,8 +244,59 @@ export default function OrderPage() {
     setPlaylistName(data.playlistName);
     setPlaylistSource(data.playlistSource);
     setMixedMeta(data.mixedPlaylistMeta ?? null);
+    setBuzzerRoom(data.buzzerRoom ?? null);
     gameStartTimeRef.current = Date.now();
   }, [router]);
+
+  // The room, when there is one. The roster fills the scoreboard the way
+  // /game's does — additively, by name (`mergeRoomRoster`) — because scores
+  // are awarded by name and a phone that is not a row earns nothing.
+  const onRoomMessage = useCallback((msg: ServerMessage) => {
+    if (msg.type === "state") {
+      dealtRef.current = null;
+      revealSentRef.current = null;
+    }
+    if (msg.type === "state" || msg.type === "players") {
+      const list = msg.type === "state" ? msg.snapshot.players : msg.players;
+      setPlayers((prev) => mergeRoomRoster(prev, list.map((p) => p.name)));
+    }
+  }, []);
+  const room = useBuzzerSocket({
+    code: buzzerRoom?.code ?? null,
+    name: buzzerRoom?.hostName ?? "",
+    hostToken: buzzerRoom?.hostToken,
+    caps: ORDER_CAPS,
+    onServerMessage: onRoomMessage,
+  });
+  const { snapshot: roomSnapshot, connected: roomConnected, hostOrderDeal, hostOrderReveal } = room;
+
+  // Deal the round on screen to the phones, whenever the room holds anything
+  // else: a new round, a reconnect that found the room on another one, the
+  // first join after a reload. Never while the room holds this very deal —
+  // a re-deal wipes every lock.
+  useEffect(() => {
+    if (!buzzerRoom || !roomConnected || !roomSnapshot || phase !== "showing") return;
+    const current = rounds[currentIndex];
+    if (!current) return;
+    const cards = orderCardsFor(current);
+    const held = roomSnapshot.order;
+    if (held && held.round === currentIndex && held.phase === "arranging" && sameDeal(held.cards, cards)) return;
+    const key = `${currentIndex}:${cards.map((c) => c.id).join(",")}`;
+    if (dealtRef.current === key) return;
+    dealtRef.current = key;
+    hostOrderDeal(currentIndex, cards);
+  }, [buzzerRoom, roomConnected, roomSnapshot, phase, rounds, currentIndex, hostOrderDeal]);
+
+  // A reveal the room never got — sent while the socket was down — goes
+  // again once a replay shows the room still arranging this round.
+  useEffect(() => {
+    if (!roomConnected || phase !== "revealed" || phoneRound?.round !== currentIndex) return;
+    const held = roomSnapshot?.order;
+    if (!held || held.round !== currentIndex || held.phase !== "arranging") return;
+    if (revealSentRef.current === currentIndex) return;
+    revealSentRef.current = currentIndex;
+    hostOrderReveal(currentIndex, phoneRound.reveal);
+  }, [roomConnected, roomSnapshot, phase, phoneRound, currentIndex, hostOrderReveal]);
 
   // The phone is the screen, and left alone through an argument about 1997
   // it locks. Held for the whole game, final scores included.
@@ -283,14 +386,21 @@ export default function OrderPage() {
   }
 
   function reveal() {
-    setDrag(null);
-    dragRef.current = null;
+    cardDrag.cancel();
     setPhase("revealed");
+    const round = rounds[currentIndex];
+    // With a room this page reached, the phones are the answers and this
+    // page grades them. A room it never reached falls through to the
+    // shared-screen game below, award rows and all, so a Worker outage
+    // costs the phones and not the round.
+    if (buzzerRoom && roomSnapshot && round) {
+      revealToRoom(round);
+      return;
+    }
     // One player has nobody to argue with and nobody to judge them: the
     // arrangement on the screen is their answer, so it is scored as one.
     // A room keeps the host's two award rows — the screen holds one order,
     // and only the room knows whose it was.
-    const round = rounds[currentIndex];
     if (players.length === 1 && round) {
       const result = readArrangement(arrangedIds, round);
       if (result.exact) awardExact(players[0].name);
@@ -298,56 +408,45 @@ export default function OrderPage() {
     }
   }
 
+  /**
+   * Grade every seat in the room, send the years and the results to the
+   * phones, and put the points on the scoreboard. Every seat that earned
+   * points gets them — no one-of-each here (lib/order-phone.ts).
+   */
+  function revealToRoom(round: OrderRound) {
+    if (!roomSnapshot) return;
+    const held = roomSnapshot.order?.round === currentIndex ? roomSnapshot.order : null;
+    const arrangements: Record<string, readonly string[]> = { ...(held?.arrangements ?? {}) };
+    // The host's seat has no Lock in: this screen is its answer once moved.
+    if (hostMoved) arrangements[room.playerId] = arrangedIds;
+    const seats = roomSnapshot.players;
+    const result = orderRevealFor(round, seats.map((p) => p.playerId), arrangements);
+    const names = Object.fromEntries(seats.map((p) => [p.playerId, p.name]));
+    const locked = held?.locked ?? [];
+    const phones = phonesInPlay(seats, locked, room.playerId).map((p) => p.playerId);
+    revealSentRef.current = currentIndex;
+    hostOrderReveal(currentIndex, result);
+    setPhoneRound({ round: currentIndex, reveal: result, coverage: phoneCoverage(phones, locked), names });
+
+    const earned = new Map<string, number>();
+    for (const [id, r] of Object.entries(result.results)) {
+      if (r.points > 0 && names[id]) {
+        const key = nameKey(names[id]);
+        earned.set(key, (earned.get(key) ?? 0) + r.points);
+      }
+    }
+    setPlayers((prev) =>
+      mergeRoomRoster(prev, Object.values(names)).map((p) => {
+        const points = earned.get(nameKey(p.name)) ?? 0;
+        return points > 0 ? { ...p, score: p.score + points } : p;
+      })
+    );
+    const top = Object.entries(result.results).find(([, r]) => r.verdict === "exact") ?? Object.entries(result.results).find(([, r]) => r.points > 0);
+    if (top && names[top[0]]) pulseScore(scoreboardName(players, names[top[0]]) ?? names[top[0]]);
+  }
+
   function setIds(ids: string[]) {
     setArrangement({ round: currentIndex, ids, moved: true });
-  }
-
-  /**
-   * A drag, by pointer — mouse, finger or pen, without a library. The slots'
-   * centres are measured once when the card is picked up; the card follows
-   * the pointer, and when its centre is nearer another slot the list
-   * reorders under it and the offset is re-based on the new slot, so the
-   * card stays under the finger.
-   */
-  function pickUp(event: ReactPointerEvent<HTMLDivElement>, id: string) {
-    if (phase !== "showing" || !listRef.current) return;
-    const index = arrangedIds.indexOf(id);
-    if (index < 0) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const centres = Array.from(listRef.current.children).map((el) => {
-      const r = el.getBoundingClientRect();
-      return r.top + r.height / 2;
-    });
-    dragRef.current = { id, startY: event.clientY, origin: centres[index], centres };
-    setDrag({ id, dy: 0 });
-  }
-
-  function dragMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const d = dragRef.current;
-    if (!d) return;
-    const centre = d.origin + (event.clientY - d.startY);
-    const from = arrangedIds.indexOf(d.id);
-    const to = dropSlot(centre, d.centres);
-    if (from >= 0 && to !== from) setIds(moveCard(arrangedIds, from, to));
-    setDrag({ id: d.id, dy: centre - d.centres[to] });
-  }
-
-  function putDown() {
-    if (!dragRef.current) return;
-    dragRef.current = null;
-    setDrag(null);
-  }
-
-  /** The same move from the keyboard: arrow keys shift the focused card. */
-  function keyMove(event: ReactKeyboardEvent<HTMLDivElement>, id: string) {
-    if (phase !== "showing") return;
-    const step = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
-    if (step === 0) return;
-    event.preventDefault();
-    const from = arrangedIds.indexOf(id);
-    const to = from + step;
-    if (from < 0 || to < 0 || to >= arrangedIds.length) return;
-    setIds(moveCard(arrangedIds, from, to));
   }
 
   /**
@@ -357,6 +456,16 @@ export default function OrderPage() {
    */
   function closeRound() {
     if (phase !== "revealed") return;
+    // A round on the phones: `order_round` as the best answer in the room,
+    // so that line still sums to rounds played, and `order_phone` for how
+    // the phones did. No `arranged` — that is the shared screen's drag.
+    if (phoneRound?.round === currentIndex) {
+      reportOrderRound(roomVerdict(phoneRound.reveal), currentIndex + 1);
+      if (phoneRound.coverage) {
+        reportOrderPhoneRound(currentIndex + 1, phoneRound.coverage, phoneVerdictCounts(phoneRound.reveal));
+      }
+      return;
+    }
     // GA4's round_completed is the guess game's and carries no mode, so it
     // is not sent from here; order_round_resolved is this game's round.
     reportOrderRound(
@@ -530,6 +639,19 @@ export default function OrderPage() {
   const leftoverLine = orderLeftoverLine(leftover);
   const onward = gameOverOnward(screen);
   const lastRound = currentIndex + 1 >= rounds.length;
+  const hostMoved = arrangement?.round === currentIndex && arrangement.moved;
+  // The one drag, shared with the phones (lib/use-card-drag.ts). Live only
+  // while the cards are face down.
+  const cardDrag = useCardDrag(arrangedIds, phase === "showing", setIds);
+  const { drag } = cardDrag;
+  // This round was graded from the phones: their results replace the award
+  // rows, and the marks against this screen's order mean something only
+  // when the host made it an answer by moving a card.
+  const phoneResults = phoneRound?.round === currentIndex ? phoneRound : null;
+  const marked = !phoneResults || hostMoved;
+  const lockedNow = roomSnapshot?.order?.round === currentIndex ? roomSnapshot.order.locked : [];
+  const phonesNow = phonesInPlay(roomSnapshot?.players ?? [], lockedNow, room.playerId);
+  const lockedSet = new Set(lockedNow);
 
   if (rounds.length === 0) {
     return (
@@ -752,6 +874,49 @@ export default function OrderPage() {
         }
         @keyframes pop-in { from{transform:scale(0.6);opacity:0} to{transform:scale(1);opacity:1} }
         .order-note { margin-top: 10px; font-size: 12px; line-height: 1.4; color: #555; text-align: center; }
+
+        /* The round on the phones: who has locked in, then how each did. */
+        .phone-status { margin-bottom: 12px; text-align: center; }
+        .phone-status-line { font-size: 13px; color: #888; }
+        .phone-status-line.error { color: #fca5a5; }
+        .phone-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 8px; }
+        .phone-chip {
+          font-size: 12px;
+          color: #777;
+          padding: 4px 10px;
+          border: 1px solid #2a2a2a;
+          border-radius: var(--radius);
+          max-width: 140px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .phone-chip.locked { color: #1DB954; border-color: rgba(29,185,84,0.45); }
+        .text-btn {
+          background: none;
+          border: none;
+          padding: 0;
+          color: #f0f0f0;
+          font: inherit;
+          text-decoration: underline;
+          cursor: pointer;
+        }
+        .text-btn:active { color: #bbb; transition: none; }
+        .phone-results { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+        .phone-result {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          min-width: 0;
+          padding: 6px 12px;
+          font-size: 14px;
+          color: #888;
+          background: #161616;
+          border-radius: 8px;
+        }
+        .phone-result.scored { color: #1DB954; background: rgba(29,185,84,0.07); }
+        .phone-result-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ddd; }
+        .phone-result-verdict { flex-shrink: 0; }
 
         .btn-primary {
           display: block;
@@ -1221,14 +1386,18 @@ export default function OrderPage() {
         <main className="main-area">
           <div className="game-card">
             <p className={`order-prompt${isRevealed ? " revealed" : ""}`}>
-              {isRevealed ? "Oldest to newest — the real order" : "Oldest on top. Drag the cards into order, then reveal"}
+              {isRevealed
+                ? "Oldest to newest — the real order"
+                : buzzerRoom
+                ? "Everyone orders these on their phone. Move one here and yours counts too"
+                : "Oldest on top. Drag the cards into order, then reveal"}
             </p>
 
-            <div className="order-list" ref={listRef} role="list">
+            <div className="order-list" ref={cardDrag.listRef} role="list">
               {cards.map((t, i) => {
                 const slot = slotOf.get(t.id) ?? i;
-                const inPlace = isRevealed && slot === i;
-                const missed = isRevealed && slot !== i;
+                const inPlace = isRevealed && marked && slot === i;
+                const missed = isRevealed && marked && slot !== i;
                 const lifted = drag?.id === t.id;
                 return (
                   <div
@@ -1243,11 +1412,11 @@ export default function OrderPage() {
                           tabIndex: 0,
                           role: "listitem",
                           "aria-label": `${displayTitle(t.name)}, position ${i + 1} of ${cards.length}. Arrow keys move it.`,
-                          onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => pickUp(e, t.id),
-                          onPointerMove: dragMove,
-                          onPointerUp: putDown,
-                          onPointerCancel: putDown,
-                          onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => keyMove(e, t.id),
+                          onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => cardDrag.pickUp(e, t.id),
+                          onPointerMove: cardDrag.dragMove,
+                          onPointerUp: cardDrag.putDown,
+                          onPointerCancel: cardDrag.putDown,
+                          onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => cardDrag.keyMove(e, t.id),
                         })}
                   >
                     <span className="order-slot" aria-label={isRevealed ? `Rank ${i + 1}` : `Card ${letterOf.get(t.id)}`}>
@@ -1287,6 +1456,40 @@ export default function OrderPage() {
               })}
             </div>
 
+            {phase === "showing" && buzzerRoom && (
+              <div className="phone-status" role="status">
+                {room.error ? (
+                  <p className="phone-status-line error">
+                    {buzzerErrorMessage(room.error, locale, "host")}{" "}
+                    <button type="button" className="text-btn" onClick={room.reconnect}>
+                      Reconnect
+                    </button>
+                  </p>
+                ) : !roomConnected ? (
+                  <p className="phone-status-line">Connecting to room {buzzerRoom.code}…</p>
+                ) : phonesNow.length === 0 ? (
+                  <p className="phone-status-line">Room {buzzerRoom.code} · no phones in yet</p>
+                ) : (
+                  <>
+                    <p className="phone-status-line">
+                      {/* The code stays on screen for a latecomer: this page
+                          shows no QR, and a phone can join mid-game. */}
+                      Room {buzzerRoom.code} · {phonesNow.filter((p) => lockedSet.has(p.playerId)).length} of{" "}
+                      {phonesNow.length} phones locked in
+                    </p>
+                    <div className="phone-chips">
+                      {phonesNow.map((p) => (
+                        <span key={p.playerId} className={`phone-chip${lockedSet.has(p.playerId) ? " locked" : ""}`}>
+                          {lockedSet.has(p.playerId) ? "✓ " : ""}
+                          {p.name}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {phase === "showing" && (
               <div>
                 <button className="btn-primary" onClick={reveal}>
@@ -1296,7 +1499,40 @@ export default function OrderPage() {
               </div>
             )}
 
-            {phase === "revealed" && (
+            {phase === "revealed" && phoneResults && (
+              <div>
+                {/* Every seat, graded. Best first, the seats that never
+                    locked in last: the points are already on the scoreboard. */}
+                <div className="phone-results" role="status">
+                  {Object.entries(phoneResults.reveal.results)
+                    .sort(([, a], [, b]) => b.points - a.points || Number(b.locked) - Number(a.locked))
+                    .map(([id, r]) => (
+                      <div key={id} className={`phone-result${r.points > 0 ? " scored" : ""}`}>
+                        <span className="phone-result-name">
+                          {phoneResults.names[id] ?? "?"}
+                          {id === room.playerId ? " (here)" : ""}
+                        </span>
+                        <span className="phone-result-verdict">
+                          {!r.locked
+                            ? id === room.playerId
+                              ? "didn't play"
+                              : "didn't lock in"
+                            : r.verdict === "exact"
+                            ? `full order +${r.points}`
+                            : r.verdict === "oldest"
+                            ? `oldest right +${r.points}`
+                            : "no points"}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+                <button className="btn-primary next" onClick={nextRound}>
+                  {lastRound ? "See Final Scores →" : "Next Round →"}
+                </button>
+              </div>
+            )}
+
+            {phase === "revealed" && !phoneResults && (
               <div>
                 {result && (
                   <p className={`order-result${result.exact ? " exact" : ""}`} role="status">

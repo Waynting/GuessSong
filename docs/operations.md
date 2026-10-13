@@ -22,6 +22,13 @@ both, and **the Worker first**: an old Worker talking to a new client fails on
 messages it does not recognise, while a new Worker talking to an old client
 usually still works, because the protocol only ever gains message types.
 
+"Usually" has a sharp edge: until the order game's per-phone round, the
+client's reducer had no `default`, and a page built before that crashes on the
+first frame type it does not know. A new server-to-client frame therefore goes
+only to sockets that asked for it in `join`'s `caps` (the order game's `order`
+frame is the first). Add a capability for the next one, rather than relying on
+the `default` that only newer pages have.
+
 ```bash
 cd worker
 npm run typecheck

@@ -20,8 +20,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  BuzzerCapability,
   BuzzerErrorCode,
   ClientMessage,
+  OrderCard,
+  OrderReveal,
   RoomSnapshot,
   ServerMessage,
 } from "@/lib/buzzer-protocol";
@@ -190,6 +193,12 @@ export interface BuzzerSocketApi extends BuzzerSocketState {
   hostVerdict: (verdict: "correct" | "wrong") => void;
   hostReveal: () => void;
   hostNext: () => void;
+  /** A player's arrangement for the order round `round` (lib/order-phone.ts). */
+  orderLock: (round: number, ids: string[]) => void;
+  /** Host only: deal an order round to every phone. */
+  hostOrderDeal: (round: number, cards: OrderCard[]) => void;
+  /** Host only: the years and every seat's result. */
+  hostOrderReveal: (round: number, reveal: OrderReveal) => void;
 }
 
 export interface UseBuzzerSocketOptions {
@@ -199,6 +208,12 @@ export interface UseBuzzerSocketOptions {
   hostToken?: string;
   /** Fired for every server message, so callers can drive analytics. */
   onServerMessage?: (msg: ServerMessage) => void;
+  /**
+   * What this page can render beyond the buzzer, sent with every join. The
+   * room sends order frames only to a socket that asked for them, because an
+   * older page's reducer cannot survive one (lib/buzzer-protocol.ts).
+   */
+  caps?: BuzzerCapability[];
 }
 
 export function useBuzzerSocket({
@@ -206,6 +221,7 @@ export function useBuzzerSocket({
   name,
   hostToken,
   onServerMessage,
+  caps,
 }: UseBuzzerSocketOptions): BuzzerSocketApi {
   const [state, setState] = useState<BuzzerSocketState>({
     snapshot: null,
@@ -235,6 +251,8 @@ export function useBuzzerSocket({
   const nameRef = useRef(name);
   const hostTokenRef = useRef(hostToken);
   const onMessageRef = useRef(onServerMessage);
+  const capsRef = useRef(caps);
+  capsRef.current = caps;
   nameRef.current = name;
   hostTokenRef.current = hostToken;
   onMessageRef.current = onServerMessage;
@@ -338,6 +356,7 @@ export function useBuzzerSocket({
             playerId,
             name: nameRef.current,
             ...(hostTokenRef.current ? { hostToken: hostTokenRef.current } : {}),
+            ...(capsRef.current?.length ? { caps: capsRef.current } : {}),
           } satisfies ClientMessage)
         );
       });
@@ -444,6 +463,20 @@ export function useBuzzerSocket({
       () => hostSend({ type: "host:next", hostToken: hostTokenRef.current ?? "" }),
       [hostSend]
     ),
+    orderLock: useCallback(
+      (round: number, ids: string[]) => send({ type: "order:lock", round, ids }),
+      [send]
+    ),
+    hostOrderDeal: useCallback(
+      (round: number, cards: OrderCard[]) =>
+        hostSend({ type: "host:order:deal", hostToken: hostTokenRef.current ?? "", round, cards }),
+      [hostSend]
+    ),
+    hostOrderReveal: useCallback(
+      (round: number, reveal: OrderReveal) =>
+        hostSend({ type: "host:order:reveal", hostToken: hostTokenRef.current ?? "", round, reveal }),
+      [hostSend]
+    ),
   };
 }
 
@@ -522,7 +555,18 @@ export function reduce(state: BuzzerSocketState, msg: ServerMessage): BuzzerSock
         : state;
     case "error":
       return { ...state, error: { code: msg.code, message: msg.message } };
+    case "order":
+      // The room's round as this socket may see it, adopted whole like a
+      // snapshot: it is built per socket and says everything there is.
+      return state.snapshot ? { ...state, snapshot: { ...state.snapshot, order: msg.order } } : state;
     case "pong":
+      return state;
+    default:
+      // A frame from a Worker newer than this page. Without this the reducer
+      // returned undefined, the state was gone, and the next frame threw:
+      // the crash screen, for a message the page had no use for anyway.
+      // Pages from before this line are protected by the room instead, which
+      // only sends what a join's `caps` asked for.
       return state;
   }
 }
