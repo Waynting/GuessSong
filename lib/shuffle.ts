@@ -82,21 +82,37 @@ export function spreadByAlbum<T extends AlbumTagged>(
   const out = keyed.map((k) => k.item);
 
   const album = out.map(albumKey);
-  const clashes = (pos: number, key: string) =>
-    (pos > 0 && album[pos - 1] === key) || (pos < out.length - 1 && album[pos + 1] === key);
+  // Same-album pairs on the edges touching `a` and `b` (edge e joins e-1, e).
+  const pairsAround = (a: number, b: number) => {
+    let n = 0;
+    for (const e of new Set([a, a + 1, b, b + 1])) {
+      if (e >= 1 && e < out.length && album[e] === album[e - 1]) n++;
+    }
+    return n;
+  };
+  // Partners after the clash first, then before it. Forward-only could not
+  // repair a clash on the last track — there is nothing after it — and left
+  // ~1 game in 2,000 opening the same album twice at the end.
+  const partners = (i: number) => [
+    ...Array.from({ length: out.length - i - 1 }, (_, k) => i + 1 + k),
+    ...Array.from({ length: i - 1 }, (_, k) => i - 2 - k),
+  ];
   for (let i = 1; i < out.length; i++) {
     if (album[i] !== album[i - 1]) continue;
-    for (let j = i + 1; j < out.length; j++) {
-      const moving = album[i];
-      const incoming = album[j];
-      if (incoming === album[i - 1]) continue;
-      // Swap tentatively and keep it only if neither spot gains a neighbour.
-      [album[i], album[j]] = [incoming, moving];
-      if (!clashes(i, incoming) && !clashes(j, moving)) {
+    for (const j of partners(i)) {
+      if (album[j] === album[i]) continue;
+      // Kept when it strictly lowers the pairs around both spots, so no swap
+      // ever adds one anywhere. "Neither spot gains a neighbour" was stricter
+      // and wrong when one album is most of the list: every useful swap then
+      // leaves the moved track beside that album, so two singles dealt side by
+      // side stayed that way and the list ended a pair worse than it allows.
+      const before = pairsAround(i, j);
+      [album[i], album[j]] = [album[j], album[i]];
+      if (pairsAround(i, j) < before) {
         [out[i], out[j]] = [out[j], out[i]];
         break;
       }
-      [album[i], album[j]] = [moving, incoming];
+      [album[i], album[j]] = [album[j], album[i]];
     }
   }
   return out;

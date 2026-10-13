@@ -83,6 +83,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`spreadByAlbum` repairs every back-to-back pair the list allows**
+  (`lib/shuffle.ts`). The repair searched forward only, so a clash on the last
+  track (~1 game in 2,000) stayed; and it kept a swap only if neither spot
+  gained a neighbour, which with one album most of the list refused every
+  useful swap and ended a pair worse than possible. It now tries partners
+  after the clash, then before it, and keeps a swap that strictly lowers the
+  same-album pairs around both spots. Both showed up as a flaky
+  `tests/shuffle.test.ts`; the no-pair check now runs 5,000 times, not 300.
+  Measured: 0 pairs in 200,000 deals of the fixture, worst case at its optimum
+  of 5, all 60 tracks still open a game.
+
 - **Shuffling: albums spread out, big playlists sampled fairly, Mixed keeps
   the better copy.** (`lib/shuffle.ts`, `lib/spotify.ts`,
   `lib/mixed-playlist.ts`)
