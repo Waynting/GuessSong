@@ -420,7 +420,12 @@ awards. `lib/order-game.ts` has the rules, `app/order/page.tsx` the screen.
 - *Pass-the-phone with drag-to-order and automatic grading.* Real per-player
   input, but every round becomes a minute of one person holding the screen,
   and the point of the mode is that the whole room is looking at the same
-  four cards. The host stays the judge, as in the guess game.
+  four cards. The host stays the judge, as in the guess game. (Superseded
+  in part, after the drag shipped: with a buzzer room each player now
+  arranges on their *own* phone and is graded by the host's page — no phone
+  passed around, so the objection does not apply. Without a room the host
+  is still the judge. Data at the time: 86% of rounds dragged, full order
+  36.8% dragged vs 15.2% untouched. CLAUDE.md "Put them in order".)
 - *Bumping `CACHE_VERSION` for the new field.* `releaseDate` is an optional
   addition, and a bump turns every warm playlist key into a miss at once:
   ~2,900 extra Spotify loads a day against a ceiling of 2,000 that the real

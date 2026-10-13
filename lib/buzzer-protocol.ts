@@ -85,6 +85,94 @@ export interface RoomSnapshot {
   players: PlayerSummary[];
   /** Epoch ms this room expires if the host does nothing further. */
   expiresAt: number;
+  /**
+   * The "put them in order" round, as this socket may see it — see
+   * `OrderRoundView`. Absent in a guess game, and absent for a socket that
+   * did not join with the `order` capability.
+   */
+  order?: OrderRoundView;
+}
+
+// ---------------------------------------------------------------------------
+// "Put them in order", one phone each
+// ---------------------------------------------------------------------------
+//
+// The order game with a buzzer room hands every player the round's cards on
+// their own phone. The host's page deals (it has the release years; the room
+// never does), the phones arrange and lock in, and the host's page grades at
+// the reveal and sends the results back through the room.
+//
+// **The year never reaches the room before the reveal.** A card is an id, a
+// title, a credit and a cover. The year, the release date and the album name
+// stay on the host's page (an album called "1989" names a year), so a phone
+// cannot read the answer out of the network tab — the quiz's rule, one game
+// over (`lib/quiz-store.ts`).
+//
+// **Additive, and gated on a capability.** A page built before these messages
+// existed has a reducer with no `default`: an unknown frame leaves its state
+// undefined and the next frame throws, which is the crash screen. So the room
+// sends `order` frames, and the snapshot's `order`, only to a socket whose
+// `join` listed `"order"` in `caps`. An old phone in such a room keeps a
+// buzzer that never opens; it never crashes.
+
+/** What a `join` may declare it understands. Unknown entries are ignored. */
+export type BuzzerCapability = "order";
+
+/** Upper bounds the room enforces on what the host deals. */
+export const ORDER_MAX_CARDS = 6;
+export const ORDER_CARD_ID_MAX = 64;
+export const ORDER_CARD_TEXT_MAX = 200;
+export const ORDER_CARD_ART_MAX = 500;
+
+/** One card as a phone sees it. Never a year, a date or an album. */
+export interface OrderCard {
+  id: string;
+  title: string;
+  artist: string;
+  /** Album art URL, or "" for none. */
+  art: string;
+}
+
+/**
+ * How one player's arrangement came out: the whole order, the oldest card
+ * alone, or neither. Graded on the host's page (`gradeArrangement` in
+ * lib/order-game.ts), and every player who earned it gets it — where the
+ * shared screen's awards are one of each per round.
+ */
+export type OrderPhoneVerdict = "exact" | "oldest" | "none";
+
+export interface OrderPhoneResult {
+  verdict: OrderPhoneVerdict;
+  points: number;
+  /** False for a player who never locked in: verdict "none", no points. */
+  locked: boolean;
+}
+
+export interface OrderReveal {
+  /** The card ids, oldest first. */
+  order: string[];
+  /** Card id → release year. */
+  years: Record<string, number>;
+  /** playerId → result, for every seat the host graded. */
+  results: Record<string, OrderPhoneResult>;
+}
+
+export interface OrderRoundView {
+  /** The order page's 0-based round index — not the buzzer's `roundIndex`. */
+  round: number;
+  /** In the order they were dealt. */
+  cards: OrderCard[];
+  phase: "arranging" | "revealed";
+  /** Who has locked in — ids only, never what they locked. */
+  locked: string[];
+  /** This socket's own locked arrangement, or null. */
+  mine: string[] | null;
+  /**
+   * Every locked arrangement, by playerId. The host's socket only: a phone
+   * that could read its neighbours' answers before the reveal could copy them.
+   */
+  arrangements?: Record<string, string[]>;
+  reveal: OrderReveal | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +191,8 @@ export type ClientMessage =
       name: string;
       /** Host must present the token minted at room creation. */
       hostToken?: string;
+      /** What this page understands beyond the buzzer. See `BuzzerCapability`. */
+      caps?: BuzzerCapability[];
     }
   | {
       type: "buzz";
@@ -113,6 +203,16 @@ export type ClientMessage =
   | { type: "host:verdict"; hostToken: string; verdict: "correct" | "wrong" }
   | { type: "host:reveal"; hostToken: string }
   | { type: "host:next"; hostToken: string }
+  /**
+   * Deal an order round to every phone. Replaces whatever round the room
+   * held, locks included: a new round, or the host's page dealing again
+   * after a reload.
+   */
+  | { type: "host:order:deal"; hostToken: string; round: number; cards: OrderCard[] }
+  /** The years go up, with every player's result. Ends the round's locking. */
+  | { type: "host:order:reveal"; hostToken: string; round: number; reveal: OrderReveal }
+  /** A player's arrangement, card ids top (oldest) to bottom. Re-sendable until the reveal. */
+  | { type: "order:lock"; round: number; ids: string[] }
   | { type: "ping" };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +228,12 @@ export type ServerMessage =
   | { type: "round:resolved"; roundIndex: number; verdict: RoundVerdict }
   | { type: "players"; players: PlayerSummary[] }
   | { type: "error"; code: BuzzerErrorCode; message: string }
+  /**
+   * The order round changed: dealt, someone locked in, revealed. Built per
+   * socket (`mine`, and `arrangements` for the host), and sent only to a
+   * socket that joined with the `order` capability.
+   */
+  | { type: "order"; order: OrderRoundView }
   | { type: "pong" };
 
 export type BuzzerErrorCode =
@@ -156,6 +262,9 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "host:verdict":
     case "host:reveal":
     case "host:next":
+    case "host:order:deal":
+    case "host:order:reveal":
+    case "order:lock":
     case "ping":
       return value as ClientMessage;
     default:

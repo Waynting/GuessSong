@@ -1480,3 +1480,40 @@ describe("order rounds that were dragged", () => {
     expect(script).toMatch(/get\(`order_arranged:\$\{state\}:\$\{v\}`\)/);
   });
 });
+
+describe("order rounds played on the phones", () => {
+  it("bumps the coverage once and each verdict by its count, under the keys the reader names", async () => {
+    const { recordOrderPhone } = await import("@/lib/loop-stats");
+    const { ORDER_PHONE_COVERAGES, ORDER_PHONE_VERDICTS } = await import("@/lib/order-game");
+    const expected = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    for (const c of ORDER_PHONE_COVERAGES) {
+      expect(expected.orderPhone[c]).toBe(`loop:stats:2026-08-09:order_phone:${c}`);
+    }
+    for (const v of ORDER_PHONE_VERDICTS) {
+      expect(expected.orderPhoneVerdict[v]).toBe(`loop:stats:2026-08-09:order_phone_verdict:${v}`);
+    }
+
+    await recordOrderPhone("some", { exact: 2, oldest: 0, none: 1 });
+    expect(kv.incrs.filter((i) => i.key.includes("order_phone")).map((i) => [i.key, i.by ?? 1])).toEqual([
+      [expected.orderPhone.some, 1],
+      [expected.orderPhoneVerdict.exact, 2],
+      [expected.orderPhoneVerdict.none, 1],
+    ]);
+  });
+
+  it("refuses a coverage it does not know — it is a key tail — and writes nothing for it", async () => {
+    const { recordOrderPhone } = await import("@/lib/loop-stats");
+    await recordOrderPhone("most" as never, { exact: 1, oldest: 1, none: 1 });
+    await recordOrderPhone("__proto__" as never, { exact: 1, oldest: 1, none: 1 });
+    expect(kv.incrs).toEqual([]);
+  });
+
+  it("is rendered by the digest, under the order rounds", () => {
+    const script = readFileSync(join(process.cwd(), "scripts/loop-stats.mjs"), "utf8");
+    expect(script).toContain('"order_phone:",');
+    expect(script).toContain('"order_phone_verdict:",');
+    expect(script).toMatch(/get\(`order_phone:\$\{c\}`\)/);
+    expect(script).toMatch(/get\(`order_phone_verdict:\$\{v\}`\)/);
+    expect(script.indexOf("order_phone:")).toBeGreaterThan(script.indexOf("Order rounds"));
+  });
+});

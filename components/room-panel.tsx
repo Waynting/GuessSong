@@ -49,6 +49,11 @@ export interface RoomPanelProps {
   onPhoneCountChange?: (count: number) => void;
   /** Who has submitted a playlist — the parent gates starting on this. */
   onSubmissionsChange?: (submissions: RoomSubmissionSummary[]) => void;
+  /**
+   * The order game: the same room puts the cards on every phone instead of
+   * a buzzer (lib/order-phone.ts). Changes what the panel says, nothing else.
+   */
+  orderGame?: boolean;
 }
 
 export function RoomPanel({
@@ -58,6 +63,7 @@ export function RoomPanel({
   onOpened,
   onPhoneCountChange,
   onSubmissionsChange,
+  orderGame = false,
 }: RoomPanelProps) {
   // The host buzzes like everyone else, so they need a name the scoreboard can
   // award points to. Persisted per browser so a host isn't retyping it every
@@ -352,7 +358,7 @@ export function RoomPanel({
     return (
       <div className="card" style={{ padding: "24px", textAlign: "center" }}>
         <p style={{ fontSize: "13px", color: "#777", marginBottom: "16px" }}>
-          {describeRoom(collectsPlaylists, buzzer)}
+          {describeRoom(collectsPlaylists, buzzer, orderGame)}
         </p>
         {buzzer && (
           <>
@@ -372,7 +378,7 @@ export function RoomPanel({
               style={{ marginBottom: "6px", textAlign: "center" }}
             />
             <p style={{ fontSize: "12px", color: "#777", marginBottom: "16px", textAlign: "center" }}>
-              You can buzz from this screen too.
+              {orderGame ? "You can play from this screen too." : "You can buzz from this screen too."}
             </p>
           </>
         )}
@@ -564,12 +570,13 @@ export function RoomPanel({
   );
 }
 
-function describeRoom(collectsPlaylists: boolean, buzzer: boolean): string {
+function describeRoom(collectsPlaylists: boolean, buzzer: boolean, orderGame: boolean): string {
+  const gets = orderGame ? "the cards" : "a buzzer";
   if (collectsPlaylists && buzzer) {
-    return "One QR code does both — players scan it to add a playlist and get a buzzer.";
+    return `One QR code does both — players scan it to add a playlist and get ${gets}.`;
   }
   if (collectsPlaylists) {
     return "Players scan a QR code to add their own playlist.";
   }
-  return "Players scan a QR code to get a buzzer on their phone.";
+  return `Players scan a QR code to get ${gets} on their phone.`;
 }

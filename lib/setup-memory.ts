@@ -438,11 +438,10 @@ export function initialSetup(
       ? songCountStateOf(remembered.songCount)
       : DEFAULT_SONG_COUNT_STATE,
     sampledPerPlayer: remembered?.sampledPerPlayer ?? DEFAULT_SAMPLED_PER_PLAYER,
-    // The buzzer has no round to buzz in when the cards are the game, and
-    // the page hides its toggle in that style — so a record that says both
-    // (one deploy's "order" over an older "buzzer: true") restores a form
-    // whose roster is hidden behind a room nothing can open. The style wins.
-    buzzer: playStyle === "order" ? false : (remembered?.buzzer ?? false),
+    // Restored beside either style: with the order game the buzzer room is
+    // what puts the cards on every phone, and the page shows its toggle in
+    // both. (Until the per-phone round, "order" forced this off.)
+    buzzer: remembered?.buzzer ?? false,
     playStyle,
   };
 }

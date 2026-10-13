@@ -27,8 +27,13 @@ import { useErrorLocale } from "@/lib/use-error-locale";
 import { usePlaylistLinkCheck } from "@/lib/use-playlist-link";
 import { readStored, removeStored, writeStored } from "@/lib/host-session";
 import { LoopCtaButton, LoopFooter } from "@/components/loop-cta";
+import { OrderPhone } from "@/components/order-phone";
+import type { BuzzerCapability } from "@/lib/buzzer-protocol";
 
 const NAME_STORAGE_KEY = "guesssong_player_name";
+
+/** Module scope, so the hook's ref is handed the same array every render. */
+const ORDER_CAPS: BuzzerCapability[] = ["order"];
 
 /**
  * Remembers that this browser already fed the mailbox for a given room. Without
@@ -100,9 +105,13 @@ export default function BuzzPlayerPage() {
   }, [code]);
 
   const joinedRef = useRef(false);
-  const { snapshot, connected, error, playerId, buzz, reconnect } = useBuzzerSocket({
+  const { snapshot, connected, error, playerId, buzz, reconnect, orderLock } = useBuzzerSocket({
     code: ready ? code : null,
     name,
+    // This page can play the order game's round as well as buzz. Declared,
+    // because the room sends that round only to a page that says so — an
+    // older page would crash on it (lib/buzzer-protocol.ts).
+    caps: ORDER_CAPS,
   });
 
   useEffect(() => {
@@ -292,19 +301,28 @@ export default function BuzzPlayerPage() {
         </span>
       </header>
 
-      <BuzzerButton
-        phase={snapshot?.phase ?? "idle"}
-        buzzes={snapshot?.buzzes ?? []}
-        roundIndex={snapshot?.roundIndex ?? null}
-        roundOpenedAt={snapshot?.roundOpenedAt ?? null}
-        playerId={playerId}
-        connected={connected}
-        onBuzz={buzz}
-      />
+      {/* The order game, when the host's page has dealt a round to the room:
+          this phone's own copy of the cards in place of the buzzer. A guess
+          game never has one, so this page is the buzzer it always was. */}
+      {snapshot?.order ? (
+        <OrderPhone view={snapshot.order} playerId={playerId} connected={connected} onLock={orderLock} />
+      ) : (
+        <>
+          <BuzzerButton
+            phase={snapshot?.phase ?? "idle"}
+            buzzes={snapshot?.buzzes ?? []}
+            roundIndex={snapshot?.roundIndex ?? null}
+            roundOpenedAt={snapshot?.roundOpenedAt ?? null}
+            playerId={playerId}
+            connected={connected}
+            onBuzz={buzz}
+          />
 
-      <p className="px-1 text-center text-xs text-muted-foreground">
-        Buzz the moment the clip starts, then shout the answer.
-      </p>
+          <p className="px-1 text-center text-xs text-muted-foreground">
+            Buzz the moment the clip starts, then shout the answer.
+          </p>
+        </>
+      )}
 
       {/*
         Between rounds only, and never before the first round has resolved —

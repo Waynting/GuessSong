@@ -36,7 +36,7 @@ import type {
 import { sendPulse } from "@/lib/pulse-client";
 import type { PlaylistHelpTopic } from "@/lib/playlist-help";
 import type { GameMode } from "@/lib/game-session";
-import type { OrderVerdict } from "@/lib/order-game";
+import type { OrderPhoneCoverage, OrderPhoneVerdict, OrderVerdict } from "@/lib/order-game";
 import type { GameScored, PlayerBand } from "@/lib/game-players";
 import type { Arrival } from "@/lib/arrival";
 
@@ -220,9 +220,33 @@ export function reportGameLeft(
  * the top of this file. Sent from Next Round and from End Game on a revealed
  * round — the document survives both, so this is a beacon like the taps.
  */
-export function reportOrderRound(verdict: OrderVerdict, roundIndex: number, arranged: boolean): void {
-  trackEvent("order_round_resolved", { round_index: roundIndex, verdict, arranged });
-  sendPulse({ kind: "order_round", verdict, arranged });
+export function reportOrderRound(verdict: OrderVerdict, roundIndex: number, arranged?: boolean): void {
+  // `arranged` is the host's screen's drag. A round played on the phones
+  // passes none: there it is one player's answer among several, and
+  // `order_arranged:*` reads the shared screen's.
+  trackEvent("order_round_resolved", {
+    round_index: roundIndex,
+    verdict,
+    ...(arranged === undefined ? {} : { arranged }),
+  });
+  sendPulse(
+    arranged === undefined ? { kind: "order_round", verdict } : { kind: "order_round", verdict, arranged }
+  );
+}
+
+/**
+ * Call beside `reportOrderRound` when the round was played on the phones:
+ * whether the phones locked in, and how the locked answers graded
+ * (lib/order-phone.ts). One beacon per round, the counts inside it, so a
+ * room of twelve costs one request and stays far under the pulse body cap.
+ */
+export function reportOrderPhoneRound(
+  roundIndex: number,
+  locked: OrderPhoneCoverage,
+  counts: Record<OrderPhoneVerdict, number>
+): void {
+  trackEvent("order_phone_round", { round_index: roundIndex, locked, ...counts });
+  sendPulse({ kind: "order_phone", locked, ...counts });
 }
 
 /**

@@ -46,6 +46,13 @@ import { GAME_MODES, isGameMode, type GameMode } from "@/lib/game-session";
 import { ORDER_VERDICTS, isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
 import { ARRIVALS, isArrival, type Arrival } from "@/lib/arrival";
 import {
+  ORDER_PHONE_COVERAGES,
+  ORDER_PHONE_VERDICTS,
+  isOrderPhoneCoverage,
+  type OrderPhoneCoverage,
+  type OrderPhoneVerdict,
+} from "@/lib/order-game";
+import {
   GAME_SCORED,
   PLAYER_BANDS,
   isGameScored,
@@ -797,6 +804,8 @@ export function loopStatsKeys(
   gameLeftScored: Record<GameScored, Record<EarlyEndBand, string>>;
   orderArranged: Record<"moved" | "untouched", Record<OrderVerdict, string>>;
   orderRound: Record<OrderVerdict, string>;
+  orderPhone: Record<OrderPhoneCoverage, string>;
+  orderPhoneVerdict: Record<OrderPhoneVerdict, string>;
   firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
   gameOverTap: Record<GameOverTap, string>;
   mixedNudge: Record<MixedNudgeStage, string>;
@@ -896,6 +905,12 @@ export function loopStatsKeys(
     orderRound: Object.fromEntries(
       ORDER_VERDICTS.map((v) => [v, key(day, `order_round:${v}`)])
     ) as Record<OrderVerdict, string>,
+    orderPhone: Object.fromEntries(
+      ORDER_PHONE_COVERAGES.map((c) => [c, key(day, `order_phone:${c}`)])
+    ) as Record<OrderPhoneCoverage, string>,
+    orderPhoneVerdict: Object.fromEntries(
+      ORDER_PHONE_VERDICTS.map((v) => [v, key(day, `order_phone_verdict:${v}`)])
+    ) as Record<OrderPhoneVerdict, string>,
     firstClip: Object.fromEntries(
       FIRST_CLIP_PATHS.map((path) => [
         path,
@@ -1276,6 +1291,28 @@ export async function recordOrderRound(verdict: OrderVerdict, arranged?: boolean
   if (typeof arranged === "boolean") {
     await bump(`order_arranged:${arranged ? "moved" : "untouched"}:${verdict}`);
   }
+}
+
+/**
+ * A "put them in order" round played on the phones closed after its reveal
+ * (`reportOrderPhoneRound` in `lib/loop-client.ts`): `order_phone:<locked>`
+ * once — had all, some or none of the phones in play locked in — and
+ * `order_phone_verdict:<verdict>` by how many locked answers graded that way.
+ * The coverage is a key tail and refused when undeclared; the counts are
+ * increments under fixed keys, clamped to a room by the parser.
+ */
+export async function recordOrderPhone(
+  locked: OrderPhoneCoverage,
+  counts: Record<OrderPhoneVerdict, number>
+): Promise<void> {
+  if (!isOrderPhoneCoverage(locked)) return;
+  await bump(`order_phone:${locked}`);
+  await Promise.all(
+    ORDER_PHONE_VERDICTS.map((v) => {
+      const n = counts[v];
+      return Number.isInteger(n) && n > 0 ? bump(`order_phone_verdict:${v}`, n) : undefined;
+    })
+  );
 }
 
 /** A tap on the Game Over screen. See `GameOverTap`. */

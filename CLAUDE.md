@@ -435,15 +435,50 @@ for each:
   never `countRoundsPlayed`, and never `recordHostedStart` or `reportFirstClip`.
 
 The setup page's "How to play" row is the only way in: picking it hides the
-clip-length pills and the buzzer toggle and turns the buzzer off
-(`choosePlayStyle`), `initialSetup` refuses to restore the buzzer beside a
-remembered `order`, and all three start paths refuse through
-`orderRefusal`, filter through `usableOrderTracks` and push `gameHref`
-rather than a literal. A Mixed room that also collects playlists survives the
-buzzer being switched off by the pill, and the order game leaves its buzzer
-handle out of the payload. A QR room's pool is held in `roomPoolRef` once
-fetched, because `GET /api/room/[code]/pool` consumes the room: a pool the
-order game refuses must still start a guess game on the next press.
+clip-length pills and relabels the buzzer toggle "Play on phones"
+(`choosePlayStyle` no longer touches the buzzer or the room), `initialSetup`
+restores the buzzer beside either style, and all three start paths refuse
+through `orderRefusal`, filter through `usableOrderTracks` and push
+`gameHref` rather than a literal. The payload's `mode` stays `order`; the
+buzzer handle rides on it only when the toggle is on. A QR room's pool is held
+in `roomPoolRef` once fetched, because `GET /api/room/[code]/pool` consumes
+the room: a pool the order game refuses must still start a guess game on the
+next press.
+
+**With a buzzer room every phone plays its own copy** (`lib/order-phone.ts`,
+`components/order-phone.tsx` on `/buzz/[code]`). Without one, the page above
+is unchanged. Five rules, each pinned by `tests/order-phone.test.ts`,
+`tests/buzzer.test.ts` or `worker/test/buzzer-room.test.ts`:
+
+- **The year never reaches the room before the reveal.** The host's page
+  deals `orderCardsFor(round)` — id, `displayTitle`, credit, https art, never
+  `releaseDate` or `albumName` (an album called "1989") — and grades at the
+  reveal itself; the Durable Object only stores and relays. The quiz's rule
+  one game over. Locks are relayed to the host's socket only
+  (`arrangements`); a phone sees who has locked in, never what.
+- **Order frames go only to a socket whose `join` sent `caps: ["order"]`.**
+  `reduce` in `lib/use-buzzer-socket.ts` had no `default`: an unknown frame
+  left the state undefined and the next frame threw, the crash screen. It has
+  one now, but every page cached before it still crashes, so the room gates on
+  the capability instead. Deploy the Worker first (`docs/operations.md`).
+- **Every scorer scores.** `gradeArrangement`: the whole order is
+  `ORDER_EXACT_POINTS`, else the oldest card on top `ORDER_OLDEST_POINTS`,
+  else nothing, for every seat that earned it — not one of each. A seat that
+  never locked in is `locked: false`, zero. Points go on the scoreboard by
+  name after `mergeRoomRoster`, as `/game` does. The host's seat has no Lock
+  in: its screen's arrangement is its answer once a card has moved.
+- **A re-deal wipes every lock, so the page deals only what the room does not
+  hold** (`sameDeal`), and re-sends a reveal a replay shows the room never
+  got. Both are guarded by a ref that only a `state` replay clears, or a
+  refusal would loop. A room the page never reached (`roomSnapshot` null at
+  Reveal) falls back to the shared-screen game, award rows and all.
+- **One drag.** `lib/use-card-drag.ts` is the pointer and arrow-key wiring
+  for both screens; a second copy is a phone whose card stops following the
+  finger while the host's does. Counted as `order_round:<verdict>` (the best
+  answer in the room, no `arranged`) plus `order_phone:<all|some|none>` (the
+  phones in play — every seat but the host's that is connected or locked)
+  and `order_phone_verdict:<exact|oldest|none>` per locked answer, one
+  `order_phone` beacon per round from `closeRound`.
 
 ## Nothing on screen claims sound until the element reports it
 

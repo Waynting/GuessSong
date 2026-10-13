@@ -710,6 +710,210 @@ describe("reconnect", () => {
  * unmetered oracle for "does this room code exist" — and a 4-character code
  * from a 31-character alphabet is only ~923k combinations.
  */
+describe("put them in order, one phone each", () => {
+  const isOrder = (m: ServerMessage): m is Extract<ServerMessage, { type: "order" }> => m.type === "order";
+  const CARDS = [
+    { id: "t1", title: "One", artist: "A", art: "https://i.scdn.co/image/1" },
+    { id: "t2", title: "Two", artist: "B", art: "javascript:alert(1)" },
+    { id: "t3", title: "Three", artist: "C", art: "" },
+    { id: "t4", title: "Four", artist: "D", art: "https://i.scdn.co/image/4" },
+  ];
+
+  async function orderHost(code: string, hostToken: string) {
+    const c = await connect(code);
+    c.send({ type: "join", playerId: "host-1", name: "Host", hostToken, caps: ["order"] });
+    await c.waitFor(isState);
+    return c;
+  }
+
+  async function orderPlayer(code: string, id: string, name: string) {
+    const c = await connect(code);
+    c.send({ type: "join", playerId: id, name, caps: ["order"] });
+    await c.waitFor(isState);
+    return c;
+  }
+
+  /** The latest order frame a socket has been sent, once `ready` holds for it. */
+  async function latestOrder(
+    c: Awaited<ReturnType<typeof connect>>,
+    ready: (o: Extract<ServerMessage, { type: "order" }>["order"]) => boolean
+  ) {
+    const deadline = Date.now() + 2000;
+    for (;;) {
+      const frames = c.received.filter(isOrder);
+      const last = frames[frames.length - 1];
+      if (last && ready(last.order)) return last.order;
+      if (Date.now() > deadline) throw new Error(`timed out; got ${frames.length} order frames`);
+      await scheduler.wait(10);
+    }
+  }
+
+  it("deals the cards to every phone that understands them, and never a year", async () => {
+    const { code, hostToken } = await createRoom();
+    const host = await orderHost(code, hostToken);
+    const ann = await orderPlayer(code, "p-1", "Ann");
+    // A page from before the order frames existed: its reducer has no
+    // default, so a frame it does not know is the crash screen.
+    const old = await joinedPlayer(code, "p-old", "Old");
+
+    host.send({ type: "host:order:deal", hostToken, round: 0, cards: CARDS });
+    const dealt = await latestOrder(ann, (o) => o.round === 0);
+    expect(dealt.cards.map((c) => c.id)).toEqual(["t1", "t2", "t3", "t4"]);
+    expect(dealt.phase).toBe("arranging");
+    expect(dealt.mine).toBeNull();
+    expect(dealt.reveal).toBeNull();
+    // Art that is not https never reaches an <img> on a phone.
+    expect(dealt.cards[1].art).toBe("");
+    expect(JSON.stringify(dealt)).not.toMatch(/year|release/i);
+    expect(dealt.arrangements).toBeUndefined();
+
+    await scheduler.wait(50);
+    expect(old.received.some((m) => m.type === "order")).toBe(false);
+    // Nor in a replay: the old phone rejoins and its snapshot carries no round.
+    old.ws.close();
+    await scheduler.wait(50);
+    const back = await connect(code);
+    back.send({ type: "join", playerId: "p-old", name: "Old" });
+    const state = await back.waitFor(isState);
+    expect(state.snapshot.order).toBeUndefined();
+  });
+
+  it("refuses a deal without the token, and one that is not a round", async () => {
+    const { code, hostToken } = await createRoom();
+    await orderHost(code, hostToken);
+    const ann = await orderPlayer(code, "p-1", "Ann");
+
+    ann.send({ type: "host:order:deal", hostToken: "nope", round: 0, cards: CARDS });
+    expect((await ann.waitFor(isError)).code).toBe("not_host");
+
+    const host2 = await connect(code);
+    host2.send({ type: "join", playerId: "host-1", name: "Host", hostToken, caps: ["order"] });
+    await host2.waitFor(isState);
+    host2.send({ type: "host:order:deal", hostToken, round: 0, cards: [CARDS[0], { ...CARDS[1], id: "t1" }] });
+    expect((await host2.waitFor(isError)).code).toBe("bad_message");
+    host2.send({ type: "host:order:deal", hostToken, round: 0, cards: [{ ...CARDS[0], id: "__proto__" }, CARDS[1]] });
+    await scheduler.wait(50);
+    expect(host2.received.filter(isError)).toHaveLength(2);
+  });
+
+  it("keeps each seat's latest lock, shows the host every answer and a phone only its own", async () => {
+    const { code, hostToken } = await createRoom();
+    const host = await orderHost(code, hostToken);
+    const ann = await orderPlayer(code, "p-1", "Ann");
+    const bob = await orderPlayer(code, "p-2", "Bob");
+    host.send({ type: "host:order:deal", hostToken, round: 2, cards: CARDS });
+    await latestOrder(bob, (o) => o.round === 2);
+
+    ann.send({ type: "order:lock", round: 2, ids: ["t4", "t3", "t2", "t1"] });
+    ann.send({ type: "order:lock", round: 2, ids: ["t1", "t2", "t3", "t4"] });
+    const hostView = await latestOrder(host, (o) => o.arrangements?.["p-1"]?.[0] === "t1");
+    expect(hostView.locked).toEqual(["p-1"]);
+    expect(hostView.arrangements).toEqual({ "p-1": ["t1", "t2", "t3", "t4"] });
+
+    const annView = await latestOrder(ann, (o) => o.mine?.[0] === "t1");
+    expect(annView.arrangements).toBeUndefined();
+    const bobView = await latestOrder(bob, (o) => o.locked.length === 1);
+    expect(bobView.mine).toBeNull();
+    expect(bobView.arrangements).toBeUndefined();
+    expect(JSON.stringify(bobView)).not.toContain('"t2","t3"');
+
+    // A lock that is not the round's cards, or not the room's round, is not a lock.
+    bob.send({ type: "order:lock", round: 2, ids: ["t1", "t1", "t3", "t4"] });
+    expect((await bob.waitFor(isError)).code).toBe("bad_message");
+    bob.send({ type: "order:lock", round: 1, ids: ["t1", "t2", "t3", "t4"] });
+    await scheduler.wait(50);
+    const last = await latestOrder(host, () => true);
+    expect(last.locked).toEqual(["p-1"]);
+
+    // The host's own seat plays too.
+    host.send({ type: "order:lock", round: 2, ids: ["t2", "t1", "t3", "t4"] });
+    const both = await latestOrder(host, (o) => o.locked.length === 2);
+    expect(both.mine).toEqual(["t2", "t1", "t3", "t4"]);
+  });
+
+  it("hands the locks back on a reconnect, and the reveal to every phone", async () => {
+    const { code, hostToken } = await createRoom();
+    const host = await orderHost(code, hostToken);
+    const ann = await orderPlayer(code, "p-1", "Ann");
+    host.send({ type: "host:order:deal", hostToken, round: 0, cards: CARDS });
+    await latestOrder(ann, (o) => o.round === 0);
+    ann.send({ type: "order:lock", round: 0, ids: ["t2", "t1", "t3", "t4"] });
+    await latestOrder(host, (o) => o.locked.length === 1);
+
+    // The host's page reloads: its replay carries every arrangement.
+    host.ws.close();
+    await scheduler.wait(50);
+    const host2 = await connect(code);
+    host2.send({ type: "join", playerId: "host-1", name: "Host", hostToken, caps: ["order"] });
+    const replay = await host2.waitFor(isState);
+    expect(replay.snapshot.order?.arrangements).toEqual({ "p-1": ["t2", "t1", "t3", "t4"] });
+
+    host2.send({
+      type: "host:order:reveal",
+      hostToken,
+      round: 0,
+      reveal: {
+        order: ["t2", "t1", "t3", "t4"],
+        years: { t1: 1999, t2: 1975, t3: 2004, t4: 2020 },
+        results: {
+          "p-1": { verdict: "exact", points: 3, locked: true },
+          "host-1": { verdict: "none", points: 0, locked: false },
+          "nobody-here": { verdict: "exact", points: 3, locked: true },
+        },
+      },
+    });
+    const revealed = await latestOrder(ann, (o) => o.phase === "revealed");
+    expect(revealed.reveal?.years.t2).toBe(1975);
+    expect(revealed.reveal?.results["p-1"]).toEqual({ verdict: "exact", points: 3, locked: true });
+    // Only seats the room knows are carried.
+    expect(Object.keys(revealed.reveal?.results ?? {}).sort()).toEqual(["host-1", "p-1"]);
+
+    // Locking is over: a late lock changes nothing and is shown the reveal.
+    const framesBefore = ann.received.filter(isOrder).length;
+    ann.send({ type: "order:lock", round: 0, ids: ["t1", "t2", "t3", "t4"] });
+    const after = await latestOrder(ann, (o) => o.phase === "revealed");
+    await scheduler.wait(50);
+    expect(ann.received.filter(isOrder).length).toBe(framesBefore + 1);
+    expect(after.mine).toEqual(["t2", "t1", "t3", "t4"]);
+
+    // A new deal starts clean.
+    host2.send({ type: "host:order:deal", hostToken, round: 1, cards: CARDS.slice(0, 3) });
+    const next = await latestOrder(ann, (o) => o.round === 1);
+    expect(next).toMatchObject({ phase: "arranging", locked: [], mine: null, reveal: null });
+  });
+
+  it("refuses a reveal whose order is not the round's cards or whose years are missing", async () => {
+    const { code, hostToken } = await createRoom();
+    const host = await orderHost(code, hostToken);
+    host.send({ type: "host:order:deal", hostToken, round: 0, cards: CARDS.slice(0, 2) });
+    await latestOrder(host, (o) => o.round === 0);
+    host.send({ type: "host:order:reveal", hostToken, round: 0, reveal: { order: ["t1"], years: {}, results: {} } });
+    expect((await host.waitFor(isError)).code).toBe("bad_message");
+    host.send({ type: "host:order:reveal", hostToken, round: 0, reveal: { order: ["t1", "t2"], years: { t1: 1990 }, results: {} } });
+    await scheduler.wait(50);
+    expect(host.received.filter(isError)).toHaveLength(2);
+    expect((await latestOrder(host, () => true)).phase).toBe("arranging");
+  });
+
+  it("moves a lock with its seat when a reloaded phone takes the seat back under a new id", async () => {
+    const { code, hostToken } = await createRoom();
+    const host = await orderHost(code, hostToken);
+    const ann = await orderPlayer(code, "p-1", "Ann");
+    host.send({ type: "host:order:deal", hostToken, round: 0, cards: CARDS });
+    await latestOrder(ann, (o) => o.round === 0);
+    ann.send({ type: "order:lock", round: 0, ids: ["t4", "t3", "t2", "t1"] });
+    await latestOrder(host, (o) => o.locked.length === 1);
+
+    ann.ws.close();
+    await scheduler.wait(50);
+    const back = await connect(code);
+    back.send({ type: "join", playerId: "p-1-after-reload", name: "Ann", caps: ["order"] });
+    const state = await back.waitFor(isState);
+    expect(state.snapshot.order?.mine).toEqual(["t4", "t3", "t2", "t1"]);
+    expect(state.snapshot.order?.locked).toEqual(["p-1-after-reload"]);
+  });
+});
+
 describe("per-IP rate limits", () => {
   const FLOODER = "198.51.100.7";
 

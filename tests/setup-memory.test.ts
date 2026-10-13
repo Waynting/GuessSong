@@ -559,17 +559,16 @@ describe("initialSetup — the URL outranks the memory, and the memory outranks 
     });
   });
 
-  it("restores the play style, and never the buzzer beside an order game", () => {
-    // The order page has no round to buzz in and the form hides the toggle
-    // in that style; a record that says both would restore a hidden roster
-    // behind a room nothing can open.
+  it("restores the play style, and the buzzer beside either style", () => {
+    // With the order game the buzzer room puts the cards on every phone
+    // (lib/order-phone.ts), and the form shows the toggle in both styles.
     expect(initialSetup(NOTHING_ASKED, remembered({ playStyle: "order" }))).toMatchObject({
       playStyle: "order",
       buzzer: false,
     });
     expect(
       initialSetup(NOTHING_ASKED, remembered({ playStyle: "order", buzzer: true }))
-    ).toMatchObject({ playStyle: "order", buzzer: false });
+    ).toMatchObject({ playStyle: "order", buzzer: true });
     expect(
       initialSetup(NOTHING_ASKED, remembered({ playStyle: "guess", buzzer: true }))
     ).toMatchObject({ playStyle: "guess", buzzer: true });

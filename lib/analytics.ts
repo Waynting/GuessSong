@@ -232,6 +232,22 @@ export type AnalyticsEvent =
     }
   | {
       /**
+       * The same round when every player arranged on their own phone: how
+       * many phones had locked in, and how the locked answers graded. The KV
+       * twins are `order_phone:<locked>` and `order_phone_verdict:<verdict>`
+       * (`recordOrderPhone` in lib/loop-stats.ts).
+       */
+      name: "order_phone_round";
+      params: {
+        round_index: number;
+        locked: "all" | "some" | "none";
+        exact: number;
+        oldest: number;
+        none: number;
+      };
+    }
+  | {
+      /**
        * A tap on the Game Over screen, and the layout it was drawn in.
        * `screen` is omitted, not guessed, when the page could not tell.
        */

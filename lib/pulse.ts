@@ -77,6 +77,18 @@ import { isSocialPlatform, type SocialPlatform } from "@/lib/social-share";
 import { isPlaylistHelpTopic, type PlaylistHelpTopic } from "@/lib/playlist-help";
 import { isGameMode, type GameMode } from "@/lib/game-session";
 import { isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
+import { isOrderPhoneCoverage, type OrderPhoneCoverage } from "@/lib/order-game";
+import { BUZZER_MAX_PLAYERS } from "@/lib/buzzer-protocol";
+
+/**
+ * A count of players off the wire, or null when it is not a number. Clamped
+ * to a room's seats: it becomes an increment, not a key, but a body claiming
+ * a million exact answers would still be a million on the stats line.
+ */
+function parseSeatCount(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(Math.trunc(value), BUZZER_MAX_PLAYERS));
+}
 import { isGameScored, isPlayerBand, type GameScored, type PlayerBand } from "@/lib/game-players";
 import { isArrival, type Arrival } from "@/lib/arrival";
 
@@ -181,6 +193,7 @@ export type PulseEvent =
       scored?: GameScored;
     }
   | { kind: "order_round"; verdict: OrderVerdict; arranged?: boolean }
+  | { kind: "order_phone"; locked: OrderPhoneCoverage; exact: number; oldest: number; none: number }
   | { kind: "game_over_tap"; target: GameOverTap }
   | { kind: "mixed_nudge"; stage: MixedNudgeStage }
   | { kind: "remote_door"; stage: RemoteDoorStage }
@@ -303,6 +316,18 @@ export function parsePulse(body: unknown): PulseEvent | null {
     return typeof raw.arranged === "boolean"
       ? { kind: "order_round", verdict: raw.verdict, arranged: raw.arranged }
       : { kind: "order_round", verdict: raw.verdict };
+  }
+
+  if (raw.kind === "order_phone") {
+    // The coverage is a key tail and is refused when undeclared. The three
+    // counts are increments under fixed keys; a round whose counts are not
+    // numbers is not a reading of anything, so it is refused whole.
+    if (!isOrderPhoneCoverage(raw.locked)) return null;
+    const exact = parseSeatCount(raw.exact);
+    const oldest = parseSeatCount(raw.oldest);
+    const none = parseSeatCount(raw.none);
+    if (exact === null || oldest === null || none === null) return null;
+    return { kind: "order_phone", locked: raw.locked, exact, oldest, none };
   }
 
   if (raw.kind === "game_over_tap") {

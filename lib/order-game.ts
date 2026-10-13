@@ -35,7 +35,9 @@
  * - **The host is the judge**, as in the guess game: `ORDER_EXACT_POINTS` to
  *   whoever called the whole order, `ORDER_OLDEST_POINTS` for the oldest song
  *   alone, one award of each per round. The reveal shows the real order; it
- *   does not grade anyone, because nobody typed anything.
+ *   does not grade anyone, because nobody typed anything. With a buzzer room
+ *   every phone arranges its own copy and is graded instead, every scorer
+ *   scoring — `lib/order-phone.ts`.
  *
  * `releaseDate` reached `Track` one release before this mode (1.20.1) and the
  * playlist cache was not versioned for it, so a track without a date is an
@@ -44,6 +46,9 @@
  */
 
 import type { Track } from "@/types";
+import type { OrderPhoneVerdict } from "@/lib/buzzer-protocol";
+
+export type { OrderPhoneVerdict };
 
 /**
  * How the setup page's "How to play" row is remembered and read back. Not a
@@ -301,4 +306,29 @@ export function readArrangement<T extends Pick<Track, "id" | "releaseDate">>(
     exact: truth.length > 0 && inPlace === truth.length,
     oldest: truth.length > 0 && arranged[0] === truth[0],
   };
+}
+
+/**
+ * How many of the phones in a per-phone round had locked in when the years
+ * went up: `order_phone:<all|some|none>`, once per revealed round. The
+ * question it answers is whether a room finds the Lock in button at all;
+ * `lib/order-phone.ts` decides which seats count as phones.
+ */
+export type OrderPhoneCoverage = "all" | "some" | "none";
+
+export const ORDER_PHONE_COVERAGES: readonly OrderPhoneCoverage[] = ["all", "some", "none"];
+
+export function isOrderPhoneCoverage(value: unknown): value is OrderPhoneCoverage {
+  return typeof value === "string" && (ORDER_PHONE_COVERAGES as readonly string[]).includes(value);
+}
+
+/**
+ * One locked arrangement's grade: `order_phone_verdict:<exact|oldest|none>`.
+ * The type is the wire's (lib/buzzer-protocol.ts); the list is here, beside
+ * the counters' other closed sets.
+ */
+export const ORDER_PHONE_VERDICTS: readonly OrderPhoneVerdict[] = ["exact", "oldest", "none"];
+
+export function isOrderPhoneVerdict(value: unknown): value is OrderPhoneVerdict {
+  return typeof value === "string" && (ORDER_PHONE_VERDICTS as readonly string[]).includes(value);
 }

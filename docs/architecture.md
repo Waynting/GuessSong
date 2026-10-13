@@ -89,6 +89,8 @@ for it; the order page never imports `lib/preview-client.ts`. The two share
 everything that is not about audio — the storage, the beacons, the Game Over
 rule, the result card — and duplicate the chrome.
 [D12](decisions.md#d12--put-them-in-order-is-a-second-page-a-gamemode-and-a-date-field-the-cache-was-not-versioned-for).
+Started with the buzzer on, the payload also carries the buzzer room, and every
+phone arranges its own copy of each round through it — see §4.
 
 The state machine lives entirely in React state. A reload loses the game, which
 is why `sessionStorage` holds the payload but not the score: recovering a
@@ -195,9 +197,30 @@ retry. Only a clean, complete reply from upstream may produce `absent`.
 Next.js client and the Worker — so it must stay dependency-free. Types and plain
 constants only.
 
+**The order game uses the same room for a different round.** With a buzzer
+room, `/order` deals each round to the phones and grades them itself:
+
+```
+  /order (host)                DURABLE OBJECT               phones
+       │── host:order:deal ──────────▶│  cards: id, title,       │
+       │   (no years)                 │  artist, art             │
+       │                              │──── order (per socket) ─▶│  arrange, Lock in
+       │                              │◀──────── order:lock ─────│  ×N, re-sendable
+       │◀── order (+ arrangements) ───│──── order (locked ids) ─▶│
+       │  grades every seat           │                          │
+       │── host:order:reveal ────────▶│  years + every result    │
+       │                              │──── order (revealed) ───▶│  own result
+```
+
+The snapshot carries the round too (`RoomSnapshot.order`), built per socket:
+`mine` is that seat's lock, `arrangements` goes to the host's socket only.
+Both the frames and the snapshot field go only to a socket that joined with
+`caps: ["order"]` — a page from before this has a reducer that cannot survive
+an unknown frame. Rules: `lib/order-phone.ts`; CLAUDE.md "Put them in order".
+
 **The protocol has no end-of-game signal.** `BuzzerPhase` is
 `idle | open | locked`; `ClientMessage` has `host:open`, `host:verdict`,
-`host:reveal`, `host:next` and nothing else. Anything on a player's phone that
+`host:reveal`, `host:next` (and the order game's three, above) and nothing else. Anything on a player's phone that
 needs to react to the game finishing would need a protocol change, a Worker
 change, and a `wrangler deploy`. This is why the loop's call to action on that
 page is gated on "a round has resolved" rather than "the game ended" — see

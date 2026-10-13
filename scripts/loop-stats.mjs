@@ -786,6 +786,42 @@ if (orderRounds > 0) {
         "  full-order share beside the other row's to see whether it helps."
     );
   }
+  /**
+   * Rounds played on the phones (the order game with a buzzer room):
+   * `order_phone:<all|some|none>` once per revealed round — how many of the
+   * phones in play had locked in — and `order_phone_verdict:<verdict>` per
+   * locked answer. A seat that never locked is in the first and not the
+   * second. These rounds are in the `order_round` line above too, as the best
+   * answer in the room, and are not in the two drag rows.
+   */
+  const phoneCoverage = [
+    ["all", "every phone"],
+    ["some", "some"],
+    ["none", "none"],
+  ];
+  const phoneRounds = phoneCoverage.reduce((t, [c]) => t + get(`order_phone:${c}`), 0);
+  if (phoneRounds > 0) {
+    const locked = phoneCoverage
+      .map(([c, label]) => `${label} ${get(`order_phone:${c}`)} (${pct(get(`order_phone:${c}`), phoneRounds).trim()})`)
+      .join(" · ");
+    const phoneVerdicts = [
+      ["exact", "full order"],
+      ["oldest", "oldest only"],
+      ["none", "no points"],
+    ];
+    const answers = phoneVerdicts.reduce((t, [v]) => t + get(`order_phone_verdict:${v}`), 0);
+    const graded = phoneVerdicts
+      .map(([v, label]) => `${label} ${get(`order_phone_verdict:${v}`)} (${pct(get(`order_phone_verdict:${v}`), answers).trim()})`)
+      .join(" · ");
+    console.log(`  on the phones      ${phoneRounds} rounds — locked in: ${locked}`);
+    console.log(`  phone answers      ${answers} — ${graded}`);
+    console.log(
+      "  how to read it: a round on the phones, every player arranging their own. `none`\n" +
+        "  locked in, round after round, is a Lock in button nobody finds; set the full-order\n" +
+        "  share of phone answers beside `dragged first` above to see whether one answer each\n" +
+        "  plays harder or easier than one shared screen."
+    );
+  }
 }
 
 /**
@@ -1237,6 +1273,8 @@ const RENDERED_PREFIXES = [
   "game_left_scored:",
   "order_round:",
   "order_arranged:",
+  "order_phone:",
+  "order_phone_verdict:",
   "first_clip:",
   "game_over_tap:",
   "mixed_nudge:",

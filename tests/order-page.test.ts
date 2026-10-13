@@ -122,12 +122,21 @@ describe("the order page's beacons", () => {
   });
 
   it("reports a round's verdict once, from the one place a revealed round closes", () => {
-    expect(body.match(/reportOrderRound\(/g) ?? []).toHaveLength(1);
     const close = member("closeRound");
+    // Two calls, both in closeRound and on either side of one return: a
+    // round on the phones, or the shared screen's.
+    expect(body.match(/reportOrderRound\(/g) ?? []).toHaveLength(2);
+    expect(close.match(/reportOrderRound\(/g) ?? []).toHaveLength(2);
     expect(close).toMatch(/if \(phase !== "revealed"\) return;/);
     expect(close).toMatch(
       /reportOrderRound\(\s*orderVerdict\(\{ exact: exactWinner !== null, oldest: oldestWinner !== null \}\),/
     );
+    // The phones' round: the best answer for order_round, no `arranged`, and
+    // its own beacon only when a phone was in play.
+    expect(close).toMatch(
+      /if \(phoneRound\?\.round === currentIndex\) \{\s*reportOrderRound\(roomVerdict\(phoneRound\.reveal\), currentIndex \+ 1\);\s*if \(phoneRound\.coverage\) \{\s*reportOrderPhoneRound\(currentIndex \+ 1, phoneRound\.coverage, phoneVerdictCounts\(phoneRound\.reveal\)\);\s*\}\s*return;/
+    );
+    expect(body.match(/reportOrderPhoneRound\(/g) ?? []).toHaveLength(1);
     expect(member("nextRound")).toMatch(/closeRound\(\)/);
     expect(member("endGame")).toMatch(/closeRound\(\)/);
   });
@@ -268,10 +277,12 @@ describe("the setup page starts an order game the same way on all three paths", 
     expect(setup).toMatch(/function resetRoom\(\) \{\s*roomPoolRef\.current = null;/);
   });
 
-  it("keeps a room that collects playlists when the order pill turns the buzzer off", () => {
+  it("keeps the buzzer and its room through a change of style, and hands the order game the handle", () => {
+    // With the order game the room is what puts the cards on every phone.
     const choose = setup.match(/function choosePlayStyle\(style: PlayStyle\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
-    expect(choose).toMatch(/if \(!collectsPlaylists\) resetRoom\(\);/);
-    expect(setup).toMatch(/const room = isOrder \|\| !buzzerEnabled \? undefined : openedRoom\.buzzer;/);
+    expect(choose).not.toMatch(/setBuzzerEnabled|resetRoom/);
+    expect(setup).toMatch(/const room = !buzzerEnabled \? undefined : openedRoom\.buzzer;/);
+    expect(setup).not.toMatch(/isOrder \|\| !buzzerEnabled/);
   });
 
   it("filters to dated songs, refuses a list that deals no round, and stores mode \"order\"", () => {
@@ -294,11 +305,10 @@ describe("the setup page starts an order game the same way on all three paths", 
     expect(setup).toMatch(/setPlayStyle\(form\.playStyle\);/);
   });
 
-  it("hides the clip length and the buzzer in the order style, and turns the buzzer off on the way in", () => {
+  it("hides the clip length in the order style, and offers the buzzer there as phones", () => {
     expect(setup).toMatch(/\{!isOrder && \(\s*<div>\s*<p className="section-label">Clip Duration<\/p>/);
-    expect(setup).toMatch(/\{isBuzzerConfigured\(\) && !isOrder && \(/);
-    const choose = setup.match(/function choosePlayStyle\(style: PlayStyle\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
-    expect(choose).toMatch(/if \(style === "order" && buzzerEnabled\) \{\s*setBuzzerEnabled\(false\);/);
+    expect(setup).toMatch(/\{isBuzzerConfigured\(\) && \(\s*<div>\s*<p className="section-label">\{isOrder \? "Play on phones" : "Buzzer Mode"\}<\/p>/);
+    expect(setup).not.toMatch(/isBuzzerConfigured\(\) && !isOrder/);
     expect(setup).toMatch(/choosePlayStyle\("order"\)/);
     expect(setup).toMatch(/choosePlayStyle\("guess"\)/);
   });
@@ -324,9 +334,21 @@ describe("the order page's drag", () => {
   it("moves by pointer and by arrow key, only while the cards are face down", () => {
     expect(src).toMatch(/onPointerDown:/);
     expect(src).toMatch(/onKeyDown:/);
-    expect(src).toMatch(/function pickUp[\s\S]*?if \(phase !== "showing"/);
-    expect(src).toMatch(/function keyMove[\s\S]*?if \(phase !== "showing"\) return;/);
+    // The drag is the one the phones use (lib/use-card-drag.ts), live only
+    // while the cards are face down; the hook makes every handler a no-op
+    // when it is not.
+    expect(src).toMatch(/const cardDrag = useCardDrag\(arrangedIds, phase === "showing", setIds\);/);
+    const hook = readFileSync(join(process.cwd(), "lib/use-card-drag.ts"), "utf8");
+    expect(hook).toMatch(/function pickUp[\s\S]*?if \(!enabled \|\| !listRef\.current\) return;/);
+    expect(hook).toMatch(/function keyMove[\s\S]*?if \(!enabled\) return;/);
     expect(src).toMatch(/\.order-card\.movable \{[^}]*touch-action: none/);
+    expect(src).not.toMatch(/function pickUp|function dragMove/);
+  });
+
+  it("drags on the phone with the same hook, so there is one implementation", () => {
+    const phone = readFileSync(join(process.cwd(), "components/order-phone.tsx"), "utf8");
+    expect(phone).toMatch(/useCardDrag\(ids, !revealed,/);
+    expect(phone).not.toMatch(/setPointerCapture|dropSlot|moveCard/);
   });
 
   it("gives a one-player game no buttons to award itself", () => {

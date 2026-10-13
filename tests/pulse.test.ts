@@ -787,3 +787,48 @@ describe("parsePulse — an order round, and whether it was dragged", () => {
     }
   });
 });
+
+describe("parsePulse — an order round played on the phones", () => {
+  it("accepts every declared coverage with three counts", () => {
+    for (const locked of ["all", "some", "none"]) {
+      expect(parsePulse({ kind: "order_phone", locked, exact: 1, oldest: 2, none: 0 })).toEqual({
+        kind: "order_phone",
+        locked,
+        exact: 1,
+        oldest: 2,
+        none: 0,
+      });
+    }
+  });
+
+  it("refuses an undeclared coverage, which would become a KV key", () => {
+    for (const locked of ["All", "most", "", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "order_phone", locked, exact: 0, oldest: 0, none: 0 })).toBeNull();
+    }
+  });
+
+  it("clamps each count to a room and refuses one that is not a number", () => {
+    expect(parsePulse({ kind: "order_phone", locked: "all", exact: 1e9, oldest: -4, none: 2.7 })).toEqual({
+      kind: "order_phone",
+      locked: "all",
+      exact: 12,
+      oldest: 0,
+      none: 2,
+    });
+    for (const junk of ["3", null, undefined, NaN, Infinity, {}]) {
+      expect(parsePulse({ kind: "order_phone", locked: "some", exact: junk, oldest: 0, none: 0 })).toBeNull();
+    }
+  });
+
+  it("fits a full room's beacon well under the route's body cap", () => {
+    const body = JSON.stringify({ kind: "order_phone", locked: "some", exact: 12, oldest: 12, none: 12 });
+    expect(body.length).toBeLessThan(512);
+  });
+
+  it("reaches its recorder with the coverage and all three counts", () => {
+    const route = readFileSync(join(process.cwd(), "app/api/pulse/route.ts"), "utf8");
+    expect(route).toMatch(
+      /case "order_phone":\s*await recordOrderPhone\(event\.locked, \{ exact: event\.exact, oldest: event\.oldest, none: event\.none \}\);/
+    );
+  });
+});
