@@ -460,6 +460,28 @@ if (indices.length > 0) {
   }
 }
 
+/**
+ * `new_host_from:<arrival>`, lib/arrival.ts — the referrer of a device's first
+ * game, bucketed. Written from 1.22.0; the 2026-10-07 step (games ×3.5, first
+ * hosts ×3) had nothing to explain it, which is why it exists. Discovered
+ * rather than listed, so a bucket added there prints here without an edit.
+ */
+const arrivals = [...totals.keys()]
+  .filter((m) => m.startsWith("new_host_from:"))
+  .map((m) => [m.slice("new_host_from:".length), get(m)])
+  .filter(([, n]) => n > 0)
+  .sort((a, b) => b[1] - a[1]);
+if (arrivals.length > 0) {
+  const total = arrivals.reduce((t, [, n]) => t + n, 0);
+  console.log(`\nFirst-time hosts came from (${total} of ${get("host_index:1")} said)`);
+  console.log(`  ${arrivals.map(([a, n]) => `${a} ${n} (${pct(n, total).trim()})`).join(" · ")}`);
+  console.log(
+    "  how to read it: `none` is typed, bookmarked or a referrer the app or browser\n" +
+      "  stripped — chat apps' in-app browsers often do. A jump in games is a jump in\n" +
+      "  one of these rows; set it beside the Spotify budget below."
+  );
+}
+
 const earlyRounds = [...totals.keys()]
   .filter((m) => m.startsWith("game_end_round:"))
   .map((m) => Number(m.slice("game_end_round:".length)))
@@ -1224,6 +1246,8 @@ const RENDERED_PREFIXES = [
   "playlist_refused:",
   "playlist_invalid:",
   "playlist_shortlink:",
+  "playlist_recheck:",
+  "new_host_from:",
   "quiz:",
   "quiz_share:",
   "quiz_copy:",
@@ -1294,7 +1318,7 @@ if (throttled > 0) {
  *
  * Discovery earns its cost above because loop surface names are open-ended
  * (lib/loop-links.ts adds them). These kinds are not: both are closed unions
- * in TypeScript — `"hit" | "miss" | "negative"` in lib/playlist-cache.ts and
+ * in TypeScript — `"hit" | "miss" | "negative" | "stale" | "refreshed"` in lib/playlist-cache.ts and
  * `"hit" | "miss" | "unavailable"` in lib/preview-cache.ts — so mirroring them
  * is mirroring a compile-checked set, and widening one without adding it here
  * is the one drift this trades for two commands instead of four hundred.
@@ -1316,7 +1340,7 @@ async function cacheTotals(namespace, kinds, buckets) {
 }
 
 const caches = [
-  { name: "playlist", upstream: "Spotify", subset: "negative", kinds: ["hit", "miss", "negative"] },
+  { name: "playlist", upstream: "Spotify", subset: "negative", kinds: ["hit", "miss", "negative", "stale", "refreshed"] },
   { name: "preview", upstream: "iTunes/Deezer", subset: "unavailable", kinds: ["hit", "miss", "unavailable"] },
 ];
 
@@ -1327,7 +1351,14 @@ for (const cache of caches) {
   const hits = byKind.get("hit") ?? 0;
   const misses = byKind.get("miss") ?? 0;
   if (hits + misses === 0) continue;
-  cacheRows.push({ ...cache, hits, misses, subset: byKind.get(cache.subset) ?? 0 });
+  cacheRows.push({
+    ...cache,
+    hits,
+    misses,
+    subset: byKind.get(cache.subset) ?? 0,
+    stale: byKind.get("stale") ?? 0,
+    refreshed: byKind.get("refreshed") ?? 0,
+  });
 }
 
 if (cacheRows.length > 0) {
@@ -1343,6 +1374,16 @@ if (cacheRows.length > 0) {
     );
   }
   for (const c of cacheRows) {
+    // STALE_GRACE_SECONDS in lib/playlist-cache.ts, from 1.22.0. `stale` is in
+    // the hits, `refreshed` in the misses; the second is what a longer
+    // freshness window would have saved, and the number to decide it on.
+    if (c.name === "playlist" && c.stale + c.refreshed > 0) {
+      console.log(
+        `\n  playlist: ${c.stale} hosts were handed a copy past its 24h because Spotify ` +
+          `could not be asked · ${c.refreshed} misses had a copy under a week old ` +
+          `(${pct(c.refreshed, c.misses).trim()} of misses — what a longer TTL would save)`
+      );
+    }
     if (c.subset === 0) continue;
     if (c.name === "playlist") {
       // Subtracted rather than merely reported: a host retrying a playlist
@@ -1448,6 +1489,17 @@ if (recRefused + recRecovered > 0) {
   }
   const via = SETUP_SOURCE_ORDER.map((s) => [s, get(`refusal_recovery_via:${s}`)]).filter(([, n]) => n > 0);
   if (via.length) console.log(`  got past it by: ${via.map(([s, n]) => `${s} ${n}`).join(" · ")}`);
+  // `playlist_recheck:<outcome>`, lib/loop-stats.ts — the private refusal's
+  // "I made it public — try again" button, per press that reached the server.
+  const recheck = ["found", "missing", "other"].map((o) => [o, get(`playlist_recheck:${o}`)]);
+  const rechecks = recheck.reduce((t, [, n]) => t + n, 0);
+  if (rechecks > 0) {
+    console.log(
+      `  "made it public" pressed ${rechecks}: ` +
+        recheck.map(([o, n]) => `${o} ${n}`).join(" · ") +
+        ` — found is a host the button let through`
+    );
+  }
   console.log(
     "  how to read it: per page load, not per host — a host who reloads and tries\n" +
       "  again is two pages. `starter` here is the chips under the error doing their job;\n" +

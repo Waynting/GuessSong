@@ -624,7 +624,7 @@ describe("the route records every kind the parser accepts", () => {
     // The mode rides to all three game recorders, or the KV rows read as
     // "no mode was ever sent".
     expect(route).toMatch(
-      /recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source, event\.mode, event\.players\)/
+      /recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source, event\.mode, event\.players, event\.from\)/
     );
     expect(route).toMatch(
       /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored\)/
@@ -746,6 +746,22 @@ describe("parsePulse — players and whether anyone scored", () => {
       expect(parsePulse({ kind: "game_left", roundsPlayed: 1, players: junk, scored: junk })).toEqual({
         kind: "game_left",
         roundsPlayed: 1,
+      });
+    }
+  });
+});
+
+describe("parsePulse — where a first-time host came from", () => {
+  it("carries a known arrival and drops anything else without losing the game", () => {
+    expect(parsePulse({ kind: "game_started", hostGameIndex: 1, from: "google" })).toEqual({
+      kind: "game_started",
+      hostGameIndex: 1,
+      from: "google",
+    });
+    for (const junk of ["https://google.com", "Google", "", "__proto__", 3, null]) {
+      expect(parsePulse({ kind: "game_started", hostGameIndex: 1, from: junk })).toEqual({
+        kind: "game_started",
+        hostGameIndex: 1,
       });
     }
   });

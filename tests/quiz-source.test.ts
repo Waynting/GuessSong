@@ -172,15 +172,18 @@ describe("the form and the route, as far as the suite can see them", () => {
     expect(route).toMatch(/from: isQuizSource\(body\.from\) \? body\.from : undefined/);
   });
 
-  it("reads the referrer in exactly one file, and never sends or logs it", () => {
+  it("reads the referrer only in the two modules that reduce it, and neither sends or logs it", () => {
     const readers = ["app", "components", "lib"]
       .flatMap((dir) => walk(join(process.cwd(), dir)))
       .filter((f) => /\.tsx?$/.test(f))
       .filter((f) => /document\.referrer/.test(code(readFileSync(f, "utf8"))))
       .map((f) => f.slice(process.cwd().length + 1));
-    expect(readers).toEqual(["lib/quiz-source.ts"]);
-    const source = code(read("lib/quiz-source.ts"));
-    expect(source).not.toMatch(/console\.|fetch\(|sendBeacon|trackEvent/);
+    // lib/arrival.ts is the game's half of the same rule (where a first-time
+    // host came from); both hand back a word from a closed set and nothing else.
+    expect(readers.sort()).toEqual(["lib/arrival.ts", "lib/quiz-source.ts"]);
+    for (const file of readers) {
+      expect(code(read(file))).not.toMatch(/console\.|fetch\(|sendBeacon|trackEvent/);
+    }
   });
 });
 

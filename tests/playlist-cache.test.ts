@@ -638,14 +638,19 @@ describe("404 negative caching", () => {
     expect(missTtl).toBeLessThan(hitTtl);
   });
 
-  it("holds a loaded playlist long enough to cover tomorrow night", async () => {
+  it("holds a loaded playlist fresh long enough to cover tomorrow night", async () => {
+    const before = Date.now();
     await loadPlaylist(URL_A);
 
     // Parties are nightly, so six hours meant a playlist first loaded at 8pm
     // was cold again by 8pm the next day: 406 warm keys against 2,152 cold
     // loads in a day, every miss spending the app's shared Spotify quota.
     const write = kv.writes.find((w) => w.key.startsWith("playlist:"))!;
-    expect(write.ttlSeconds).toBe(24 * 60 * 60);
+    const freshUntil = (write.value as { freshUntil: number }).freshUntil;
+    expect(freshUntil - before).toBeGreaterThanOrEqual(24 * 60 * 60 * 1000);
+    expect(freshUntil - before).toBeLessThan(24 * 60 * 60 * 1000 + 5000);
+    // The key outlives its freshness by the stale grace, a week in all.
+    expect(write.ttlSeconds).toBe(7 * 24 * 60 * 60);
   });
 
   it("does not cache a 5xx — that is Spotify's problem, not the playlist's", async () => {
@@ -1233,5 +1238,183 @@ describe("rolling 24h upstream budget", () => {
       throttled: true,
       code: "spotify_quota_exhausted",
     });
+  });
+});
+
+describe("a stale copy, served when Spotify cannot be asked", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-13T12:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.SPOTIFY_MAX_LOADS_PER_DAY;
+  });
+
+  async function loadThenAge(ms: number) {
+    await loadPlaylist(URL_A);
+    vi.setSystemTime(new Date(Date.now() + ms));
+    __resetInFlightForTests();
+  }
+
+  it("still serves a fresh entry without asking", async () => {
+    await loadThenAge(DAY - 60_000);
+    await loadPlaylist(URL_A);
+    expect(upstreamCalls()).toBe(1);
+  });
+
+  it("refreshes a stale entry when Spotify is fine, and counts it as a miss a longer TTL would save", async () => {
+    await loadThenAge(2 * DAY);
+    upstream().mockResolvedValue(upstreamResult(["a", "b", "c"]));
+
+    await expect(loadPlaylist(URL_A)).resolves.toMatchObject({ totalTracks: 3 });
+    expect(upstreamCalls()).toBe(2);
+    await expect(getCacheStats()).resolves.toMatchObject({ refreshed: 1, staleHits: 0 });
+  });
+
+  it("serves the stale copy without a call once the day is near its ceiling", async () => {
+    process.env.SPOTIFY_MAX_LOADS_PER_DAY = "2";
+    await loadThenAge(2 * DAY);
+    // The first load's hour has rolled out of the window by now, so two fresh
+    // ones: the second crosses the warning ratio of a ceiling of two, while one
+    // slot is still unspent — the notice is up and the gate is still open.
+    await loadPlaylist(urlFor("near1"));
+    await loadPlaylist(urlFor("near2"));
+    await expect(getSpotifyServiceStatus()).resolves.toMatchObject({ approachingLimit: true });
+    const calls = upstreamCalls();
+
+    await expect(loadPlaylist(URL_A)).resolves.toMatchObject({ totalTracks: 2 });
+    expect(upstreamCalls()).toBe(calls);
+    await expect(getCacheStats()).resolves.toMatchObject({ staleHits: 1 });
+  });
+
+  it("serves the stale copy when Spotify refuses the refresh", async () => {
+    await loadThenAge(3 * DAY);
+    upstream().mockRejectedValue(
+      new spotify.SpotifyApiError("spotify_rate_limited", 429, { retryAfterSeconds: 60 })
+    );
+
+    await expect(loadPlaylist(URL_A)).resolves.toMatchObject({ totalTracks: 2 });
+    // And the cooldown that refusal started parks the next one without asking.
+    await expect(loadPlaylist(URL_A)).resolves.toMatchObject({ totalTracks: 2 });
+    expect(upstreamCalls()).toBe(2);
+  });
+
+  it("serves the stale copy on an upstream error that says nothing about the playlist", async () => {
+    await loadThenAge(3 * DAY);
+    upstream().mockRejectedValue(new spotify.SpotifyApiError("playlist_load_failed", 503));
+    await expect(loadPlaylist(URL_A)).resolves.toMatchObject({ totalTracks: 2 });
+  });
+
+  it("believes a 404 on refresh — the owner made it private, and that is theirs to decide", async () => {
+    await loadThenAge(2 * DAY);
+    upstream().mockRejectedValue(new spotify.SpotifyApiError("playlist_not_found", 404));
+    await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ code: "playlist_not_found" });
+  });
+
+  it("keeps nothing past a week", async () => {
+    await loadThenAge(7 * DAY + 60_000);
+    upstream().mockRejectedValue(
+      new spotify.SpotifyApiError("spotify_rate_limited", 429, { retryAfterSeconds: 60 })
+    );
+    await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ status: 429 });
+  });
+
+  it("gives an empty playlist no grace — it is a refusal", async () => {
+    upstream().mockResolvedValue(upstreamResult([]));
+    await loadPlaylist(URL_A);
+    const write = kv.writes.find((w) => w.key.startsWith("playlist:"))!;
+    expect(write.ttlSeconds).toBe(10 * 60);
+  });
+
+  it("treats an entry written before freshUntil existed as fresh for its own TTL", async () => {
+    kv.mem.set(`playlist:v1:${playlistId("a")}`, {
+      value: { kind: "hit", name: "Old", tracks: [makeTrack("x")], truncated: false },
+      expiresAt: Date.now() + 60_000,
+    });
+    await expect(loadPlaylist(URL_A)).resolves.toMatchObject({ name: "Old" });
+    expect(upstreamCalls()).toBe(0);
+  });
+});
+
+describe("rechecking a playlist the host has just made public", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-13T12:00:00Z"));
+    upstream().mockRejectedValue(new spotify.SpotifyApiError("playlist_not_found", 404));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const recheckCounts = () =>
+    Object.fromEntries(
+      ["found", "missing", "other"].map((o) => [
+        o,
+        (kv.mem.get(`loop:stats:2026-10-13:playlist_recheck:${o}`)?.value as number) ?? 0,
+      ])
+    );
+
+  it("goes past a cached 404 when asked to, and lets the host through", async () => {
+    await expect(loadPlaylist(URL_A)).rejects.toThrow();
+    vi.setSystemTime(new Date(Date.now() + 30_000));
+    upstream().mockResolvedValue(upstreamResult(["a"]));
+
+    await expect(loadPlaylist(URL_A, "playlist-api", { recheck: true })).resolves.toMatchObject({
+      totalTracks: 1,
+    });
+    expect(upstreamCalls()).toBe(2);
+    expect(recheckCounts()).toMatchObject({ found: 1 });
+  });
+
+  it("still replays the 404 to a plain Start — the negative cache keeps absorbing bursts", async () => {
+    await expect(loadPlaylist(URL_A)).rejects.toThrow();
+    vi.setSystemTime(new Date(Date.now() + 30_000));
+    upstream().mockResolvedValue(upstreamResult(["a"]));
+
+    await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ code: "playlist_not_found" });
+    expect(upstreamCalls()).toBe(1);
+  });
+
+  it("replays a 404 only seconds old, so the button cannot become a burst", async () => {
+    await expect(loadPlaylist(URL_A)).rejects.toThrow();
+    for (let i = 0; i < 5; i++) {
+      await expect(loadPlaylist(URL_A, "playlist-api", { recheck: true })).rejects.toMatchObject({
+        code: "playlist_not_found",
+      });
+    }
+    expect(upstreamCalls()).toBe(1);
+    expect(recheckCounts()).toMatchObject({ missing: 5 });
+  });
+
+  it("asks Spotify again on a recheck after the wait, and counts a second refusal as missing", async () => {
+    await expect(loadPlaylist(URL_A)).rejects.toThrow();
+    vi.setSystemTime(new Date(Date.now() + 30_000));
+    await expect(loadPlaylist(URL_A, "playlist-api", { recheck: true })).rejects.toMatchObject({
+      code: "playlist_not_found",
+    });
+    expect(upstreamCalls()).toBe(2);
+    expect(recheckCounts()).toMatchObject({ missing: 1, found: 0 });
+  });
+
+  it("takes only a literal true from the route", async () => {
+    const post = (body: unknown) =>
+      postPlaylist(
+        new NextRequest("http://localhost/api/playlist", {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: { "content-type": "application/json", "x-forwarded-for": "10.9.9.9" },
+        })
+      );
+    await post({ url: URL_A });
+    vi.setSystemTime(new Date(Date.now() + 30_000));
+    upstream().mockResolvedValue(upstreamResult(["a"]));
+
+    expect((await post({ url: URL_A, recheck: "true" })).status).toBe(404);
+    expect((await post({ url: URL_A, recheck: true })).status).toBe(200);
   });
 });

@@ -309,7 +309,7 @@ describe("a refused link says what to do next", () => {
   it("renders the help inside the alert, under the sentence", () => {
     expect(body).toMatch(/const help = failure \? playlistHelp\(failure\.code, locale\) : null;/);
     expect(body).toMatch(
-      /\{failure && \(\s*<div\s+role="alert"[\s\S]*?<p>\{failure\.message\}<\/p>\s*\{help && <PlaylistHelpLine help=\{help\} \/>\}\s*<\/div>\s*\)\}/
+      /\{failure && \(\s*<div\s+role="alert"[\s\S]*?<p>\{failure\.message\}<\/p>\s*\{help && <PlaylistHelpLine help=\{help\} \/>\}\s*\{recheck && \([\s\S]*?<PrivateRecheck[\s\S]*?\/>\s*\)\}\s*<\/div>\s*\)\}/
     );
   });
 

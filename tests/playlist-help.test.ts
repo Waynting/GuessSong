@@ -17,6 +17,7 @@ import {
   PLAYLIST_HELP_BY_CODE,
   PLAYLIST_HELP_TOPICS,
   editorialWarning,
+  recheckOffer,
   failureFor,
   failureOf,
   isPermanentRefusal,
@@ -287,6 +288,35 @@ describe("a failure as the page holds it", () => {
       expect(failure.code).toBe("playlist_load_failed");
       expect(failure.message).toBe(errorMessage("playlist_load_failed", "en"));
       expect(playlistHelp(failure.code, "en")).toBeNull();
+    }
+  });
+});
+
+describe("the private refusal's recheck", () => {
+  const URL = "https://open.spotify.com/playlist/37abcdefghijklmnopqrst";
+
+  it("is offered only on a private-or-deleted refusal, and only with a link to ask about", () => {
+    expect(recheckOffer("playlist_not_found", URL, "en")).toMatchObject({ openHref: URL });
+    expect(recheckOffer("playlist_not_found", null, "en")).toBeNull();
+    for (const code of [
+      "playlist_editorial",
+      "invalid_playlist_url",
+      "playlist_empty",
+      "spotify_daily_budget_spent",
+      "spotify_quota_exhausted",
+      "playlist_load_failed",
+    ]) {
+      expect(recheckOffer(code, URL, "en")).toBeNull();
+    }
+  });
+
+  it("speaks both languages, and the Chinese is not the English", () => {
+    const en = recheckOffer("playlist_not_found", URL, "en")!;
+    const zh = recheckOffer("playlist_not_found", URL, "zh")!;
+    for (const k of ["openLabel", "recheckLabel", "checkingLabel", "stillPrivate"] as const) {
+      expect(en[k]).toBeTruthy();
+      expect(zh[k]).toBeTruthy();
+      expect(zh[k]).not.toBe(en[k]);
     }
   });
 });

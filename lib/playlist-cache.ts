@@ -49,8 +49,10 @@ import type { AppErrorCode } from "@/lib/error-messages";
 import {
   isPlaylistRefusalCode,
   recordPlaylistInvalid,
+  recordPlaylistRecheck,
   recordPlaylistRefused,
   type PlaylistInvalidKind,
+  type PlaylistRecheckOutcome,
 } from "@/lib/loop-stats";
 import type { SpotifyServiceStatus } from "@/types/service-status";
 import type { Track } from "@/types";
@@ -107,6 +109,34 @@ const SAMPLED_TTL_SECONDS = 60 * 60;
  * enough to absorb the burst of retries a bad paste generates.
  */
 const NOT_FOUND_TTL_SECONDS = 10 * 60;
+
+/**
+ * How long a loaded playlist is kept *after* it stops being fresh, to be
+ * served only when the alternative is refusing the host.
+ *
+ * `HIT_TTL_SECONDS` decides freshness and is unchanged; this is the copy we
+ * hold back. From 2026-10-07 the site ran ~5,000 games a day against a 2,000
+ * load ceiling, and on 2026-10-08 the misses came to exactly 2,000 — the gate
+ * was shut that evening, and every host it turned away was a cold load,
+ * which for a returning host (half of all games start on a remembered link)
+ * is very often a playlist we had loaded a day or two earlier and then
+ * deleted. A week-old copy of a party playlist is a better answer than "the
+ * site is out of Spotify for today".
+ *
+ * So a stale entry is served when Spotify cannot be asked — a cooldown, the
+ * daily ceiling spent or within `SPOTIFY_BUDGET_WARN_RATIO` of it, the minute
+ * gate, an upstream error — and refreshed otherwise. A refresh that comes back
+ * 404 is believed and not papered over: the owner made it private or deleted
+ * it, and that is theirs to decide. Storage is the cost, measured at ~48KB an
+ * entry and ~1,100 live entries at one day, against a 3GB instance.
+ */
+const STALE_GRACE_SECONDS = 6 * 24 * 60 * 60;
+
+/**
+ * The youngest a cached 404 may be before an explicit recheck is allowed to go
+ * past it. See `LoadOptions.recheck`.
+ */
+const RECHECK_MIN_AGE_MS = 15 * 1000;
 
 const COOLDOWN_KEY = "spotify:cooldown";
 
@@ -293,7 +323,14 @@ export interface LoadedPlaylist {
 export type PlaylistLoadSource = "playlist-api" | "room-submit" | "quiz-create" | "unknown";
 
 type CacheEntry =
-  | { kind: "hit"; name: string; tracks: Track[]; truncated: boolean }
+  /**
+   * `freshUntil` (epoch ms) is when the entry stops being served as a plain
+   * hit; the key itself lives `STALE_GRACE_SECONDS` longer. Optional because
+   * entries written before it existed are still live, and those are fresh for
+   * as long as their own TTL keeps them — which is the rule they were written
+   * under.
+   */
+  | { kind: "hit"; name: string; tracks: Track[]; truncated: boolean; freshUntil?: number }
   /**
    * `code` is what a replayed 404 is rendered from, so a cached miss is
    * readable in either language — caching a *sentence* would have frozen
@@ -301,7 +338,30 @@ type CacheEntry =
    * the whole TTL. Optional because entries written before this field existed
    * are still live in KV; `readCache` falls back for them.
    */
-  | { kind: "missing"; code?: AppErrorCode; message: string; status: number };
+  | {
+      kind: "missing";
+      code?: AppErrorCode;
+      message: string;
+      status: number;
+      /** Epoch ms of the 404. Absent on older entries, which a recheck may pass. */
+      at?: number;
+    };
+
+export interface LoadOptions {
+  /**
+   * The host says they have just made the playlist public: go past a cached
+   * 404 rather than replaying it.
+   *
+   * The help line under a private-playlist refusal tells the host to make it
+   * public and try again, and for ten minutes afterwards (`NOT_FOUND_TTL_SECONDS`)
+   * this cache answered "private" to the host who had done exactly that — one
+   * reason that refusal recovered 18% of the time. Only the explicit button
+   * sends this; a mashed Start does not, so the negative cache still absorbs
+   * the bursts it exists for, and a 404 younger than `RECHECK_MIN_AGE_MS` is
+   * still replayed so the button cannot be turned into a burst either.
+   */
+  recheck?: boolean;
+}
 
 function cacheKey(playlistId: string): string {
   return `playlist:${CACHE_VERSION}:${playlistId}`;
@@ -519,7 +579,7 @@ export async function getDailyBudgetStatus(now: Date = new Date()): Promise<{
  * once the cache is doing its job, so the instrumentation gets quieter exactly
  * as things get healthier, and a sudden run of lines is itself the signal.
  */
-function statsKey(kind: "hit" | "miss" | "negative"): string {
+function statsKey(kind: "hit" | "miss" | "negative" | "stale" | "refreshed"): string {
   return `playlist:stats:${dayBucket()}:${kind}`;
 }
 
@@ -540,6 +600,26 @@ async function recordHit(negative = false): Promise<void> {
     const store = await getKvStore();
     await store.incr(statsKey("hit"), STATS_TTL_SECONDS);
     if (negative) await store.incr(statsKey("negative"), STATS_TTL_SECONDS);
+  } catch {
+    // Instrumentation must never be able to fail a request.
+  }
+}
+
+/**
+ * The two halves of the stale copy, counted apart.
+ *
+ * `stale` is a load answered from a copy past `freshUntil` because Spotify
+ * could not be asked — a hit as far as the rate is concerned (it is counted in
+ * `hit` too), and the number that says how many hosts the grace period kept
+ * playing. `refreshed` is a stale copy that was there and went upstream
+ * anyway: every one of those is a miss a longer `HIT_TTL_SECONDS` would have
+ * saved, which is the figure that decision has to be made on.
+ */
+async function recordStale(kind: "stale" | "refreshed"): Promise<void> {
+  try {
+    const store = await getKvStore();
+    if (kind === "stale") await store.incr(statsKey("hit"), STATS_TTL_SECONDS);
+    await store.incr(statsKey(kind), STATS_TTL_SECONDS);
   } catch {
     // Instrumentation must never be able to fail a request.
   }
@@ -578,14 +658,27 @@ export async function getCacheStats(): Promise<{
   misses: number;
   /** Hits that replayed a cached 404 or empty playlist, already in `hits`. */
   negativeHits: number;
+  /** Hits answered from a copy past its freshness, already in `hits`. */
+  staleHits: number;
+  /** Misses that had a stale copy to hand, already in `misses`. */
+  refreshed: number;
   hitRate: number;
 }> {
   const store = await getKvStore();
-  const hits = (await store.get<number>(statsKey("hit"))) ?? 0;
-  const misses = (await store.get<number>(statsKey("miss"))) ?? 0;
-  const negativeHits = (await store.get<number>(statsKey("negative"))) ?? 0;
+  const [hits, misses, negativeHits, staleHits, refreshed] = (
+    await store.mget<number>(
+      (["hit", "miss", "negative", "stale", "refreshed"] as const).map(statsKey)
+    )
+  ).map((n) => n ?? 0);
   const total = hits + misses;
-  return { hits, misses, negativeHits, hitRate: total > 0 ? hits / total : 0 };
+  return {
+    hits,
+    misses,
+    negativeHits,
+    staleHits,
+    refreshed,
+    hitRate: total > 0 ? hits / total : 0,
+  };
 }
 
 /**
@@ -702,6 +795,36 @@ export async function getSpotifyServiceStatus(): Promise<SpotifyServiceStatus> {
 }
 
 /**
+ * Whether a stale copy should be served without asking Spotify at all.
+ *
+ * The same three keys the site notice reads, so "we served you yesterday's
+ * copy" and "the notice says we are near the limit" are one fact. Waiting
+ * until the gate actually refuses would spend the last of the day on
+ * refreshing playlists we already have, and leave nothing for the host whose
+ * playlist we have never seen. Fails to false: the load then goes through the
+ * ordinary gates, each of which fails open, and falls back to the copy if one
+ * of them refuses.
+ */
+async function spotifyUnderPressure(): Promise<boolean> {
+  try {
+    const store = await getKvStore();
+    const entries = await store.mget<{ until: number }>([
+      COOLDOWN_KEY,
+      DAILY_SPENT_KEY,
+      DAILY_NEAR_KEY,
+    ]);
+    const now = Date.now();
+    return entries.some((entry) => typeof entry?.until === "number" && entry.until > now);
+  } catch {
+    return false;
+  }
+}
+
+function isFresh(entry: Extract<CacheEntry, { kind: "hit" }>): boolean {
+  return typeof entry.freshUntil !== "number" || Date.now() < entry.freshUntil;
+}
+
+/**
  * Coalesces concurrent loads of the same playlist within one lambda instance.
  *
  * Mixed Playlist Mode fires one request per contributor from a single click,
@@ -769,14 +892,24 @@ async function fetchAndCache(
     // day: it is the same "fix it and come back" refusal (`playlist_empty`,
     // raised by the callers from the empty list), and uncached every retry of
     // it spent a full load and a daily-budget slot to be told it again.
-    await writeCache(
-      playlistId,
-      { kind: "hit", name: playlist.name, tracks: stripped, truncated },
+    const freshSeconds =
       stripped.length === 0
         ? NOT_FOUND_TTL_SECONDS
         : truncated
           ? SAMPLED_TTL_SECONDS
-          : HIT_TTL_SECONDS
+          : HIT_TTL_SECONDS;
+    await writeCache(
+      playlistId,
+      {
+        kind: "hit",
+        name: playlist.name,
+        tracks: stripped,
+        truncated,
+        freshUntil: Date.now() + freshSeconds * 1000,
+      },
+      // An empty playlist gets no grace: it is a refusal, and a week-old
+      // refusal is not a better answer than asking again.
+      stripped.length === 0 ? freshSeconds : freshSeconds + STALE_GRACE_SECONDS
     );
 
     return {
@@ -797,7 +930,7 @@ async function fetchAndCache(
     if (err instanceof SpotifyApiError && err.status === 404) {
       await writeCache(
         playlistId,
-        { kind: "missing", code: err.code, message: err.message, status: 404 },
+        { kind: "missing", code: err.code, message: err.message, status: 404, at: Date.now() },
         NOT_FOUND_TTL_SECONDS
       );
     }
@@ -830,12 +963,14 @@ async function fetchAndCache(
  */
 export async function loadPlaylist(
   playlistUrl: string,
-  source: PlaylistLoadSource = "unknown"
+  source: PlaylistLoadSource = "unknown",
+  options: LoadOptions = {}
 ): Promise<LoadedPlaylist> {
   let loaded: LoadedPlaylist;
   try {
-    loaded = await loadPlaylistUncounted(playlistUrl, source);
+    loaded = await loadPlaylistUncounted(playlistUrl, source, options);
   } catch (err) {
+    if (options.recheck) await recordPlaylistRecheck(recheckOutcomeOf(err));
     const invalid = invalidKindOf(err);
     if (invalid) {
       await recordPlaylistInvalid(invalid);
@@ -849,7 +984,19 @@ export async function loadPlaylist(
   // refusal, and counting it where the other three are counted keeps the
   // four reasons on one line in `npm run stats`.
   if (loaded.tracks.length === 0) await recordPlaylistRefused("playlist_empty");
+  if (options.recheck) await recordPlaylistRecheck("found");
   return loaded;
+}
+
+/**
+ * What an explicit recheck came back as. `missing` is the host told "still
+ * private" — by Spotify, or by a 404 too young to go past — and `other` is
+ * anything that says nothing about the playlist (throttled, a bad link).
+ */
+function recheckOutcomeOf(err: unknown): PlaylistRecheckOutcome {
+  return err instanceof SpotifyApiError && err.code === "playlist_not_found"
+    ? "missing"
+    : "other";
 }
 
 /**
@@ -922,7 +1069,8 @@ async function playlistIdFor(pasted: string): Promise<string> {
 
 async function loadPlaylistUncounted(
   playlistUrl: string,
-  source: PlaylistLoadSource
+  source: PlaylistLoadSource,
+  options: LoadOptions
 ): Promise<LoadedPlaylist> {
   const playlistId = await playlistIdFor(playlistUrl);
 
@@ -935,14 +1083,24 @@ async function loadPlaylistUncounted(
   }
 
   const cached = await readCache(playlistId);
-  if (cached?.kind === "hit") {
+  if (cached?.kind === "hit" && isFresh(cached)) {
     // A replayed empty playlist is a negative hit, like a replayed 404: the
     // one kind of hit a broken input produces on repeat. `loadPlaylist` counts
     // it as `playlist_refused:playlist_empty` from the empty list either way.
     await recordHit(cached.tracks.length === 0);
     return toLoaded(cached);
   }
-  if (cached?.kind === "missing") {
+  // Past its freshness: kept for exactly this, see STALE_GRACE_SECONDS.
+  const stale = cached?.kind === "hit" ? cached : null;
+  if (stale && (await spotifyUnderPressure())) {
+    await recordStale("stale");
+    return toLoaded(stale);
+  }
+  const recheckable =
+    cached?.kind === "missing" &&
+    options.recheck === true &&
+    Date.now() - (cached.at ?? 0) >= RECHECK_MIN_AGE_MS;
+  if (cached?.kind === "missing" && !recheckable) {
     // A cached 404 is a cache hit too — it is a question answered without
     // touching Spotify, which is the only thing the rate measures. Counted
     // separately as well, so a spammed dead link can't quietly inflate it.
@@ -954,19 +1112,38 @@ async function loadPlaylistUncounted(
     });
   }
 
+  if (!stale) return fetchCoalesced(playlistId, source);
+
+  try {
+    const fresh = await fetchCoalesced(playlistId, source);
+    await recordStale("refreshed");
+    return fresh;
+  } catch (err) {
+    // A 404 is the owner's answer and is passed on; anything else — every
+    // throttling code, the minute gate, a 5xx, a dropped connection — is
+    // ours or Spotify's, and the copy we hold is the better thing to hand
+    // a host than that.
+    if (err instanceof SpotifyApiError && err.status === 404) throw err;
+    await recordStale("stale");
+    return toLoaded(stale);
+  }
+}
+
+function fetchCoalesced(
+  playlistId: string,
+  source: PlaylistLoadSource
+): Promise<LoadedPlaylist> {
   const existing = inFlight.get(playlistId);
   if (existing) return existing;
 
   // The source recorded is the one that *started* the fetch — a coalesced
   // sibling joins a load already in progress and never reaches recordMiss,
   // which is correct: the line describes the upstream call, not the request.
-  const pending = fetchAndCache(playlistId, source);
-  inFlight.set(playlistId, pending);
-  try {
-    return await pending;
-  } finally {
+  const pending = fetchAndCache(playlistId, source).finally(() => {
     inFlight.delete(playlistId);
-  }
+  });
+  inFlight.set(playlistId, pending);
+  return pending;
 }
 
 /** Test seam: the in-flight map is module state that outlives a single test. */
