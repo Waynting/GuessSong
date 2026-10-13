@@ -2,10 +2,18 @@ import { DurableObject } from "cloudflare:workers";
 import {
   BUZZER_IDLE_TIMEOUT_MS,
   BUZZER_MAX_PLAYERS,
+  ORDER_CARD_ART_MAX,
+  ORDER_CARD_ID_MAX,
+  ORDER_CARD_TEXT_MAX,
+  ORDER_MAX_CARDS,
   parseClientMessage,
   type BuzzEntry,
   type BuzzerErrorCode,
   type BuzzerPhase,
+  type OrderCard,
+  type OrderPhoneResult,
+  type OrderReveal,
+  type OrderRoundView,
   type PlayerSummary,
   type RoomSnapshot,
   type RoundVerdict,
@@ -67,6 +75,22 @@ interface RoomState {
   players: Record<string, PlayerRecord>;
   createdAt: number;
   expiresAt: number;
+  /**
+   * The order game's round on everyone's phone, when the host's page has
+   * dealt one. Absent in a guess game and on rooms persisted before it.
+   * Arrangements are keyed by seat, so a seat taken over (`takeSeat`) keeps
+   * its lock: the same rule as a queued buzz.
+   */
+  order?: OrderRoundState;
+}
+
+interface OrderRoundState {
+  round: number;
+  cards: OrderCard[];
+  phase: "arranging" | "revealed";
+  /** playerId -> card ids, the latest lock. */
+  arrangements: Record<string, string[]>;
+  reveal: OrderReveal | null;
 }
 
 /** What we hang off each socket so a hibernated object can still identify it. */
@@ -74,7 +98,19 @@ interface SocketAttachment {
   playerId: string;
   name: string;
   isHost: boolean;
+  /**
+   * The join listed the `order` capability. Only such a socket is sent
+   * order frames: an older page's reducer has no `default`, and an unknown
+   * frame takes it to the crash screen (lib/buzzer-protocol.ts).
+   */
+  order?: boolean;
 }
+
+const ORDER_VERDICTS: readonly OrderPhoneResult["verdict"][] = ["exact", "oldest", "none"];
+/** A round index past this is not a game anyone is playing. */
+const ORDER_MAX_ROUND = 10_000;
+/** Far above the most a round can award (3 + 1), far below anything that breaks a scoreboard. */
+const ORDER_MAX_POINTS = 10;
 
 const STORAGE_KEY = "room";
 
@@ -198,12 +234,17 @@ export class BuzzerRoom extends DurableObject<Env> {
     }
 
     if (msg.type === "ping") return this.send(ws, { type: "pong" });
-    if (msg.type === "join") return this.handleJoin(ws, msg.playerId, msg.name, msg.hostToken);
+    if (msg.type === "join") {
+      const wantsOrder = Array.isArray(msg.caps) && msg.caps.includes("order");
+      return this.handleJoin(ws, msg.playerId, msg.name, msg.hostToken, wantsOrder);
+    }
 
     const att = this.attachment(ws);
     if (!att) return this.sendError(ws, "not_joined", "Send a join message first");
 
     if (msg.type === "buzz") return this.handleBuzz(ws, att, msg.roundIndex);
+    // A player's own arrangement. Every seat plays, the host's included.
+    if (msg.type === "order:lock") return this.handleOrderLock(ws, att, msg.round, msg.ids);
 
     // Everything below is host-only. Compare against the stored token before
     // acting — without this any player could open a round or award points.
@@ -220,6 +261,10 @@ export class BuzzerRoom extends DurableObject<Env> {
         return this.handleResolve("revealed");
       case "host:next":
         return this.handleNext();
+      case "host:order:deal":
+        return this.handleOrderDeal(ws, msg.round, msg.cards);
+      case "host:order:reveal":
+        return this.handleOrderReveal(ws, msg.round, msg.reveal);
     }
   }
 
@@ -257,7 +302,8 @@ export class BuzzerRoom extends DurableObject<Env> {
     ws: WebSocket,
     playerId: string,
     rawName: string,
-    hostToken?: string
+    hostToken?: string,
+    wantsOrder = false
   ): Promise<void> {
     // The id is a hash key the room persists under and a value it broadcasts,
     // and `parseClientMessage` checks nothing past `type`. A bare object
@@ -334,19 +380,20 @@ export class BuzzerRoom extends DurableObject<Env> {
     }
     if (isHost) this.room.hostPlayerId = playerId;
 
-    ws.serializeAttachment({ playerId, name, isHost } satisfies SocketAttachment);
+    const att: SocketAttachment = { playerId, name, isHost, ...(wantsOrder ? { order: true } : {}) };
+    ws.serializeAttachment(att);
     await this.persist();
 
     // Full-state replay. Reconnects are indistinguishable from first joins on
     // purpose: the client throws away whatever it had and adopts this.
-    this.send(ws, { type: "state", snapshot: this.snapshot(), you: { playerId, isHost } });
+    this.send(ws, { type: "state", snapshot: this.snapshot(att), you: { playerId, isHost } });
     if (rekeyedBuzz) {
       // Everyone else's queue still names the old id, and the client
       // advances its queue by matching the entry the host's verdict moves
       // to the head — an id nobody knows is appended instead, and the
       // round goes to the wrong name on the host's screen. The same replay
       // handleNext sends, for the same reason.
-      this.broadcast({ type: "state", snapshot: this.snapshot(), you: { playerId: "", isHost: false } });
+      this.broadcastState();
     } else {
       this.broadcastPlayers();
     }
@@ -440,7 +487,121 @@ export class BuzzerRoom extends DurableObject<Env> {
     this.room.buzzes = [];
     this.room.buzzCount = 0;
     await this.touch();
-    this.broadcast({ type: "state", snapshot: this.snapshot(), you: { playerId: "", isHost: false } });
+    this.broadcastState();
+  }
+
+  /**
+   * The host's page dealt an order round. Replaces the room's round, locks
+   * and all: the page deals each round once, and again after a reload or a
+   * reconnect that found the room on a different round. Either way the cards
+   * on the phones must be the ones on the host's screen.
+   *
+   * Everything is bounded here, because the deal is stored and broadcast to
+   * every phone: a card is clamped to the fields a phone renders, and art
+   * that is not https is dropped rather than handed to an <img>.
+   */
+  private async handleOrderDeal(ws: WebSocket, round: unknown, rawCards: unknown): Promise<void> {
+    if (!Number.isInteger(round) || (round as number) < 0 || (round as number) > ORDER_MAX_ROUND) {
+      return this.sendError(ws, "bad_message", "round must be a small integer");
+    }
+    if (!Array.isArray(rawCards) || rawCards.length < 2 || rawCards.length > ORDER_MAX_CARDS) {
+      return this.sendError(ws, "bad_message", "a round is 2 to 6 cards");
+    }
+    const cards: OrderCard[] = [];
+    const seen = new Set<string>();
+    for (const raw of rawCards) {
+      const c = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+      const id = c.id;
+      // Ids become keys of the reveal's `years`, so the prototype check is
+      // the join's, for the join's reason.
+      if (
+        typeof id !== "string" ||
+        !id ||
+        id.length > ORDER_CARD_ID_MAX ||
+        seen.has(id) ||
+        Object.hasOwn(Object.prototype, id)
+      ) {
+        return this.sendError(ws, "bad_message", "every card needs a distinct id");
+      }
+      seen.add(id);
+      const art =
+        typeof c.art === "string" && /^https:\/\//i.test(c.art) && c.art.length <= ORDER_CARD_ART_MAX ? c.art : "";
+      cards.push({
+        id,
+        title: typeof c.title === "string" ? c.title.slice(0, ORDER_CARD_TEXT_MAX) : "",
+        artist: typeof c.artist === "string" ? c.artist.slice(0, ORDER_CARD_TEXT_MAX) : "",
+        art,
+      });
+    }
+    this.room.order = { round: round as number, cards, phase: "arranging", arrangements: {}, reveal: null };
+    await this.touch();
+    this.broadcastOrder();
+  }
+
+  /**
+   * A player locked in. Stored per seat, latest wins, until the reveal: a
+   * phone may change its mind as often as it likes before then. A lock for a
+   * round that is not the room's, or one already revealed (it crossed the
+   * reveal on the wire), changes nothing; the phone is sent the round as it
+   * stands, which shows it the years.
+   */
+  private async handleOrderLock(ws: WebSocket, att: SocketAttachment, round: unknown, ids: unknown): Promise<void> {
+    if (!Object.hasOwn(this.room.players, att.playerId)) {
+      return this.sendError(ws, "not_joined", "Send a join message first");
+    }
+    const order = this.room.order;
+    if (!order || round !== order.round || order.phase !== "arranging") {
+      const view = this.orderView(att);
+      if (view) this.send(ws, { type: "order", order: view });
+      return;
+    }
+    if (!isArrangementOf(ids, order.cards)) {
+      return this.sendError(ws, "bad_message", "ids must be the round's cards, each once");
+    }
+    order.arrangements[att.playerId] = [...ids];
+    await this.persist();
+    this.broadcastOrder();
+  }
+
+  /**
+   * The host's page revealed the years and graded every seat. The room
+   * cannot check the grading (it never had the years, which is the point),
+   * so it checks the shape: the order is the round's cards, every year is a
+   * year, every result names a seat and a verdict it knows. Accepted again
+   * for a round already revealed, because the host's page re-sends it when a
+   * reconnect shows the room never got it.
+   */
+  private async handleOrderReveal(ws: WebSocket, round: unknown, raw: unknown): Promise<void> {
+    const order = this.room.order;
+    if (!order || round !== order.round) return;
+    const r = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+    if (!isArrangementOf(r.order, order.cards)) {
+      return this.sendError(ws, "bad_message", "the order must be the round's cards, each once");
+    }
+    const rawYears = (typeof r.years === "object" && r.years !== null ? r.years : {}) as Record<string, unknown>;
+    const years: Record<string, number> = {};
+    for (const card of order.cards) {
+      const y = Object.hasOwn(rawYears, card.id) ? rawYears[card.id] : undefined;
+      if (!Number.isInteger(y) || (y as number) < 1000 || (y as number) > 9999) {
+        return this.sendError(ws, "bad_message", "every card needs a year");
+      }
+      years[card.id] = y as number;
+    }
+    const rawResults = (typeof r.results === "object" && r.results !== null ? r.results : {}) as Record<string, unknown>;
+    const results: Record<string, OrderPhoneResult> = {};
+    for (const playerId of Object.keys(rawResults)) {
+      if (!Object.hasOwn(this.room.players, playerId)) continue;
+      const entry = rawResults[playerId];
+      const res = (typeof entry === "object" && entry !== null ? entry : {}) as Record<string, unknown>;
+      const verdict = res.verdict as OrderPhoneResult["verdict"];
+      if (!ORDER_VERDICTS.includes(verdict)) continue;
+      const points = Number.isInteger(res.points) ? Math.max(0, Math.min(res.points as number, ORDER_MAX_POINTS)) : 0;
+      results[playerId] = { verdict, points, locked: res.locked === true };
+    }
+    order.phase = "revealed";
+    order.reveal = { order: [...r.order], years, results };
+    await this.touch();
+    this.broadcastOrder();
   }
 
   // -------------------------------------------------------------------------
@@ -473,7 +634,13 @@ export class BuzzerRoom extends DurableObject<Env> {
     return raw && typeof raw === "object" ? (raw as SocketAttachment) : null;
   }
 
-  private snapshot(): RoomSnapshot {
+  /**
+   * The room as one socket may see it. Per socket because of the order
+   * round: `mine` is that seat's own lock, and only the host's socket is
+   * handed every arrangement. A guess game's snapshot is what it always was.
+   */
+  private snapshot(att: SocketAttachment): RoomSnapshot {
+    const order = this.orderView(att);
     return {
       code: this.room.code,
       phase: this.room.phase,
@@ -482,7 +649,47 @@ export class BuzzerRoom extends DurableObject<Env> {
       buzzes: this.room.buzzes,
       players: this.playerSummaries(),
       expiresAt: this.room.expiresAt,
+      ...(order ? { order } : {}),
     };
+  }
+
+  /** The order round for this socket, or null when there is none or it cannot read one. */
+  private orderView(att: SocketAttachment): OrderRoundView | null {
+    const order = this.room.order;
+    if (!order || !att.order) return null;
+    return {
+      round: order.round,
+      cards: order.cards,
+      phase: order.phase,
+      locked: Object.keys(order.arrangements),
+      mine: Object.hasOwn(order.arrangements, att.playerId) ? order.arrangements[att.playerId] : null,
+      ...(att.isHost ? { arrangements: order.arrangements } : {}),
+      reveal: order.reveal,
+    };
+  }
+
+  /**
+   * A full replay to every joined socket, each with its own snapshot. `you`
+   * is blank, as it always was on a broadcast: only the join reply says who
+   * the socket is (`hostOpenWasLost` in lib/buzzer-round.ts reads exactly
+   * that difference).
+   */
+  private broadcastState(): void {
+    for (const ws of this.ctx.getWebSockets()) {
+      // Joined sockets only, for `broadcast`'s reason.
+      const att = this.attachment(ws);
+      if (!att) continue;
+      this.send(ws, { type: "state", snapshot: this.snapshot(att), you: { playerId: "", isHost: false } });
+    }
+  }
+
+  /** The order round to every socket that can read one, each its own view. */
+  private broadcastOrder(): void {
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = this.attachment(ws);
+      const order = att ? this.orderView(att) : null;
+      if (order) this.send(ws, { type: "order", order });
+    }
   }
 
   /**
@@ -512,6 +719,17 @@ export class BuzzerRoom extends DurableObject<Env> {
         entry.playerId = toId;
         rekeyed = true;
       }
+    }
+    // An order lock is the seat's, like its buzz: a phone that reloaded into
+    // its own seat under a new id finds its answer still in, and its result.
+    const order = this.room.order;
+    if (order && Object.hasOwn(order.arrangements, fromId)) {
+      order.arrangements[toId] = order.arrangements[fromId];
+      delete order.arrangements[fromId];
+    }
+    if (order?.reveal && Object.hasOwn(order.reveal.results, fromId)) {
+      order.reveal.results[toId] = order.reveal.results[fromId];
+      delete order.reveal.results[fromId];
     }
     if (!evictHolder) return rekeyed;
     for (const ws of this.ctx.getWebSockets()) {
@@ -576,4 +794,16 @@ export class BuzzerRoom extends DurableObject<Env> {
   private sendError(ws: WebSocket, code: BuzzerErrorCode, message: string): void {
     this.send(ws, { type: "error", code, message });
   }
+}
+
+/** True when `ids` is the round's card ids, each exactly once, in any order. */
+function isArrangementOf(ids: unknown, cards: readonly OrderCard[]): ids is string[] {
+  if (!Array.isArray(ids) || ids.length !== cards.length) return false;
+  const want = new Set(cards.map((c) => c.id));
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (typeof id !== "string" || !want.has(id) || seen.has(id)) return false;
+    seen.add(id);
+  }
+  return true;
 }
