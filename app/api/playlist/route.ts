@@ -43,15 +43,18 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { url } = body as { url: string };
+    const { url, recheck } = body as { url: string; recheck?: unknown };
 
     if (!url || typeof url !== "string") {
       return errorResponse("missing_playlist_url", 400);
     }
 
+    // Strictly `true`: only the setup page's recheck button sends it, and a
+    // truthy string must not be a way past the negative cache.
     const { name, tracks, totalTracks, truncated } = await loadPlaylist(
       url,
-      "playlist-api"
+      "playlist-api",
+      { recheck: recheck === true }
     );
 
     if (tracks.length < 1) {

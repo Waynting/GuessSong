@@ -255,7 +255,12 @@ The cooldown in `lib/playlist-cache.ts` parks all *uncached* loads for the
 the tens of thousands of seconds), shared across instances via KV. The key's
 own TTL is `COOLDOWN_PROBE_SECONDS` (15 min), so the gate re-probes on schedule
 and a refused probe rewrites the cooldown from a fresh header. Cached playlists
-keep serving throughout, so a party already mid-game is unaffected.
+keep serving throughout, so a party already mid-game is unaffected — and so do
+playlists loaded in the last week, past their 24h: while the cooldown, the spent
+flag or the warning flag is up, a stale copy is served without a call
+(`STALE_GRACE_SECONDS`). A host who reports "my playlist is missing the songs I
+added today" on a busy evening is reading that copy; it refreshes once the
+pressure lifts. `npm run stats` prints how many stale copies were handed out.
 
 If it is persistent rather than a spike, lower `SPOTIFY_MAX_LOADS_PER_MINUTE`.
 Its default of 40 is a guess — the right value depends on which quota tier the

@@ -200,6 +200,60 @@ export function playlistHelp(code: unknown, locale: ErrorLocale): PlaylistHelp |
 }
 
 /**
+ * The two buttons under a private-or-deleted refusal: open the playlist in
+ * Spotify, and check again once it is public.
+ *
+ * The private refusal recovered 18.4% of the time in the week to 2026-10-13,
+ * the lowest of the four, on ~460 refused pages a day. The step above told
+ * the host to make the playlist public and copy the link again, and then the
+ * site could not hear that they had: the setup page replays a refusal for an
+ * identical link without asking (`lastRejectedRef`), and the server replayed
+ * its cached 404 for ten minutes behind it. The open link is the other half —
+ * on a phone it lands in the Spotify app on that playlist, which is where the
+ * setting is, instead of leaving the host to find it from the library.
+ *
+ * Offered only for the `private` topic and only when the field still holds a
+ * playlist link, because "check again" means "the same link, asked again".
+ */
+export interface RecheckOffer {
+  /** `https://open.spotify.com/playlist/<id>` — never the pasted text. */
+  openHref: string;
+  openLabel: string;
+  recheckLabel: string;
+  checkingLabel: string;
+  /** Shown once a recheck has come back private again. */
+  stillPrivate: string;
+}
+
+const RECHECK_COPY: Record<
+  ErrorLocale,
+  Omit<RecheckOffer, "openHref">
+> = {
+  en: {
+    openLabel: "Open it in Spotify",
+    recheckLabel: "I made it public — try again",
+    checkingLabel: "Checking…",
+    stillPrivate:
+      "Spotify still says it's private. It can take a minute to catch up after you change it — try again shortly.",
+  },
+  zh: {
+    openLabel: "在 Spotify 打開",
+    recheckLabel: "我設成公開了，再試一次",
+    checkingLabel: "確認中…",
+    stillPrivate: "Spotify 那邊還顯示是私人歌單。改完設定後有時要等一分鐘才會更新，稍等再試一次。",
+  },
+};
+
+export function recheckOffer(
+  code: unknown,
+  playlistUrl: string | null,
+  locale: ErrorLocale
+): RecheckOffer | null {
+  if (playlistHelpTopic(code) !== "private" || !playlistUrl) return null;
+  return { openHref: playlistUrl, ...RECHECK_COPY[locale] };
+}
+
+/**
  * The warning under the field when the link typed is one of Spotify's own.
  *
  * It used to read "may not work". The server refuses these every single time

@@ -78,6 +78,7 @@ import { isPlaylistHelpTopic, type PlaylistHelpTopic } from "@/lib/playlist-help
 import { isGameMode, type GameMode } from "@/lib/game-session";
 import { isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
 import { isGameScored, isPlayerBand, type GameScored, type PlayerBand } from "@/lib/game-players";
+import { isArrival, type Arrival } from "@/lib/arrival";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
@@ -156,6 +157,7 @@ export type PulseEvent =
       source?: SetupSource;
       mode?: GameMode;
       players?: PlayerBand;
+      from?: Arrival;
     }
   | {
       kind: "game_finished";
@@ -235,7 +237,10 @@ export function parsePulse(body: unknown): PulseEvent | null {
     const moded = isGameMode(raw.mode) ? { ...sourced, mode: raw.mode } : sourced;
     // And the scoreboard's band, under the same trade: `game_players:${value}`
     // is a key, and an older page sends none.
-    return isPlayerBand(raw.players) ? { ...moded, players: raw.players } : moded;
+    const banded = isPlayerBand(raw.players) ? { ...moded, players: raw.players } : moded;
+    // Where the tab came from (lib/arrival.ts), once more under the same
+    // trade: `new_host_from:${value}` is a key, and an older page sends none.
+    return isArrival(raw.from) ? { ...banded, from: raw.from } : banded;
   }
 
   if (raw.kind === "game_finished") {

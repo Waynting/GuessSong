@@ -5,6 +5,7 @@ import { ERROR_LOCALES } from "@/lib/error-messages";
 import { LOOP_SURFACES } from "@/lib/loop-links";
 import { QUIZ_VERDICTS } from "@/lib/quiz";
 import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
+import { ARRIVALS } from "@/lib/arrival";
 
 const kv = vi.hoisted(() => ({
   incrs: [] as Array<{ key: string; ttl: number; by?: number }>,
@@ -50,6 +51,7 @@ const {
   PLAYLIST_REFUSAL_CODES,
   PLAYLIST_INVALID_KINDS,
   SHORTLINK_OUTCOMES,
+  PLAYLIST_RECHECK_OUTCOMES,
   QUIZ_STAGES,
   QUIZ_LENGTH_STAGES,
   QUIZ_HINT_OUTCOMES,
@@ -62,6 +64,7 @@ const {
   recordPlaylistRefused,
   recordPlaylistInvalid,
   recordShortlinkOutcome,
+  recordPlaylistRecheck,
   recordQuizShare,
   recordQuizStage,
   recordQuizVerdict,
@@ -126,6 +129,12 @@ describe("the key format is the contract between writer and reader", () => {
       kv.incrs = [];
       await recordGameStart(1, undefined, undefined, mode);
       expect(keysWritten()).toContain(expected.gameMode[mode]);
+    }
+
+    for (const from of ARRIVALS) {
+      kv.incrs = [];
+      await recordGameStart(1, undefined, undefined, undefined, undefined, from);
+      expect(keysWritten()).toContain(expected.newHostFrom[from]);
     }
 
     for (const verdict of ORDER_VERDICTS) {
@@ -646,6 +655,30 @@ describe("playlist refusals and quiz shares", () => {
       await recordPlaylistInvalid(kind as never);
       expect(kv.incrs).toEqual([]);
     }
+  });
+
+  it("keys an arrival only on a device's first game, and only from the closed set", async () => {
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    kv.incrs = [];
+    await recordGameStart(2, undefined, undefined, undefined, undefined, "google");
+    expect(keysWritten()).not.toContain(keys.newHostFrom.google);
+    kv.incrs = [];
+    await recordGameStart(1, undefined, undefined, undefined, undefined, "https://evil.example" as never);
+    expect(keysWritten().some((k) => k.includes("new_host_from"))).toBe(false);
+  });
+
+  it("keys a recheck by how it came out, from a closed set", async () => {
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    expect(Object.keys(keys.playlistRecheck)).toHaveLength(PLAYLIST_RECHECK_OUTCOMES.length);
+    for (const outcome of PLAYLIST_RECHECK_OUTCOMES) {
+      kv.incrs = [];
+      await recordPlaylistRecheck(outcome);
+      expect(keys.playlistRecheck[outcome]).toBe(`loop:stats:2026-08-09:playlist_recheck:${outcome}`);
+      expect(keysWritten()).toContain(keys.playlistRecheck[outcome]);
+    }
+    kv.incrs = [];
+    await recordPlaylistRecheck("public" as never);
+    expect(kv.incrs).toEqual([]);
   });
 
   it("keys a followed short link by how it came out, from a closed set", async () => {

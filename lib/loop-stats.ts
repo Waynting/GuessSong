@@ -44,6 +44,7 @@ import { RECOVERY_STAGES, type RecoveryStage } from "@/lib/refusal-recovery";
 import { SETUP_SOURCES, isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { GAME_MODES, isGameMode, type GameMode } from "@/lib/game-session";
 import { ORDER_VERDICTS, isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
+import { ARRIVALS, isArrival, type Arrival } from "@/lib/arrival";
 import {
   GAME_SCORED,
   PLAYER_BANDS,
@@ -445,6 +446,28 @@ export const SHORTLINK_OUTCOMES: readonly ShortlinkOutcome[] = [
 ];
 
 /**
+ * How the "I made it public — check again" button came out, one per press
+ * that reached the server (`LoadOptions.recheck` in `lib/playlist-cache.ts`).
+ *
+ *   found    the playlist loaded: the host fixed it, and we let them through
+ *   missing  still a 404 — Spotify's, or ours replayed because the last one
+ *            is seconds old
+ *   other    nothing about the playlist: throttled, or the field now holds
+ *            something that is not a playlist link
+ *
+ * `found` against the private refusals is the share of hosts the button gets
+ * past the refusal; a pile at `missing` is hosts who pressed it without the
+ * playlist having changed, or Spotify being slower to agree than the button.
+ */
+export type PlaylistRecheckOutcome = "found" | "missing" | "other";
+
+export const PLAYLIST_RECHECK_OUTCOMES: readonly PlaylistRecheckOutcome[] = [
+  "found",
+  "missing",
+  "other",
+];
+
+/**
  * Which of Mixed Playlist Mode's two collection routes built a game's pool.
  *
  * Lives here rather than in `lib/pulse.ts` for the same reason
@@ -754,6 +777,8 @@ export function loopStatsKeys(
   gameEndRound: string[];
   playlistInvalid: Record<PlaylistInvalidKind, string>;
   playlistShortlink: Record<ShortlinkOutcome, string>;
+  playlistRecheck: Record<PlaylistRecheckOutcome, string>;
+  newHostFrom: Record<Arrival, string>;
   gameEndHost: Record<GameHostKind, Record<GameEnd, string>>;
   gameEndEarly: Record<GameHostKind, Record<EarlyEndBand, string>>;
   gameEndScreen: Record<GameScreen, string>;
@@ -909,6 +934,12 @@ export function loopStatsKeys(
     playlistShortlink: Object.fromEntries(
       SHORTLINK_OUTCOMES.map((o) => [o, key(day, `playlist_shortlink:${o}`)])
     ) as Record<ShortlinkOutcome, string>,
+    playlistRecheck: Object.fromEntries(
+      PLAYLIST_RECHECK_OUTCOMES.map((o) => [o, key(day, `playlist_recheck:${o}`)])
+    ) as Record<PlaylistRecheckOutcome, string>,
+    newHostFrom: Object.fromEntries(
+      ARRIVALS.map((a) => [a, key(day, `new_host_from:${a}`)])
+    ) as Record<Arrival, string>,
     mixedPool: {
       room: key(day, "mixed_pool:room"),
       phone: key(day, "mixed_pool:phone"),
@@ -1076,7 +1107,8 @@ export async function recordGameStart(
   mixed?: MixedSubMode,
   source?: SetupSource,
   mode?: GameMode,
-  players?: PlayerBand
+  players?: PlayerBand,
+  from?: Arrival
 ): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
@@ -1099,6 +1131,9 @@ export async function recordGameStart(
   if (isGameMode(mode)) await bump(`game_mode:${mode}`);
   // How many the game was for — the denominator for the end and leave rows.
   if (isPlayerBand(players)) await bump(`game_players:${players}`);
+  // Where a first-time host came from (lib/arrival.ts). A first game only —
+  // one command on ~40% of starts — because the question is who is arriving.
+  if (index === 1 && isArrival(from)) await bump(`new_host_from:${from}`);
 }
 
 /**
@@ -1316,6 +1351,12 @@ export async function recordPlaylistInvalid(kind: PlaylistInvalidKind): Promise<
 export function recordShortlinkOutcome(outcome: ShortlinkOutcome): Promise<void> {
   if (!SHORTLINK_OUTCOMES.includes(outcome)) return Promise.resolve();
   return bump(`playlist_shortlink:${outcome}`);
+}
+
+/** An explicit recheck of a refused playlist, by how it came out. */
+export function recordPlaylistRecheck(outcome: PlaylistRecheckOutcome): Promise<void> {
+  if (!PLAYLIST_RECHECK_OUTCOMES.includes(outcome)) return Promise.resolve();
+  return bump(`playlist_recheck:${outcome}`);
 }
 
 /**

@@ -38,6 +38,7 @@ import type { PlaylistHelpTopic } from "@/lib/playlist-help";
 import type { GameMode } from "@/lib/game-session";
 import type { OrderVerdict } from "@/lib/order-game";
 import type { GameScored, PlayerBand } from "@/lib/game-players";
+import type { Arrival } from "@/lib/arrival";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
 
@@ -113,7 +114,8 @@ export function reportGameStart(
   mixed?: MixedSubMode,
   source?: SetupSource,
   mode?: GameMode,
-  players?: PlayerBand
+  players?: PlayerBand,
+  from?: Arrival
 ): void {
   sendPulse({
     kind: "game_started",
@@ -122,6 +124,9 @@ export function reportGameStart(
     ...(source ? { source } : {}),
     ...(mode ? { mode } : {}),
     ...(players ? { players } : {}),
+    // A first game only: the server keys nothing else, so a returning host's
+    // beacon carries no referrer-derived field at all.
+    ...(from && hostGameIndex === 1 ? { from } : {}),
   });
 }
 

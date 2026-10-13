@@ -143,8 +143,8 @@ So each cache is four layers, and they read the same way on purpose:
 | Called once per | playlist | **track** |
 | Cold 50-song game | 1 load | **50 lookups, up to 5 calls each** |
 | Budget env var | `SPOTIFY_MAX_LOADS_PER_MINUTE` (40) | `PREVIEW_MAX_LOOKUPS_PER_MINUTE` (120) |
-| Positive TTL | 24h (1h if sampled) | 1 year |
-| Negative TTL | 10 min | 1 week (`absent`) / **90s** (`unavailable`) |
+| Positive TTL | 24h fresh (1h if sampled), then kept 6 more days and served only when Spotify cannot be asked | 1 year |
+| Negative TTL | 10 min, or 15s for the private refusal's explicit recheck | 1 week (`absent`) / **90s** (`unavailable`) |
 
 **Every layer fails open.** Losing the safety net must mean "back to how it was",
 never "nobody can play".

@@ -20,6 +20,7 @@ import { NO_REFUSAL, noteFailure, noteStart, type RecoveryState } from "@/lib/re
 import { showMixedNudge } from "@/lib/mixed-nudge";
 import { REMOTE_DOOR_COPY } from "@/lib/remote-door";
 import { playerBand } from "@/lib/game-players";
+import { currentArrival } from "@/lib/arrival";
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
 import {
   AppError,
@@ -33,6 +34,7 @@ import {
   failureFor,
   failureOf,
   playlistHelp,
+  recheckOffer,
   type SetupFailure,
 } from "@/lib/playlist-help";
 import { isEditorialLink, playlistIdOf, playlistUrlOf } from "@/lib/playlist-ref";
@@ -59,6 +61,7 @@ import {
   EditorialWarning,
   PlaylistChips,
   PlaylistHelpLine,
+  PrivateRecheck,
   RecallNote,
   SetupAssistStyles,
 } from "@/components/setup-assist";
@@ -230,6 +233,10 @@ export default function SetupPage() {
   // The sentence and the code it came from, together. The code is what lets
   // the box say what to do next; see `SetupFailure` in lib/playlist-help.ts.
   const [failure, setFailure] = useState<SetupFailure | null>(null);
+  // The private refusal's "try again" (lib/playlist-help.ts `recheckOffer`):
+  // in flight, and whether the last one came back private again.
+  const [rechecking, setRechecking] = useState(false);
+  const [rechecked, setRechecked] = useState(false);
   // Both empty until the mount effect has read storage: the page is
   // prerendered, and the server has no idea what this device remembers.
   const [recentPlaylists, setRecentPlaylists] = useState<RecentPlaylist[]>([]);
@@ -587,7 +594,7 @@ export default function SetupPage() {
   function recordHostedStart(mixed: MixedSubMode | undefined, mode: GameMode, playerCount: number) {
     const hostGameIndex = bumpHostGameCount();
     const setupSource = setupSourceFor(Boolean(mixed));
-    reportGameStart(hostGameIndex, mixed, setupSource, mode, playerBand(playerCount));
+    reportGameStart(hostGameIndex, mixed, setupSource, mode, playerBand(playerCount), currentArrival());
     const recovery = noteStart(recoveryRef.current, setupSource);
     recoveryRef.current = recovery.state;
     if (recovery.report) reportRefusalRecovered(recovery.report.topic, recovery.report.via);
@@ -625,8 +632,15 @@ export default function SetupPage() {
     setPlayers((p) => p.map((v, i) => (i === idx ? val : v)));
   }
 
-  async function handleStart() {
+  /**
+   * `recheck` is the private refusal's button: the same link asked again past
+   * both memos — the page's own and the server's cached 404. Start never sends
+   * it, so a mashed Start still costs no request.
+   */
+  async function handleStart(opts?: { recheck?: boolean }) {
+    const recheck = opts?.recheck === true;
     setFailure(null);
+    setRechecked(false);
     const validPlayers = players.filter((p) => p.trim());
     if (!playlistUrl.trim()) {
       setFailure(failureFor("playlist_url_required", locale));
@@ -651,17 +665,18 @@ export default function SetupPage() {
     // already looking at, and the fix is still to change the link.
     const submissionKey = `own:${playlistUrl}`;
     const rejected = lastRejectedRef.current;
-    if (rejected && rejected.key === submissionKey) {
+    if (!recheck && rejected && rejected.key === submissionKey) {
       setFailure(rejected.failure);
       return;
     }
     setLoading(true);
+    setRechecking(recheck);
     trackEvent("playlist_submitted", { playlist_source: "own" });
     try {
       const res = await fetch("/api/playlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: playlistUrl }),
+        body: JSON.stringify(recheck ? { url: playlistUrl, recheck: true } : { url: playlistUrl }),
       });
       const data = await res.json();
       if (!res.ok) throw apiError(data, "playlist_load_failed");
@@ -747,9 +762,11 @@ export default function SetupPage() {
       lastRejectedRef.current = shouldRememberRejection(e)
         ? { key: submissionKey, failure: failed }
         : null;
+      if (recheck && failed.code === "playlist_not_found") setRechecked(true);
       showFailure(failed);
     } finally {
       setLoading(false);
+      setRechecking(false);
     }
   }
 
@@ -967,6 +984,16 @@ export default function SetupPage() {
   // What goes under the error's sentence: null for every failure that is not
   // the link's own fault, which is most of them and all of the throttling ones.
   const help = failure ? playlistHelp(failure.code, locale) : null;
+  // Single playlist only: the button re-runs `handleStart`, and a Mixed
+  // refusal names a contributor's link, not the one in this field.
+  const recheck =
+    failure && setupMode === "single"
+      ? recheckOffer(
+          failure.code,
+          currentPlaylistId ? playlistUrlOf(currentPlaylistId) : null,
+          locale
+        )
+      : null;
   // Null while lib/starter-playlists.ts ships an empty list, so nothing below
   // that reads it renders.
   const starterPlace = starterPlacement({
@@ -1415,7 +1442,7 @@ export default function SetupPage() {
                 button says what it does; what it is waiting for goes on the
                 line under it. */}
             <div>
-              <button className="start-btn" onClick={startClick} disabled={startState_.disabled}>
+              <button className="start-btn" onClick={() => startClick()} disabled={startState_.disabled}>
                 {startBusy ? (
                   <>
                     <span className="spinner" />
@@ -1451,6 +1478,14 @@ export default function SetupPage() {
                 >
                   <p>{failure.message}</p>
                   {help && <PlaylistHelpLine help={help} />}
+                  {recheck && (
+                    <PrivateRecheck
+                      offer={recheck}
+                      checking={rechecking}
+                      rechecked={rechecked}
+                      onRecheck={() => handleStart({ recheck: true })}
+                    />
+                  )}
                 </div>
               )}
               {starterPlace === "refusal" && starterChips}

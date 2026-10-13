@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A loaded playlist is kept a week, and served past its 24h when Spotify
+  cannot be asked** (`lib/playlist-cache.ts`, `STALE_GRACE_SECONDS`). From
+  2026-10-07 the site ran ~5,000 games a day against the 2,000-load daily
+  ceiling, and on 2026-10-08 the misses came to exactly 2,000 — the gate shut
+  that evening. Freshness is unchanged (`freshUntil`, 24h; 1h sampled); the key
+  now lives six days longer, and a copy past its freshness is served without a
+  call while the cooldown, the spent flag or the warning flag is up, and as the
+  fallback when a refresh is refused for any reason but a 404. Otherwise it is
+  refreshed. Entries from before carry no `freshUntil` and stay fresh for their
+  own TTL, so `CACHE_VERSION` stays `v1`. Storage: ~48KB × ~1,100 entries a day.
+  - Counted: `playlist:stats:<day>:stale` (also in `hit`) and `:refreshed`
+    (also in `miss` — the misses a longer TTL would have saved, the number to
+    decide that on). `npm run stats` prints both under the cache table;
+    `getCacheStats()` returns them and now reads its five keys in one `mget`.
+- **"I made it public — try again" under a private-playlist refusal**
+  (`recheckOffer` in `lib/playlist-help.ts`, `PrivateRecheck` in
+  `components/setup-assist.tsx`, `LoadOptions.recheck`). That refusal
+  recovered 18.4% of the time on ~460 pages a day, and part of why was ours:
+  the help line said to make the playlist public and try again, while the page
+  replayed the refusal for an identical link and the server replayed its 404
+  for ten minutes. The button goes past both — the server only for a 404 at
+  least 15s old, so it cannot become a burst; Start still replays. Beside it,
+  "Open it in Spotify" links `open.spotify.com/playlist/<id>`, which a phone
+  hands to the app. Bilingual; single-playlist form only.
+  - Counted: `playlist_recheck:<found|missing|other>`, printed under "After a
+    refusal on setup".
+- **Where a first-time host came from** (`lib/arrival.ts`,
+  `new_host_from:<arrival>`). The 2026-10-07 step — games ×3.5, first-time
+  hosts ×3, sustained — had nothing in KV to explain it. A device's first game
+  now carries its referrer reduced to one of a closed set (google, bing, yahoo,
+  duckduckgo, naver, facebook, instagram, threads, x, line, reddit, youtube,
+  tiktok, chatgpt, perplexity, external, internal, none); the referrer itself
+  never leaves the module. `npm run stats` prints it under the host-number
+  histogram. One extra command on ~40% of starts.
+
 - **Put them in order: drag the cards, and the reveal marks them**
   (`app/order/page.tsx`, rules in `lib/order-game.ts`: `moveCard`, `dropSlot`,
   `readArrangement`). Face down, a card is picked up anywhere and dragged by

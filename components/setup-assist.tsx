@@ -19,7 +19,7 @@
  * press landing at once.
  */
 
-import type { PlaylistHelp } from "@/lib/playlist-help";
+import type { PlaylistHelp, RecheckOffer } from "@/lib/playlist-help";
 
 export function SetupAssistStyles() {
   return (
@@ -125,6 +125,38 @@ export function SetupAssistStyles() {
       @media (hover: hover) { .help-link:hover { opacity: 0.8; } }
       .help-link:active { opacity: 0.6; transition: none; }
       .help-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
+
+      /* Under a private refusal. Both are real buttons-sized targets: the
+         host is on a phone, about to switch to Spotify and back. */
+      .recheck-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .recheck-btn {
+        display: inline-flex;
+        align-items: center;
+        min-height: 36px;
+        padding: 6px 14px;
+        border-radius: 999px;
+        border: 1.5px solid rgba(252,165,165,0.5);
+        background: transparent;
+        color: #fca5a5;
+        font-family: 'Outfit', sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .recheck-btn.primary { background: rgba(252,165,165,0.14); }
+      .recheck-btn:disabled { opacity: 0.6; cursor: default; }
+      @media (hover: hover) { .recheck-btn:hover:not(:disabled) { border-color: #fca5a5; } }
+      .recheck-btn:active { transform: scale(0.96); transition: none; }
+      .recheck-btn:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+      .recheck-note { margin-top: 8px; color: #fcd34d; }
 
       .editorial-warning {
         margin-top: 8px;
@@ -250,6 +282,36 @@ export function PlaylistHelpLine({ help }: { help: PlaylistHelp }) {
         </>
       )}
     </p>
+  );
+}
+
+/**
+ * Open the playlist in Spotify, then ask again. The open link is a new tab for
+ * `PlaylistHelpLine`'s reason; on a phone it hands over to the Spotify app.
+ */
+export function PrivateRecheck({
+  offer,
+  checking,
+  rechecked,
+  onRecheck,
+}: {
+  offer: RecheckOffer;
+  checking: boolean;
+  rechecked: boolean;
+  onRecheck: () => void;
+}) {
+  return (
+    <>
+      <div className="recheck-row">
+        <a className="recheck-btn" href={offer.openHref} target="_blank" rel="noopener">
+          {offer.openLabel} ↗
+        </a>
+        <button type="button" className="recheck-btn primary" disabled={checking} onClick={onRecheck}>
+          {checking ? offer.checkingLabel : offer.recheckLabel}
+        </button>
+      </div>
+      {rechecked && !checking && <p className="recheck-note">{offer.stillPrivate}</p>}
+    </>
   );
 }
 
