@@ -2,7 +2,15 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { NO_REFUSAL, noteFailure, noteStart, RECOVERY_STAGES } from "@/lib/refusal-recovery";
+import {
+  NO_REFUSAL,
+  noteFailure,
+  noteStart,
+  parseRecovery,
+  RECOVERY_CARRY_MS,
+  RECOVERY_STAGES,
+  serializeRecovery,
+} from "@/lib/refusal-recovery";
 import { PLAYLIST_HELP_BY_CODE, PLAYLIST_HELP_TOPIC_NAMES, PLAYLIST_HELP_TOPICS } from "@/lib/playlist-help";
 import { loopStatsKeys, recordRefusalRecovery, SETUP_SOURCES } from "@/lib/loop-stats";
 import { parsePulse } from "@/lib/pulse";
@@ -89,6 +97,52 @@ describe("the wire and the counters", () => {
   });
 });
 
+describe("carried across a reload of the same tab", () => {
+  const NOW = Date.parse("2026-10-17T12:00:00Z");
+
+  it("round-trips an unrecovered refusal, and carries nothing once it recovered", () => {
+    const refused = noteFailure(NO_REFUSAL, "playlist_not_found").state;
+    expect(parseRecovery(serializeRecovery(refused, NOW), NOW + 60_000)).toEqual(refused);
+    // Play Again returns to / in the same tab: the next refusal there is a new one.
+    const recovered = noteStart(refused, "typed").state;
+    expect(serializeRecovery(recovered, NOW)).toBeNull();
+    const next = parseRecovery(serializeRecovery(recovered, NOW), NOW + 60_000);
+    expect(noteFailure(next, "playlist_not_found").report).toBe("private");
+  });
+
+  it("so a reload's second refusal is not counted again, and its start is", () => {
+    const before = noteFailure(NO_REFUSAL, "playlist_not_found").state;
+    const afterReload = parseRecovery(serializeRecovery(before, NOW), NOW + 120_000);
+    expect(noteFailure(afterReload, "playlist_not_found").report).toBeNull();
+    expect(noteStart(afterReload, "typed").report).toEqual({ topic: "private", via: "typed" });
+  });
+
+  it("stores nothing for no refusal, and reads anything off as no refusal", () => {
+    expect(serializeRecovery(NO_REFUSAL, NOW)).toBeNull();
+    const old = serializeRecovery(noteFailure(NO_REFUSAL, "playlist_not_found").state, NOW);
+    expect(parseRecovery(old, NOW + RECOVERY_CARRY_MS + 1)).toEqual(NO_REFUSAL);
+    expect(parseRecovery(old, NOW - 1)).toEqual(NO_REFUSAL);
+    // Each row is fresh, so the field it is about is the only thing wrong with it.
+    for (const raw of [
+      null,
+      "",
+      "{",
+      "null",
+      "[]",
+      `{"refusedWith":"private"}`,
+      ...["constructor", "__proto__", "toString", "nope"].map((t) => JSON.stringify({ refusedWith: t, at: NOW })),
+      JSON.stringify({ refusedWith: "private", recovered: true, at: NOW }),
+    ]) {
+      expect(parseRecovery(raw, NOW), String(raw)).toEqual(NO_REFUSAL);
+    }
+    // Only a literal true is "recovered"; anything else reads as not recovered.
+    expect(parseRecovery(JSON.stringify({ refusedWith: "private", recovered: "true", at: NOW }), NOW)).toEqual({
+      refusedWith: "private",
+      recovered: false,
+    });
+  });
+});
+
 describe("the setup page's wiring", () => {
   const body = code(read("app/page.tsx"));
 
@@ -97,6 +151,11 @@ describe("the setup page's wiring", () => {
     expect(body.match(/showFailure\(failed\)/g) ?? []).toHaveLength(2);
     const show = body.slice(body.indexOf("function showFailure("));
     expect(show.slice(0, 300)).toMatch(/noteFailure\(recoveryRef\.current, failed\.code\)/);
+  });
+
+  it("reads the carried state on mount and writes it through sessionStorage's guard", () => {
+    expect(body).toMatch(/recoveryRef\.current = parseRecovery\(readSessionStored\(RECOVERY_STORAGE_KEY\)\)/);
+    expect(body).not.toMatch(/window\.sessionStorage/);
   });
 
   it("credits a recovery where every hosted start is counted", () => {

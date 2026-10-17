@@ -19,7 +19,7 @@
  * press landing at once.
  */
 
-import type { PlaylistHelp, RecheckOffer } from "@/lib/playlist-help";
+import type { PlaylistHelp, RecheckNote, RecheckOffer } from "@/lib/playlist-help";
 
 export function SetupAssistStyles() {
   return (
@@ -157,6 +157,7 @@ export function SetupAssistStyles() {
       .recheck-btn:active { transform: scale(0.96); transition: none; }
       .recheck-btn:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
       .recheck-note { margin-top: 8px; color: #fcd34d; }
+      .recheck-note:empty { margin-top: 0; }
 
       .editorial-warning {
         margin-top: 8px;
@@ -292,12 +293,14 @@ export function PlaylistHelpLine({ help }: { help: PlaylistHelp }) {
 export function PrivateRecheck({
   offer,
   checking,
-  rechecked,
+  note,
   onRecheck,
 }: {
   offer: RecheckOffer;
+  /** The button's own check is in flight. */
   checking: boolean;
-  rechecked: boolean;
+  /** The line under the buttons, or none. */
+  note: RecheckNote | null;
   onRecheck: () => void;
 }) {
   return (
@@ -310,7 +313,13 @@ export function PrivateRecheck({
           {checking ? offer.checkingLabel : offer.recheckLabel}
         </button>
       </div>
-      {rechecked && !checking && <p className="recheck-note">{offer.stillPrivate}</p>}
+      {/* Mounted with the refusal box, so its first line is read as part of
+          the alert; every change after that is announced politely and on its
+          own (atomic) — the automatic check's lines arrive with nobody
+          pressing anything, and must not re-read the whole box. */}
+      <p className="recheck-note" aria-live="polite" aria-atomic="true">
+        {note && !checking ? offer.notes[note] : null}
+      </p>
     </>
   );
 }

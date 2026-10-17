@@ -71,6 +71,31 @@ export function removeStored(key: string): void {
   withStorage((storage) => storage.removeItem(key), undefined);
 }
 
+/**
+ * The same three for `sessionStorage` — this tab only, gone when it closes.
+ * Same guard: the access itself throws in a locked-down browser.
+ */
+function withSessionStorage<T>(fn: (storage: Storage) => T, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    return fn(window.sessionStorage);
+  } catch {
+    return fallback;
+  }
+}
+
+export function readSessionStored(key: string): string | null {
+  return withSessionStorage((storage) => storage.getItem(key), null);
+}
+
+export function writeSessionStored(key: string, value: string): void {
+  withSessionStorage((storage) => storage.setItem(key, value), undefined);
+}
+
+export function removeSessionStored(key: string): void {
+  withSessionStorage((storage) => storage.removeItem(key), undefined);
+}
+
 /** Games this device has hosted so far. 0 before the first one. */
 export function getHostGameCount(): number {
   return withStorage((storage) => {
