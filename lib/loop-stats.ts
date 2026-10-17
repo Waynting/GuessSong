@@ -453,24 +453,34 @@ export const SHORTLINK_OUTCOMES: readonly ShortlinkOutcome[] = [
 ];
 
 /**
- * How the "I made it public — check again" button came out, one per press
- * that reached the server (`LoadOptions.recheck` in `lib/playlist-cache.ts`).
+ * How a recheck of a private refusal came out, one per request that reached
+ * the server (`LoadOptions.recheck` in `lib/playlist-cache.ts`). The button's
+ * are `playlist_recheck:<outcome>`; the setup page's own, sent once half a
+ * minute after the refusal (`LoadOptions.automatic`), are
+ * `playlist_autocheck:<outcome>`, so one cannot be read as the other.
  *
- *   found    the playlist loaded: the host fixed it, and we let them through
- *   missing  still a 404 — Spotify's, or ours replayed because the last one
- *            is seconds old
- *   other    nothing about the playlist: throttled, or the field now holds
- *            something that is not a playlist link
+ *   found     the playlist loaded: it is public now. For the button that is
+ *             the Start going through; for the automatic check it is a
+ *             "press Start" line and no game — whether they then played is
+ *             `refusal_recovery:recovered`
+ *   missing   Spotify asked, still a 404
+ *   replayed  Spotify not asked: our 404 was seconds old, or (automatic only)
+ *             Spotify was under pressure — until 2026-10-17 this was in missing
+ *   other     nothing about the playlist: throttled, the field now holds
+ *             something that is not a playlist link, or it loaded empty (the
+ *             automatic check's empty load is here only, never in
+ *             `playlist_refused:playlist_empty`)
  *
- * `found` against the private refusals is the share of hosts the button gets
- * past the refusal; a pile at `missing` is hosts who pressed it without the
- * playlist having changed, or Spotify being slower to agree than the button.
+ * `found` against the private refusals is the share of hosts a recheck gets
+ * past the refusal; a pile at `missing` is a playlist that really is private,
+ * or Spotify being slower to agree than the recheck.
  */
-export type PlaylistRecheckOutcome = "found" | "missing" | "other";
+export type PlaylistRecheckOutcome = "found" | "missing" | "replayed" | "other";
 
 export const PLAYLIST_RECHECK_OUTCOMES: readonly PlaylistRecheckOutcome[] = [
   "found",
   "missing",
+  "replayed",
   "other",
 ];
 
@@ -785,6 +795,7 @@ export function loopStatsKeys(
   playlistInvalid: Record<PlaylistInvalidKind, string>;
   playlistShortlink: Record<ShortlinkOutcome, string>;
   playlistRecheck: Record<PlaylistRecheckOutcome, string>;
+  playlistAutocheck: Record<PlaylistRecheckOutcome, string>;
   newHostFrom: Record<Arrival, string>;
   gameEndHost: Record<GameHostKind, Record<GameEnd, string>>;
   gameEndEarly: Record<GameHostKind, Record<EarlyEndBand, string>>;
@@ -951,6 +962,9 @@ export function loopStatsKeys(
     ) as Record<ShortlinkOutcome, string>,
     playlistRecheck: Object.fromEntries(
       PLAYLIST_RECHECK_OUTCOMES.map((o) => [o, key(day, `playlist_recheck:${o}`)])
+    ) as Record<PlaylistRecheckOutcome, string>,
+    playlistAutocheck: Object.fromEntries(
+      PLAYLIST_RECHECK_OUTCOMES.map((o) => [o, key(day, `playlist_autocheck:${o}`)])
     ) as Record<PlaylistRecheckOutcome, string>,
     newHostFrom: Object.fromEntries(
       ARRIVALS.map((a) => [a, key(day, `new_host_from:${a}`)])
@@ -1390,10 +1404,13 @@ export function recordShortlinkOutcome(outcome: ShortlinkOutcome): Promise<void>
   return bump(`playlist_shortlink:${outcome}`);
 }
 
-/** An explicit recheck of a refused playlist, by how it came out. */
-export function recordPlaylistRecheck(outcome: PlaylistRecheckOutcome): Promise<void> {
+/** A recheck of a refused playlist, by how it came out and who sent it. */
+export function recordPlaylistRecheck(
+  outcome: PlaylistRecheckOutcome,
+  automatic = false
+): Promise<void> {
   if (!PLAYLIST_RECHECK_OUTCOMES.includes(outcome)) return Promise.resolve();
-  return bump(`playlist_recheck:${outcome}`);
+  return bump(`${automatic ? "playlist_autocheck" : "playlist_recheck"}:${outcome}`);
 }
 
 /**

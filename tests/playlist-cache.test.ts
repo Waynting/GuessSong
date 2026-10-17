@@ -1351,13 +1351,15 @@ describe("rechecking a playlist the host has just made public", () => {
     vi.useRealTimers();
   });
 
-  const recheckCounts = () =>
+  const counts = (prefix: string) =>
     Object.fromEntries(
-      ["found", "missing", "other"].map((o) => [
+      ["found", "missing", "replayed", "other"].map((o) => [
         o,
-        (kv.mem.get(`loop:stats:2026-10-13:playlist_recheck:${o}`)?.value as number) ?? 0,
+        (kv.mem.get(`loop:stats:2026-10-13:${prefix}:${o}`)?.value as number) ?? 0,
       ])
     );
+  const recheckCounts = () => counts("playlist_recheck");
+  const autocheckCounts = () => counts("playlist_autocheck");
 
   it("goes past a cached 404 when asked to, and lets the host through", async () => {
     await expect(loadPlaylist(URL_A)).rejects.toThrow();
@@ -1388,7 +1390,108 @@ describe("rechecking a playlist the host has just made public", () => {
       });
     }
     expect(upstreamCalls()).toBe(1);
-    expect(recheckCounts()).toMatchObject({ missing: 5 });
+    // Spotify was never asked, so none of these say the playlist is still private.
+    expect(recheckCounts()).toMatchObject({ replayed: 5, missing: 0 });
+  });
+
+  it("counts the page's own recheck apart from the button, and lets the host through", async () => {
+    await expect(loadPlaylist(URL_A)).rejects.toThrow();
+    vi.setSystemTime(new Date(Date.now() + 30_000));
+    upstream().mockResolvedValue(upstreamResult(["a"]));
+
+    await expect(
+      loadPlaylist(URL_A, "playlist-api", { recheck: true, automatic: true })
+    ).resolves.toMatchObject({ totalTracks: 1 });
+    expect(upstreamCalls()).toBe(2);
+    expect(autocheckCounts()).toMatchObject({ found: 1 });
+    expect(recheckCounts()).toMatchObject({ found: 0, missing: 0, replayed: 0 });
+  });
+
+  it.each(["spotify:cooldown", "spotify:budget:spent", "spotify:budget:near"])(
+    "does not ask Spotify for the page's own recheck while %s is up",
+    async (pressureKey) => {
+      await expect(loadPlaylist(URL_A)).rejects.toThrow();
+      vi.setSystemTime(new Date(Date.now() + 30_000));
+      upstream().mockResolvedValue(upstreamResult(["a"]));
+      kv.mem.set(pressureKey, {
+        value: { until: Date.now() + 60 * 60_000 },
+        expiresAt: Date.now() + 60 * 60_000,
+      });
+
+      await expect(
+        loadPlaylist(URL_A, "playlist-api", { recheck: true, automatic: true })
+      ).rejects.toMatchObject({ code: "playlist_not_found" });
+      expect(upstreamCalls()).toBe(1);
+      expect(autocheckCounts()).toMatchObject({ replayed: 1 });
+    }
+  );
+
+  it("still lets the button through under pressure — that is the host asking", async () => {
+    await expect(loadPlaylist(URL_A)).rejects.toThrow();
+    vi.setSystemTime(new Date(Date.now() + 30_000));
+    upstream().mockResolvedValue(upstreamResult(["a"]));
+    kv.mem.set("spotify:budget:near", {
+      value: { until: Date.now() + 60 * 60_000 },
+      expiresAt: Date.now() + 60 * 60_000,
+    });
+    await expect(loadPlaylist(URL_A, "playlist-api", { recheck: true })).resolves.toMatchObject({
+      totalTracks: 1,
+    });
+  });
+
+  it("does not ask Spotify for the page's own recheck under pressure once its 404 has expired", async () => {
+    await expect(loadPlaylist(URL_A)).rejects.toThrow();
+    vi.setSystemTime(new Date(Date.now() + 11 * 60_000));
+    kv.mem.delete(`playlist:v1:${playlistId("a")}`);
+    upstream().mockResolvedValue(upstreamResult(["a"]));
+    kv.mem.set("spotify:budget:near", {
+      value: { until: Date.now() + 60 * 60_000 },
+      expiresAt: Date.now() + 60 * 60_000,
+    });
+    await expect(
+      loadPlaylist(URL_A, "playlist-api", { recheck: true, automatic: true })
+    ).rejects.toMatchObject({ code: "playlist_not_found" });
+    expect(upstreamCalls()).toBe(1);
+    expect(autocheckCounts()).toMatchObject({ replayed: 1 });
+  });
+
+  it("counts a recheck that loads an empty playlist as other, and the page's own as no refusal", async () => {
+    const emptyRefused = () =>
+      (kv.mem.get("loop:stats:2026-10-13:playlist_refused:playlist_empty")?.value as number) ?? 0;
+    await expect(loadPlaylist(URL_A)).rejects.toThrow();
+    vi.setSystemTime(new Date(Date.now() + 30_000));
+    upstream().mockResolvedValue(upstreamResult([]));
+    await expect(
+      loadPlaylist(URL_A, "playlist-api", { recheck: true, automatic: true })
+    ).resolves.toMatchObject({ totalTracks: 0 });
+    expect(autocheckCounts()).toMatchObject({ found: 0, other: 1 });
+    expect(emptyRefused()).toBe(0);
+  });
+
+  it("counts a too-young automatic recheck as the page's replayed, not the button's", async () => {
+    await expect(loadPlaylist(URL_A)).rejects.toThrow();
+    vi.setSystemTime(new Date(Date.now() + 5_000));
+    await expect(
+      loadPlaylist(URL_A, "playlist-api", { recheck: true, automatic: true })
+    ).rejects.toMatchObject({ code: "playlist_not_found" });
+    expect(upstreamCalls()).toBe(1);
+    expect(autocheckCounts()).toMatchObject({ replayed: 1, missing: 0 });
+    expect(recheckCounts()).toMatchObject({ replayed: 0, missing: 0 });
+  });
+
+  it("does not count the page's own refused recheck as another refusal", async () => {
+    const refused = () =>
+      (kv.mem.get("loop:stats:2026-10-13:playlist_refused:playlist_not_found")?.value as number) ?? 0;
+    await expect(loadPlaylist(URL_A)).rejects.toThrow();
+    expect(refused()).toBe(1);
+    vi.setSystemTime(new Date(Date.now() + 30_000));
+    await expect(
+      loadPlaylist(URL_A, "playlist-api", { recheck: true, automatic: true })
+    ).rejects.toMatchObject({ code: "playlist_not_found" });
+    expect(upstreamCalls()).toBe(2);
+    expect(autocheckCounts()).toMatchObject({ missing: 1 });
+    // One person told their link is dead, once.
+    expect(refused()).toBe(1);
   });
 
   it("asks Spotify again on a recheck after the wait, and counts a second refusal as missing", async () => {
@@ -1416,5 +1519,47 @@ describe("rechecking a playlist the host has just made public", () => {
 
     expect((await post({ url: URL_A, recheck: "true" })).status).toBe(404);
     expect((await post({ url: URL_A, recheck: true })).status).toBe(200);
+  });
+
+  it("takes the page's own recheck as the literal \"auto\", and counts it as automatic", async () => {
+    const post = (body: unknown) =>
+      postPlaylist(
+        new NextRequest("http://localhost/api/playlist", {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: { "content-type": "application/json", "x-forwarded-for": "10.9.9.8" },
+        })
+      );
+    await post({ url: URL_A });
+    vi.setSystemTime(new Date(Date.now() + 30_000));
+    upstream().mockResolvedValue(upstreamResult(["a"]));
+
+    expect((await post({ url: URL_A, recheck: "AUTO" })).status).toBe(404);
+    expect((await post({ url: URL_A, recheck: "auto" })).status).toBe(200);
+    expect(autocheckCounts()).toMatchObject({ found: 1 });
+  });
+
+  it("marks a recheck the cache answered without asking Spotify, and only that one", async () => {
+    const post = (body: unknown) =>
+      postPlaylist(
+        new NextRequest("http://localhost/api/playlist", {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: { "content-type": "application/json", "x-forwarded-for": "10.9.9.7" },
+        })
+      );
+    // The first refusal is Spotify's: no mark.
+    const first = await post({ url: URL_A });
+    expect(first.status).toBe(404);
+    expect((await first.json()).replayed).toBeUndefined();
+    // A recheck seconds later is our cached 404: marked.
+    const replayed = await post({ url: URL_A, recheck: true });
+    expect(replayed.status).toBe(404);
+    expect(await replayed.json()).toMatchObject({ code: "playlist_not_found", replayed: true });
+    // Past the wait Spotify is asked again and says 404 itself: no mark.
+    vi.setSystemTime(new Date(Date.now() + 30_000));
+    const asked = await post({ url: URL_A, recheck: true });
+    expect(asked.status).toBe(404);
+    expect((await asked.json()).replayed).toBeUndefined();
   });
 });

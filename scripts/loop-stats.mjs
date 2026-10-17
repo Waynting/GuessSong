@@ -1285,6 +1285,7 @@ const RENDERED_PREFIXES = [
   "playlist_invalid:",
   "playlist_shortlink:",
   "playlist_recheck:",
+  "playlist_autocheck:",
   "new_host_from:",
   "quiz:",
   "quiz_share:",
@@ -1527,21 +1528,36 @@ if (recRefused + recRecovered > 0) {
   }
   const via = SETUP_SOURCE_ORDER.map((s) => [s, get(`refusal_recovery_via:${s}`)]).filter(([, n]) => n > 0);
   if (via.length) console.log(`  got past it by: ${via.map(([s, n]) => `${s} ${n}`).join(" · ")}`);
-  // `playlist_recheck:<outcome>`, lib/loop-stats.ts — the private refusal's
-  // "I made it public — try again" button, per press that reached the server.
-  const recheck = ["found", "missing", "other"].map((o) => [o, get(`playlist_recheck:${o}`)]);
-  const rechecks = recheck.reduce((t, [, n]) => t + n, 0);
-  if (rechecks > 0) {
+  // `playlist_recheck:<outcome>` / `playlist_autocheck:<outcome>`,
+  // lib/loop-stats.ts — the private refusal's "I made it public — try again"
+  // button, and the setup page's own recheck half a minute after the refusal.
+  // `replayed` is our cached 404 handed back without asking Spotify; before
+  // 2026-10-17 it was counted in `missing`.
+  const RECHECK_OUTCOMES = ["found", "missing", "replayed", "other"];
+  const RECHECK_SPLIT_DAY = "2026-10-17";
+  for (const [prefix, label, gloss] of [
+    ["playlist_recheck", `"made it public" pressed`, "found is a host the button let through"],
+    ["playlist_autocheck", "checked again by itself", "found is the playlist public by the time we checked — they still press Start; whether they played is recovery above"],
+  ]) {
+    const rows = RECHECK_OUTCOMES.map((o) => [o, get(`${prefix}:${o}`)]);
+    const total = rows.reduce((t, [, n]) => t + n, 0);
+    if (total > 0) {
+      console.log(`  ${label} ${total}: ` + rows.map(([o, n]) => `${o} ${n}`).join(" · ") + ` — ${gloss}`);
+    }
+  }
+  if (since < RECHECK_SPLIT_DAY && get("playlist_recheck:missing") > 0) {
     console.log(
-      `  "made it public" pressed ${rechecks}: ` +
-        recheck.map(([o, n]) => `${o} ${n}`).join(" · ") +
-        ` — found is a host the button let through`
+      `  days before ${RECHECK_SPLIT_DAY} counted a replayed 404 as missing, and refusal recovery per page —\n` +
+        `  read both from \`npm run stats -- --since ${RECHECK_SPLIT_DAY}\``
     );
   }
   console.log(
-    "  how to read it: per page load, not per host — a host who reloads and tries\n" +
-      "  again is two pages. `starter` here is the chips under the error doing their job;\n" +
-      "  a low private-or-deleted rate is the help line not getting people unstuck."
+    "  how to read it: per browser tab — a refusal is carried across a reload since\n" +
+      "  2026-10-17, so a host who reloads after fixing it counts as recovered (before\n" +
+      "  that each reload was a new, unrecovered page). `starter` here is the chips under\n" +
+      "  the error doing their job; a low private-or-deleted rate is the help line not\n" +
+      "  getting people unstuck. Spotify keeps answering 404 for a while after a playlist\n" +
+      "  is made public, so `missing` on the button is partly Spotify being slow."
   );
 }
 
