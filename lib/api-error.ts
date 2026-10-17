@@ -19,6 +19,8 @@ export interface ErrorResponseOptions {
    * reads can never disagree.
    */
   retryAfter?: number;
+  /** See `ApiErrorBody.replayed`. */
+  replayed?: boolean;
 }
 
 export function errorResponse(
@@ -42,6 +44,7 @@ export function errorResponse(
       // The client re-renders from `code` in its own language, so it needs
       // the same values this English sentence was filled with.
       ...(options.params && Object.keys(options.params).length ? { params: options.params } : {}),
+      ...(options.replayed === true ? { replayed: true as const } : {}),
     },
     {
       status,

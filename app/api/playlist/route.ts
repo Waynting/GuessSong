@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { loadPlaylist } from "@/lib/playlist-cache";
+import { isReplayedRecheck, loadPlaylist } from "@/lib/playlist-cache";
 import { SpotifyApiError } from "@/lib/spotify";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
@@ -49,12 +49,15 @@ export async function POST(req: NextRequest) {
       return errorResponse("missing_playlist_url", 400);
     }
 
-    // Strictly `true`: only the setup page's recheck button sends it, and a
-    // truthy string must not be a way past the negative cache.
+    // Strictly `true` or `"auto"`: the setup page's recheck button sends the
+    // first, its own one-off recheck half a minute after a refusal the second
+    // (`LoadOptions.automatic`). Any other truthy value must not be a way past
+    // the negative cache.
+    const automatic = recheck === "auto";
     const { name, tracks, totalTracks, truncated } = await loadPlaylist(
       url,
       "playlist-api",
-      { recheck: recheck === true }
+      { recheck: recheck === true || automatic, automatic }
     );
 
     if (tracks.length < 1) {
@@ -72,6 +75,7 @@ export async function POST(req: NextRequest) {
       return errorResponse(err.code, status, {
         params: err.params,
         retryAfter: err.status === 429 ? err.retryAfterSeconds : undefined,
+        replayed: isReplayedRecheck(err),
       });
     }
 

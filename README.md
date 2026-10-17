@@ -4,7 +4,7 @@ A local party music guessing game powered by Spotify playlists. Live at **[guess
 
 No login, no accounts. The host pastes a public Spotify playlist URL, everyone guesses out loud, and the host awards points.
 
-Current version: **1.20.0** — see [CHANGELOG.md](./CHANGELOG.md).
+Current version: **1.21.0** — see [CHANGELOG.md](./CHANGELOG.md).
 
 ## How It Works
 
@@ -210,7 +210,7 @@ Every route is IP rate limited (`lib/rate-limit.ts`) with a fixed window; limits
 
 | Route | Method | Purpose | Limit |
 |---|---|---|---|
-| `/api/playlist` | POST | `{url}` → playlist name + tracks, via Spotify Client Credentials. Editorial playlists (IDs starting `37i9`) are rejected — they 404 for new apps. | 30 / 10 min |
+| `/api/playlist` | POST | `{url, recheck?}` → playlist name + tracks, via Spotify Client Credentials. Editorial playlists (IDs starting `37i9`) are rejected — they 404 for new apps. `recheck: true` (the "I made it public" button) or `"auto"` (the setup page's own check 30s after a private refusal) goes past a cached 404 older than 15s; a `playlist_not_found` with `replayed: true` means Spotify was not asked. | 30 / 10 min |
 | `/api/preview` | GET | `?track=&artist=&id=` → `{previewUrl, status}` where status is `found` / `absent` / `unavailable`. `&refresh=1` re-resolves a URL that stopped playing. `track` and `artist` are trimmed and clamped to 300 code points. | 300 / 10 min (refresh: 30) |
 | `/api/preview/batch` | POST | `{tracks:[{id,name,artist,durationMs?}]}` (max 60) → previews for a whole game in one request. Same 300-code-point clamp on `name` and `artist`. | 20 / 10 min |
 | `/api/room` | POST | Optional `{code}` → `{roomCode, hostToken, expiresAt}`. Creates the Mixed Playlist mailbox. | 10 / 10 min |

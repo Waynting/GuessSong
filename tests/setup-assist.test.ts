@@ -132,7 +132,7 @@ describe("the page remembers a game when it starts, and at no other time", () =>
   it("keeps a playlist only once it has loaded, under the name the response gave it", () => {
     expect(body).toMatch(/rememberPlaylist\(playlistUrl, data\.name\);/);
     expect(body).toMatch(/playlistName: data\.name,/);
-    const loaded = body.indexOf('if (!res.ok) throw apiError(data, "playlist_load_failed");');
+    const loaded = body.indexOf('throw apiError(data, "playlist_load_failed");');
     expect(loaded).toBeGreaterThan(-1);
     expect(body.indexOf("rememberPlaylist(")).toBeGreaterThan(loaded);
   });
@@ -303,7 +303,7 @@ describe("a refused link says what to do next", () => {
       /lastRejectedRef\.current = allFailuresFinal\s*\? \{ key: submissionKey, failure: failed \}\s*: null;/
     );
     // The key is still the exact string submitted, so editing the link asks again.
-    expect(body).toMatch(/const submissionKey = `own:\$\{playlistUrl\}`;/);
+    expect(body).toMatch(/const submissionKey = ownSubmissionKey\(playlistUrl\);/);
   });
 
   it("renders the help inside the alert, under the sentence", () => {

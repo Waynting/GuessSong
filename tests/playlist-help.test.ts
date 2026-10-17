@@ -10,13 +10,16 @@ import {
   isDeterministicPlaylistFailure,
   type AppErrorCode,
 } from "@/lib/error-messages";
+import { AUTO_RECHECK_DELAY_MS } from "@/lib/auto-recheck";
 import { getGuide } from "@/lib/guides";
 import { PLAYLIST_REFUSAL_CODES } from "@/lib/loop-stats";
 import {
   PLAYLIST_GUIDE_SLUG,
   PLAYLIST_HELP_BY_CODE,
   PLAYLIST_HELP_TOPICS,
+  RECHECK_NOTES,
   editorialWarning,
+  recheckFoundLine,
   recheckOffer,
   failureFor,
   failureOf,
@@ -313,10 +316,33 @@ describe("the private refusal's recheck", () => {
   it("speaks both languages, and the Chinese is not the English", () => {
     const en = recheckOffer("playlist_not_found", URL, "en")!;
     const zh = recheckOffer("playlist_not_found", URL, "zh")!;
-    for (const k of ["openLabel", "recheckLabel", "checkingLabel", "stillPrivate"] as const) {
+    for (const k of ["openLabel", "recheckLabel", "checkingLabel"] as const) {
       expect(en[k]).toBeTruthy();
       expect(zh[k]).toBeTruthy();
       expect(zh[k]).not.toBe(en[k]);
     }
+    for (const note of RECHECK_NOTES) {
+      expect(en.notes[note], note).toBeTruthy();
+      expect(zh.notes[note], note).toBeTruthy();
+      expect(zh.notes[note], note).not.toBe(en.notes[note]);
+    }
+    expect(recheckFoundLine("zh")).not.toBe(recheckFoundLine("en"));
+  });
+
+  it("promises nothing in the step every private refusal shows", () => {
+    // The step is shown on Mixed refusals and repeats too, where no check is
+    // scheduled; only `notes.pending` may say the page will check again.
+    const step = PLAYLIST_HELP_TOPICS.private.step;
+    expect(step.en).not.toMatch(/we('|’)ll|we will|check again/i);
+    expect(step.zh).not.toMatch(/我們會|幫你確認/);
+  });
+
+  it("states the automatic check's real delay", () => {
+    const en = recheckOffer("playlist_not_found", URL, "en")!;
+    const zh = recheckOffer("playlist_not_found", URL, "zh")!;
+    // AUTO_RECHECK_DELAY_MS is 30s; "a few seconds" was wrong.
+    expect(AUTO_RECHECK_DELAY_MS).toBe(30_000);
+    expect(en.notes.pending).toMatch(/30 seconds/);
+    expect(zh.notes.pending).toMatch(/半分鐘/);
   });
 });

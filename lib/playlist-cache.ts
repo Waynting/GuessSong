@@ -136,7 +136,7 @@ const STALE_GRACE_SECONDS = 6 * 24 * 60 * 60;
  * The youngest a cached 404 may be before an explicit recheck is allowed to go
  * past it. See `LoadOptions.recheck`.
  */
-const RECHECK_MIN_AGE_MS = 15 * 1000;
+export const RECHECK_MIN_AGE_MS = 15 * 1000;
 
 const COOLDOWN_KEY = "spotify:cooldown";
 
@@ -355,12 +355,40 @@ export interface LoadOptions {
    * The help line under a private-playlist refusal tells the host to make it
    * public and try again, and for ten minutes afterwards (`NOT_FOUND_TTL_SECONDS`)
    * this cache answered "private" to the host who had done exactly that — one
-   * reason that refusal recovered 18% of the time. Only the explicit button
-   * sends this; a mashed Start does not, so the negative cache still absorbs
+   * reason that refusal recovered 18% of the time. The button sends this, and
+   * so does the setup page's one-off check half a minute after a refusal
+   * (`automatic`); a mashed Start does not, so the negative cache still absorbs
    * the bursts it exists for, and a 404 younger than `RECHECK_MIN_AGE_MS` is
    * still replayed so the button cannot be turned into a burst either.
    */
   recheck?: boolean;
+  /**
+   * The recheck was sent by the setup page on its own, once, half a minute
+   * after the refusal — not by the host pressing the button.
+   *
+   * Spotify's API keeps answering 404 for a playlist for a while after it is
+   * made public, and flaps between 404 and 200 in that window: on 2026-10-16
+   * 18 of 38 "private" refusals were already public, tracks and all, within
+   * seconds of the 404 we cached, and two of those hosts never asked again.
+   * The automatic one asks for them. It is the one extra Spotify call a
+   * refusal can cost without anyone pressing anything, so it yields first:
+   * under any of the site notice's three pressure keys it replays the cached
+   * 404 instead of asking (`replayed`), and only `recheck` lets it past.
+   */
+  automatic?: boolean;
+}
+
+/**
+ * Errors this module answered from a cached 404 on a recheck rather than by
+ * asking Spotify, so the recheck counter can tell "Spotify still says no"
+ * from "we did not ask". Before they were split, a press seconds after the
+ * refusal read as the playlist still being private.
+ */
+const replayedRechecks = new WeakSet<object>();
+
+/** A recheck this module answered from a cached 404 without asking Spotify. */
+export function isReplayedRecheck(err: unknown): boolean {
+  return typeof err === "object" && err !== null && replayedRechecks.has(err);
 }
 
 function cacheKey(playlistId: string): string {
@@ -970,7 +998,11 @@ export async function loadPlaylist(
   try {
     loaded = await loadPlaylistUncounted(playlistUrl, source, options);
   } catch (err) {
-    if (options.recheck) await recordPlaylistRecheck(recheckOutcomeOf(err));
+    if (options.recheck) await recordPlaylistRecheck(recheckOutcomeOf(err), options.automatic === true);
+    // The page's own recheck is not a person told their link is dead — its
+    // outcome is `playlist_autocheck:*`. Counting it here as well would
+    // double "private or deleted" against every week before it existed.
+    if (options.automatic === true) throw err;
     const invalid = invalidKindOf(err);
     if (invalid) {
       await recordPlaylistInvalid(invalid);
@@ -983,17 +1015,23 @@ export async function loadPlaylist(
   // raise `playlist_empty` in their own vocabulary — but it is the same
   // refusal, and counting it where the other three are counted keeps the
   // four reasons on one line in `npm run stats`.
-  if (loaded.tracks.length === 0) await recordPlaylistRefused("playlist_empty");
-  if (options.recheck) await recordPlaylistRecheck("found");
+  // An empty playlist is a refusal the route raises, not a playlist found: a
+  // recheck that loads one counts `other`, and the page's own is never a
+  // `playlist_refused` (see the catch above).
+  const empty = loaded.tracks.length === 0;
+  if (empty && options.automatic !== true) await recordPlaylistRefused("playlist_empty");
+  if (options.recheck) await recordPlaylistRecheck(empty ? "other" : "found", options.automatic === true);
   return loaded;
 }
 
 /**
- * What an explicit recheck came back as. `missing` is the host told "still
- * private" — by Spotify, or by a 404 too young to go past — and `other` is
- * anything that says nothing about the playlist (throttled, a bad link).
+ * What a recheck came back as. `missing` is Spotify still saying 404;
+ * `replayed` is our cached 404 handed back without asking (seconds old, or an
+ * automatic recheck while Spotify is under pressure); `other` is anything that
+ * says nothing about the playlist (throttled, a bad link).
  */
 function recheckOutcomeOf(err: unknown): PlaylistRecheckOutcome {
+  if (isReplayedRecheck(err)) return "replayed";
   return err instanceof SpotifyApiError && err.code === "playlist_not_found"
     ? "missing"
     : "other";
@@ -1099,7 +1137,8 @@ async function loadPlaylistUncounted(
   const recheckable =
     cached?.kind === "missing" &&
     options.recheck === true &&
-    Date.now() - (cached.at ?? 0) >= RECHECK_MIN_AGE_MS;
+    Date.now() - (cached.at ?? 0) >= RECHECK_MIN_AGE_MS &&
+    !(options.automatic === true && (await spotifyUnderPressure()));
   if (cached?.kind === "missing" && !recheckable) {
     // A cached 404 is a cache hit too — it is a question answered without
     // touching Spotify, which is the only thing the rate measures. Counted
@@ -1107,9 +1146,21 @@ async function loadPlaylistUncounted(
     await recordHit(true);
     // Entries written before `code` existed carry only a message, and the only
     // thing cached here is a 404, so that is what they replay as.
-    throw new SpotifyApiError(cached.code ?? "playlist_not_found", cached.status, {
+    const replay = new SpotifyApiError(cached.code ?? "playlist_not_found", cached.status, {
       detail: cached.code ? undefined : cached.message,
     });
+    if (options.recheck) replayedRechecks.add(replay);
+    throw replay;
+  }
+
+  // The page's own recheck yields to pressure with nothing cached as well: its
+  // 404 can expire during the half-minute wait or a hidden tab's hold, and a
+  // cold load then is the one call `automatic` exists not to spend. Handed
+  // back as a replayed refusal, so the page says nothing about the playlist.
+  if (!cached && options.automatic === true && (await spotifyUnderPressure())) {
+    const replay = new SpotifyApiError("playlist_not_found", 404);
+    replayedRechecks.add(replay);
+    throw replay;
   }
 
   if (!stale) return fetchCoalesced(playlistId, source);

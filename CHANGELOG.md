@@ -62,7 +62,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tiktok, chatgpt, perplexity, external, internal, none); the referrer itself
   never leaves the module. `npm run stats` prints it under the host-number
   histogram. One extra command on ~40% of starts.
-||||||| parent of cd95acd (docs(changelog): per-phone order round under Unreleased)
 
 - **Put them in order: drag the cards, and the reveal marks them**
   (`app/order/page.tsx`, rules in `lib/order-game.ts`: `moveCard`, `dropSlot`,
@@ -82,6 +81,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `npm run stats` prints both rows under the order line.
 
 ### Fixed
+
+- **A "private" playlist that is public by now gets checked again by itself**
+  (`lib/auto-recheck.ts`, `LoadOptions.automatic` in `lib/playlist-cache.ts`,
+  `app/page.tsx` `runAutoRecheck`). Watched live for eleven hours on
+  2026-10-16: 18 of 38 `playlist_not_found` refusals were already
+  `public: true`, tracks and all, within seconds of the 404 we cached, and
+  three times the server got a fresh 404 after the playlist had been seen
+  public. Spotify's API lags a playlist being made public, and flaps 404/200
+  while it does; it is not our ten-minute cache (loads landed 1–3 minutes after
+  the refusal, through the button). Two of those hosts never asked again. The
+  setup page now asks once more by itself, 30s after a private refusal
+  (`recheck: "auto"`), at most once per link per page: held while the tab is hidden and dropped if it
+  cannot go out within ten minutes, single-playlist form only, cancelled by the
+  button or a Start that sends a request (not by a Start the page answers from
+  memory — that host pressed the wrong button after fixing it), its answer
+  dropped if the host has moved on, never after a recheck's own refusal, and
+  replayed instead of sent upstream while Spotify is under pressure, cached 404
+  or not. A check cancelled or dropped before it went out gives the link back
+  its turn; one held back under pressure ends in "press the button", not
+  silence. At most one extra Spotify call per
+  refused link. **It only asks**: a found playlist replaces the refusal with
+  "It's public now — press Start Game" (the playlist is cached by then, so that
+  Start costs nothing upstream); it never starts a game, validates the form or
+  counts a submission.
+  - **"Still private" only when Spotify said so.** `/api/playlist` marks a
+    recheck's 404 that the cache answered without asking Spotify
+    (`replayed: true`, `isReplayedRecheck`); the page says "give Spotify a few
+    more seconds" then, for the button as well as the automatic check.
+  - The help line's first sentence is for the host who already made it public
+    ("Just made it public? Spotify can take a minute to catch up"), `en` and
+    `zh`, and promises nothing — it shows on every private refusal; the line
+    under the buttons says what the last check did (`RecheckNote`), politely
+    (`aria-live`), and names the button it means.
+  - Counted: `playlist_autocheck:<outcome>`, apart from the button's
+    `playlist_recheck:<outcome>`, and both gain `replayed`. Until now a press
+    seconds after the refusal was counted `missing`, as if Spotify had said no.
+    An automatic check is not counted in `playlist_refused:*`, and a recheck
+    that loads an empty playlist counts `other`, not `found`. `npm run stats`
+    says to read both from `--since 2026-10-17` when the window spans it, and
+    `docs/viral-loop.md` has rows for the recovery and recheck lines.
+  - Refusal recovery is per tab, not per page load (`parseRecovery` /
+    `serializeRecovery`, `sessionStorage` for 30 minutes through
+    `lib/host-session.ts`, dropped once recovered so the next refusal after
+    Play Again still counts). A reload is how most hosts come back from the
+    Spotify app; it used to count as a fresh page whose refusal never
+    recovered, which is why "private or deleted" read 26% while ~68% of the
+    watched playlists ended up loading.
+  - Also removed a stray diff3 marker line left in this file by 2360eba.
 
 - **`spreadByAlbum` repairs every back-to-back pair the list allows**
   (`lib/shuffle.ts`). The repair searched forward only, so a clash on the last
@@ -121,6 +168,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The QR-room Mixed path still filters undated songs after the server pools
   them (`consumeRoomPool` does not know the play style, and the pool is
   consumed once). The order game from a QR room can come out short.
+- `RECHECK_SPLIT_DAY` in `scripts/loop-stats.mjs` and the "since 2026-10-17"
+  in `docs/viral-loop.md` and above name the day the recheck counters change
+  meaning. They were written before the deploy: set them to the actual deploy
+  day (UTC) when this ships, or a `--since` window mixes the two meanings.
+- A screen reader may announce the refusal box's first recheck line as part
+  of the alert; later lines are polite and atomic. Not checked with VoiceOver.
+- Under Spotify pressure, an automatic recheck with nothing cached is answered
+  `404 playlist_not_found` + `replayed: true` without asking Spotify. The setup
+  page reads the mark; another client that ignores it would read "private", and
+  the route logs it as a 404. A dedicated "not asked" code would be cleaner.
+- `replayed: true` on a button recheck tells a caller who already has a private
+  playlist's id that someone looked it up in the last 15 seconds. Accepted.
+- Refusal-recovery's 30-minute carry runs from a tab's first refusal and is not
+  extended by later ones; and an automatic check's fresh 404 restarts the 15s
+  window, so a button press right after it is answered "not asked".
 
 - **Who a game was for, and whether anyone scored, on every start, end and
   leave** (`lib/game-players.ts`). The largest pile in `npm run stats` is games

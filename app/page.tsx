@@ -8,7 +8,25 @@ import { pickSpread, shuffle } from "@/lib/shuffle";
 import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolResponse } from "@/types/room";
 import { trackEvent } from "@/lib/analytics";
 import { arrivedFrom } from "@/lib/loop-links";
-import { bumpHostGameCount, recallLoopRef, rememberLoopRef } from "@/lib/host-session";
+import {
+  bumpHostGameCount,
+  readSessionStored,
+  recallLoopRef,
+  rememberLoopRef,
+  removeSessionStored,
+  writeSessionStored,
+} from "@/lib/host-session";
+import {
+  AUTO_RECHECK_CODE,
+  AUTO_RECHECK_DELAY_MS,
+  AUTO_RECHECK_TIMEOUT_MS,
+  autoRecheckAnswerStillWanted,
+  autoRecheckStillWanted,
+  ownSubmissionKey,
+  readRecheckAnswer,
+  shouldScheduleAutoRecheck,
+  type RecheckAnswer,
+} from "@/lib/auto-recheck";
 import {
   reportGameStart,
   reportMixedNudge,
@@ -16,7 +34,15 @@ import {
   reportRemoteDoor,
   reportRefusalRecovered,
 } from "@/lib/loop-client";
-import { NO_REFUSAL, noteFailure, noteStart, type RecoveryState } from "@/lib/refusal-recovery";
+import {
+  NO_REFUSAL,
+  RECOVERY_STORAGE_KEY,
+  noteFailure,
+  noteStart,
+  parseRecovery,
+  serializeRecovery,
+  type RecoveryState,
+} from "@/lib/refusal-recovery";
 import { showMixedNudge } from "@/lib/mixed-nudge";
 import { REMOTE_DOOR_COPY } from "@/lib/remote-door";
 import { playerBand } from "@/lib/game-players";
@@ -34,7 +60,9 @@ import {
   failureFor,
   failureOf,
   playlistHelp,
+  recheckFoundLine,
   recheckOffer,
+  type RecheckNote,
   type SetupFailure,
 } from "@/lib/playlist-help";
 import { isEditorialLink, playlistIdOf, playlistUrlOf } from "@/lib/playlist-ref";
@@ -234,10 +262,20 @@ export default function SetupPage() {
   // The sentence and the code it came from, together. The code is what lets
   // the box say what to do next; see `SetupFailure` in lib/playlist-help.ts.
   const [failure, setFailure] = useState<SetupFailure | null>(null);
-  // The private refusal's "try again" (lib/playlist-help.ts `recheckOffer`):
-  // in flight, and whether the last one came back private again.
+  // The private refusal's "try again" (lib/playlist-help.ts `recheckOffer`) is in flight.
   const [rechecking, setRechecking] = useState(false);
-  const [rechecked, setRechecked] = useState(false);
+  // The line under the two buttons — what the last check did (RecheckNote).
+  // Keyed by the link it is about, so it never speaks for a link the host has
+  // since typed over it.
+  const [recheckNote, setRecheckNote] = useState<{ note: RecheckNote; key: string } | null>(null);
+  // The submission key a check found public, so "press Start" shows for that
+  // link only and goes the moment the field holds another.
+  const [recheckFoundKey, setRecheckFoundKey] = useState<string | null>(null);
+  // The page's own recheck, half a minute after a private refusal
+  // (lib/auto-recheck.ts): which link it was for.
+  const autoRecheckForRef = useRef<string | null>(null);
+  const autoRecheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoRecheckVisibleRef = useRef<(() => void) | null>(null);
   // Both empty until the mount effect has read storage: the page is
   // prerendered, and the server has no idea what this device remembers.
   const [recentPlaylists, setRecentPlaylists] = useState<RecentPlaylist[]>([]);
@@ -294,16 +332,69 @@ export default function SetupPage() {
   // and once on its first tap, per page load.
   const remoteDoorTappedRef = useRef(false);
   const [remoteDoorOpen, setRemoteDoorOpen] = useState(false);
-  // Whether this page showed a permanent refusal, and whether a game started
-  // after it. See lib/refusal-recovery.ts.
+  // Whether this tab showed a permanent refusal, and whether a game started
+  // after it — carried across a reload, read back in the mount effect. See
+  // lib/refusal-recovery.ts.
   const recoveryRef = useRef<RecoveryState>(NO_REFUSAL);
+
+  function setRecovery(state: RecoveryState) {
+    recoveryRef.current = state;
+    const raw = serializeRecovery(state);
+    if (raw) writeSessionStored(RECOVERY_STORAGE_KEY, raw);
+    else removeSessionStored(RECOVERY_STORAGE_KEY);
+  }
 
   /** Every failure the host is shown goes through here. */
   function showFailure(failed: SetupFailure) {
     setFailure(failed);
     const noted = noteFailure(recoveryRef.current, failed.code);
-    recoveryRef.current = noted.state;
+    if (noted.state !== recoveryRef.current) setRecovery(noted.state);
     if (noted.report) reportRefusal(noted.report);
+  }
+
+  // What the automatic recheck reads when its timer fires, half a minute after
+  // the render that scheduled it: the field, the in-flight flag and the form
+  // as they are then, not as they were.
+  const playlistUrlRef = useRef(playlistUrl);
+  const loadingRef = useRef(loading);
+  const singleModeRef = useRef(setupMode === "single");
+  // Whether the private refusal is what the box shows now — a roster error
+  // raised since then is not the refusal the check was scheduled for.
+  const refusalShownRef = useRef(false);
+  useEffect(() => {
+    playlistUrlRef.current = playlistUrl;
+    loadingRef.current = loading;
+    singleModeRef.current = setupMode === "single";
+    refusalShownRef.current = failure?.code === AUTO_RECHECK_CODE;
+  });
+
+  /** The timer and the hidden-tab listener, gone. Shared by cancel and unmount. */
+  function releaseAutoRecheck(): boolean {
+    const pending = Boolean(autoRecheckTimerRef.current || autoRecheckVisibleRef.current);
+    if (autoRecheckTimerRef.current) clearTimeout(autoRecheckTimerRef.current);
+    autoRecheckTimerRef.current = null;
+    if (autoRecheckVisibleRef.current) {
+      document.removeEventListener("visibilitychange", autoRecheckVisibleRef.current);
+      autoRecheckVisibleRef.current = null;
+    }
+    return pending;
+  }
+  useEffect(() => {
+    return () => {
+      releaseAutoRecheck();
+    };
+  }, []);
+
+  /** Drop a scheduled automatic recheck: the host has done something first. */
+  function cancelAutoRecheck() {
+    // The link keeps its key: what cancels a check is a request of the host's
+    // own, and that request is its link's one extra ask. Clearing it here let
+    // "the button, then a Start the memo answers" schedule a second automatic
+    // call for a link the host had just rechecked by hand. The key is given
+    // back only where nothing asked: a check dropped unsent (`fire`), or a
+    // button press our cache answered (`notAsked`, in handleStart's catch).
+    releaseAutoRecheck();
+    setRecheckNote((n) => (n?.note === "pending" ? null : n));
   }
 
   // What the one room has to do, given the modes picked above. Pass-the-phone
@@ -497,6 +588,9 @@ export default function SetupPage() {
 
   useEffect(() => {
     setMounted(true);
+    // A refusal shown in this tab before a reload is still this host's — the
+    // reload is how most of them come back after changing the playlist.
+    recoveryRef.current = parseRecovery(readSessionStored(RECOVERY_STORAGE_KEY));
     // Read straight off `window.location`, not `useSearchParams`. This page is
     // a client component that is still statically prerendered — it carries the
     // FAQ structured data and takes essentially all of the site's traffic — and
@@ -589,7 +683,7 @@ export default function SetupPage() {
     const setupSource = setupSourceFor(Boolean(mixed));
     reportGameStart(hostGameIndex, mixed, setupSource, mode, playerBand(playerCount), currentArrival());
     const recovery = noteStart(recoveryRef.current, setupSource);
-    recoveryRef.current = recovery.state;
+    if (recovery.state !== recoveryRef.current) setRecovery(recovery.state);
     if (recovery.report) reportRefusalRecovered(recovery.report.topic, recovery.report.via);
     if (mixed && nudgeTappedRef.current) {
       nudgeTappedRef.current = false;
@@ -628,12 +722,22 @@ export default function SetupPage() {
   /**
    * `recheck` is the private refusal's button: the same link asked again past
    * both memos — the page's own and the server's cached 404. Start never sends
-   * it, so a mashed Start still costs no request.
+   * it, so a mashed Start still costs no request. The page's own recheck is
+   * not this function: it only asks (`runAutoRecheck`), and never starts a game.
    */
   async function handleStart(opts?: { recheck?: boolean }) {
     const recheck = opts?.recheck === true;
+    // A Start the memo will answer sends nothing, so it leaves a pending check
+    // (and its note) alone: that host pressed the wrong button after changing
+    // the setting, and is exactly who the check is for. lib/auto-recheck.ts.
+    const memoWillAnswer =
+      !recheck && lastRejectedRef.current?.key === ownSubmissionKey(playlistUrl);
+    if (!memoWillAnswer) {
+      cancelAutoRecheck();
+      setRecheckNote(null);
+    }
     setFailure(null);
-    setRechecked(false);
+    setRecheckFoundKey(null);
     const validPlayers = players.filter((p) => p.trim());
     if (!playlistUrl.trim()) {
       setFailure(failureFor("playlist_url_required", locale));
@@ -656,15 +760,32 @@ export default function SetupPage() {
     // told the identical thing — see `lastRejectedRef`. Deliberately silent
     // about the shortcut: from the host's side this is the error they are
     // already looking at, and the fix is still to change the link.
-    const submissionKey = `own:${playlistUrl}`;
+    const submissionKey = ownSubmissionKey(playlistUrl);
     const rejected = lastRejectedRef.current;
     if (!recheck && rejected && rejected.key === submissionKey) {
       setFailure(rejected.failure);
+      // A check dropped while a roster error covered the refusal was never
+      // asked; the refusal is back, so it may be scheduled again.
+      if (
+        !autoRecheckTimerRef.current &&
+        !autoRecheckVisibleRef.current &&
+        shouldScheduleAutoRecheck({
+          code: rejected.failure.code,
+          fromRecheck: false,
+          notAsked: false,
+          key: submissionKey,
+          scheduledFor: autoRecheckForRef.current,
+        })
+      ) {
+        scheduleAutoRecheck(submissionKey);
+      }
       return;
     }
     setLoading(true);
     setRechecking(recheck);
     trackEvent("playlist_submitted", { playlist_source: "own" });
+    // Whether a refused recheck was asked of Spotify at all (`replayed`).
+    let answer: RecheckAnswer = "other";
     try {
       const res = await fetch("/api/playlist", {
         method: "POST",
@@ -672,7 +793,10 @@ export default function SetupPage() {
         body: JSON.stringify(recheck ? { url: playlistUrl, recheck: true } : { url: playlistUrl }),
       });
       const data = await res.json();
-      if (!res.ok) throw apiError(data, "playlist_load_failed");
+      if (!res.ok) {
+        answer = readRecheckAnswer(false, data);
+        throw apiError(data, "playlist_load_failed");
+      }
 
       const shuffled = shuffle(data.tracks as Track[]);
       // The order game deals only songs with a release year, so the count is
@@ -755,12 +879,131 @@ export default function SetupPage() {
       lastRejectedRef.current = shouldRememberRejection(e)
         ? { key: submissionKey, failure: failed }
         : null;
-      if (recheck && failed.code === "playlist_not_found") setRechecked(true);
+      if (recheck && answer === "still_refused") setRecheckNote({ note: "still_refused", key: submissionKey });
+      if (recheck && answer === "not_asked") setRecheckNote({ note: "not_asked", key: submissionKey });
       showFailure(failed);
+      // A button press answered from our cache asked nobody: give the link
+      // back its turn, so the check that waits past the 15s goes out.
+      if (recheck && answer === "not_asked" && autoRecheckForRef.current === submissionKey) {
+        autoRecheckForRef.current = null;
+      }
+      if (
+        shouldScheduleAutoRecheck({
+          code: failed.code,
+          fromRecheck: recheck,
+          // The button pressed inside 15s was not asked of Spotify, so the
+          // check that waits past that is still worth sending.
+          notAsked: answer === "not_asked",
+          key: submissionKey,
+          scheduledFor: autoRecheckForRef.current,
+        })
+      ) {
+        scheduleAutoRecheck(submissionKey);
+      }
     } finally {
       setLoading(false);
       setRechecking(false);
     }
+  }
+
+  /**
+   * Check the refused link again by ourselves in half a minute — once, held
+   * while the tab is hidden, and only if the page is still where it was.
+   * lib/auto-recheck.ts has why.
+   */
+  function scheduleAutoRecheck(key: string) {
+    autoRecheckForRef.current = key;
+    const scheduledAt = Date.now();
+    setRecheckNote({ note: "pending", key });
+    const fire = () => {
+      autoRecheckVisibleRef.current = null;
+      if (
+        !autoRecheckStillWanted({
+          key,
+          currentKey: ownSubmissionKey(playlistUrlRef.current),
+          rejectedKey: lastRejectedRef.current?.key ?? null,
+          loading: loadingRef.current,
+          singleMode: singleModeRef.current,
+          refusalShown: refusalShownRef.current,
+          scheduledAt,
+          now: Date.now(),
+        })
+      ) {
+        // Dropped unsent: the link may have one again if its refusal returns.
+        autoRecheckForRef.current = null;
+        setRecheckNote((n) => (n?.note === "pending" ? null : n));
+        return;
+      }
+      void runAutoRecheck(key);
+    };
+    autoRecheckTimerRef.current = setTimeout(() => {
+      autoRecheckTimerRef.current = null;
+      if (document.visibilityState === "visible") return fire();
+      const onVisible = () => {
+        if (document.visibilityState !== "visible") return;
+        document.removeEventListener("visibilitychange", onVisible);
+        fire();
+      };
+      autoRecheckVisibleRef.current = onVisible;
+      document.addEventListener("visibilitychange", onVisible);
+    }, AUTO_RECHECK_DELAY_MS);
+  }
+
+  /**
+   * Ask whether the refused link loads now, and say what came back. It never
+   * starts the game, validates the form or touches the refusal unless the
+   * playlist was found: the host is often still typing, and a check nobody
+   * pressed must not move them. A found playlist is in the cache by now, so
+   * the Start it asks for costs no Spotify call.
+   */
+  async function runAutoRecheck(key: string) {
+    const url = playlistUrlRef.current;
+    setRecheckNote({ note: "auto_checking", key });
+    let answer: RecheckAnswer = "other";
+    // Bounded: "Checking again…" must not sit there until the function times out.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), AUTO_RECHECK_TIMEOUT_MS);
+    try {
+      const res = await fetch("/api/playlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, recheck: "auto" }),
+        signal: controller.signal,
+      });
+      answer = readRecheckAnswer(res.ok, await res.json().catch(() => null));
+    } catch {
+      answer = "other";
+    } finally {
+      clearTimeout(timeout);
+    }
+    // The host may have changed the link, switched forms or sent their own
+    // request meanwhile; then this answer is not theirs.
+    if (
+      !autoRecheckAnswerStillWanted({
+        key,
+        currentKey: ownSubmissionKey(playlistUrlRef.current),
+        rejectedKey: lastRejectedRef.current?.key ?? null,
+        loading: loadingRef.current,
+        singleMode: singleModeRef.current,
+        refusalShown: refusalShownRef.current,
+      })
+    ) {
+      setRecheckNote((n) => (n?.note === "auto_checking" ? null : n));
+      return;
+    }
+    if (answer === "found") {
+      lastRejectedRef.current = null;
+      setFailure(null);
+      setRecheckNote(null);
+      setRecheckFoundKey(key);
+      return;
+    }
+    // Anything but Spotify's own 404 — not asked under pressure, too soon,
+    // throttled, offline, timed out, empty — says to press the button, rather
+    // than leave the promise erased with nothing in its place.
+    setRecheckNote(
+      answer === "still_refused" ? { note: "auto_still_refused", key } : { note: "not_asked", key }
+    );
   }
 
   async function handleMixedStart() {
@@ -1479,12 +1722,40 @@ export default function SetupPage() {
                     <PrivateRecheck
                       offer={recheck}
                       checking={rechecking}
-                      rechecked={rechecked}
+                      note={
+                        // Every note is about one link; under another, say nothing.
+                        recheckNote && recheckNote.key === ownSubmissionKey(playlistUrl)
+                          ? recheckNote.note
+                          : null
+                      }
                       onRecheck={() => handleStart({ recheck: true })}
                     />
                   )}
                 </div>
               )}
+              {/* A check found the refused playlist public: no game starts
+                  until the host presses Start (lib/auto-recheck.ts). */}
+              {/* Always mounted, so a screen reader announces the line when it
+                  fills — a live region inserted already full is often missed,
+                  and nobody pressed anything to expect it. */}
+              <div role="status" aria-live="polite">
+                {!failure && setupMode === "single" && recheckFoundKey === ownSubmissionKey(playlistUrl) && (
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      padding: "12px 16px",
+                      background: "rgba(29,185,84,0.1)",
+                      border: "1px solid rgba(29,185,84,0.3)",
+                      borderRadius: "8px",
+                      fontSize: "13px",
+                      color: "#86efac",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {recheckFoundLine(locale)}
+                  </div>
+                )}
+              </div>
               {starterPlace === "refusal" && starterChips}
 
               {/* The other two ways in, as links rather than a pill row above

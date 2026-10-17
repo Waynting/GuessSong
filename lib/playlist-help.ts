@@ -97,9 +97,18 @@ export const PLAYLIST_HELP_TOPICS: Record<PlaylistHelpTopic, PlaylistHelpCopy> =
     // "Make it public", not the menu item's name. The guide this links to
     // says the wording differs by app version, and a step that quotes a label
     // the host cannot find is worse than one that says what the label does.
+    //
+    // The first half is for the host who already did it. Spotify's API keeps
+    // answering 404 for a while after a playlist is made public — 18 of 38
+    // refusals watched on 2026-10-16 were public within seconds — so telling
+    // every one of them to go and change a setting they had already changed
+    // was the wrong first sentence for half of them. It promises nothing: this
+    // step is shown on every private refusal, Mixed and repeats included, and
+    // the page's own check is announced by `RecheckOffer.notes.pending` only
+    // while one is scheduled for the link in the field.
     step: {
-      en: "In Spotify, open the playlist's ⋯ menu and make it public, then copy the link again.",
-      zh: "在 Spotify 打開這個歌單的「⋯」選單，把它設成公開，再重新複製連結。",
+      en: "Just made it public? Spotify can take a minute to catch up. Otherwise open the playlist's ⋯ menu in Spotify and make it public.",
+      zh: "剛設成公開嗎？Spotify 有時要一兩分鐘才會更新。還沒改的話，在 Spotify 打開這個歌單的「⋯」選單，把它設成公開。",
     },
     label: {
       en: "How to make a playlist public",
@@ -221,28 +230,78 @@ export interface RecheckOffer {
   openLabel: string;
   recheckLabel: string;
   checkingLabel: string;
-  /** Shown once a recheck has come back private again. */
-  stillPrivate: string;
+  /** The line under the buttons, by what the last check did. */
+  notes: Record<RecheckNote, string>;
 }
 
+/**
+ * Which line goes under the two buttons. Each says only what happened:
+ *
+ *   pending             the page will check again by itself (lib/auto-recheck.ts)
+ *   auto_checking       it is doing that now — on the note, not the button,
+ *                       because the host did not press the button
+ *   still_refused       the button asked, and Spotify said 404
+ *   auto_still_refused  the page's own check asked, and Spotify said 404
+ *   not_asked           a check came back from our cache without asking
+ *                       Spotify (`replayed`), so nothing is said about the playlist
+ */
+export type RecheckNote =
+  | "pending"
+  | "auto_checking"
+  | "still_refused"
+  | "auto_still_refused"
+  | "not_asked";
+
+export const RECHECK_NOTES: readonly RecheckNote[] = [
+  "pending",
+  "auto_checking",
+  "still_refused",
+  "auto_still_refused",
+  "not_asked",
+];
+
+// `found` lives here and not on the offer: it is shown after the refusal is
+// cleared, when there is no offer — `recheckFoundLine` is its one reader.
 const RECHECK_COPY: Record<
   ErrorLocale,
-  Omit<RecheckOffer, "openHref">
+  Omit<RecheckOffer, "openHref"> & { found: string }
 > = {
   en: {
     openLabel: "Open it in Spotify",
     recheckLabel: "I made it public — try again",
     checkingLabel: "Checking…",
-    stillPrivate:
-      "Spotify still says it's private. It can take a minute to catch up after you change it — try again shortly.",
+    notes: {
+      // AUTO_RECHECK_DELAY_MS is 30s; the copy says so.
+      pending: "We'll check again automatically in about 30 seconds.",
+      auto_checking: "Checking again…",
+      // The step above already says Spotify can be slow; these say what happened.
+      still_refused: "Spotify still says it's private — try again shortly.",
+      auto_still_refused:
+        "We checked again: Spotify still says it's private. Press \"I made it public — try again\" once you've changed it.",
+      not_asked: "Give Spotify a few more seconds, then press \"I made it public — try again\".",
+    },
+    found: "It's public now — press Start Game.",
   },
   zh: {
     openLabel: "在 Spotify 打開",
     recheckLabel: "我設成公開了，再試一次",
     checkingLabel: "確認中…",
-    stillPrivate: "Spotify 那邊還顯示是私人歌單。改完設定後有時要等一分鐘才會更新，稍等再試一次。",
+    notes: {
+      pending: "大約半分鐘後會自動再幫你確認一次。",
+      auto_checking: "正在再確認一次…",
+      still_refused: "Spotify 那邊還顯示是私人歌單，稍等再試一次。",
+      auto_still_refused: "剛剛幫你再確認了一次，Spotify 還是顯示私人歌單。改好之後按「我設成公開了，再試一次」。",
+      not_asked: "再給 Spotify 幾秒鐘，然後按「我設成公開了，再試一次」。",
+    },
+    // The setup page's button reads "Start Game" in every language; name it as it reads.
+    found: "現在是公開的了，按上面的「Start Game」開始吧。",
   },
 };
+
+/** The line that replaces a private refusal once a check found the playlist. */
+export function recheckFoundLine(locale: ErrorLocale): string {
+  return RECHECK_COPY[locale].found;
+}
 
 export function recheckOffer(
   code: unknown,

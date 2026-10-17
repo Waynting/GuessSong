@@ -42,7 +42,7 @@ No `.github/workflows`. Nothing runs the suite before a merge. Before opening a
 pull request:
 
 ```bash
-npm test              # 48 files, 994 tests, ~2s
+npm test              # 83 files, 1931 tests, ~6s
 npx tsc --noEmit
 npx eslint app lib components
 npm run build         # see the warning below
@@ -66,6 +66,8 @@ Full annotated list in `.env.example`. What actually breaks without each:
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | no GA4. The KV loop counters still work |
 | `NEXT_PUBLIC_BASE_URL` | defaults to `https://www.guessong.app` |
 | `SPOTIFY_MAX_LOADS_PER_MINUTE` | defaults to 40 |
+| `SPOTIFY_MAX_LOADS_PER_DAY` | defaults to 2000 |
+| `SPOTIFY_BUDGET_WARN_RATIO` | defaults to 0.8 |
 | `PREVIEW_MAX_LOOKUPS_PER_MINUTE` | defaults to 120 |
 
 ---

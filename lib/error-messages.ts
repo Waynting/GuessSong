@@ -854,6 +854,13 @@ export interface ApiErrorBody {
    * code alone. Numbers and strings only — nothing here is user input.
    */
   params?: Record<string, string | number>;
+  /**
+   * On a recheck's `playlist_not_found` only: the 404 was our cached one,
+   * handed back without asking Spotify (lib/playlist-cache.ts
+   * `isReplayedRecheck`). The page must not tell the host Spotify still says
+   * private when Spotify was not asked.
+   */
+  replayed?: true;
 }
 
 /**
