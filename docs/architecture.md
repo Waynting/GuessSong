@@ -146,7 +146,7 @@ So each cache is four layers, and they read the same way on purpose:
 | Cold 50-song game | 1 load | **50 lookups, up to 5 calls each** |
 | Budget env var | `SPOTIFY_MAX_LOADS_PER_MINUTE` (40) | `PREVIEW_MAX_LOOKUPS_PER_MINUTE` (120) |
 | Positive TTL | 24h fresh (1h if sampled), then kept 6 more days and served only when Spotify cannot be asked | 1 year |
-| Negative TTL | 10 min, or 15s for the private refusal's explicit recheck | 1 week (`absent`) / **90s** (`unavailable`) |
+| Negative TTL | 10 min, or 15s for a recheck of a private refusal (the button, or the setup page's own check 30s after it) | 1 week (`absent`) / **90s** (`unavailable`) |
 
 **Every layer fails open.** Losing the safety net must mean "back to how it was",
 never "nobody can play".
@@ -233,7 +233,7 @@ page is gated on "a round has resolved" rather than "the game ended" — see
 | Where | What | Lifetime |
 |---|---|---|
 | React state | the running game — phase, scores, current track | until reload |
-| `sessionStorage` | the game payload handed from `/` to `/game` or `/order` | the tab |
+| `sessionStorage` | the game payload handed from `/` to `/game` or `/order`; the setup page's last playlist refusal, for refusal-recovery counting (`guesssong_refusal`, 30 min) | the tab |
 | `localStorage` | player id, host name, host game count, last loop ref, last quiz code + host tokens, a taker's quiz in progress (answers, the verdicts already shown, hints charged) and the submission id a resend replays | the device, until ITP clears it |
 | Upstash KV | rooms, rate limits, playlist + preview caches, loop counters | 30s – 1 year, always a TTL |
 | Upstash KV | a quiz: its questions (answer key included) and its board, one hash | 7 days |
