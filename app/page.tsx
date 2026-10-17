@@ -879,7 +879,7 @@ export default function SetupPage() {
       lastRejectedRef.current = shouldRememberRejection(e)
         ? { key: submissionKey, failure: failed }
         : null;
-      if (recheck && answer === "still_private") setRecheckNote({ note: "still_private", key: submissionKey });
+      if (recheck && answer === "still_refused") setRecheckNote({ note: "still_refused", key: submissionKey });
       if (recheck && answer === "not_asked") setRecheckNote({ note: "not_asked", key: submissionKey });
       showFailure(failed);
       // A button press answered from our cache asked nobody: give the link
@@ -1002,7 +1002,7 @@ export default function SetupPage() {
     // throttled, offline, timed out, empty — says to press the button, rather
     // than leave the promise erased with nothing in its place.
     setRecheckNote(
-      answer === "still_private" ? { note: "auto_still_private", key } : { note: "not_asked", key }
+      answer === "still_refused" ? { note: "auto_still_refused", key } : { note: "not_asked", key }
     );
   }
 

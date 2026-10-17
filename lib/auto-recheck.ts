@@ -153,11 +153,11 @@ export function autoRecheckStillWanted(args: {
  * What a recheck's answer says about the playlist.
  *
  *   found          it loaded — it is public now
- *   still_private  Spotify was asked and said 404
+ *   still_refused  Spotify was asked and said 404
  *   not_asked      our cached 404, handed back without asking Spotify
  *   other          anything that says nothing about the playlist
  */
-export type RecheckAnswer = "found" | "still_private" | "not_asked" | "other";
+export type RecheckAnswer = "found" | "still_refused" | "not_asked" | "other";
 
 export function readRecheckAnswer(ok: boolean, body: unknown): RecheckAnswer {
   const value = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
@@ -165,5 +165,5 @@ export function readRecheckAnswer(ok: boolean, body: unknown): RecheckAnswer {
     return Array.isArray(value.tracks) && value.tracks.length > 0 ? "found" : "other";
   }
   if (value.code !== AUTO_RECHECK_CODE) return "other";
-  return value.replayed === true ? "not_asked" : "still_private";
+  return value.replayed === true ? "not_asked" : "still_refused";
 }

@@ -240,23 +240,23 @@ export interface RecheckOffer {
  *   pending             the page will check again by itself (lib/auto-recheck.ts)
  *   auto_checking       it is doing that now — on the note, not the button,
  *                       because the host did not press the button
- *   still_private       the button asked, and Spotify said 404
- *   auto_still_private  the page's own check asked, and Spotify said 404
+ *   still_refused       the button asked, and Spotify said 404
+ *   auto_still_refused  the page's own check asked, and Spotify said 404
  *   not_asked           a check came back from our cache without asking
  *                       Spotify (`replayed`), so nothing is said about the playlist
  */
 export type RecheckNote =
   | "pending"
   | "auto_checking"
-  | "still_private"
-  | "auto_still_private"
+  | "still_refused"
+  | "auto_still_refused"
   | "not_asked";
 
 export const RECHECK_NOTES: readonly RecheckNote[] = [
   "pending",
   "auto_checking",
-  "still_private",
-  "auto_still_private",
+  "still_refused",
+  "auto_still_refused",
   "not_asked",
 ];
 
@@ -275,8 +275,8 @@ const RECHECK_COPY: Record<
       pending: "We'll check again automatically in about 30 seconds.",
       auto_checking: "Checking again…",
       // The step above already says Spotify can be slow; these say what happened.
-      still_private: "Spotify still says it's private — try again shortly.",
-      auto_still_private:
+      still_refused: "Spotify still says it's private — try again shortly.",
+      auto_still_refused:
         "We checked again: Spotify still says it's private. Press \"I made it public — try again\" once you've changed it.",
       not_asked: "Give Spotify a few more seconds, then press \"I made it public — try again\".",
     },
@@ -289,8 +289,8 @@ const RECHECK_COPY: Record<
     notes: {
       pending: "大約半分鐘後會自動再幫你確認一次。",
       auto_checking: "正在再確認一次…",
-      still_private: "Spotify 那邊還顯示是私人歌單，稍等再試一次。",
-      auto_still_private: "剛剛幫你再確認了一次，Spotify 還是顯示私人歌單。改好之後按「我設成公開了，再試一次」。",
+      still_refused: "Spotify 那邊還顯示是私人歌單，稍等再試一次。",
+      auto_still_refused: "剛剛幫你再確認了一次，Spotify 還是顯示私人歌單。改好之後按「我設成公開了，再試一次」。",
       not_asked: "再給 Spotify 幾秒鐘，然後按「我設成公開了，再試一次」。",
     },
     // The setup page's button reads "Start Game" in every language; name it as it reads.

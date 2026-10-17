@@ -83,10 +83,10 @@ describe("the page's own recheck of a private refusal", () => {
 
   it("says \"still private\" only when Spotify was asked", () => {
     expect(readRecheckAnswer(true, { tracks: [{ id: "a" }] })).toBe("found");
-    expect(readRecheckAnswer(false, { code: "playlist_not_found" })).toBe("still_private");
+    expect(readRecheckAnswer(false, { code: "playlist_not_found" })).toBe("still_refused");
     expect(readRecheckAnswer(false, { code: "playlist_not_found", replayed: true })).toBe("not_asked");
     // Only a literal true marks a replay; anything else is Spotify's own 404.
-    expect(readRecheckAnswer(false, { code: "playlist_not_found", replayed: "true" })).toBe("still_private");
+    expect(readRecheckAnswer(false, { code: "playlist_not_found", replayed: "true" })).toBe("still_refused");
     // Anything else says nothing about the playlist.
     for (const [ok, body] of [
       [true, { tracks: [] }],
@@ -168,7 +168,7 @@ describe("the setup page's wiring", () => {
 
   it("tells the host to press the button whenever its own check got no answer from Spotify", () => {
     const run = body.slice(body.indexOf("async function runAutoRecheck("), body.indexOf("async function handleMixedStart("));
-    expect(run).toMatch(/answer === "still_private" \? \{ note: "auto_still_private", key \} : \{ note: "not_asked", key \}/);
+    expect(run).toMatch(/answer === "still_refused" \? \{ note: "auto_still_refused", key \} : \{ note: "not_asked", key \}/);
     // And it gives up rather than hang on "Checking again…".
     expect(run).toMatch(/setTimeout\(\(\) => controller\.abort\(\), AUTO_RECHECK_TIMEOUT_MS\)/);
     expect(run).toMatch(/signal: controller\.signal/);
@@ -196,6 +196,6 @@ describe("the setup page's wiring", () => {
     const assist = code(read("components/setup-assist.tsx"));
     expect(assist).toMatch(/<p className="recheck-note" aria-live="polite" aria-atomic="true">\s*\{note && !checking \? offer\.notes\[note\] : null\}/);
     // "Still private" from the button only when Spotify said so.
-    expect(body).toMatch(/answer === "still_private"\) setRecheckNote\(\{ note: "still_private", key: submissionKey \}\)/);
+    expect(body).toMatch(/answer === "still_refused"\) setRecheckNote\(\{ note: "still_refused", key: submissionKey \}\)/);
   });
 });
