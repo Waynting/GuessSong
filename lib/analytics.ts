@@ -265,9 +265,9 @@ export type AnalyticsEvent =
       params: { stage: "shown" | "tapped" | "started" };
     }
   | {
-      /** The setup page's "play online" fake door. See `lib/remote-door.ts`. */
-      name: "remote_door";
-      params: { stage: "shown" | "tapped" };
+      /** The setup page's nudge for a host alone. See `lib/solo-nudge.ts`. */
+      name: "solo_nudge";
+      params: { stage: "shown" | "tapped" | "started" };
     }
   | {
       /**

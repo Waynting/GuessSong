@@ -31,8 +31,8 @@ import {
   reportGameStart,
   reportMixedNudge,
   reportRefusal,
-  reportRemoteDoor,
   reportRefusalRecovered,
+  reportSoloNudge,
 } from "@/lib/loop-client";
 import {
   NO_REFUSAL,
@@ -44,7 +44,7 @@ import {
   type RecoveryState,
 } from "@/lib/refusal-recovery";
 import { showMixedNudge } from "@/lib/mixed-nudge";
-import { REMOTE_DOOR_COPY } from "@/lib/remote-door";
+import { showSoloNudge } from "@/lib/solo-nudge";
 import { playerBand } from "@/lib/game-players";
 import { currentArrival } from "@/lib/arrival";
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
@@ -328,10 +328,10 @@ export default function SetupPage() {
   // remembered so a Mixed start from this page can be credited to it.
   const nudgeShownRef = useRef(false);
   const nudgeTappedRef = useRef(false);
-  // The "play online" fake door (lib/remote-door.ts): counted once when drawn
-  // and once on its first tap, per page load.
-  const remoteDoorTappedRef = useRef(false);
-  const [remoteDoorOpen, setRemoteDoorOpen] = useState(false);
+  // The solo nudge (lib/solo-nudge.ts): the same two memories, so an order
+  // game started after its tap can be credited to it.
+  const soloNudgeShownRef = useRef(false);
+  const soloNudgeTappedRef = useRef(false);
   // Whether this tab showed a permanent refusal, and whether a game started
   // after it — carried across a reload, read back in the mount effect. See
   // lib/refusal-recovery.ts.
@@ -688,6 +688,10 @@ export default function SetupPage() {
     if (mixed && nudgeTappedRef.current) {
       nudgeTappedRef.current = false;
       reportMixedNudge("started");
+    }
+    if (mode === "order" && soloNudgeTappedRef.current) {
+      soloNudgeTappedRef.current = false;
+      reportSoloNudge("started");
     }
     return {
       host_game_index: hostGameIndex,
@@ -1191,24 +1195,25 @@ export default function SetupPage() {
     reportMixedNudge("shown");
   }, [mixedNudge]);
 
-  // Drawn only once mounted, so the line is in the device's language from its
-  // first paint rather than switching from English after hydration.
-  useEffect(() => {
-    if (mounted) reportRemoteDoor("shown");
-  }, [mounted]);
-
-  function openRemoteDoor() {
-    setRemoteDoorOpen(true);
-    if (remoteDoorTappedRef.current) return;
-    remoteDoorTappedRef.current = true;
-    reportRemoteDoor("tapped");
-  }
-  const remoteDoor = REMOTE_DOOR_COPY[locale];
-
   function takeMixedNudge() {
     nudgeTappedRef.current = true;
     reportMixedNudge("tapped");
     chooseMode("mixed");
+  }
+
+  // One name and no second, on the guess game: offer the game that scores
+  // itself. The tap switches the play style; the pill row below shows it.
+  const soloNudge = showSoloNudge({ setupMode, buzzerEnabled, players, playStyle });
+  useEffect(() => {
+    if (!soloNudge || soloNudgeShownRef.current) return;
+    soloNudgeShownRef.current = true;
+    reportSoloNudge("shown");
+  }, [soloNudge]);
+
+  function takeSoloNudge() {
+    soloNudgeTappedRef.current = true;
+    reportSoloNudge("tapped");
+    choosePlayStyle("order");
   }
 
   const startClick = setupMode === "single"
@@ -1454,6 +1459,19 @@ export default function SetupPage() {
                         <span>
                           Three or more of you? Everyone brings a playlist and you also
                           guess whose it was. <strong>Try Mixed mode →</strong>
+                        </span>
+                      </button>
+                    )}
+                    {/* The other end of the roster: one name. The guess game
+                        needs a judge, and alone there is none; the order game
+                        scores itself. lib/solo-nudge.ts. */}
+                    {soloNudge && (
+                      <button type="button" className="solo-nudge" onClick={takeSoloNudge}>
+                        <span aria-hidden style={{ fontSize: "18px" }}>📅</span>
+                        <span>
+                          Playing on your own? The guessing game needs someone to judge.{" "}
+                          <strong>Try Put them in order →</strong> — four songs, oldest to
+                          newest, and it scores itself.
                         </span>
                       </button>
                     )}
@@ -1772,25 +1790,6 @@ export default function SetupPage() {
                   Make a Taste Quiz link →
                 </Link>
               </div>
-
-              {/* A question, not a feature: online rooms do not exist, and the
-                  tap is how we find out whether they should. lib/remote-door.ts. */}
-              {mounted && (
-                <div className="remote-door" lang={locale === "zh" ? "zh-TW" : "en"}>
-                  {remoteDoorOpen ? (
-                    <p className="remote-door-note" role="status">
-                      {remoteDoor.note}{" "}
-                      <Link href={QUIZ_SETUP_HREF} className="text-link">
-                        {remoteDoor.quiz}
-                      </Link>
-                    </p>
-                  ) : (
-                    <button type="button" className="text-link" onClick={openRemoteDoor}>
-                      {remoteDoor.link}
-                    </button>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 

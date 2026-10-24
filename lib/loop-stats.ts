@@ -253,13 +253,15 @@ export type MixedNudgeStage = "shown" | "tapped" | "started";
 export const MIXED_NUDGE_STAGES: readonly MixedNudgeStage[] = ["shown", "tapped", "started"];
 
 /**
- * The setup page's "play online" fake door (`lib/remote-door.ts`): `shown`
- * once per page load, `tapped` once per page load. Nothing is started from
- * it, because there is nothing to start.
+ * The setup page's nudge for a host alone (`lib/solo-nudge.ts`): `shown` once
+ * per page load, `tapped`, and `started` for an order game started after a
+ * tap on this page. The same three stages as the Mixed nudge, read the same
+ * way; whether the game it sends them to keeps them is
+ * `game_end_mode_players:order:p1:*` below.
  */
-export type RemoteDoorStage = "shown" | "tapped";
+export type SoloNudgeStage = "shown" | "tapped" | "started";
 
-export const REMOTE_DOOR_STAGES: readonly RemoteDoorStage[] = ["shown", "tapped"];
+export const SOLO_NUDGE_STAGES: readonly SoloNudgeStage[] = ["shown", "tapped", "started"];
 
 /**
  * Who tapped a quiz's share button, and what came of it.
@@ -831,6 +833,10 @@ export function loopStatsKeys(
   gamePlayers: Record<PlayerBand, string>;
   gameEndPlayers: Record<PlayerBand, Record<GameEnd, string>>;
   gameLeftPlayers: Record<PlayerBand, Record<EarlyEndBand, string>>;
+  /** Mode × players, on the start and on both beacons — see `recordGameStart`. */
+  gameModePlayers: Record<GameMode, Record<PlayerBand, string>>;
+  gameEndModePlayers: Record<GameMode, Record<PlayerBand, Record<GameEnd, string>>>;
+  gameLeftModePlayers: Record<GameMode, Record<PlayerBand, Record<EarlyEndBand, string>>>;
   gameEndScored: Record<GameScored, Record<GameEnd, string>>;
   gameLeftScored: Record<GameScored, Record<EarlyEndBand, string>>;
   orderArranged: Record<"moved" | "untouched", Record<OrderVerdict, string>>;
@@ -840,7 +846,7 @@ export function loopStatsKeys(
   firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
   gameOverTap: Record<GameOverTap, string>;
   mixedNudge: Record<MixedNudgeStage, string>;
-  remoteDoor: Record<RemoteDoorStage, string>;
+  soloNudge: Record<SoloNudgeStage, string>;
   refusalRecovery: Record<RecoveryStage, Record<PlaylistHelpTopic, string>>;
   refusalRecoveryVia: Record<SetupSource, string>;
   playlistRefused: Record<PlaylistRefusalCode, string>;
@@ -931,6 +937,13 @@ export function loopStatsKeys(
     ) as Record<PlayerBand, string>,
     gameEndPlayers: byList("game_end_players", PLAYER_BANDS, GAME_ENDS),
     gameLeftPlayers: byList("game_left_players", PLAYER_BANDS, EARLY_END_BANDS),
+    gameModePlayers: byList("game_mode_players", GAME_MODES, PLAYER_BANDS),
+    gameEndModePlayers: Object.fromEntries(
+      GAME_MODES.map((m) => [m, byList(`game_end_mode_players:${m}`, PLAYER_BANDS, GAME_ENDS)])
+    ) as Record<GameMode, Record<PlayerBand, Record<GameEnd, string>>>,
+    gameLeftModePlayers: Object.fromEntries(
+      GAME_MODES.map((m) => [m, byList(`game_left_mode_players:${m}`, PLAYER_BANDS, EARLY_END_BANDS)])
+    ) as Record<GameMode, Record<PlayerBand, Record<EarlyEndBand, string>>>,
     gameEndScored: byList("game_end_scored", GAME_SCORED, GAME_ENDS),
     gameLeftScored: byList("game_left_scored", GAME_SCORED, EARLY_END_BANDS),
     orderArranged: byList("order_arranged", ["moved", "untouched"] as const, ORDER_VERDICTS),
@@ -958,9 +971,9 @@ export function loopStatsKeys(
     mixedNudge: Object.fromEntries(
       MIXED_NUDGE_STAGES.map((s) => [s, key(day, `mixed_nudge:${s}`)])
     ) as Record<MixedNudgeStage, string>,
-    remoteDoor: Object.fromEntries(
-      REMOTE_DOOR_STAGES.map((s) => [s, key(day, `remote_door:${s}`)])
-    ) as Record<RemoteDoorStage, string>,
+    soloNudge: Object.fromEntries(
+      SOLO_NUDGE_STAGES.map((s) => [s, key(day, `solo_nudge:${s}`)])
+    ) as Record<SoloNudgeStage, string>,
     refusalRecovery: Object.fromEntries(
       RECOVERY_STAGES.map((stage) => [
         stage,
@@ -1184,6 +1197,13 @@ export async function recordGameStart(
   if (isGameMode(mode)) await bump(`game_mode:${mode}`);
   // How many the game was for — the denominator for the end and leave rows.
   if (isPlayerBand(players)) await bump(`game_players:${players}`);
+  // The two crossed, when the page sent both: `game_mode_players:<mode>:<band>`,
+  // the denominator for the crossed end and leave rows. One more command on
+  // every start from a page new enough to say, since 2026-10-25, for the
+  // question the solo nudge (lib/solo-nudge.ts) asks — does the order game
+  // keep a host who is alone where the guess game does not — which the mode
+  // table and the players table cannot answer apart.
+  if (isGameMode(mode) && isPlayerBand(players)) await bump(`game_mode_players:${mode}:${players}`);
   // Where a first-time host came from (lib/arrival.ts). A first game only —
   // one command on ~40% of starts — because the question is who is arriving.
   if (index === 1 && isArrival(from)) await bump(`new_host_from:${from}`);
@@ -1234,6 +1254,9 @@ export async function recordGameEnd(
   if (isGameMode(details.mode)) extras.push(bump(`game_end_mode:${details.mode}:${end}`));
   if (isGameScreen(details.screen)) extras.push(bump(`game_end_screen:${details.screen}`));
   if (isPlayerBand(details.players)) extras.push(bump(`game_end_players:${details.players}:${end}`));
+  if (isGameMode(details.mode) && isPlayerBand(details.players)) {
+    extras.push(bump(`game_end_mode_players:${details.mode}:${details.players}:${end}`));
+  }
   if (isGameScored(details.scored)) extras.push(bump(`game_end_scored:${details.scored}:${end}`));
   if (end !== "ended_early") {
     await Promise.all(extras);
@@ -1309,6 +1332,9 @@ export async function recordGameLeft(
     isSetupSource(source) ? bump(`game_left_source:${source}:${band}`) : undefined,
     isGameMode(mode) ? bump(`game_left_mode:${mode}:${band}`) : undefined,
     isPlayerBand(players) ? bump(`game_left_players:${players}:${band}`) : undefined,
+    isGameMode(mode) && isPlayerBand(players)
+      ? bump(`game_left_mode_players:${mode}:${players}:${band}`)
+      : undefined,
     isGameScored(scored) ? bump(`game_left_scored:${scored}:${band}`) : undefined,
   ]);
 }
@@ -1381,10 +1407,10 @@ export function recordMixedNudge(stage: MixedNudgeStage): Promise<void> {
   return bump(`mixed_nudge:${stage}`);
 }
 
-/** The setup page's "play online" fake door. See `RemoteDoorStage`. */
-export function recordRemoteDoor(stage: RemoteDoorStage): Promise<void> {
-  if (!REMOTE_DOOR_STAGES.includes(stage)) return Promise.resolve();
-  return bump(`remote_door:${stage}`);
+/** The setup page's nudge for a host alone. See `SoloNudgeStage`. */
+export function recordSoloNudge(stage: SoloNudgeStage): Promise<void> {
+  if (!SOLO_NUDGE_STAGES.includes(stage)) return Promise.resolve();
+  return bump(`solo_nudge:${stage}`);
 }
 
 /**

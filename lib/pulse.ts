@@ -49,7 +49,7 @@ import {
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
   MIXED_NUDGE_STAGES,
-  REMOTE_DOOR_STAGES,
+  SOLO_NUDGE_STAGES,
   GAME_ROUND_CEILING,
   GAME_ROUND_FLOOR,
   GAME_SCREENS,
@@ -63,7 +63,7 @@ import {
   type GameHostKind,
   type GameOverTap,
   type MixedNudgeStage,
-  type RemoteDoorStage,
+  type SoloNudgeStage,
   type GameScreen,
   type MixedSubMode,
   type QuizShareBy,
@@ -126,8 +126,8 @@ function isMixedNudgeStage(value: unknown): value is MixedNudgeStage {
   return typeof value === "string" && (MIXED_NUDGE_STAGES as readonly string[]).includes(value);
 }
 
-function isRemoteDoorStage(value: unknown): value is RemoteDoorStage {
-  return typeof value === "string" && (REMOTE_DOOR_STAGES as readonly string[]).includes(value);
+function isSoloNudgeStage(value: unknown): value is SoloNudgeStage {
+  return typeof value === "string" && (SOLO_NUDGE_STAGES as readonly string[]).includes(value);
 }
 
 /**
@@ -196,7 +196,7 @@ export type PulseEvent =
   | { kind: "order_phone"; locked: OrderPhoneCoverage; exact: number; oldest: number; none: number }
   | { kind: "game_over_tap"; target: GameOverTap }
   | { kind: "mixed_nudge"; stage: MixedNudgeStage }
-  | { kind: "remote_door"; stage: RemoteDoorStage }
+  | { kind: "solo_nudge"; stage: SoloNudgeStage }
   | { kind: "refusal_recovery"; stage: "refused"; topic: PlaylistHelpTopic }
   | { kind: "refusal_recovery"; stage: "recovered"; topic: PlaylistHelpTopic; via: SetupSource }
   | { kind: "quiz_copied"; by: QuizShareBy; outcome: QuizCopyOutcome }
@@ -349,8 +349,8 @@ export function parsePulse(body: unknown): PulseEvent | null {
     return isMixedNudgeStage(raw.stage) ? { kind: "mixed_nudge", stage: raw.stage } : null;
   }
 
-  if (raw.kind === "remote_door") {
-    return isRemoteDoorStage(raw.stage) ? { kind: "remote_door", stage: raw.stage } : null;
+  if (raw.kind === "solo_nudge") {
+    return isSoloNudgeStage(raw.stage) ? { kind: "solo_nudge", stage: raw.stage } : null;
   }
 
   if (raw.kind === "quiz_shared") {
