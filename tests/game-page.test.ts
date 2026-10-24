@@ -380,6 +380,19 @@ describe("an award reaches the row it names", () => {
   });
 });
 
+describe("an album's own award", () => {
+  it("hides Album +1 when every track is one album, and still names it on the reveal", () => {
+    // An album link plays since 2026-10-25, and every one of its tracks
+    // shares the album, so the +1 would be a free point every round.
+    expect(body).toMatch(
+      /const oneAlbum = useMemo\(\s*\(\) => tracks\.length > 0 && tracks\.every\(\(t\) => t\.albumName === tracks\[0\]\.albumName\),\s*\[tracks\]\s*\)/
+    );
+    expect(body).toMatch(/\{currentTrack\?\.albumName && !oneAlbum && \(/);
+    // The reveal line is not gated: the album is the thing they pasted.
+    expect(body).toMatch(/\{currentTrack\?\.albumName && \(\s*<p style/);
+  });
+});
+
 describe("a round reaches the history the same way from Next Track and End Game", () => {
   it("records through closeRoundEntry from both paths, and nowhere else", () => {
     // End Game used to append nothing, so a source point awarded on the round

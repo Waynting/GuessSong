@@ -3,6 +3,7 @@
 import {
   useState,
   useEffect,
+  useMemo,
   useRef,
   useCallback,
   type MouseEvent as ReactMouseEvent,
@@ -137,6 +138,13 @@ export default function GamePage() {
   const [scorePulse, setScorePulse] = useState<string | null>(null);
   const [pointsAwarded, setPointsAwarded] = useState(false);
   const [albumPointsAwarded, setAlbumPointsAwarded] = useState(false);
+  // A pasted album's tracks all share one album, so "Album +1" would be a
+  // free point every round. The row is hidden when the whole list is one
+  // album; the reveal still names it, since that is the thing they pasted.
+  const oneAlbum = useMemo(
+    () => tracks.length > 0 && tracks.every((t) => t.albumName === tracks[0].albumName),
+    [tracks]
+  );
   const [sourcePointsAwarded, setSourcePointsAwarded] = useState(false);
   const [roundHistory, setRoundHistory] = useState<RoundHistoryEntry[]>([]);
   const [albumHintShown, setAlbumHintShown] = useState(false);
@@ -2521,12 +2529,13 @@ export default function GamePage() {
                   </p>
                 )}
 
-                {/* Album scoring — 1 pt, only if track has album. Compact: the
+                {/* Album scoring — 1 pt, only if track has album, and never
+                    when the whole game is one album (`oneAlbum`). Compact: the
                     song is the question every round, the album is the bonus,
                     and three equal-sized banks of the same names made the host
                     hunt for which row was which. No "No one" button — Next
                     Track is what nobody-got-it looks like. */}
-                {currentTrack?.albumName && (
+                {currentTrack?.albumName && !oneAlbum && (
                   <div className="score-row-compact">
                     <span className="score-row-label">Album +1</span>
                     {!albumPointsAwarded ? (
