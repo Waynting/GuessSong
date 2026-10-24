@@ -715,6 +715,55 @@ if (playerCols.length > 0) {
   );
 }
 
+/**
+ * Mode × players: `game_mode_players:<mode>:<band>` on the start (the
+ * denominator), `game_end_mode_players:<mode>:<band>:<end>` and
+ * `game_left_mode_players:<mode>:<band>:<rband>` on the beacons, all since
+ * 2026-10-25. Two columns per mode — one player, and a room — because that is
+ * the question the two tables above cannot answer apart: the solo nudge
+ * (lib/solo-nudge.ts) sends a host who is alone to the order game, and
+ * whether that game keeps them is only readable against the solo guess game
+ * beside it. Read with `--since` the deploy day.
+ */
+const ROOM_BANDS = ["p2", "p3_4", "p5_plus"];
+const crossCols = [];
+for (const mode of GAME_MODE_ORDER) {
+  const seen = [...totals.keys()].some(
+    (k) =>
+      k.startsWith(`game_mode_players:${mode}:`) ||
+      k.startsWith(`game_end_mode_players:${mode}:`) ||
+      k.startsWith(`game_left_mode_players:${mode}:`)
+  );
+  if (!seen) continue;
+  crossCols.push([mode, ["p1"], `${mode} 1`]);
+  crossCols.push([mode, ROOM_BANDS, `${mode} 2+`]);
+}
+if (crossCols.length > 0) {
+  const across = (read) => crossCols.map(([mode, bands]) => bands.reduce((t, b) => t + read(mode, b), 0));
+  const started = across((m, b) => get(`game_mode_players:${m}:${b}`));
+  const playedOut = across((m, b) => get(`game_end_mode_players:${m}:${b}:played_out`));
+  const endedEarly = across((m, b) => get(`game_end_mode_players:${m}:${b}:ended_early`));
+  const leftBands = earlyBands.map(([band]) => across((m, b) => get(`game_left_mode_players:${m}:${b}:${band}`)));
+  const left = crossCols.map((_, i) => leftBands.reduce((t, row) => t + row[i], 0));
+  const leftEarly = crossCols.map((_, i) => leftBands[0][i] + leftBands[1][i]);
+  console.log("\nHow games ended, by how they were played and how many were playing");
+  console.log(sourceRow("", crossCols.map(([, , label]) => label)));
+  console.log(sourceRow("started", started));
+  console.log(sourceRow("played out", playedOut));
+  console.log(sourceRow("ended early", endedEarly));
+  console.log(sourceRow("left mid-game", left));
+  earlyBands.forEach(([, label], i) => console.log(sourceRow(`  ${label}`, leftBands[i])));
+  console.log(sourcePctRow("played out, % of started", playedOut, started));
+  console.log(sourcePctRow("left by round 2, %", leftEarly, started));
+  console.log(
+    "  how to read it: `party 1` is the guess game with nobody to judge; `order 1` is the\n" +
+      "  order game scoring itself for one person, the game the solo nudge sends a host\n" +
+      "  alone to. `order 1` playing out well above `party 1` says a solo visitor will play\n" +
+      "  when the game lets them; the two level says they are looking, not playing, and\n" +
+      "  the first-visit work is the landing, not the game."
+  );
+}
+
 const scoredCols = [
   ["scored", "scored"],
   ["unscored", "no points"],
@@ -908,6 +957,28 @@ if (nudgeShown + nudgeTapped + nudgeStarted > 0) {
     "  how to read it: shown counts page loads where three names were typed, not hosts.\n" +
       "  A tap that does not start is a host who looked at Mixed and went back; set\n" +
       "  started beside `Playlist came from … mixed` to see what share of Mixed it brought."
+  );
+}
+
+/**
+ * The setup page's nudge for a host alone (`lib/solo-nudge.ts`), shown when
+ * exactly one name is typed on the guess game; a tap switches the play style
+ * to "put them in order", and `started` is an order game begun after a tap.
+ * Whether that game then keeps them is the mode × players table above.
+ */
+const soloShown = get("solo_nudge:shown");
+const soloTapped = get("solo_nudge:tapped");
+const soloStarted = get("solo_nudge:started");
+if (soloShown + soloTapped + soloStarted > 0) {
+  console.log(
+    `\nSolo nudge on setup  shown ${soloShown} · tapped ${soloTapped} (${pct(soloTapped, soloShown).trim()})` +
+      ` · started an order game ${soloStarted} (${pct(soloStarted, soloTapped).trim()} of taps)`
+  );
+  console.log(
+    "  how to read it: shown counts page loads where one name was typed and no second, on\n" +
+      "  the guess game — most first visits. A tap is a host alone who would rather play\n" +
+      "  than leave; set `started` beside `order · 1` in the mode × players table, which is\n" +
+      "  whether the game they were sent to kept them."
   );
 }
 
@@ -1247,6 +1318,9 @@ const RENDERED_PREFIXES = [
   "game_players:",
   "game_end_players:",
   "game_left_players:",
+  "game_mode_players:",
+  "game_end_mode_players:",
+  "game_left_mode_players:",
   "game_end_scored:",
   "game_left_scored:",
   "order_round:",
@@ -1256,6 +1330,7 @@ const RENDERED_PREFIXES = [
   "first_clip:",
   "game_over_tap:",
   "mixed_nudge:",
+  "solo_nudge:",
   "refusal_recovery:",
   "refusal_recovery_via:",
   "playlist_refused:",

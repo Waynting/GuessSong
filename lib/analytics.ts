@@ -260,6 +260,11 @@ export type AnalyticsEvent =
       params: { stage: "shown" | "tapped" | "started" };
     }
   | {
+      /** The setup page's nudge for a host alone. See `lib/solo-nudge.ts`. */
+      name: "solo_nudge";
+      params: { stage: "shown" | "tapped" | "started" };
+    }
+  | {
       /**
        * A permanent playlist refusal shown on the setup page, and a game
        * started after one. See `lib/refusal-recovery.ts`.

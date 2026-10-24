@@ -32,6 +32,7 @@ import {
   reportMixedNudge,
   reportRefusal,
   reportRefusalRecovered,
+  reportSoloNudge,
 } from "@/lib/loop-client";
 import {
   NO_REFUSAL,
@@ -43,6 +44,7 @@ import {
   type RecoveryState,
 } from "@/lib/refusal-recovery";
 import { showMixedNudge } from "@/lib/mixed-nudge";
+import { showSoloNudge } from "@/lib/solo-nudge";
 import { playerBand } from "@/lib/game-players";
 import { currentArrival } from "@/lib/arrival";
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
@@ -326,6 +328,10 @@ export default function SetupPage() {
   // remembered so a Mixed start from this page can be credited to it.
   const nudgeShownRef = useRef(false);
   const nudgeTappedRef = useRef(false);
+  // The solo nudge (lib/solo-nudge.ts): the same two memories, so an order
+  // game started after its tap can be credited to it.
+  const soloNudgeShownRef = useRef(false);
+  const soloNudgeTappedRef = useRef(false);
   // Whether this tab showed a permanent refusal, and whether a game started
   // after it — carried across a reload, read back in the mount effect. See
   // lib/refusal-recovery.ts.
@@ -682,6 +688,10 @@ export default function SetupPage() {
     if (mixed && nudgeTappedRef.current) {
       nudgeTappedRef.current = false;
       reportMixedNudge("started");
+    }
+    if (mode === "order" && soloNudgeTappedRef.current) {
+      soloNudgeTappedRef.current = false;
+      reportSoloNudge("started");
     }
     return {
       host_game_index: hostGameIndex,
@@ -1191,6 +1201,21 @@ export default function SetupPage() {
     chooseMode("mixed");
   }
 
+  // One name and no second, on the guess game: offer the game that scores
+  // itself. The tap switches the play style; the pill row below shows it.
+  const soloNudge = showSoloNudge({ setupMode, buzzerEnabled, players, playStyle });
+  useEffect(() => {
+    if (!soloNudge || soloNudgeShownRef.current) return;
+    soloNudgeShownRef.current = true;
+    reportSoloNudge("shown");
+  }, [soloNudge]);
+
+  function takeSoloNudge() {
+    soloNudgeTappedRef.current = true;
+    reportSoloNudge("tapped");
+    choosePlayStyle("order");
+  }
+
   const startClick = setupMode === "single"
     ? handleStart
     : mixedSubMode === "phone"
@@ -1434,6 +1459,19 @@ export default function SetupPage() {
                         <span>
                           Three or more of you? Everyone brings a playlist and you also
                           guess whose it was. <strong>Try Mixed mode →</strong>
+                        </span>
+                      </button>
+                    )}
+                    {/* The other end of the roster: one name. The guess game
+                        needs a judge, and alone there is none; the order game
+                        scores itself. lib/solo-nudge.ts. */}
+                    {soloNudge && (
+                      <button type="button" className="solo-nudge" onClick={takeSoloNudge}>
+                        <span aria-hidden style={{ fontSize: "18px" }}>📅</span>
+                        <span>
+                          Playing on your own? The guessing game needs someone to judge.{" "}
+                          <strong>Try Put them in order →</strong> — four songs, oldest to
+                          newest, and it scores itself.
                         </span>
                       </button>
                     )}

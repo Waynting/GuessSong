@@ -9,6 +9,7 @@ import {
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
   MIXED_NUDGE_STAGES,
+  SOLO_NUDGE_STAGES,
   GAME_ROUND_CEILING,
   GAME_SCREENS,
   HOST_INDEX_CEILING,
@@ -443,6 +444,17 @@ describe("parsePulse — the setup page's Mixed nudge", () => {
     }
     for (const stage of ["clicked", "", "SHOWN", "__proto__", 1, null, undefined]) {
       expect(parsePulse({ kind: "mixed_nudge", stage })).toBeNull();
+    }
+  });
+});
+
+describe("parsePulse — the setup page's nudge for a host alone", () => {
+  it("accepts the three stages and nothing else", () => {
+    for (const stage of SOLO_NUDGE_STAGES) {
+      expect(parsePulse({ kind: "solo_nudge", stage })).toEqual({ kind: "solo_nudge", stage });
+    }
+    for (const stage of ["clicked", "", "SHOWN", "__proto__", 1, null, undefined]) {
+      expect(parsePulse({ kind: "solo_nudge", stage })).toBeNull();
     }
   });
 });
