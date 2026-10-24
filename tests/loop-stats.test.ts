@@ -31,6 +31,7 @@ const {
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
   MIXED_NUDGE_STAGES,
+  SOLO_NUDGE_STAGES,
   REMOTE_DOOR_STAGES,
   GAME_ROUND_CEILING,
   GAME_ROUND_FLOOR,
@@ -43,6 +44,7 @@ const {
   ORDER_VERDICTS,
   recordGameOverTap,
   recordMixedNudge,
+  recordSoloNudge,
   recordRemoteDoor,
   HOST_INDEX_CEILING,
   LOOP_STATS_TTL_SECONDS,
@@ -263,6 +265,12 @@ describe("the key format is the contract between writer and reader", () => {
       kv.incrs = [];
       await recordMixedNudge(stage);
       expect(keysWritten()).toContain(expected.mixedNudge[stage]);
+    }
+
+    for (const stage of SOLO_NUDGE_STAGES) {
+      kv.incrs = [];
+      await recordSoloNudge(stage);
+      expect(keysWritten()).toContain(expected.soloNudge[stage]);
     }
 
     for (const stage of REMOTE_DOOR_STAGES) {
@@ -521,6 +529,10 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
       expect(keys.mixedNudge[stage]).toBe(`loop:stats:2026-08-09:mixed_nudge:${stage}`);
     }
     expect(Object.keys(keys.mixedNudge)).toHaveLength(MIXED_NUDGE_STAGES.length);
+    for (const stage of SOLO_NUDGE_STAGES) {
+      expect(keys.soloNudge[stage]).toBe(`loop:stats:2026-08-09:solo_nudge:${stage}`);
+    }
+    expect(Object.keys(keys.soloNudge)).toHaveLength(SOLO_NUDGE_STAGES.length);
     for (const stage of REMOTE_DOOR_STAGES) {
       expect(keys.remoteDoor[stage]).toBe(`loop:stats:2026-08-09:remote_door:${stage}`);
     }
@@ -578,6 +590,56 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
     kv.incrs = [];
     await recordGameLeft(0, undefined, undefined, "" as never);
     expect(keysWritten().some((k) => k.includes("game_left_mode:"))).toBe(false);
+  });
+
+  it("crosses the mode with the player band on the start and both beacons, only when the page sent both", async () => {
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    await recordGameStart(1, undefined, "starter", "order", "p1");
+    expect(keysWritten()).toContain(keys.gameModePlayers.order.p1);
+
+    kv.incrs = [];
+    await recordGameEnd("played_out", 9, { mode: "order", players: "p1" });
+    expect(keysWritten()).toContain(keys.gameEndModePlayers.order.p1.played_out);
+    kv.incrs = [];
+    await recordGameEnd("ended_early", 2, { mode: "party", players: "p3_4" });
+    expect(keysWritten()).toContain(keys.gameEndModePlayers.party.p3_4.ended_early);
+
+    kv.incrs = [];
+    await recordGameLeft(1, "first", "typed", "party", "p1");
+    expect(keysWritten()).toContain(keys.gameLeftModePlayers.party.p1.r1_2);
+
+    // Half a cross is no cross: a page that sent only one of the two writes
+    // its own key for that one and nothing under the joined prefix.
+    for (const half of [{ mode: "order" as const }, { players: "p2" as const }]) {
+      kv.incrs = [];
+      await recordGameStart(1, undefined, undefined, half.mode, half.players);
+      await recordGameEnd("played_out", 9, half);
+      await recordGameLeft(3, undefined, undefined, half.mode, half.players);
+      expect(keysWritten().some((k) => k.includes("_mode_players:"))).toBe(false);
+    }
+    // And an undeclared value on either side is refused the same way.
+    kv.incrs = [];
+    await recordGameEnd("played_out", 9, { mode: "timeline" as never, players: "p1" });
+    await recordGameEnd("played_out", 9, { mode: "order", players: "p9" as never });
+    expect(keysWritten().some((k) => k.includes("_mode_players:"))).toBe(false);
+
+    for (const mode of GAME_MODES) {
+      for (const band of PLAYER_BANDS) {
+        expect(keys.gameModePlayers[mode][band]).toBe(
+          `loop:stats:2026-08-09:game_mode_players:${mode}:${band}`
+        );
+        for (const end of GAME_ENDS) {
+          expect(keys.gameEndModePlayers[mode][band][end]).toBe(
+            `loop:stats:2026-08-09:game_end_mode_players:${mode}:${band}:${end}`
+          );
+        }
+        for (const early of EARLY_END_BANDS) {
+          expect(keys.gameLeftModePlayers[mode][band][early]).toBe(
+            `loop:stats:2026-08-09:game_left_mode_players:${mode}:${band}:${early}`
+          );
+        }
+      }
+    }
   });
 
   it("counts an order round's verdict once, and refuses one it does not know", async () => {
@@ -1379,6 +1441,10 @@ describe("the digest prints what the recorders write", () => {
       "first_clip:",
       "game_over_tap:",
       "mixed_nudge:",
+      "solo_nudge:",
+      "game_mode_players:",
+      "game_end_mode_players:",
+      "game_left_mode_players:",
       "remote_door:",
     ]) {
       expect(rendered, `${prefix} is not claimed`).toContain(`"${prefix}"`);
@@ -1392,6 +1458,9 @@ describe("the digest prints what the recorders write", () => {
     }
     for (const stage of MIXED_NUDGE_STAGES) {
       expect(script, `${stage} is never read`).toMatch(new RegExp(`get\\("mixed_nudge:${stage}"\\)`));
+    }
+    for (const stage of SOLO_NUDGE_STAGES) {
+      expect(script, `${stage} is never read`).toMatch(new RegExp(`get\\("solo_nudge:${stage}"\\)`));
     }
     for (const stage of REMOTE_DOOR_STAGES) {
       expect(script, `${stage} is never read`).toMatch(new RegExp(`get\\("remote_door:${stage}"\\)`));

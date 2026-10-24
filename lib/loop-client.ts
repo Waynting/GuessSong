@@ -30,6 +30,7 @@ import type {
   GameHostKind,
   GameOverTap,
   MixedNudgeStage,
+  SoloNudgeStage,
   RemoteDoorStage,
   GameScreen,
 } from "@/lib/loop-stats";
@@ -282,6 +283,16 @@ export function reportRefusalRecovered(topic: PlaylistHelpTopic, via: SetupSourc
 export function reportMixedNudge(stage: MixedNudgeStage): void {
   trackEvent("mixed_nudge", { stage });
   sendPulse({ kind: "mixed_nudge", stage });
+}
+
+/**
+ * Call when the setup page's nudge for a host alone is first drawn, on its
+ * first tap, and from `recordHostedStart` for an order game started after
+ * the tap. See `lib/solo-nudge.ts`.
+ */
+export function reportSoloNudge(stage: SoloNudgeStage): void {
+  trackEvent("solo_nudge", { stage });
+  sendPulse({ kind: "solo_nudge", stage });
 }
 
 /**

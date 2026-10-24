@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A nudge for a host who is alone, and the mode × players cross to read
+  it by** (`lib/solo-nudge.ts`, `solo_nudge:<shown|tapped|started>`,
+  `game_mode_players:*`, `game_end_mode_players:*`,
+  `game_left_mode_players:*`). In the week to 2026-10-24, 68% of games that
+  said how many were playing said one, and those played out 11.9% of the time
+  against 38.5% for a room of three or four; 4,134 of that week's round 1–2
+  leaves had no points on the board and 460 did. The guess game cannot be
+  played alone — the host judges, and alone there is nobody to judge — while
+  "put them in order" scores a one-player game from the screen and fetches
+  no clip. So under the roster, when exactly one name is typed on the guess
+  game, a row in the Mixed nudge's shape says so and offers the order game;
+  a tap switches the play style (the pill row shows it) and nothing else.
+  The hero copy is untouched: it is the sentence Google sends 89% of
+  first-time hosts for.
+  - Counted like the Mixed nudge, through `/api/pulse` and GA4's
+    `solo_nudge`: `shown` once per page load, `tapped` once, and `started`
+    for an order game begun after the tap. Printed under "Solo nudge on
+    setup".
+  - The cross is what makes the read honest: `game_mode_players:<mode>:<band>`
+    on the start and the same join on the end and leave beacons, written
+    only when the page sent both halves, one command more on each. `npm run
+    stats` prints "How games ended, by how they were played and how many were
+    playing" with a one-player and a room column per mode — `order 1` against
+    `party 1` is whether the game a solo host is sent to keeps them, which the
+    mode table and the players table could not say apart. Read with
+    `--since 2026-10-25`.
+  - What it decides: `order 1` playing out well above `party 1` says a solo
+    visitor plays when the game lets them, and the first-visit work is a
+    solo path; the two level says they are looking, not playing, and the
+    work is the landing. Neither is built on this read.
+
 - **Put them in order, on every phone** (`lib/order-phone.ts`,
   `components/order-phone.tsx`, `lib/use-card-drag.ts`). With a buzzer room
   ("Play on phones" beside the order game on `/`), `/order` deals each round to

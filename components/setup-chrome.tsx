@@ -180,6 +180,33 @@ export function SetupStyles() {
         }
         .mixed-nudge:active { background: rgba(29,185,84,0.18); transition: none; }
         .mixed-nudge:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+        /* Under the roster when exactly one name is typed: the same row, for
+           the opposite room size (lib/solo-nudge.ts). Its own rules rather
+           than a shared selector so each keeps its own pressed state. */
+        .solo-nudge {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          width: 100%;
+          margin-top: 12px;
+          padding: 12px 14px;
+          background: rgba(29,185,84,0.06);
+          border: 1px solid rgba(29,185,84,0.25);
+          border-radius: 10px;
+          font-family: 'Outfit', sans-serif;
+          font-size: 14px;
+          line-height: 1.4;
+          color: #ccc;
+          text-align: left;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .solo-nudge strong { color: var(--green); font-weight: 600; }
+        @media (hover: hover) {
+          .solo-nudge:hover { background: rgba(29,185,84,0.12); border-color: rgba(29,185,84,0.45); }
+        }
+        .solo-nudge:active { background: rgba(29,185,84,0.18); transition: none; }
+        .solo-nudge:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
         .card {
           background: var(--surface);
