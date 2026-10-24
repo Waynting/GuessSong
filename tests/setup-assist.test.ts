@@ -249,7 +249,9 @@ describe("the setup source follows the link into the field", () => {
       expect(next, next).toMatch(/^setPlaylistUrl\([^)]*\)+;\s*setLinkSource\(/);
     }
     expect(body).toMatch(/setPlaylistUrl\(e\.target\.value\);\s*setLinkSource\("typed"\);/);
-    expect(body).toMatch(/setPlaylistUrl\(playlistUrlOf\(id\)\);\s*setLinkSource\(source\);/);
+    // A chip's id is a playable ref — a playlist's bare id or `album:<id>` —
+    // so the field takes whichever address it names (lib/playlist-ref.ts).
+    expect(body).toMatch(/setPlaylistUrl\(playableUrlOf\(id\)\);\s*setLinkSource\(source\);/);
     expect(body).toMatch(/setPlaylistUrl\(form\.playlistUrl\);\s*setLinkSource\(form\.linkSource\);/);
   });
 
@@ -354,7 +356,7 @@ describe("the chips", () => {
   });
 
   it("lights the chip whose playlist is in the field", () => {
-    expect(body).toMatch(/const currentPlaylistId = playlistIdOf\(playlistUrl\);/);
+    expect(body).toMatch(/const currentPlaylistId = playableRefOf\(playlistUrl\);/);
     expect(body).toMatch(/currentId=\{currentPlaylistId\}/);
   });
 

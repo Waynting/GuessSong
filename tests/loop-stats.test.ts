@@ -50,6 +50,8 @@ const {
   SETUP_SOURCES,
   PLAYLIST_REFUSAL_CODES,
   PLAYLIST_INVALID_KINDS,
+  PLAYLIST_ALBUM_OUTCOMES,
+  recordPlaylistAlbum,
   SHORTLINK_OUTCOMES,
   PLAYLIST_RECHECK_OUTCOMES,
   QUIZ_STAGES,
@@ -628,13 +630,20 @@ describe("playlist refusals and quiz shares", () => {
 
   it("splits a 'not a playlist URL' refusal by what it was, and writes the total with it", async () => {
     // The split is a second reading of `playlist_refused:invalid_playlist_url`,
-    // not a fifth refusal code. One call writes both, so the parts cannot
+    // not a refusal code of its own. One call writes both, so the parts cannot
     // drift from the total they are parts of — and the weekly series that
     // read 748 before the split keeps counting exactly what it counted.
+    // `album` left the split on 2026-10-25, when albums began to load.
     const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
-    expect(PLAYLIST_INVALID_KINDS).toEqual(["album", "track", "artist", "shortlink", "other"]);
+    expect(PLAYLIST_INVALID_KINDS).toEqual(["track", "artist", "shortlink", "other"]);
     expect(Object.keys(keys.playlistInvalid)).toHaveLength(PLAYLIST_INVALID_KINDS.length);
-    expect(PLAYLIST_REFUSAL_CODES).toHaveLength(4);
+    expect(PLAYLIST_REFUSAL_CODES).toEqual([
+      "playlist_not_found",
+      "playlist_editorial",
+      "playlist_empty",
+      "invalid_playlist_url",
+      "album_not_found",
+    ]);
 
     for (const kind of PLAYLIST_INVALID_KINDS) {
       kv.incrs = [];
@@ -650,11 +659,31 @@ describe("playlist refusals and quiz shares", () => {
   });
 
   it("refuses an undeclared kind outright — no part, and no total without its part", async () => {
-    for (const kind of ["playlist", "episode", "", "album:x", "__proto__"]) {
+    // `album` is undeclared now: an album loads, and a writer that still
+    // sent it would put a refusal on a series that measured the demand.
+    for (const kind of ["playlist", "album", "episode", "", "album:x", "__proto__"]) {
       kv.incrs = [];
       await recordPlaylistInvalid(kind as never);
       expect(kv.incrs).toEqual([]);
     }
+  });
+
+  it("counts an album that loaded under its own key, from a closed set", async () => {
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    expect(PLAYLIST_ALBUM_OUTCOMES).toEqual(["loaded"]);
+    expect(keys.playlistAlbum.loaded).toBe("loop:stats:2026-08-09:playlist_album:loaded");
+    expect(keys.playlistRefused.album_not_found).toBe(
+      "loop:stats:2026-08-09:playlist_refused:album_not_found"
+    );
+    kv.incrs = [];
+    await recordPlaylistAlbum("loaded");
+    expect(keysWritten()).toContain(keys.playlistAlbum.loaded);
+    kv.incrs = [];
+    await recordPlaylistAlbum("missing" as never);
+    expect(kv.incrs).toEqual([]);
+    kv.incrs = [];
+    await recordPlaylistRefused("album_not_found");
+    expect(keysWritten()).toContain(keys.playlistRefused.album_not_found);
   });
 
   it("keys an arrival only on a device's first game, and only from the closed set", async () => {
@@ -708,7 +737,8 @@ describe("playlist refusals and quiz shares", () => {
     expect(kv.incrs).toEqual([]);
 
     kv.failWrites = true;
-    await expect(recordPlaylistInvalid("album")).resolves.toBeUndefined();
+    await expect(recordPlaylistInvalid("track")).resolves.toBeUndefined();
+    await expect(recordPlaylistAlbum("loaded")).resolves.toBeUndefined();
     await expect(recordShortlinkOutcome("unavailable")).resolves.toBeUndefined();
   });
 
@@ -1208,11 +1238,20 @@ describe("the digest prints what the recorders write", () => {
     const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
     expect(rendered).toContain('"playlist_invalid:"');
     expect(rendered).toContain('"playlist_shortlink:"');
+    expect(rendered).toContain('"playlist_album:"');
 
     // Read by name over the writer's closed sets, every member of each.
     const kinds = script.match(/const invalidKinds = \[([\s\S]*?)\n  \];/)?.[1] ?? "";
     for (const kind of PLAYLIST_INVALID_KINDS) expect(kinds, kind).toContain(`["${kind}",`);
+    expect(kinds).not.toContain('["album",');
     expect(script).toMatch(/get\(`playlist_invalid:\$\{k\}`\)/);
+    // The album line: both ways up, and the days before albums could play.
+    for (const outcome of PLAYLIST_ALBUM_OUTCOMES) {
+      expect(script).toMatch(new RegExp(`get\\("playlist_album:${outcome}"\\)`));
+    }
+    expect(script).toMatch(/get\("playlist_refused:album_not_found"\)/);
+    expect(script).toMatch(/get\("playlist_invalid:album"\)/);
+    expect(script).toMatch(/REFUSAL_LABELS = \{[\s\S]*?album_not_found: "/);
     const outcomes = script.match(/const shortlinkOutcomes = \[([\s\S]*?)\n\];/)?.[1] ?? "";
     for (const outcome of SHORTLINK_OUTCOMES) expect(outcomes, outcome).toContain(`["${outcome}",`);
     expect(script).toMatch(/get\(`playlist_shortlink:\$\{o\}`\)/);

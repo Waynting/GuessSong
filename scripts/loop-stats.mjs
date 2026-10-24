@@ -1283,6 +1283,7 @@ const RENDERED_PREFIXES = [
   "refusal_recovery_via:",
   "playlist_refused:",
   "playlist_invalid:",
+  "playlist_album:",
   "playlist_shortlink:",
   "playlist_recheck:",
   "playlist_autocheck:",
@@ -1458,6 +1459,7 @@ const REFUSAL_LABELS = {
   playlist_editorial: "Spotify's own (editorial)",
   playlist_empty: "empty",
   invalid_playlist_url: "not a playlist URL",
+  album_not_found: "album not on Spotify",
 };
 const refusals = [...totals.keys()]
   .filter((m) => m.startsWith("playlist_refused:"))
@@ -1475,24 +1477,42 @@ if (refusals.length > 0) {
   // and in its order: a kind that was never pasted prints as 0, which is an
   // answer here, where a missing word would be a question.
   const invalidKinds = [
-    ["album", "album"],
     ["track", "track"],
     ["artist", "artist"],
     ["shortlink", "dead short link"],
     ["other", "anything else"],
   ];
+  // `album` left the set on 2026-10-25, when albums began to load. The days
+  // before still hold the key, and it is the number the line below is read
+  // against, so it is read here by name for as long as the window has it.
+  const albumsRefusedBefore = get("playlist_invalid:album");
   const invalidTotal = invalidKinds.reduce((t, [k]) => t + get(`playlist_invalid:${k}`), 0);
   if (invalidTotal > 0) {
     const split = invalidKinds.map(([k, label]) => `${label} ${get(`playlist_invalid:${k}`)}`).join(" · ");
     console.log(`  not a playlist URL, by what it was: ${split}`);
     console.log(
-      "  album is the one the app could choose to serve; the forms that block a\n" +
-        "  wrong link never send it, so this is the party form and the quiz only"
+      "  the forms that block a wrong link never send it, so this is the party\n" +
+        "  form and the quiz only"
     );
-    const unsplit = get("playlist_refused:invalid_playlist_url") - invalidTotal;
+    const unsplit = get("playlist_refused:invalid_playlist_url") - invalidTotal - albumsRefusedBefore;
     if (unsplit > 0) {
       console.log(`  (${unsplit} more were refused before the split was counted)`);
     }
+  }
+  // Album links, both ways up: `playlist_album:loaded` is the ones that
+  // played, `playlist_refused:album_not_found` the ones Spotify had no album
+  // for. Beside them, the same links as they were counted before 2026-10-25 —
+  // refused as "not a playlist URL" — so a window straddling the change
+  // reads as one story. An album link has one of these three outcomes.
+  const albumsLoaded = get("playlist_album:loaded");
+  const albumsMissing = get("playlist_refused:album_not_found");
+  if (albumsLoaded + albumsMissing + albumsRefusedBefore > 0) {
+    console.log(
+      `  album links: played ${albumsLoaded} · not on Spotify ${albumsMissing}` +
+        (albumsRefusedBefore > 0
+          ? ` · refused before albums could play ${albumsRefusedBefore} (days before 2026-10-25)`
+          : "")
+    );
   }
   const editorial = get("playlist_refused:playlist_editorial");
   if (editorial > 0 && editorial >= total / 4) {

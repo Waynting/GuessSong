@@ -25,29 +25,39 @@
  * *all* uncached loads for the duration it asked for.
  *
  * In front of all three sits the one step that is not about Spotify's quota
- * at all: finding out what was pasted (`playlistIdFor`). A link that is an
- * album, a track, an artist page or nothing is refused there, and a short
- * link is followed there, before the cache is read and before any budget is
- * claimed — none of it touches the Web API, so none of it may spend or wait
- * on the API's allowance.
+ * at all: finding out what was pasted (`playableFor`). A link that is a
+ * track, an artist page or nothing is refused there, and a short link is
+ * followed there, before the cache is read and before any budget is claimed
+ * — none of it touches the Web API, so none of it may spend or wait on the
+ * API's allowance. An album is not refused: since 2026-10-25 it loads through
+ * every layer here exactly as a playlist does, under its own cache key.
  *
  * Every KV call is wrapped. A cache outage must degrade to "slower", never to
  * "broken" — same contract as app/api/preview/route.ts, which this follows.
  */
 
 import { dayBucket, getKvStore, hourBucket } from "@/lib/kv";
-import { getPlaylistWithTracks, isSpotifyEditorial, SpotifyApiError } from "@/lib/spotify";
+import {
+  getAlbumWithTracks,
+  getPlaylistWithTracks,
+  isSpotifyEditorial,
+  SpotifyApiError,
+} from "@/lib/spotify";
 import {
   classifySpotifyLink,
   isNamedLinkKind,
+  isPlayableLink,
   NAMED_LINK_CODES,
-  playlistUrlFromId,
+  playableUrl,
+  type PlayableKind,
+  type PlayableLink,
 } from "@/lib/spotify-link";
 import { resolveShortlink } from "@/lib/spotify-shortlink";
 import { stripTrackForStorage } from "@/lib/game-session";
 import type { AppErrorCode } from "@/lib/error-messages";
 import {
   isPlaylistRefusalCode,
+  recordPlaylistAlbum,
   recordPlaylistInvalid,
   recordPlaylistRecheck,
   recordPlaylistRefused,
@@ -298,6 +308,12 @@ const COOLDOWN_PROBE_SECONDS = 15 * 60;
 const COUNTDOWN_MAX_SECONDS = 10 * 60;
 
 export interface LoadedPlaylist {
+  /**
+   * What the link was. Derived from the link, never stored: the cache entry
+   * is the same shape under either key. An album is counted on the way out
+   * (`playlist_album:loaded`), and the game page hides its album award.
+   */
+  kind: PlayableKind;
   name: string;
   tracks: Track[];
   totalTracks: number;
@@ -391,27 +407,35 @@ export function isReplayedRecheck(err: unknown): boolean {
   return typeof err === "object" && err !== null && replayedRechecks.has(err);
 }
 
-function cacheKey(playlistId: string): string {
-  return `playlist:${CACHE_VERSION}:${playlistId}`;
+/**
+ * A playlist's key is byte-for-byte what it was before albums could load —
+ * `playlist:v1:<id>` — because a change to it is the cold start
+ * `CACHE_VERSION`'s comment costs out. An album gets its own prefix rather
+ * than sharing the playlist's: the two id spaces are Spotify's, not ours,
+ * and one key holding two answers is the bug every `fold()` in this codebase
+ * exists to prevent.
+ */
+function cacheKey(link: PlayableLink): string {
+  return `${link.kind}:${CACHE_VERSION}:${link.id}`;
 }
 
-async function readCache(playlistId: string): Promise<CacheEntry | null> {
+async function readCache(link: PlayableLink): Promise<CacheEntry | null> {
   try {
     const store = await getKvStore();
-    return await store.get<CacheEntry>(cacheKey(playlistId));
+    return await store.get<CacheEntry>(cacheKey(link));
   } catch {
     return null;
   }
 }
 
 async function writeCache(
-  playlistId: string,
+  link: PlayableLink,
   entry: CacheEntry,
   ttlSeconds: number
 ): Promise<void> {
   try {
     const store = await getKvStore();
-    await store.set(cacheKey(playlistId), entry, ttlSeconds);
+    await store.set(cacheKey(link), entry, ttlSeconds);
   } catch {
     // Swallowed: the caller already has its answer, and failing the request
     // over a cache write would turn a degraded cache into a broken game.
@@ -662,14 +686,17 @@ async function recordStale(kind: "stale" | "refreshed"): Promise<void> {
  * project has decided numbers are read.
  */
 async function recordMiss(
-  playlistId: string,
+  link: PlayableLink,
   source: PlaylistLoadSource
 ): Promise<void> {
   try {
     const store = await getKvStore();
     const misses = await store.incr(statsKey("miss"), STATS_TTL_SECONDS);
+    // A playlist's id prints bare, as it always has; an album's is prefixed
+    // so the two cannot be read as one series.
+    const id = link.kind === "album" ? `album:${link.id}` : link.id;
     console.log(
-      `[playlist-cache] miss id=${playlistId} source=${source} misses=${misses}`
+      `[playlist-cache] miss id=${id} source=${source} misses=${misses}`
     );
   } catch {
     // Instrumentation must never be able to fail a request.
@@ -865,8 +892,12 @@ function isFresh(entry: Extract<CacheEntry, { kind: "hit" }>): boolean {
  */
 const inFlight = new Map<string, Promise<LoadedPlaylist>>();
 
-function toLoaded(entry: Extract<CacheEntry, { kind: "hit" }>): LoadedPlaylist {
+function toLoaded(
+  entry: Extract<CacheEntry, { kind: "hit" }>,
+  link: PlayableLink
+): LoadedPlaylist {
   return {
+    kind: link.kind,
     name: entry.name,
     tracks: entry.tracks,
     totalTracks: entry.tracks.length,
@@ -874,8 +905,32 @@ function toLoaded(entry: Extract<CacheEntry, { kind: "hit" }>): LoadedPlaylist {
   };
 }
 
+/**
+ * The one upstream read, by kind. Both answer in the same shape so that
+ * everything after this line — the strip, the TTLs, the cache write — is one
+ * path, and an album cannot be cached by a rule a playlist is not.
+ */
+async function fetchUpstream(
+  link: PlayableLink
+): Promise<{ name: string; tracks: Track[]; truncated: boolean }> {
+  if (link.kind === "album") {
+    const { album, tracks, truncated } = await getAlbumWithTracks(link.id);
+    return { name: album.name, tracks, truncated };
+  }
+  // By the address built from the id, not by what was pasted. The paste may
+  // be a short link, which lib/spotify.ts cannot read and must not follow —
+  // and the id is the thing this function was already keyed on.
+  const { playlist, tracks, truncated } = await getPlaylistWithTracks(playableUrl(link));
+  return { name: playlist.name, tracks, truncated };
+}
+
+/** What a cached 404 replays as when the entry predates `code`. */
+function notFoundCode(link: PlayableLink): AppErrorCode {
+  return link.kind === "album" ? "album_not_found" : "playlist_not_found";
+}
+
 async function fetchAndCache(
-  playlistId: string,
+  link: PlayableLink,
   source: PlaylistLoadSource
 ): Promise<LoadedPlaylist> {
   const cooldownUntil = await readCooldownUntil();
@@ -900,15 +955,10 @@ async function fetchAndCache(
     });
   }
 
-  await recordMiss(playlistId, source);
+  await recordMiss(link, source);
 
   try {
-    // By the address built from the id, not by what was pasted. The paste may
-    // be a short link, which lib/spotify.ts cannot read and must not follow —
-    // and the id is the thing this function was already keyed on.
-    const { playlist, tracks, truncated } = await getPlaylistWithTracks(
-      playlistUrlFromId(playlistId)
-    );
+    const { name, tracks, truncated } = await fetchUpstream(link);
 
     // rawJson is the entire Spotify track object and nothing reads it — every
     // consumer runs it through stripTrackForStorage before use. Dropping it
@@ -927,10 +977,10 @@ async function fetchAndCache(
           ? SAMPLED_TTL_SECONDS
           : HIT_TTL_SECONDS;
     await writeCache(
-      playlistId,
+      link,
       {
         kind: "hit",
-        name: playlist.name,
+        name,
         tracks: stripped,
         truncated,
         freshUntil: Date.now() + freshSeconds * 1000,
@@ -941,7 +991,8 @@ async function fetchAndCache(
     );
 
     return {
-      name: playlist.name,
+      kind: link.kind,
+      name,
       tracks: stripped,
       totalTracks: stripped.length,
       truncated,
@@ -957,7 +1008,7 @@ async function fetchAndCache(
     // blip look like a broken playlist for as long as the entry lived.
     if (err instanceof SpotifyApiError && err.status === 404) {
       await writeCache(
-        playlistId,
+        link,
         { kind: "missing", code: err.code, message: err.message, status: 404, at: Date.now() },
         NOT_FOUND_TTL_SECONDS
       );
@@ -1020,6 +1071,12 @@ export async function loadPlaylist(
   // `playlist_refused` (see the catch above).
   const empty = loaded.tracks.length === 0;
   if (empty && options.automatic !== true) await recordPlaylistRefused("playlist_empty");
+  // An album that played, hit or miss — the number that replaced
+  // `playlist_invalid:album`, which counted the same links being turned away.
+  // Not for the page's own recheck, for the reason the refusals above are not.
+  if (!empty && loaded.kind === "album" && options.automatic !== true) {
+    await recordPlaylistAlbum("loaded");
+  }
   if (options.recheck) await recordPlaylistRecheck(empty ? "other" : "found", options.automatic === true);
   return loaded;
 }
@@ -1032,7 +1089,8 @@ export async function loadPlaylist(
  */
 function recheckOutcomeOf(err: unknown): PlaylistRecheckOutcome {
   if (isReplayedRecheck(err)) return "replayed";
-  return err instanceof SpotifyApiError && err.code === "playlist_not_found"
+  return err instanceof SpotifyApiError &&
+    (err.code === "playlist_not_found" || err.code === "album_not_found")
     ? "missing"
     : "other";
 }
@@ -1069,17 +1127,17 @@ function invalidKindOf(err: unknown): PlaylistInvalidKind | null {
 }
 
 /**
- * What was pasted, as a playlist id — following a short link to find out
- * when that is what it takes.
+ * What was pasted, as a playlist or an album — following a short link to
+ * find out when that is what it takes.
  *
  * Everything here happens before the cache is read and before any budget is
  * claimed, and none of it touches the Web API, so a refusal from this
  * function is as true during a cooldown as outside one. That is the rule the
  * editorial check below follows, one step earlier: telling someone who
- * pasted an album "we're rate limited, try again in 60s" sends them back
- * with the same album.
+ * pasted a track "we're rate limited, try again in 60s" sends them back
+ * with the same track.
  */
-async function playlistIdFor(pasted: string): Promise<string> {
+async function playableFor(pasted: string): Promise<PlayableLink> {
   let link = classifySpotifyLink(pasted);
 
   if (link.kind === "shortlink") {
@@ -1096,9 +1154,9 @@ async function playlistIdFor(pasted: string): Promise<string> {
     link = resolution.link;
   }
 
-  if (link.kind === "playlist") return link.id;
-  // An album reached through a short link is an album. The question the
-  // counter answers is what people are trying to play.
+  // A playlist or an album reached through a short link is that thing. The
+  // question the counter answers is what people are trying to play.
+  if (isPlayableLink(link)) return link;
   if (isNamedLinkKind(link.kind)) {
     throw new PlaylistLinkError(NAMED_LINK_CODES[link.kind], link.kind);
   }
@@ -1110,29 +1168,31 @@ async function loadPlaylistUncounted(
   source: PlaylistLoadSource,
   options: LoadOptions
 ): Promise<LoadedPlaylist> {
-  const playlistId = await playlistIdFor(playlistUrl);
+  const link = await playableFor(playlistUrl);
 
   // Checked here as well as inside getPlaylistWithTracks so it stays true
   // during a cooldown: an editorial playlist is permanently unsupported, and
   // telling that host "we're rate limited, try again in 60s" would send them
-  // back to a URL that is never going to work.
-  if (isSpotifyEditorial(playlistId)) {
+  // back to a URL that is never going to work. Playlists only: `37i9` is a
+  // playlist-id convention, and an album whose id happened to begin with it
+  // would be refused for a reason that does not exist.
+  if (link.kind === "playlist" && isSpotifyEditorial(link.id)) {
     throw new SpotifyApiError("playlist_editorial", 404);
   }
 
-  const cached = await readCache(playlistId);
+  const cached = await readCache(link);
   if (cached?.kind === "hit" && isFresh(cached)) {
     // A replayed empty playlist is a negative hit, like a replayed 404: the
     // one kind of hit a broken input produces on repeat. `loadPlaylist` counts
     // it as `playlist_refused:playlist_empty` from the empty list either way.
     await recordHit(cached.tracks.length === 0);
-    return toLoaded(cached);
+    return toLoaded(cached, link);
   }
   // Past its freshness: kept for exactly this, see STALE_GRACE_SECONDS.
   const stale = cached?.kind === "hit" ? cached : null;
   if (stale && (await spotifyUnderPressure())) {
     await recordStale("stale");
-    return toLoaded(stale);
+    return toLoaded(stale, link);
   }
   const recheckable =
     cached?.kind === "missing" &&
@@ -1146,7 +1206,7 @@ async function loadPlaylistUncounted(
     await recordHit(true);
     // Entries written before `code` existed carry only a message, and the only
     // thing cached here is a 404, so that is what they replay as.
-    const replay = new SpotifyApiError(cached.code ?? "playlist_not_found", cached.status, {
+    const replay = new SpotifyApiError(cached.code ?? notFoundCode(link), cached.status, {
       detail: cached.code ? undefined : cached.message,
     });
     if (options.recheck) replayedRechecks.add(replay);
@@ -1158,15 +1218,15 @@ async function loadPlaylistUncounted(
   // cold load then is the one call `automatic` exists not to spend. Handed
   // back as a replayed refusal, so the page says nothing about the playlist.
   if (!cached && options.automatic === true && (await spotifyUnderPressure())) {
-    const replay = new SpotifyApiError("playlist_not_found", 404);
+    const replay = new SpotifyApiError(notFoundCode(link), 404);
     replayedRechecks.add(replay);
     throw replay;
   }
 
-  if (!stale) return fetchCoalesced(playlistId, source);
+  if (!stale) return fetchCoalesced(link, source);
 
   try {
-    const fresh = await fetchCoalesced(playlistId, source);
+    const fresh = await fetchCoalesced(link, source);
     await recordStale("refreshed");
     return fresh;
   } catch (err) {
@@ -1176,24 +1236,27 @@ async function loadPlaylistUncounted(
     // a host than that.
     if (err instanceof SpotifyApiError && err.status === 404) throw err;
     await recordStale("stale");
-    return toLoaded(stale);
+    return toLoaded(stale, link);
   }
 }
 
 function fetchCoalesced(
-  playlistId: string,
+  link: PlayableLink,
   source: PlaylistLoadSource
 ): Promise<LoadedPlaylist> {
-  const existing = inFlight.get(playlistId);
+  // Keyed like the cache, so an album and a playlist that share an id (they
+  // are Spotify's two id spaces, not one) cannot join each other's fetch.
+  const key = cacheKey(link);
+  const existing = inFlight.get(key);
   if (existing) return existing;
 
   // The source recorded is the one that *started* the fetch — a coalesced
   // sibling joins a load already in progress and never reaches recordMiss,
   // which is correct: the line describes the upstream call, not the request.
-  const pending = fetchAndCache(playlistId, source).finally(() => {
-    inFlight.delete(playlistId);
+  const pending = fetchAndCache(link, source).finally(() => {
+    inFlight.delete(key);
   });
-  inFlight.set(playlistId, pending);
+  inFlight.set(key, pending);
   return pending;
 }
 

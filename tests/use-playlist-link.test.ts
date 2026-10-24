@@ -70,49 +70,56 @@ describe("usePlaylistLinkCheck", () => {
     expect(type("")).toEqual({ submittable: false, problem: null, named: null });
     expect(type(`https://open.spotify.com/intl-ja/playlist/${ID}`).submittable).toBe(true);
     expect(type("https://spotify.link/AbCdEfG").submittable).toBe(true);
+    // An album goes through like a playlist since 2026-10-25.
     expect(type(`https://open.spotify.com/album/${ID}`)).toEqual({
+      submittable: true,
+      problem: null,
+      named: null,
+    });
+    expect(type(`https://open.spotify.com/track/${ID}`)).toEqual({
       submittable: false,
-      problem: "playlist_link_album",
-      named: "album",
+      problem: "playlist_link_track",
+      named: "track",
     });
     expect(type("my party mix").problem).toBe("invalid_playlist_url");
   });
 
   it("reports a named link once, when the field becomes one", () => {
-    type(`https://open.spotify.com/album/${ID}`);
+    type(`https://open.spotify.com/track/${ID}`);
     expect(analytics.events).toEqual([
-      { name: "playlist_link_named", params: { surface: "join", link_kind: "album" } },
+      { name: "playlist_link_named", params: { surface: "join", link_kind: "track" } },
     ]);
   });
 
   it("does not report again for edits and re-renders that leave it the same kind", () => {
-    type(`https://open.spotify.com/album/${ID}`);
-    type(`https://open.spotify.com/album/${ID}?si=x`);
-    type(`https://open.spotify.com/album/${ID}?si=xy`);
-    type(`https://open.spotify.com/intl-ja/album/${ID}`);
+    type(`https://open.spotify.com/track/${ID}`);
+    type(`https://open.spotify.com/track/${ID}?si=x`);
+    type(`https://open.spotify.com/track/${ID}?si=xy`);
+    type(`https://open.spotify.com/intl-ja/track/${ID}`);
     expect(analytics.events).toHaveLength(1);
   });
 
   it("reports the new kind when the field changes to another", () => {
-    type(`https://open.spotify.com/album/${ID}`, "buzz");
     type(`https://open.spotify.com/track/${ID}`, "buzz");
+    type(`https://open.spotify.com/artist/${ID}`, "buzz");
     type("", "buzz");
-    type(`https://open.spotify.com/track/${ID}`, "buzz");
+    type(`https://open.spotify.com/artist/${ID}`, "buzz");
     expect(analytics.events.map((e) => e.params)).toEqual([
-      { surface: "buzz", link_kind: "album" },
       { surface: "buzz", link_kind: "track" },
-      { surface: "buzz", link_kind: "track" },
+      { surface: "buzz", link_kind: "artist" },
+      { surface: "buzz", link_kind: "artist" },
     ]);
   });
 
   it("reports nothing for typing, for text, or for a link that works", () => {
     // `invalid_playlist_url` is what every half-typed address reads as, so
-    // reporting it would count keystrokes. Only the three named kinds are
+    // reporting it would count keystrokes. Only the two named kinds are
     // events — they cannot arise from anything but a whole, real link.
     const whole = `https://open.spotify.com/playlist/${ID}`;
     for (let end = 1; end <= whole.length; end += 1) type(whole.slice(0, end), "collector");
     type("my party mix", "collector");
     type("https://spotify.link/AbCdEfG", "collector");
+    type(`https://open.spotify.com/album/${ID}`, "collector");
     expect(analytics.events).toEqual([]);
   });
 

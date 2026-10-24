@@ -82,12 +82,12 @@ vi.mock("@/lib/kv", () => ({
   }),
 }));
 
-// Only the network-facing entry point is mocked. parsePlaylistUrl,
+// Only the two network-facing entry points are mocked. parsePlaylistUrl,
 // isSpotifyEditorial and SpotifyApiError stay real, because the cache's
 // routing decisions are built on them.
 vi.mock("@/lib/spotify", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/spotify")>();
-  return { ...actual, getPlaylistWithTracks: vi.fn() };
+  return { ...actual, getPlaylistWithTracks: vi.fn(), getAlbumWithTracks: vi.fn() };
 });
 
 /**
@@ -123,6 +123,19 @@ function upstreamResult(ids: string[], truncated = false) {
 const upstream = () => vi.mocked(spotify.getPlaylistWithTracks);
 const upstreamCalls = () => upstream().mock.calls.length;
 
+/** `GET /albums/{id}` as lib/spotify.ts hands it back. */
+function albumResult(ids: string[], truncated = false) {
+  return {
+    album: { id: "x", name: "My Album", images: [], tracks: { items: [], total: ids.length } },
+    tracks: ids.map(makeTrack),
+    truncated,
+  };
+}
+
+const albumUpstream = () => vi.mocked(spotify.getAlbumWithTracks);
+const albumUpstreamCalls = () => albumUpstream().mock.calls.length;
+const albumUrlFor = (seed: string) => `https://open.spotify.com/album/${playlistId(seed)}`;
+
 beforeEach(() => {
   kv.mem.clear();
   kv.writes.length = 0;
@@ -132,6 +145,8 @@ beforeEach(() => {
   __resetInFlightForTests();
   upstream().mockReset();
   upstream().mockResolvedValue(upstreamResult(["a", "b"]));
+  albumUpstream().mockReset();
+  albumUpstream().mockResolvedValue(albumResult(["x1", "x2"]));
 });
 
 describe("playlist cache", () => {
@@ -285,40 +300,42 @@ describe("a link that was never a playlist is named, and counted by what it was"
   const day = new Date().toISOString().slice(0, 10);
   const stat = (metric: string) =>
     (kv.mem.get(`loop:stats:${day}:${metric}`)?.value as number | undefined) ?? 0;
-  const KINDS = ["album", "track", "artist", "shortlink", "other"] as const;
+  const KINDS = ["track", "artist", "shortlink", "other"] as const;
   const split = () => KINDS.reduce((total, kind) => total + stat(`playlist_invalid:${kind}`), 0);
 
-  it("answers an album, a track and an artist link with its own code, and never asks Spotify", async () => {
-    for (const kind of ["album", "track", "artist"] as const) {
+  it("answers a track and an artist link with its own code, and never asks Spotify", async () => {
+    for (const kind of ["track", "artist"] as const) {
       await expect(
         loadPlaylist(`https://open.spotify.com/intl-ja/${kind}/${playlistId(kind)}?si=x`)
       ).rejects.toMatchObject({ code: `playlist_link_${kind}`, status: 400 });
       expect(stat(`playlist_invalid:${kind}`)).toBe(1);
     }
     expect(upstreamCalls()).toBe(0);
+    expect(albumUpstreamCalls()).toBe(0);
     // Before the cache is read and before any budget is claimed.
     expect([...kv.mem.keys()].some((k) => k.startsWith("spotify:budget"))).toBe(false);
   });
 
   it("still counts every one of them as invalid_playlist_url, so the weekly series keeps its meaning", async () => {
-    // The host reads "that's an album"; the counter that read 748 still
-    // moves. The five parts are written in the same call as the total, so
+    // The host reads "that's a song"; the counter that read 748 still
+    // moves. The four parts are written in the same call as the total, so
     // they sum to it exactly.
     const pasted = [
-      `https://open.spotify.com/album/${playlistId("x")}`,
+      `https://open.spotify.com/track/${playlistId("x")}`,
       `spotify:track:${playlistId("y")}`,
       `https://open.spotify.com/artist/${playlistId("z")}`,
       "my party mix",
       "https://example.com/not-a-playlist",
-      `https://open.spotify.com/album/${playlistId("x")}`, // a retry counts again
+      `https://open.spotify.com/track/${playlistId("x")}`, // a retry counts again
     ];
     for (const link of pasted) await loadPlaylist(link).catch(() => {});
 
     expect(stat("playlist_refused:invalid_playlist_url")).toBe(pasted.length);
     expect(split()).toBe(pasted.length);
-    expect(stat("playlist_invalid:album")).toBe(2);
+    expect(stat("playlist_invalid:track")).toBe(3);
     expect(stat("playlist_invalid:other")).toBe(2);
-    // And nothing new joined the set of four.
+    // An album is not among them any more, and nothing new joined the refusal set.
+    expect(stat("playlist_invalid:album")).toBe(0);
     for (const code of ["playlist_link_album", "playlist_link_track", "playlist_link_artist"]) {
       expect(stat(`playlist_refused:${code}`)).toBe(0);
     }
@@ -348,15 +365,15 @@ describe("a link that was never a playlist is named, and counted by what it was"
     expect(upstreamCalls()).toBe(0);
   });
 
-  it("names the link during a cooldown too — waiting will not make an album a playlist", async () => {
+  it("names the link during a cooldown too — waiting will not make a track a playlist", async () => {
     upstream().mockRejectedValueOnce(
       new spotify.SpotifyApiError("spotify_rate_limited", 429, { retryAfterSeconds: 120 })
     );
     await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ status: 429 });
 
     await expect(
-      loadPlaylist(`https://open.spotify.com/album/${playlistId("x")}`)
-    ).rejects.toMatchObject({ code: "playlist_link_album", status: 400 });
+      loadPlaylist(`https://open.spotify.com/track/${playlistId("x")}`)
+    ).rejects.toMatchObject({ code: "playlist_link_track", status: 400 });
   });
 
   it("loads what the old forms turned away and the server always took", async () => {
@@ -433,18 +450,32 @@ describe("short links on the paste path", () => {
   });
 
   it("names what the short link led to, and counts it as that", async () => {
-    redirector({ status: 307, location: `https://open.spotify.com/album/${playlistId("x")}` });
+    redirector({ status: 307, location: `https://open.spotify.com/track/${playlistId("x")}` });
 
     await expect(loadPlaylist(SHORT)).rejects.toMatchObject({
-      code: "playlist_link_album",
+      code: "playlist_link_track",
       status: 400,
     });
-    // An album is an album however its link was spelled: the counter answers
+    // A track is a track however its link was spelled: the counter answers
     // what people are trying to play.
-    expect(stat("playlist_invalid:album")).toBe(1);
+    expect(stat("playlist_invalid:track")).toBe(1);
     expect(stat("playlist_invalid:shortlink")).toBe(0);
     expect(stat("playlist_refused:invalid_playlist_url")).toBe(1);
     expect(upstreamCalls()).toBe(0);
+  });
+
+  it("follows a short link to an album and loads it, like a playlist's", async () => {
+    redirector({ status: 307, location: `${albumUrlFor("x")}?si=abc` });
+
+    const result = await loadPlaylist(SHORT, "room-submit");
+
+    expect(result.kind).toBe("album");
+    expect(result.name).toBe("My Album");
+    expect(albumUpstream()).toHaveBeenCalledWith(playlistId("x"));
+    expect(upstreamCalls()).toBe(0);
+    expect(stat("playlist_album:loaded")).toBe(1);
+    expect(stat("playlist_invalid:shortlink")).toBe(0);
+    expect([...kv.mem.keys()].some((k) => k.includes("playlist_refused:"))).toBe(false);
   });
 
   it("refuses a dead short link for good, under its own bucket", async () => {
@@ -537,12 +568,28 @@ describe("short links on the paste path", () => {
       await expect(res.json()).resolves.toMatchObject({ name: "My Playlist", totalTracks: 2 });
     });
 
-    it("names an album with a code the page will not retry", async () => {
-      const res = await post(`https://open.spotify.com/album/${playlistId("x")}`);
+    it("loads an album like any other playlist", async () => {
+      const res = await post(albumUrlFor("x"));
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({ name: "My Album", totalTracks: 2 });
+    });
+
+    it("names an album Spotify has not got with a code the page will not retry", async () => {
+      albumUpstream().mockRejectedValue(new spotify.SpotifyApiError("album_not_found", 404));
+      const res = await post(albumUrlFor("x"));
+      const body = await res.json();
+      expect(res.status).toBe(404);
+      expect(body.code).toBe("album_not_found");
+      expect(body.error).toMatch(/album/i);
+      expect(body.error).not.toMatch(/public|private/i);
+      expect(isDeterministicPlaylistFailure(body.code)).toBe(true);
+    });
+
+    it("names a track with a code the page will not retry", async () => {
+      const res = await post(`https://open.spotify.com/track/${playlistId("x")}`);
       const body = await res.json();
       expect(res.status).toBe(400);
-      expect(body.code).toBe("playlist_link_album");
-      expect(body.error).toMatch(/album/i);
+      expect(body.code).toBe("playlist_link_track");
       expect(isDeterministicPlaylistFailure(body.code)).toBe(true);
     });
 
@@ -572,6 +619,101 @@ describe("short links on the paste path", () => {
       await expect(res.json()).resolves.toMatchObject({ code: "rate_limited_playlist" });
       expect(net.calls()).toBe(30);
     });
+  });
+});
+
+describe("an album link", () => {
+  // `playlist_invalid:album` read ~245 a week of these being turned away.
+  // Every layer below is the playlist's, shared — what is pinned here is
+  // that an album reaches the album endpoint, under its own key, and is
+  // counted both ways.
+  const day = new Date().toISOString().slice(0, 10);
+  const stat = (metric: string) =>
+    (kv.mem.get(`loop:stats:${day}:${metric}`)?.value as number | undefined) ?? 0;
+  const ALBUM_X = albumUrlFor("x");
+
+  it("loads through the album endpoint, never the playlist one, and says what it was", async () => {
+    const result = await loadPlaylist(ALBUM_X, "playlist-api");
+
+    expect(result.kind).toBe("album");
+    expect(result.name).toBe("My Album");
+    expect(result.tracks.map((t) => t.id)).toEqual(["x1", "x2"]);
+    expect(albumUpstream()).toHaveBeenCalledWith(playlistId("x"));
+    expect(upstreamCalls()).toBe(0);
+  });
+
+  it("is cached under its own key, and a repeat costs nothing upstream", async () => {
+    await loadPlaylist(ALBUM_X);
+    await loadPlaylist(`spotify:album:${playlistId("x")}`);
+    await loadPlaylist(`  聽這張 ${ALBUM_X}?si=zz `);
+
+    expect(albumUpstreamCalls()).toBe(1);
+    const write = kv.writes.find((w) => w.key.startsWith("album:"));
+    expect(write?.key).toBe(`album:v1:${playlistId("x")}`);
+    expect(kv.writes.some((w) => w.key.startsWith("playlist:v1:"))).toBe(false);
+    // The same TTL rules as a playlist: a day fresh, a week in all.
+    expect(write?.ttlSeconds).toBe(7 * 24 * 60 * 60);
+  });
+
+  it("never shares an entry with a playlist that happens to have the same id", async () => {
+    await loadPlaylist(URL_A);
+    await loadPlaylist(albumUrlFor("a"));
+    expect(upstreamCalls()).toBe(1);
+    expect(albumUpstreamCalls()).toBe(1);
+    expect(kv.writes.map((w) => w.key).filter((k) => /^(playlist|album):v1:/.test(k))).toEqual([
+      `playlist:v1:${playlistId("a")}`,
+      `album:v1:${playlistId("a")}`,
+    ]);
+  });
+
+  it("does not apply the editorial rule — 37i9 is a playlist-id convention", async () => {
+    await expect(loadPlaylist("https://open.spotify.com/album/37i9dQZF1DXcBWIGoYBM5M")).resolves.toMatchObject({
+      kind: "album",
+    });
+    expect(albumUpstreamCalls()).toBe(1);
+    expect(stat("playlist_refused:playlist_editorial")).toBe(0);
+  });
+
+  it("counts a load that played, hit or miss, and never an empty one", async () => {
+    await loadPlaylist(ALBUM_X);
+    await loadPlaylist(ALBUM_X);
+    expect(stat("playlist_album:loaded")).toBe(2);
+    expect(albumUpstreamCalls()).toBe(1);
+
+    albumUpstream().mockResolvedValue(albumResult([]));
+    await loadPlaylist(albumUrlFor("e"));
+    expect(stat("playlist_album:loaded")).toBe(2);
+    expect(stat("playlist_refused:playlist_empty")).toBe(1);
+
+    // A playlist never counts here.
+    await loadPlaylist(URL_A);
+    expect(stat("playlist_album:loaded")).toBe(2);
+  });
+
+  it("remembers an album Spotify has not got as its own refusal, and replays it", async () => {
+    albumUpstream().mockRejectedValue(new spotify.SpotifyApiError("album_not_found", 404));
+
+    for (let i = 0; i < 3; i += 1) {
+      const err = await loadPlaylist(ALBUM_X).catch((e) => e);
+      expect(err).toMatchObject({ code: "album_not_found", status: 404 });
+      expect(isDeterministicPlaylistFailure(err.code)).toBe(true);
+    }
+    expect(albumUpstreamCalls()).toBe(1);
+    // Counted as a fifth permanent refusal, every replay included, and
+    // never as the playlist's "private or deleted".
+    expect(stat("playlist_refused:album_not_found")).toBe(3);
+    expect(stat("playlist_refused:playlist_not_found")).toBe(0);
+    expect(stat("playlist_album:loaded")).toBe(0);
+    expect(kv.writes.find((w) => w.key.startsWith("album:v1:"))?.ttlSeconds).toBe(10 * 60);
+  });
+
+  it("is parked by a cooldown like a playlist, and spends the same budget", async () => {
+    upstream().mockRejectedValueOnce(
+      new spotify.SpotifyApiError("spotify_rate_limited", 429, { retryAfterSeconds: 60 })
+    );
+    await expect(loadPlaylist(URL_A)).rejects.toMatchObject({ status: 429 });
+    await expect(loadPlaylist(ALBUM_X)).rejects.toMatchObject({ status: 429 });
+    expect(albumUpstreamCalls()).toBe(0);
   });
 });
 

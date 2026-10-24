@@ -65,7 +65,7 @@ import {
   type RecheckNote,
   type SetupFailure,
 } from "@/lib/playlist-help";
-import { isEditorialLink, playlistIdOf, playlistUrlOf } from "@/lib/playlist-ref";
+import { isEditorialLink, playableRefOf, playableUrlOf } from "@/lib/playlist-ref";
 import { isSubmittablePlaylistLink } from "@/lib/spotify-link";
 import {
   CLIP_DURATIONS,
@@ -494,7 +494,7 @@ export default function SetupPage() {
    * done what the box told them to.
    */
   function pickPlaylist(id: string, source: LinkSource) {
-    setPlaylistUrl(playlistUrlOf(id));
+    setPlaylistUrl(playableUrlOf(id));
     setLinkSource(source);
     setFailure(null);
   }
@@ -704,8 +704,8 @@ export default function SetupPage() {
   // refuses — not "those four characters are somewhere in the text". See
   // lib/playlist-ref.ts.
   const isEditorial = isEditorialLink(playlistUrl);
-  // Which playlist the field holds, for the chip that names it.
-  const currentPlaylistId = playlistIdOf(playlistUrl);
+  // Which playlist (or album) the field holds, for the chip that names it.
+  const currentPlaylistId = playableRefOf(playlistUrl);
 
   function addPlayer() {
     setPlayers((p) => [...p, ""]);
@@ -1226,7 +1226,7 @@ export default function SetupPage() {
     failure && setupMode === "single"
       ? recheckOffer(
           failure.code,
-          currentPlaylistId ? playlistUrlOf(currentPlaylistId) : null,
+          currentPlaylistId ? playableUrlOf(currentPlaylistId) : null,
           locale
         )
       : null;
@@ -1336,13 +1336,13 @@ export default function SetupPage() {
 
             {setupMode === "single" && (
               <div>
-                <p className="section-label">Spotify Playlist</p>
+                <p className="section-label">Spotify Playlist or Album</p>
                 <div style={{ position: "relative" }}>
                   <input
                     ref={firstInputRef}
                     type="url"
                     className={`url-input${isValidSpotifyUrl ? " valid" : ""}`}
-                    placeholder="https://open.spotify.com/playlist/..."
+                    placeholder="https://open.spotify.com/playlist/... or /album/..."
                     value={playlistUrl}
                     onChange={(e) => {
                       setPlaylistUrl(e.target.value);

@@ -51,6 +51,7 @@ const OWN = "3cEYpjA9oz9GiPac4AsH4n";
 const OTHER = "5FJXhjdILmRA2z5bvz4nzf";
 const EDITORIAL = "37i9dQZF1DXcBWIGoYBM5M";
 const url = (id: string) => `https://open.spotify.com/playlist/${id}`;
+const album = (id: string) => `https://open.spotify.com/album/${id}`;
 
 /** What the form opened on before it remembered anything. */
 const BLANK_FORM = {
@@ -252,12 +253,22 @@ describe("the remembered link", () => {
     expect(store({ playlistUrl: `spotify:playlist:${OWN}`, playlistName: "Mix" })?.playlistUrl).toBe(url(OWN));
   });
 
+  it("remembers an album by the album's own address", () => {
+    // Albums load since 2026-10-25, and a host's last album is as worth
+    // restoring as their last playlist.
+    const pasted = `https://open.spotify.com/intl-ja/album/${OWN}?si=abcdef0123456789`;
+    expect(store({ playlistUrl: pasted, playlistName: "LP" })?.playlistUrl).toBe(album(OWN));
+    expect(store({ playlistUrl: `spotify:album:${OWN}`, playlistName: "LP" })?.playlistUrl).toBe(album(OWN));
+    expect(store({ playlistUrl: album(OWN), playlistName: "LP" })?.playlistName).toBe("LP");
+  });
+
   it("is nothing at all unless it holds an id of the right shape", () => {
     for (const junk of [
       "",
       "https://open.spotify.com/playlist/",
       "https://open.spotify.com/playlist/short",
-      `https://open.spotify.com/album/${OWN}`,
+      "https://open.spotify.com/album/short",
+      `https://open.spotify.com/track/${OWN}`,
       "javascript:alert(1)",
       "https://evil.example/?next=playlist/../../x",
       OWN,
@@ -425,11 +436,24 @@ describe("recent playlists", () => {
     expect(list.map((p) => p.name)).toEqual(["List F", "List E", "List D", "List C", "List B"]);
   });
 
+  it("keeps an album as its own chip, apart from a playlist with the same id", () => {
+    let list = addRecentPlaylist([{ id: OWN, name: "Mine" }], { url: `${album(OWN)}?si=x`, name: "LP" });
+    expect(list).toEqual([
+      { id: `album:${OWN}`, name: "LP" },
+      { id: OWN, name: "Mine" },
+    ]);
+    // The same album again, however spelled, is the same chip.
+    list = addRecentPlaylist(list, { url: `spotify:album:${OWN}`, name: "LP, renamed" });
+    expect(list.map((p) => p.id)).toEqual([`album:${OWN}`, OWN]);
+    expect(list[0].name).toBe("LP, renamed");
+  });
+
   it("does not invent a chip for a link with no id or a playlist with no name", () => {
     const before = [{ id: OTHER, name: "Other" }];
     for (const loaded of [
       { url: "https://open.spotify.com/playlist/short", name: "Mix" },
-      { url: `https://open.spotify.com/album/${OWN}`, name: "Mix" },
+      { url: "https://open.spotify.com/album/short", name: "Mix" },
+      { url: `https://open.spotify.com/track/${OWN}`, name: "Mix" },
       { url: url(OWN), name: "" },
       { url: url(OWN), name: "   " },
       { url: url(OWN), name: undefined },
@@ -464,6 +488,19 @@ describe("recent playlists", () => {
     expect(parseRecentPlaylists(raw)).toEqual([
       { id: OWN, name: "Mine" },
       { id: OTHER, name: "Other" },
+    ]);
+  });
+
+  it("reads an album chip back under its own ref, and drops a malformed one", () => {
+    const raw = JSON.stringify([
+      { id: `album:${OWN}`, name: "LP" },
+      { id: OWN, name: "Mine" },
+      { id: "album:short", name: "Bad" },
+      { id: `album:${OWN}`, name: "LP again" },
+    ]);
+    expect(parseRecentPlaylists(raw)).toEqual([
+      { id: `album:${OWN}`, name: "LP" },
+      { id: OWN, name: "Mine" },
     ]);
   });
 
@@ -510,6 +547,13 @@ describe("chipsFor — the link in the field always has a name", () => {
     expect(chips).toHaveLength(RECENT_PLAYLISTS_MAX);
     expect(chips[0]).toEqual({ id: OWN, name: "Friday Night" });
     expect(chips.map((p) => p.name)).not.toContain("List E");
+  });
+
+  it("names a remembered album the same way", () => {
+    expect(chipsFor(recent, remembered({ playlistUrl: album(OWN), playlistName: "LP" }))).toEqual([
+      { id: `album:${OWN}`, name: "LP" },
+      ...recent,
+    ]);
   });
 
   it("adds nothing when there is no playlist to name, or no name to give it", () => {

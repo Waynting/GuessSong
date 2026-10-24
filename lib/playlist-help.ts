@@ -19,8 +19,8 @@
  *
  * `PLAYLIST_HELP_BY_CODE` maps an error code to a topic; `PLAYLIST_HELP_TOPICS`
  * holds what each topic says. Two tables because several codes are the same
- * advice — a link to an album, to a track and to an artist are three refusals
- * and one remedy — and because it makes a new code a one-line change that
+ * advice — a link to a track, to an artist and to an album Spotify has not
+ * got are three refusals and one remedy — and because it makes a new code a one-line change that
  * cannot forget a translation: the line names a topic, and a topic without
  * both languages is a compile error, the same trick `ERROR_MESSAGES` uses.
  *
@@ -117,9 +117,11 @@ export const PLAYLIST_HELP_TOPICS: Record<PlaylistHelpTopic, PlaylistHelpCopy> =
   },
   wrong_link: {
     anchor: null,
+    // "Or the album": albums load since 2026-10-25, and the step is also what
+    // `album_not_found` shows, where "open the playlist" would be odd advice.
     step: {
-      en: "Open the playlist itself in Spotify, choose Share → Copy link, and paste that.",
-      zh: "在 Spotify 打開歌單本身，按「分享」→「複製連結」，再貼到這裡。",
+      en: "Open the playlist itself (or the album) in Spotify, choose Share → Copy link, and paste that.",
+      zh: "在 Spotify 打開歌單本身（或專輯），按「分享」→「複製連結」，再貼到這裡。",
     },
     label: {
       en: "What a playlist link looks like",
@@ -155,9 +157,10 @@ export const PLAYLIST_HELP_BY_CODE: Partial<Record<AppErrorCode, PlaylistHelpTop
   playlist_editorial: "editorial",
   playlist_not_found: "private",
   invalid_playlist_url: "wrong_link",
-  playlist_link_album: "wrong_link",
   playlist_link_track: "wrong_link",
   playlist_link_artist: "wrong_link",
+  // An album Spotify has not got. Not `private`: an album has no such setting.
+  album_not_found: "wrong_link",
   playlist_empty: "empty",
 };
 

@@ -360,18 +360,24 @@ export const QUIZ_SOCIAL_PLATFORMS: readonly QuizSocialPlatform[] = SOCIAL_PLATF
  *   playlist_not_found     private, deleted, or never a playlist
  *   playlist_editorial     one of Spotify's own — refused, not broken
  *   playlist_empty         loaded, and had nothing playable
- *   invalid_playlist_url   parsed as nothing — an album or track link,
- *                          usually
+ *   invalid_playlist_url   parsed as nothing — a track link, usually
+ *   album_not_found        an album link Spotify has no album for (since
+ *                          2026-10-25, when albums began to load; an album
+ *                          cannot be private, so this is a dead link)
  *
  * Which of these dominates is a product question the hit rate could not
  * ask: a wall of editorial refusals is a room that wants "Today's Top Hits"
- * and is told no, a wall of invalid URLs is a room pasting albums. Guarded
+ * and is told no, a wall of invalid URLs is a room pasting tracks. Guarded
  * like every other key tail here, because `SpotifyApiError.code` is typed
  * but the rule does not care.
  */
 export type PlaylistRefusalCode = Extract<
   AppErrorCode,
-  "playlist_not_found" | "playlist_editorial" | "playlist_empty" | "invalid_playlist_url"
+  | "playlist_not_found"
+  | "playlist_editorial"
+  | "playlist_empty"
+  | "invalid_playlist_url"
+  | "album_not_found"
 >;
 
 export const PLAYLIST_REFUSAL_CODES: readonly PlaylistRefusalCode[] = [
@@ -379,6 +385,7 @@ export const PLAYLIST_REFUSAL_CODES: readonly PlaylistRefusalCode[] = [
   "playlist_editorial",
   "playlist_empty",
   "invalid_playlist_url",
+  "album_not_found",
 ];
 
 const PLAYLIST_REFUSAL_SET: ReadonlySet<string> = new Set(PLAYLIST_REFUSAL_CODES);
@@ -395,36 +402,49 @@ export function isPlaylistRefusalCode(value: unknown): value is PlaylistRefusalC
  * — the second largest reason a link was turned away — and could not be read:
  * an album link, a track link, an artist page, a mobile short link and a
  * sentence typed into the field were one number. "Should the site play
- * albums" depends on how much of it is albums, so the split is measured
- * before anything is built.
+ * albums" depended on how much of it was albums, so the split was measured
+ * before anything was built — and it answered: ~245 a week to 2026-10-24,
+ * the only refusal the app could choose to lift, so from 2026-10-25 an album
+ * loads and `album` is no longer a kind here. Its place is taken by
+ * `playlist_album:loaded` (`recordPlaylistAlbum`), the same links counted
+ * the other way up; `npm run stats` prints the two on one line.
  *
- *   album      a Spotify album link — the request the app cannot serve
  *   track      one song
  *   artist     an artist's page
  *   shortlink  a `spotify.link` that was followed and led nowhere usable: a
  *              dead slug, or a podcast, a profile, the home page
  *   other      no Spotify link in it at all, or one too mangled to read
  *
- * A short link that leads to an album is `album`, not `shortlink` — the
+ * A short link that leads to a track is `track`, not `shortlink` — the
  * question is what people are trying to play, and how the link was spelled
  * is not part of it. A short link that could not be followed *this time* is
  * in neither: that is `playlist_shortlink:unavailable` below, it is
  * retryable, and it is not a refusal.
  *
  * **Written in the same call as `playlist_refused:invalid_playlist_url`, one
- * for one**, so the five sum to it exactly and that weekly series keeps its
- * meaning against the 748. `PLAYLIST_REFUSAL_CODES` stays the set of four:
- * this is a second reading of one of them, not a fifth.
+ * for one**, so the four sum to it exactly and that weekly series keeps its
+ * meaning against the 748. This is a second reading of one refusal code,
+ * not a code of its own.
  */
-export type PlaylistInvalidKind = "album" | "track" | "artist" | "shortlink" | "other";
+export type PlaylistInvalidKind = "track" | "artist" | "shortlink" | "other";
 
 export const PLAYLIST_INVALID_KINDS: readonly PlaylistInvalidKind[] = [
-  "album",
   "track",
   "artist",
   "shortlink",
   "other",
 ];
+
+/**
+ * An album link that loaded, hit or miss, for every caller — the party form,
+ * a Mixed room's submit, the quiz. `loaded` is the only outcome: a dead one
+ * is `playlist_refused:album_not_found`, beside the other refusals, so the
+ * refusal line stays the one place a dead link is counted. The outcome is a
+ * closed set for the reason every key tail here is, even at one member.
+ */
+export type PlaylistAlbumOutcome = "loaded";
+
+export const PLAYLIST_ALBUM_OUTCOMES: readonly PlaylistAlbumOutcome[] = ["loaded"];
 
 /**
  * How following a short link came out, for every one the server was handed —
@@ -824,6 +844,7 @@ export function loopStatsKeys(
   refusalRecovery: Record<RecoveryStage, Record<PlaylistHelpTopic, string>>;
   refusalRecoveryVia: Record<SetupSource, string>;
   playlistRefused: Record<PlaylistRefusalCode, string>;
+  playlistAlbum: Record<PlaylistAlbumOutcome, string>;
 } {
   const impressions: Record<string, string> = {};
   const clicks: Record<string, string> = {};
@@ -954,6 +975,9 @@ export function loopStatsKeys(
     playlistRefused: Object.fromEntries(
       PLAYLIST_REFUSAL_CODES.map((c) => [c, key(day, `playlist_refused:${c}`)])
     ) as Record<PlaylistRefusalCode, string>,
+    playlistAlbum: Object.fromEntries(
+      PLAYLIST_ALBUM_OUTCOMES.map((o) => [o, key(day, `playlist_album:${o}`)])
+    ) as Record<PlaylistAlbumOutcome, string>,
     playlistInvalid: Object.fromEntries(
       PLAYLIST_INVALID_KINDS.map((k) => [k, key(day, `playlist_invalid:${k}`)])
     ) as Record<PlaylistInvalidKind, string>,
@@ -1392,6 +1416,16 @@ export async function recordPlaylistInvalid(kind: PlaylistInvalidKind): Promise<
     recordPlaylistRefused("invalid_playlist_url"),
     bump(`playlist_invalid:${kind}`),
   ]);
+}
+
+/**
+ * An album link loaded. Written by `loadPlaylist` in `lib/playlist-cache.ts`
+ * on the way out, like the refusals, so every caller is counted once and the
+ * routes cannot each count it their own way.
+ */
+export function recordPlaylistAlbum(outcome: PlaylistAlbumOutcome): Promise<void> {
+  if (!PLAYLIST_ALBUM_OUTCOMES.includes(outcome)) return Promise.resolve();
+  return bump(`playlist_album:${outcome}`);
 }
 
 /**

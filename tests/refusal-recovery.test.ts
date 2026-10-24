@@ -26,8 +26,10 @@ describe("the rule", () => {
     expect(first.report).toBe("private");
     // A second refusal on the same page is the same stuck host.
     expect(noteFailure(first.state, "playlist_editorial").report).toBeNull();
-    // An album link is a wrong link, like a malformed one.
-    expect(noteFailure(NO_REFUSAL, "playlist_link_album").report).toBe("wrong_link");
+    // A track link is a wrong link, like a malformed one — and so is an
+    // album Spotify has not got, which has no "make it public" to offer.
+    expect(noteFailure(NO_REFUSAL, "playlist_link_track").report).toBe("wrong_link");
+    expect(noteFailure(NO_REFUSAL, "album_not_found").report).toBe("wrong_link");
   });
 
   it("does not count a failure that says nothing about the link", () => {

@@ -45,10 +45,10 @@ describe("parseSharedText", () => {
     ).toEqual({ kind: "track" });
   });
 
-  it("classifies album links (including intl paths)", () => {
+  it("classifies album links (including intl paths), with their id", () => {
     expect(
       parseSharedText(`https://open.spotify.com/intl-ja/album/${ID}`)
-    ).toEqual({ kind: "album" });
+    ).toEqual({ kind: "album", id: ID });
   });
 
   it("classifies artist links", () => {

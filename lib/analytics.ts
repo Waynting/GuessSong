@@ -19,7 +19,12 @@ import type { QuizVerdict } from "@/lib/quiz";
 import type { QuizSource } from "@/lib/quiz-source";
 
 export type PlaylistSource = "own" | "mixed";
-export type ShareType = "track" | "album" | "artist" | "unknown";
+/**
+ * What `/share/unsupported` was handed. `album` left on 2026-10-25, when an
+ * album began to land on the setup page like a playlist; the old value stays
+ * in GA4's history, not in the union.
+ */
+export type ShareType = "track" | "artist" | "unknown";
 /**
  * Why a round had no audio. `absent` is a property of the recording, which is
  * ours to curate around; `unavailable` is a property of our own throttled
@@ -448,9 +453,10 @@ export type AnalyticsEvent =
     }
   | {
       /**
-       * A form was shown a real Spotify link to the wrong thing — an album, a
-       * track, an artist page — and said so under the field instead of
-       * greying its button out in silence.
+       * A form was shown a real Spotify link to the wrong thing — a track, an
+       * artist page — and said so under the field instead of greying its
+       * button out in silence. (An album was the third kind until
+       * 2026-10-25; it loads now.)
        *
        * This is the only record of those, and it is the weaker kind. The four
        * forms that block a submission never send the link, so
@@ -459,14 +465,14 @@ export type AnalyticsEvent =
        * the party form and the quiz. What is pasted into a room is here or
        * nowhere.
        *
-       * Fired when the field's reading *becomes* one of the three, not per
+       * Fired when the field's reading *becomes* one of the two, not per
        * keystroke. Bucketed by kind and by form; the link itself never
        * travels, for the reason every failure param in this file is an enum.
        */
       name: "playlist_link_named";
       params: {
         surface: "join" | "buzz" | "collector" | "room_panel";
-        link_kind: "album" | "track" | "artist";
+        link_kind: "track" | "artist";
       };
     }
   | {

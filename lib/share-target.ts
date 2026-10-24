@@ -17,6 +17,8 @@ import type { ShareType } from "@/lib/analytics";
 import {
   classifySpotifyLink,
   isNamedLinkKind,
+  isPlayableLink,
+  playableUrl,
   playlistUrlFromId,
   type SpotifyLink,
 } from "@/lib/spotify-link";
@@ -32,7 +34,7 @@ export function parseSharedText(raw: string): SharedLink {
 export { playlistUrlFromId };
 
 export type ShareDestination =
-  /** The setup page, with this in the playlist field. */
+  /** The setup page, with this in the playlist field — a playlist's or an album's address. */
   | { to: "setup"; playlistUrl: string }
   /** `/share/unsupported`, which says what was shared and what to share instead. */
   | { to: "unsupported"; type: ShareType };
@@ -70,6 +72,7 @@ export async function shareDestination(
     link = resolution.link;
   }
 
-  if (link.kind === "playlist") return { to: "setup", playlistUrl: playlistUrlFromId(link.id) };
+  // A playlist or an album: the setup page loads either (lib/playlist-cache.ts).
+  if (isPlayableLink(link)) return { to: "setup", playlistUrl: playableUrl(link) };
   return { to: "unsupported", type: isNamedLinkKind(link.kind) ? link.kind : "unknown" };
 }

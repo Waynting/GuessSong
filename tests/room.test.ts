@@ -12,7 +12,7 @@ vi.mock("@/lib/playlist-cache", () => ({
 
 /** Shape lib/playlist-cache.ts returns; room.ts only reads `tracks`. */
 function loaded(tracks: Track[]) {
-  return { name: "P", tracks, totalTracks: tracks.length, truncated: false };
+  return { kind: "playlist" as const, name: "P", tracks, totalTracks: tracks.length, truncated: false };
 }
 
 function makeTrack(overrides: Partial<Track> = {}): Track {

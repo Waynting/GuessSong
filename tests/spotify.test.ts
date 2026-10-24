@@ -656,6 +656,196 @@ describe("Spotify 429 handling", () => {
   });
 });
 
+const ALBUM_ID = "4aawyAB9vmqN3uQ7FjRGTy";
+
+interface AlbumBehaviour {
+  /** HTTP status for the album calls. 200 unless overridden. */
+  status?: number;
+  /** How many tracks the fake album has; the embedded page holds 50. */
+  total?: number;
+  retryAfter?: string;
+  /** Leading tracks served with a null id, which an album never has but the shape allows. */
+  nullIds?: number;
+  albumType?: string;
+}
+
+/**
+ * The album endpoints only: `GET /albums/{id}` with its embedded first page
+ * of fifty, and `/albums/{id}/tracks` for the rest. Counts requests, since
+ * "one call per album" is the promise the cache's budget is sized on.
+ */
+function installAlbumFetchMock(behaviour: AlbumBehaviour = {}) {
+  const { status = 200, total = 12, retryAfter, nullIds = 0, albumType = "album" } = behaviour;
+  const urls: string[] = [];
+  const trackOf = (i: number) => ({
+    id: i < nullIds ? null : `cut-${i}`,
+    name: `Cut ${i}`,
+    artists: [{ name: "Band" }],
+    duration_ms: 180000,
+  });
+  const page = (offset: number, limit: number) => {
+    const end = Math.min(offset + limit, total);
+    return {
+      items: Array.from({ length: Math.max(0, end - offset) }, (_, i) => trackOf(offset + i)),
+      total,
+      next:
+        end < total
+          ? `https://api.spotify.com/v1/albums/${ALBUM_ID}/tracks?offset=${end}&limit=${limit}`
+          : null,
+    };
+  };
+  const ok = (body: unknown): MockResponse => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: noHeaders(),
+    json: async () => body,
+    text: async () => "",
+  });
+  const fetchMock = vi.fn(async (url: string | URL): Promise<MockResponse> => {
+    const href = typeof url === "string" ? url : url.toString();
+    urls.push(href);
+    if (href === TOKEN_URL) return ok({ access_token: "token-1", expires_in: 3600 });
+    if (status !== 200) {
+      return {
+        ok: false,
+        status,
+        statusText: "Error",
+        headers: { get: (name) => (name.toLowerCase() === "retry-after" ? retryAfter ?? null : null) },
+        json: async () => ({ error: { message: "nope" } }),
+        text: async () => "nope",
+      };
+    }
+    if (href.includes("/tracks")) {
+      const parsed = new URL(href);
+      return ok(page(Number(parsed.searchParams.get("offset") ?? 0), Number(parsed.searchParams.get("limit") ?? 50)));
+    }
+    return ok({
+      id: ALBUM_ID,
+      name: "Test Album",
+      images: [{ url: "https://i.scdn.co/image/a" }],
+      release_date: "1997-05-21",
+      release_date_precision: "day",
+      album_type: albumType,
+      tracks: page(0, 50),
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return {
+    urls: () => urls,
+    albumRequests: () => urls.filter((u) => u.includes("/albums/")).length,
+  };
+}
+
+describe("getAlbumWithTracks", () => {
+  beforeEach(() => {
+    process.env.SPOTIFY_CLIENT_ID = "id";
+    process.env.SPOTIFY_CLIENT_SECRET = "secret";
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads an ordinary album in one request, with the album on every track", async () => {
+    const probe = installAlbumFetchMock({ total: 12 });
+    const { getAlbumWithTracks } = await freshSpotify();
+
+    const { album, tracks, truncated } = await getAlbumWithTracks(ALBUM_ID);
+
+    expect(album.name).toBe("Test Album");
+    expect(tracks).toHaveLength(12);
+    expect(truncated).toBe(false);
+    expect(probe.albumRequests()).toBe(1);
+    expect(probe.urls()).toContain(`https://api.spotify.com/v1/albums/${ALBUM_ID}`);
+    for (const track of tracks) {
+      expect(track.albumName).toBe("Test Album");
+      expect(track.albumImageUrl).toBe("https://i.scdn.co/image/a");
+      expect(track.artists).toEqual(["Band"]);
+      expect(track.durationMs).toBe(180000);
+      expect(track.releaseDate).toBe("1997-05-21");
+      expect(track.releaseDatePrecision).toBe("day");
+      // The simplified track carries neither, and neither is invented.
+      expect("albumCompilation" in track).toBe(false);
+      expect("popularity" in track).toBe(false);
+    }
+    expect(tracks.map((t) => t.id)).toEqual(Array.from({ length: 12 }, (_, i) => `cut-${i}`));
+  });
+
+  it("follows the tracks endpoint for a box set, fifty at a time", async () => {
+    const probe = installAlbumFetchMock({ total: 120 });
+    const { getAlbumWithTracks } = await freshSpotify();
+
+    const { tracks, truncated } = await getAlbumWithTracks(ALBUM_ID);
+
+    expect(tracks).toHaveLength(120);
+    expect(truncated).toBe(false);
+    // The album object, then two pages: 50–100 and 100–120.
+    expect(probe.albumRequests()).toBe(3);
+    const offsets = probe
+      .urls()
+      .filter((u) => u.includes("/tracks"))
+      .map((u) => new URL(u).searchParams.get("offset"));
+    expect(offsets).toEqual(["50", "100"]);
+    for (const u of probe.urls().filter((u) => u.includes("/tracks"))) {
+      expect(new URL(u).searchParams.get("limit")).toBe("50");
+    }
+  });
+
+  it("stops at the same ceiling as a playlist and says so", async () => {
+    const probe = installAlbumFetchMock({ total: 640 });
+    const { getAlbumWithTracks, MAX_PLAYLIST_TRACKS } = await freshSpotify();
+
+    const { tracks, truncated } = await getAlbumWithTracks(ALBUM_ID);
+
+    expect(tracks).toHaveLength(MAX_PLAYLIST_TRACKS);
+    expect(truncated).toBe(true);
+    // Ten pages of fifty, the album object being the first.
+    expect(probe.albumRequests()).toBe(10);
+  });
+
+  it("maps a 404 to the album's own code, never the playlist's private one", async () => {
+    installAlbumFetchMock({ status: 404 });
+    const { getAlbumWithTracks } = await freshSpotify();
+
+    const err = await getAlbumWithTracks(ALBUM_ID).catch((e) => e);
+
+    expect(err).toMatchObject({ code: "album_not_found", status: 404 });
+  });
+
+  it("maps a 429 to the shared rate-limit code and keeps Retry-After", async () => {
+    installAlbumFetchMock({ status: 429, retryAfter: "30" });
+    const { getAlbumWithTracks } = await freshSpotify();
+
+    const err = await getAlbumWithTracks(ALBUM_ID).catch((e) => e);
+
+    expect(err).toMatchObject({ code: "spotify_rate_limited", status: 429, retryAfterSeconds: 30 });
+  });
+
+  it("marks a compilation, and skips a track without an id", async () => {
+    installAlbumFetchMock({ total: 4, nullIds: 1, albumType: "compilation" });
+    const { getAlbumWithTracks } = await freshSpotify();
+
+    const { tracks } = await getAlbumWithTracks(ALBUM_ID);
+
+    expect(tracks.map((t) => t.id)).toEqual(["cut-1", "cut-2", "cut-3"]);
+    for (const track of tracks) expect(track.albumCompilation).toBe(true);
+  });
+
+  it("converts an album track with the album's date and nothing it was not sent", async () => {
+    const { convertAlbumTrack } = await freshSpotify();
+    const track = convertAlbumTrack(
+      { id: "t", name: "Cut", artists: [{ name: "Band" }, { name: "Guest" }], duration_ms: 1000 },
+      { id: ALBUM_ID, name: "LP", images: [], tracks: { items: [], total: 1 } }
+    );
+    expect(track).toMatchObject({ id: "t", name: "Cut", artists: ["Band", "Guest"], durationMs: 1000, albumName: "LP" });
+    expect("releaseDate" in track).toBe(false);
+    expect("releaseDatePrecision" in track).toBe(false);
+    expect("albumCompilation" in track).toBe(false);
+    expect(track.albumImageUrl).toBeUndefined();
+  });
+});
+
 /**
  * `releaseDate` is read at year level by lib/order-game.ts. It is optional
  * on the way in (Spotify omits it for some local files) and must then be
