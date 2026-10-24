@@ -31,7 +31,6 @@ import {
   reportGameStart,
   reportMixedNudge,
   reportRefusal,
-  reportRemoteDoor,
   reportRefusalRecovered,
 } from "@/lib/loop-client";
 import {
@@ -44,7 +43,6 @@ import {
   type RecoveryState,
 } from "@/lib/refusal-recovery";
 import { showMixedNudge } from "@/lib/mixed-nudge";
-import { REMOTE_DOOR_COPY } from "@/lib/remote-door";
 import { playerBand } from "@/lib/game-players";
 import { currentArrival } from "@/lib/arrival";
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
@@ -328,10 +326,6 @@ export default function SetupPage() {
   // remembered so a Mixed start from this page can be credited to it.
   const nudgeShownRef = useRef(false);
   const nudgeTappedRef = useRef(false);
-  // The "play online" fake door (lib/remote-door.ts): counted once when drawn
-  // and once on its first tap, per page load.
-  const remoteDoorTappedRef = useRef(false);
-  const [remoteDoorOpen, setRemoteDoorOpen] = useState(false);
   // Whether this tab showed a permanent refusal, and whether a game started
   // after it — carried across a reload, read back in the mount effect. See
   // lib/refusal-recovery.ts.
@@ -1191,20 +1185,6 @@ export default function SetupPage() {
     reportMixedNudge("shown");
   }, [mixedNudge]);
 
-  // Drawn only once mounted, so the line is in the device's language from its
-  // first paint rather than switching from English after hydration.
-  useEffect(() => {
-    if (mounted) reportRemoteDoor("shown");
-  }, [mounted]);
-
-  function openRemoteDoor() {
-    setRemoteDoorOpen(true);
-    if (remoteDoorTappedRef.current) return;
-    remoteDoorTappedRef.current = true;
-    reportRemoteDoor("tapped");
-  }
-  const remoteDoor = REMOTE_DOOR_COPY[locale];
-
   function takeMixedNudge() {
     nudgeTappedRef.current = true;
     reportMixedNudge("tapped");
@@ -1772,25 +1752,6 @@ export default function SetupPage() {
                   Make a Taste Quiz link →
                 </Link>
               </div>
-
-              {/* A question, not a feature: online rooms do not exist, and the
-                  tap is how we find out whether they should. lib/remote-door.ts. */}
-              {mounted && (
-                <div className="remote-door" lang={locale === "zh" ? "zh-TW" : "en"}>
-                  {remoteDoorOpen ? (
-                    <p className="remote-door-note" role="status">
-                      {remoteDoor.note}{" "}
-                      <Link href={QUIZ_SETUP_HREF} className="text-link">
-                        {remoteDoor.quiz}
-                      </Link>
-                    </p>
-                  ) : (
-                    <button type="button" className="text-link" onClick={openRemoteDoor}>
-                      {remoteDoor.link}
-                    </button>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 
