@@ -186,6 +186,39 @@ export interface SpotifyTrack {
 
 export type SpotifyReleaseDatePrecision = "year" | "month" | "day";
 
+/**
+ * A track as `GET /albums/{id}` lists it — Spotify's "simplified" track: no
+ * `album` of its own (it is inside one) and no `popularity`. `id` is null for
+ * a local file, which an album never has, but the shape allows it.
+ */
+export interface SpotifyAlbumTrack {
+  id: string | null;
+  name: string;
+  artists: Array<{ name: string }>;
+  duration_ms: number;
+}
+
+/**
+ * `GET /albums/{id}`. There is no `fields` projection on this endpoint, so
+ * the whole object comes back; an album is small enough that this is fine.
+ * The first page of tracks is embedded, like a playlist's, at Spotify's own
+ * page size (`ALBUM_TRACKS_PAGE_LIMIT`).
+ */
+export interface SpotifyAlbum {
+  id: string;
+  name: string;
+  images: Array<{ url: string }>;
+  release_date?: string;
+  release_date_precision?: SpotifyReleaseDatePrecision;
+  /** `album`, `single` or `compilation`. */
+  album_type?: string;
+  tracks: {
+    items: Array<SpotifyAlbumTrack | null>;
+    total: number;
+    next?: string | null;
+  };
+}
+
 export interface SpotifyPlaylist {
   id: string;
   name: string;
@@ -255,6 +288,21 @@ export const MAX_PLAYLIST_TRACKS = 500;
 
 /** How many pages MAX_PLAYLIST_TRACKS works out to. */
 const MAX_TRACK_PAGES = Math.ceil(MAX_PLAYLIST_TRACKS / TRACKS_PAGE_LIMIT);
+
+/**
+ * `GET /albums/{id}/tracks` allows at most 50 per page, and the page embedded
+ * in the album object is 50 too. An ordinary album fits in that first page;
+ * a box set spends one more request per fifty, up to `MAX_ALBUM_TRACK_PAGES`.
+ */
+const ALBUM_TRACKS_PAGE_LIMIT = 50;
+
+/**
+ * The album's own bound, in requests. Ten pages is a 500-track box set — the
+ * same `MAX_PLAYLIST_TRACKS` ceiling as a playlist's, reached with smaller
+ * pages. An album is never sampled: it is read in order, and anything past
+ * the cap is reported as `truncated`, as a playlist's overflow is.
+ */
+const MAX_ALBUM_TRACK_PAGES = Math.ceil(MAX_PLAYLIST_TRACKS / ALBUM_TRACKS_PAGE_LIMIT);
 
 /**
  * What we ask Spotify to serialise for one page of tracks.
@@ -567,6 +615,60 @@ export function convertSpotifyTrack(spotifyTrack: SpotifyTrack): Track {
 }
 
 /**
+ * An album's track, in our shape. Everything about the album — its name,
+ * art, date and whether it is a compilation — comes from the album object,
+ * because the simplified track carries none of it. No `popularity`: the
+ * endpoint does not send one, and the Mixed taste card treats a track
+ * without it as unranked.
+ */
+export function convertAlbumTrack(track: SpotifyAlbumTrack, album: SpotifyAlbum): Track {
+  return {
+    id: track.id as string,
+    name: track.name,
+    artists: track.artists.map((artist) => artist.name),
+    durationMs: track.duration_ms,
+    albumName: album.name,
+    albumImageUrl: album.images[0]?.url,
+    // The same absent-not-undefined rule as convertSpotifyTrack, for the same
+    // reason: the stored and the wire shapes must agree on whether the key
+    // exists.
+    ...(typeof album.release_date === "string" ? { releaseDate: album.release_date } : {}),
+    ...(album.release_date_precision
+      ? { releaseDatePrecision: album.release_date_precision }
+      : {}),
+    ...(album.album_type === "compilation" ? { albumCompilation: true } : {}),
+    rawJson: track as unknown as Record<string, unknown>,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Run one upstream read with a client-credentials token, minting a fresh one
+ * and trying once more if Spotify rejects it.
+ *
+ * Two attempts: a cached token can be rejected mid-flight (revoked, clock
+ * skew, or expiring between the buffer check and Spotify's own clock). That
+ * is transparently recoverable, so drop the bad entry and mint a fresh one
+ * rather than surfacing an error the user can do nothing about. Only 401
+ * retries — a 404 means the thing genuinely isn't reachable, and a 429 means
+ * the quota is spent, where retrying is what caused the problem.
+ */
+async function withSpotifyToken<T>(read: (token: string) => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    const token = await getClientAccessToken();
+    try {
+      return await read(token);
+    } catch (err) {
+      const isAuthFailure = err instanceof SpotifyApiError && err.status === 401;
+      if (!isAuthFailure) throw err;
+
+      invalidateClientAccessToken();
+      if (attempt > 0) throw err;
+    }
+  }
+}
+
+/**
  * Get full playlist info including tracks using Client Credentials (no user login required)
  */
 export async function getPlaylistWithTracks(
@@ -581,36 +683,127 @@ export async function getPlaylistWithTracks(
     throw new SpotifyApiError("playlist_editorial", 404);
   }
 
-  // Two attempts: a cached token can be rejected mid-flight (revoked, clock
-  // skew, or expiring between the buffer check and Spotify's own clock). That
-  // is transparently recoverable, so drop the bad entry and mint a fresh one
-  // rather than surfacing an error the user can do nothing about. Only 401
-  // retries — a 404 means the playlist genuinely isn't reachable, and a 429
-  // means the quota is spent, where retrying is what caused the problem.
-  for (let attempt = 0; ; attempt++) {
-    const token = await getClientAccessToken();
+  return withSpotifyToken(async (token) => {
+    // Sequential, and that is the whole point. These two used to go out
+    // together under a Promise.all with an AbortController threaded into
+    // every page, because the metadata call and page zero were separate
+    // requests for overlapping data. They are one request now, so the head
+    // both costs less and gates the rest: nothing paginates until we know
+    // the playlist is readable, and a failed head spends zero track pages.
+    const { playlist, firstPage } = await fetchPlaylistHead(playlistId, token);
+    const trackPage = await fetchPlaylistTracks(playlistId, token, firstPage);
 
-    try {
-      // Sequential, and that is the whole point. These two used to go out
-      // together under a Promise.all with an AbortController threaded into
-      // every page, because the metadata call and page zero were separate
-      // requests for overlapping data. They are one request now, so the head
-      // both costs less and gates the rest: nothing paginates until we know
-      // the playlist is readable, and a failed head spends zero track pages.
-      const { playlist, firstPage } = await fetchPlaylistHead(playlistId, token);
-      const trackPage = await fetchPlaylistTracks(playlistId, token, firstPage);
+    const tracks = trackPage.tracks.map(convertSpotifyTrack);
 
-      const tracks = trackPage.tracks.map(convertSpotifyTrack);
+    return { playlist, tracks, truncated: trackPage.truncated };
+  });
+}
 
-      return { playlist, tracks, truncated: trackPage.truncated };
-    } catch (err) {
-      const isAuthFailure = err instanceof SpotifyApiError && err.status === 401;
-      if (!isAuthFailure) throw err;
-
-      invalidateClientAccessToken();
-      if (attempt > 0) throw err;
-    }
+/**
+ * The album endpoints' errors, mapped the way the playlist ones are. A 404
+ * is its own code: an album cannot be made private, so "check that it's
+ * public" would send the host to a setting that does not exist.
+ */
+function albumError(response: Response, errorData: { error?: { message?: string } }, what: string) {
+  if (response.status === 404) return new SpotifyApiError("album_not_found", 404);
+  if (response.status === 429) {
+    return new SpotifyApiError(RATE_LIMITED_CODE, 429, {
+      retryAfterSeconds: parseRetryAfter(response),
+    });
   }
+  return new SpotifyApiError("playlist_load_failed", response.status, {
+    detail: `${what}: ${response.status} ${errorData.error?.message || response.statusText}`,
+  });
+}
+
+interface AlbumTrackPage {
+  tracks: SpotifyAlbumTrack[];
+  /** Offset to read next, or null when this was the last page. */
+  nextOffset: number | null;
+}
+
+/**
+ * Spotify's paging shape over simplified tracks: the items *are* the tracks,
+ * where a playlist page wraps each in `{track}`. Same stopping rule as
+ * readTrackPage — `next` when sent, the arithmetic over the raw page as the
+ * fallback — so an album never silently ends at its first fifty.
+ */
+function readAlbumTrackPage(
+  paging: SpotifyAlbum["tracks"] | null | undefined,
+  offset: number
+): AlbumTrackPage {
+  const rawItems = Array.isArray(paging?.items) ? paging.items : [];
+  const tracks = rawItems.filter(
+    (track): track is SpotifyAlbumTrack => track != null && typeof track.id === "string" && track.id !== ""
+  );
+  const total = typeof paging?.total === "number" ? paging.total : offset + rawItems.length;
+  const consumed = offset + rawItems.length;
+  const hasMore = rawItems.length > 0 && (paging?.next != null || consumed < total);
+  return { tracks, nextOffset: hasMore ? consumed : null };
+}
+
+async function fetchAlbum(albumId: string, accessToken: string): Promise<SpotifyAlbum> {
+  const response = await fetch(`${SPOTIFY_API_BASE}/albums/${albumId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    const errorData = await response
+      .json()
+      .catch(() => ({ error: { message: response.statusText } }));
+    console.error("Spotify album fetch error:", response.status, errorData);
+    throw albumError(response, errorData, "album");
+  }
+  return (await response.json()) as SpotifyAlbum;
+}
+
+async function fetchAlbumTrackPage(
+  albumId: string,
+  accessToken: string,
+  offset: number
+): Promise<AlbumTrackPage> {
+  const url = `${SPOTIFY_API_BASE}/albums/${albumId}/tracks?limit=${ALBUM_TRACKS_PAGE_LIMIT}&offset=${offset}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    const errorData = await response
+      .json()
+      .catch(() => ({ error: { message: response.statusText } }));
+    console.error("Spotify album tracks fetch error:", response.status, errorData, "URL:", url);
+    throw albumError(response, errorData, "album tracks");
+  }
+  return readAlbumTrackPage((await response.json()) as SpotifyAlbum["tracks"], offset);
+}
+
+/**
+ * An album and its tracks, by id, using Client Credentials.
+ *
+ * One request for nearly every album: `GET /albums/{id}` carries the first
+ * fifty tracks, and the tracks endpoint is asked only for what is left,
+ * bounded like a playlist's pagination. The id is checked by the classifier
+ * before anything reaches here (`lib/playlist-cache.ts`), so there is no
+ * `invalid_playlist_url` branch to spend a call on.
+ */
+export async function getAlbumWithTracks(
+  albumId: string
+): Promise<{ album: SpotifyAlbum; tracks: Track[]; truncated: boolean }> {
+  return withSpotifyToken(async (token) => {
+    const album = await fetchAlbum(albumId, token);
+    let page = readAlbumTrackPage(album.tracks, 0);
+    const raw = [...page.tracks];
+    let pagesLeft = MAX_ALBUM_TRACK_PAGES - 1;
+    while (page.nextOffset !== null && pagesLeft > 0 && raw.length < MAX_PLAYLIST_TRACKS) {
+      page = await fetchAlbumTrackPage(albumId, token, page.nextOffset);
+      raw.push(...page.tracks);
+      pagesLeft -= 1;
+    }
+    const tracks = raw.slice(0, MAX_PLAYLIST_TRACKS).map((track) => convertAlbumTrack(track, album));
+    return {
+      album,
+      tracks,
+      truncated: raw.length > MAX_PLAYLIST_TRACKS || page.nextOffset !== null,
+    };
+  });
 }
 
 

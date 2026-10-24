@@ -80,14 +80,10 @@ export default function Page() {
       </p>
       <ul>
         <li>
-          <strong>An album link.</strong> <code>/album/…</code> is not <code>/playlist/…</code>.
-          Easy to do from the Now Playing screen. An album is not a playlist even though it
-          looks like one; add its songs to a playlist of your own and use that.
-        </li>
-        <li>
-          <strong>An artist or track link.</strong> Same problem — check the path segment.
-          GuessSong tells you which of the three you pasted rather than only that the link
-          is wrong.
+          <strong>An artist or track link.</strong> <code>/artist/…</code> and{" "}
+          <code>/track/…</code> are not <code>/playlist/…</code> — check the path segment.
+          GuessSong tells you which of the two you pasted rather than only that the link
+          is wrong. Add the songs to a playlist of your own and use that.
         </li>
         <li>
           <strong>A folder.</strong> Folders group playlists in the desktop app and are not
@@ -111,9 +107,16 @@ export default function Page() {
         outside the United States.
       </p>
       <p>
-        Two spellings that look wrong and are not, at least here:
+        Three spellings that look wrong and are not, at least here:
       </p>
       <ul>
+        <li>
+          <strong>An album link.</strong> <code>/album/…</code> plays like a playlist: paste
+          it and the game is built from the album&rsquo;s tracks. (It used to be refused —
+          if you were told to copy the songs into a playlist, that is no longer needed.) The
+          one thing it cannot do is the put-them-in-order game, since every track shares
+          the album&rsquo;s release year.
+        </li>
         <li>
           <strong>A Spotify URI.</strong> <code>spotify:playlist:…</code> is the desktop
           app&rsquo;s internal format rather than a web address. GuessSong reads it; plenty

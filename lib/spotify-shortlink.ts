@@ -121,7 +121,7 @@ function cacheKey(url: string): string {
 /**
  * Reads a cached answer back as one of the two shapes that may be stored,
  * and as nothing otherwise. The value comes out of KV untyped, and what is
- * returned here is handed to the playlist path as a playlist id.
+ * returned here is handed to the playlist path as a playlist or album id.
  */
 function settled(value: unknown): SettledResolution | null {
   if (!value || typeof value !== "object") return null;
@@ -130,11 +130,18 @@ function settled(value: unknown): SettledResolution | null {
   if (entry.status !== "resolved" || !entry.link || typeof entry.link !== "object") return null;
 
   const link = entry.link as { kind?: unknown; id?: unknown };
-  if (link.kind === "album" || link.kind === "track" || link.kind === "artist") {
+  if (link.kind === "track" || link.kind === "artist") {
     return { status: "resolved", link: { kind: link.kind } };
   }
-  if (link.kind === "playlist" && typeof link.id === "string" && /^[A-Za-z0-9]{22}$/.test(link.id)) {
-    return { status: "resolved", link: { kind: "playlist", id: link.id } };
+  // A playlist or an album is nothing without its id. An album entry written
+  // before 2026-10-25 carried none — albums were refused, so the id was not
+  // kept — and reads as uncached here: one more follow, for a day at most.
+  if (
+    (link.kind === "playlist" || link.kind === "album") &&
+    typeof link.id === "string" &&
+    /^[A-Za-z0-9]{22}$/.test(link.id)
+  ) {
+    return { status: "resolved", link: { kind: link.kind, id: link.id } };
   }
   return null;
 }
@@ -231,9 +238,11 @@ function fromInterstitial(html: string): ResolvedLink | null {
       found = link;
       continue;
     }
+    // Same kind, and for the two kinds that carry an id, the same id: two
+    // albums on one page have told us nothing, as two playlists would.
     const same =
       found.kind === link.kind &&
-      (found.kind !== "playlist" || (link.kind === "playlist" && found.id === link.id));
+      (!("id" in found) || ("id" in link && found.id === link.id));
     if (!same) return null;
   }
   return found;

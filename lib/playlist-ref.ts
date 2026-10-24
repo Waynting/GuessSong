@@ -25,8 +25,10 @@
  * the host is about to be refused for.
  */
 import {
+  albumUrlFromId,
   isEditorialPlaylistId,
   isEditorialPlaylistLink,
+  playableLinkFrom,
   playlistIdFromLink,
   playlistUrlFromId,
 } from "@/lib/spotify-link";
@@ -58,4 +60,37 @@ export function isEditorialLink(text: string): boolean {
 
 export function playlistUrlOf(id: string): string {
   return playlistUrlFromId(id);
+}
+
+/**
+ * A playlist or an album as one storable string — the *ref* the setup
+ * memory and the recent chips key on (`lib/setup-memory.ts`).
+ *
+ * A playlist's ref is its bare 22-character id, byte for byte what the two
+ * storage keys held before albums could load, so nothing a host's browser
+ * already remembers reads differently. An album's is `album:<id>`: the colon
+ * cannot occur in an id, so the two cannot collide, and `isEditorialId` is
+ * false for every album ref by construction — `37i9` is a playlist-id
+ * convention and the prefix is in front of it.
+ */
+const ALBUM_REF_PREFIX = "album:";
+
+export function playableRefOf(text: string): string | null {
+  const link = playableLinkFrom(text);
+  if (!link) return null;
+  return link.kind === "album" ? `${ALBUM_REF_PREFIX}${link.id}` : link.id;
+}
+
+export function isPlayableRef(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  return value.startsWith(ALBUM_REF_PREFIX)
+    ? PLAYLIST_ID.test(value.slice(ALBUM_REF_PREFIX.length))
+    : PLAYLIST_ID.test(value);
+}
+
+/** The canonical address a ref names — the inverse of `playableRefOf`. */
+export function playableUrlOf(ref: string): string {
+  return ref.startsWith(ALBUM_REF_PREFIX)
+    ? albumUrlFromId(ref.slice(ALBUM_REF_PREFIX.length))
+    : playlistUrlFromId(ref);
 }

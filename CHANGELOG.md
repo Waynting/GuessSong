@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An album link plays** (`getAlbumWithTracks` in `lib/spotify.ts`,
+  `PlayableLink` in `lib/spotify-link.ts`, `playableFor` in
+  `lib/playlist-cache.ts`). `playlist_invalid:album` — the split added on
+  2026-09-30 to find out whether albums were worth building — read 245 in the
+  week to 2026-10-24, the only refusal the app could choose to lift, with
+  "not a playlist link" recovering 52.8%, the lowest row. The classifier
+  captures an album's id as it does a playlist's, every form sends it, the
+  Android share sheet lands it on `/`, and `loadPlaylist` loads it through
+  the same cache, budgets, cooldown and stale grace, under its own key
+  (`album:v1:<id>`; a playlist's key is byte for byte unchanged, so nothing
+  cold-starts). `GET /albums/{id}` carries the first fifty tracks, so an
+  ordinary album is one upstream call; a box set follows `/albums/{id}/tracks`
+  fifty at a time to the playlist's 500 ceiling. Every track takes the
+  album's name, art, date and compilation flag from the album object (the
+  simplified track carries none of them, nor a popularity).
+  - An album Spotify has no album for is `album_not_found`: deterministic, the
+    fifth `PLAYLIST_REFUSAL_CODES` member, under the `wrong_link` help and
+    never the `private` one, because an album has no "make it public".
+    `invalid_playlist_url` now says "playlist or album link".
+    `playlist_link_album` is gone, with its entry on `/share/unsupported` and
+    the guide's "album links fail" bullet (the album moved to the spellings
+    that work, with the one thing it cannot do: the order game).
+  - The setup memory remembers an album like a playlist: a playable ref is a
+    playlist's bare id — the stored format is unchanged — or `album:<id>`
+    (`playableRefOf` / `isPlayableRef` / `playableUrlOf` in
+    `lib/playlist-ref.ts`), and the recent chips, the restored link and the
+    recheck's "open it" address all go through it.
+  - `/game` hides the "Album +1" award row when every track in the game
+    shares one album; the reveal still names it.
+  - Counted: `playlist_album:loaded` on every album load that played (hit or
+    miss, every caller, never the page's own recheck) and
+    `playlist_refused:album_not_found`; `album` left `PLAYLIST_INVALID_KINDS`.
+    `npm run stats` prints `album links: played · not on Spotify · refused
+    before albums could play` under the refusals, the last from the legacy
+    key so a window across the deploy reads as one story.
+  - Not yet in `lib/changelog.ts`: the player-facing entry goes in with the
+    next version cut, which rolls this Unreleased block up.
+  - Known gaps: an album's tracks share one release year, so the
+    put-them-in-order game refuses it (`order_too_few_dated`) — honest, not a
+    bug; a Taste Quiz from an album draws its decoys from a one-artist pool,
+    so the same-artist tier does most of the work; a short link cached as
+    `{kind: "album"}` before this release carried no id and is followed once
+    more rather than loaded.
+
 - **A nudge for a host who is alone, and the mode × players cross to read
   it by** (`lib/solo-nudge.ts`, `solo_nudge:<shown|tapped|started>`,
   `game_mode_players:*`, `game_end_mode_players:*`,

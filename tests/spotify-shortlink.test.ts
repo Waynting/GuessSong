@@ -167,8 +167,8 @@ describe("following a short link", () => {
     expect(init?.cache).toBe("no-store");
   });
 
-  it("names an album, a track and an artist for what they are", async () => {
-    for (const kind of ["album", "track", "artist"] as const) {
+  it("names a track and an artist for what they are, and an album by its id", async () => {
+    for (const kind of ["track", "artist"] as const) {
       kv.mem.clear();
       stubFetch({ status: 302, location: `https://open.spotify.com/intl-ja/${kind}/${ID}?si=x` });
       await expect(resolveShortlink(SHORT)).resolves.toEqual({
@@ -176,6 +176,30 @@ describe("following a short link", () => {
         link: { kind },
       });
     }
+    kv.mem.clear();
+    stubFetch({ status: 302, location: `https://open.spotify.com/intl-ja/album/${ID}?si=x` });
+    await expect(resolveShortlink(SHORT)).resolves.toEqual({
+      status: "resolved",
+      link: { kind: "album", id: ID },
+    });
+  });
+
+  it("reads a cached album back with its id, and an album cached without one as nothing", async () => {
+    // Entries from before 2026-10-25 held `{kind: "album"}` alone — albums
+    // were refused, so the id was not kept. Such an entry is one more follow,
+    // never a load of nothing.
+    kv.mem.set(`shortlink:v1:spotify.link/AbCdEfG`, {
+      value: { status: "resolved", link: { kind: "album" } },
+      expiresAt: Date.now() + 60_000,
+    });
+    const net = stubFetch({ status: 302, location: `https://open.spotify.com/album/${ID}` });
+    await expect(resolveShortlink(SHORT)).resolves.toEqual({
+      status: "resolved",
+      link: { kind: "album", id: ID },
+    });
+    expect(net.calls()).toBe(1);
+    await resolveShortlink(SHORT);
+    expect(net.calls()).toBe(1);
   });
 
   it("requests the address the classifier rebuilt, not the text it was handed", async () => {
@@ -269,7 +293,7 @@ describe("Branch's interstitial, which is what production actually got", () => {
     stubFetch({ status: 200, html: branchPage(`https://open.spotify.com/album/${ID}?si=x`) });
     await expect(resolveShortlink(SHORT)).resolves.toEqual({
       status: "resolved",
-      link: { kind: "album" },
+      link: { kind: "album", id: ID },
     });
   });
 
@@ -392,7 +416,7 @@ describe("the cache", () => {
       link: { kind: "playlist" },
     });
     await expect(resolveShortlink("https://spotify.link/abcdefg")).resolves.toMatchObject({
-      link: { kind: "album" },
+      link: { kind: "album", id: ID },
     });
     expect(net.calls()).toBe(2);
   });
@@ -503,7 +527,7 @@ describe("where a share lands", () => {
 
   it("says what was shared when it was not a playlist", async () => {
     const net = stubFetch();
-    for (const type of ["track", "album", "artist"] as const) {
+    for (const type of ["track", "artist"] as const) {
       await expect(shareDestination(`https://open.spotify.com/${type}/${ID}`)).resolves.toEqual({
         to: "unsupported",
         type,
@@ -515,8 +539,24 @@ describe("where a share lands", () => {
     });
     expect(net.calls()).toBe(0);
 
-    stubFetch({ status: 307, location: `https://open.spotify.com/album/${ID}` });
-    await expect(shareDestination(SHORT)).resolves.toEqual({ to: "unsupported", type: "album" });
+    stubFetch({ status: 307, location: `https://open.spotify.com/track/${ID}` });
+    await expect(shareDestination(SHORT)).resolves.toEqual({ to: "unsupported", type: "track" });
+  });
+
+  it("lands a shared album on the setup page, direct or through a short link", async () => {
+    // The album used to be explained away; since 2026-10-25 the setup page
+    // loads it like a playlist.
+    const net = stubFetch();
+    await expect(
+      shareDestination(`Listen: https://open.spotify.com/intl-ja/album/${ID}?si=x`)
+    ).resolves.toEqual({ to: "setup", playlistUrl: `https://open.spotify.com/album/${ID}` });
+    expect(net.calls()).toBe(0);
+
+    stubFetch({ status: 307, location: `https://open.spotify.com/album/${ID}?si=y` });
+    await expect(shareDestination(SHORT)).resolves.toEqual({
+      to: "setup",
+      playlistUrl: `https://open.spotify.com/album/${ID}`,
+    });
   });
 
   it("sends a dead short link to the explanation", async () => {
@@ -579,10 +619,16 @@ describe("/share", () => {
     const playlist = await landing(shared({ url: SHORT }));
     expect(playlist.searchParams.get("playlist")).toBe(`https://open.spotify.com/playlist/${ID}`);
 
+    stubFetch({ status: 307, location: `https://open.spotify.com/track/${ID}` });
+    const track = await landing(shared({ url: "https://spotify.link/ATrack0" }));
+    expect(track.pathname).toBe("/share/unsupported");
+    expect(track.searchParams.get("type")).toBe("track");
+
+    // An album is not "not a playlist" any more: it lands on the setup page.
     stubFetch({ status: 307, location: `https://open.spotify.com/album/${ID}` });
     const album = await landing(shared({ url: "https://spotify.link/AnAlbum" }));
-    expect(album.pathname).toBe("/share/unsupported");
-    expect(album.searchParams.get("type")).toBe("album");
+    expect(album.pathname).toBe("/");
+    expect(album.searchParams.get("playlist")).toBe(`https://open.spotify.com/album/${ID}`);
   });
 
   it("explains a share with no playlist in it", async () => {

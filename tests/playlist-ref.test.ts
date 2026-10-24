@@ -4,7 +4,10 @@ import {
   EDITORIAL_ID_PREFIX,
   isEditorialId,
   isEditorialLink,
+  isPlayableRef,
   isPlaylistId,
+  playableRefOf,
+  playableUrlOf,
   playlistIdOf,
   playlistUrlOf,
 } from "@/lib/playlist-ref";
@@ -136,3 +139,68 @@ describe("what is fit to be stored", () => {
     expect(parsePlaylistUrl(playlistUrlOf(OWN))).toBe(OWN);
   });
 });
+
+describe("a playable ref — a playlist's bare id, or album:<id>", () => {
+  // What the setup memory and the recent chips key on since albums could
+  // load (2026-10-25). A playlist's ref is byte for byte the id that was
+  // stored before, so nothing a browser already remembers reads differently.
+  it("is the bare id for a playlist, so stored entries are unchanged", () => {
+    expect(playableRefOf(`https://open.spotify.com/intl-ja/playlist/${OWN}?si=x`)).toBe(OWN);
+    expect(playableUrlOf(OWN)).toBe(playlistUrlOf(OWN));
+    expect(isPlayableRef(OWN)).toBe(true);
+    expect(isPlayableRef(EDITORIAL)).toBe(true);
+    expect(isEditorialId(EDITORIAL)).toBe(true);
+  });
+
+  it("prefixes an album, and reads it back to the album's own address", () => {
+    const ref = playableRefOf(`https://open.spotify.com/intl-ja/album/${OWN}?si=x`);
+    expect(ref).toBe(`album:${OWN}`);
+    expect(isPlayableRef(ref)).toBe(true);
+    expect(playableUrlOf(ref as string)).toBe(`https://open.spotify.com/album/${OWN}`);
+    expect(playableRefOf(playableUrlOf(ref as string))).toBe(ref);
+    expect(playableRefOf(`spotify:album:${OWN}`)).toBe(ref);
+  });
+
+  it("is never editorial for an album, whatever its id begins with", () => {
+    // `37i9` is a playlist-id convention; the prefix sits in front of it.
+    const ref = playableRefOf(`https://open.spotify.com/album/${EDITORIAL}`);
+    expect(ref).toBe(`album:${EDITORIAL}`);
+    expect(isEditorialId(ref as string)).toBe(false);
+  });
+
+  it("refuses everything that is not one", () => {
+    for (const bad of [
+      "",
+      "album:",
+      "album:short",
+      `album:${OWN}x`,
+      `album:${OWN}:x`,
+      `track:${OWN}`,
+      `ALBUM:${OWN}`,
+      ` album:${OWN}`,
+      null,
+      undefined,
+      7,
+      {},
+    ]) {
+      expect(isPlayableRef(bad), String(bad)).toBe(false);
+    }
+    for (const text of [
+      `https://open.spotify.com/track/${OWN}`,
+      `https://open.spotify.com/artist/${OWN}`,
+      "https://spotify.link/abcDEF123",
+      "https://open.spotify.com/album/short",
+      "",
+    ]) {
+      expect(playableRefOf(text), text).toBeNull();
+    }
+  });
+
+  it("prefers the playlist when a paste holds both", () => {
+    expect(
+      playableRefOf(`https://open.spotify.com/album/${OTHER_ALBUM} https://open.spotify.com/playlist/${OWN}`)
+    ).toBe(OWN);
+  });
+});
+
+const OTHER_ALBUM = "5FJXhjdILmRA2z5bvz4nzf";

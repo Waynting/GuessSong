@@ -4,12 +4,15 @@ import { join } from "node:path";
 import {
   NAMED_LINK_CODES,
   SPOTIFY_SHORTLINK_HOSTS,
+  albumUrlFromId,
   checkPlaylistLink,
   classifySpotifyLink,
   isEditorialPlaylistId,
   isEditorialPlaylistLink,
   isSpotifyShortlinkHost,
   isSubmittablePlaylistLink,
+  playableLinkFrom,
+  playableUrl,
   playlistIdFromLink,
   playlistUrlFromId,
 } from "@/lib/spotify-link";
@@ -166,16 +169,52 @@ describe("short links", () => {
   });
 });
 
+describe("an album link is playable", () => {
+  // Albums were the third named refusal until 2026-10-25, when
+  // `playlist_invalid:album` had read ~245 a week and they began to load.
+  const albums = [
+    `https://open.spotify.com/album/${ID}`,
+    `https://open.spotify.com/intl-ja/album/${ID}?si=x`,
+    `spotify:album:${ID}`,
+  ];
+
+  it("reads the id, like a playlist's, and lets every form send it", () => {
+    for (const pasted of albums) {
+      expect(classifySpotifyLink(pasted), pasted).toEqual({ kind: "album", id: ID });
+      expect(isSubmittablePlaylistLink(pasted), pasted).toBe(true);
+      expect(checkPlaylistLink(pasted), pasted).toEqual({
+        submittable: true,
+        problem: null,
+        named: null,
+      });
+      expect(playableLinkFrom(pasted), pasted).toEqual({ kind: "album", id: ID });
+      // Still not a playlist id: the editorial rule is a playlist rule.
+      expect(playlistIdFromLink(pasted), pasted).toBeNull();
+    }
+  });
+
+  it("writes one address per album, and reads it back", () => {
+    expect(albumUrlFromId(ID)).toBe(`https://open.spotify.com/album/${ID}`);
+    expect(playableUrl({ kind: "album", id: ID })).toBe(albumUrlFromId(ID));
+    expect(playableUrl({ kind: "playlist", id: ID })).toBe(playlistUrlFromId(ID));
+    expect(classifySpotifyLink(albumUrlFromId(ID))).toEqual({ kind: "album", id: ID });
+  });
+
+  it("holds an album to the same id rule as a playlist", () => {
+    // `…/album/abc` is not an album link, it is a broken one.
+    expect(classifySpotifyLink("https://open.spotify.com/album/abc")).toEqual({ kind: "unknown" });
+    expect(classifySpotifyLink(`https://open.spotify.com/album/${ID}x`)).toEqual({ kind: "unknown" });
+    expect(playableLinkFrom("https://open.spotify.com/album/abc")).toBeNull();
+  });
+
+  it("is no longer a wrong link anywhere", () => {
+    expect(Object.keys(NAMED_LINK_CODES)).toEqual(["track", "artist"]);
+    expect(isAppErrorCode("playlist_link_album")).toBe(false);
+  });
+});
+
 describe("links to the wrong thing are named", () => {
-  const named: Array<["album" | "track" | "artist", string[]]> = [
-    [
-      "album",
-      [
-        `https://open.spotify.com/album/${ID}`,
-        `https://open.spotify.com/intl-ja/album/${ID}?si=x`,
-        `spotify:album:${ID}`,
-      ],
-    ],
+  const named: Array<["track" | "artist", string[]]> = [
     [
       "track",
       [
@@ -191,7 +230,7 @@ describe("links to the wrong thing are named", () => {
   ];
 
   for (const [kind, links] of named) {
-    it(`calls ${kind === "artist" || kind === "album" ? "an" : "a"} ${kind} link ${kind}`, () => {
+    it(`calls ${kind === "artist" ? "an" : "a"} ${kind} link ${kind}`, () => {
       for (const pasted of links) {
         expect(classifySpotifyLink(pasted), pasted).toEqual({ kind });
         expect(isSubmittablePlaylistLink(pasted), pasted).toBe(false);
@@ -215,8 +254,8 @@ describe("links to the wrong thing are named", () => {
   });
 
   it("holds a named link to the same id rule as a playlist", () => {
-    // `…/album/abc` is not an album link, it is a broken one.
-    expect(classifySpotifyLink("https://open.spotify.com/album/abc")).toEqual({ kind: "unknown" });
+    // `…/track/abc` is not a track link, it is a broken one.
+    expect(classifySpotifyLink("https://open.spotify.com/track/abc")).toEqual({ kind: "unknown" });
   });
 });
 
@@ -224,15 +263,21 @@ describe("the order, when a paste holds more than one link", () => {
   it("takes the playlist over everything beside it", () => {
     expect(
       classifySpotifyLink(
-        `https://open.spotify.com/track/${ID} from https://open.spotify.com/playlist/${EDITORIAL} via https://spotify.link/AbCdEfG`
+        `https://open.spotify.com/album/${ID} and https://open.spotify.com/track/${ID} from https://open.spotify.com/playlist/${EDITORIAL} via https://spotify.link/AbCdEfG`
       )
     ).toEqual({ kind: "playlist", id: EDITORIAL });
   });
 
-  it("takes a short link over a link that certainly is not a playlist", () => {
-    // The short link may be one. It has to be followed to find out.
+  it("takes an album over a short link — it can be played without a request", () => {
     expect(
-      classifySpotifyLink(`https://open.spotify.com/album/${ID} https://spotify.link/AbCdEfG`)
+      classifySpotifyLink(`https://spotify.link/AbCdEfG https://open.spotify.com/album/${ID}`)
+    ).toEqual({ kind: "album", id: ID });
+  });
+
+  it("takes a short link over a link that certainly cannot be played", () => {
+    // The short link may be a playlist or an album. It has to be followed to find out.
+    expect(
+      classifySpotifyLink(`https://open.spotify.com/track/${ID} https://spotify.link/AbCdEfG`)
     ).toEqual({ kind: "shortlink", url: "https://spotify.link/AbCdEfG" });
   });
 });

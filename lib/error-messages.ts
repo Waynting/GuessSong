@@ -48,12 +48,13 @@ export type AppErrorCode =
   | "playlist_url_required"
   | "invalid_playlist_url"
   // A real Spotify link to the wrong thing — named, see their entries
-  | "playlist_link_album"
   | "playlist_link_track"
   | "playlist_link_artist"
   // A short link we could not follow *this time* — retryable, see its entry
   | "playlist_shortlink_unavailable"
   | "playlist_not_found"
+  // An album link Spotify has no album for — an album cannot be private
+  | "album_not_found"
   | "playlist_editorial"
   | "playlist_empty"
   | "playlist_load_failed"
@@ -158,12 +159,12 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
     zh: "請貼上 Spotify 歌單連結。",
   },
   invalid_playlist_url: {
-    en: "That doesn't look like a Spotify playlist link.",
-    zh: "這個連結看起來不是 Spotify 歌單。",
+    en: "That doesn't look like a Spotify playlist or album link.",
+    zh: "這個連結看起來不是 Spotify 歌單或專輯。",
   },
   /*
-   * The three links that are perfectly good Spotify links to something that
-   * is not a playlist. They used to be `invalid_playlist_url` like any other
+   * The two links that are perfectly good Spotify links to something that
+   * cannot be played. They used to be `invalid_playlist_url` like any other
    * string, and "that doesn't look like a Spotify playlist link" is a strange
    * thing to be told about a link Spotify itself just handed you: 748 of them
    * in the week to 2026-09-29, none of which said what was wrong or what would
@@ -172,18 +173,16 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
    * Each says what the link is and what to paste instead, and the instead is
    * always a playlist *of your own*. Not "one of the artist's playlists", not
    * "the playlist that song lives in": the playlists Spotify shows beside an
-   * artist or an album are its own — "This Is …", the editorial mixes — and
+   * artist or a song are its own — "This Is …", the editorial mixes — and
    * those are `playlist_editorial`, refused every time. Sending someone from
    * one refusal to the next is worse than the first refusal.
    *
-   * The album sentence makes no promise. Whether albums are worth supporting
-   * is what `playlist_invalid:album` in lib/loop-stats.ts is there to find
-   * out, so the sentence says what works today and nothing about tomorrow.
+   * There were three. The album sentence was written to promise nothing,
+   * because whether albums were worth supporting was what
+   * `playlist_invalid:album` in lib/loop-stats.ts was there to find out; it
+   * read ~245 a week, and since 2026-10-25 an album link loads. Its refusal
+   * now is `album_not_found`, below, for an album Spotify does not have.
    */
-  playlist_link_album: {
-    en: "That's a link to an album, and GuessSong plays playlists. Add the album's songs to a playlist of your own, make it public, and paste that playlist's link instead.",
-    zh: "這是專輯的連結，GuessSong 玩的是歌單。請把專輯裡的歌加進你自己建立的歌單、設成公開，再貼上那個歌單的連結。",
-  },
   playlist_link_track: {
     en: "That's a link to a single song, and GuessSong needs a whole playlist. Open a public playlist you made — or add this song to one — and paste that playlist's link instead.",
     zh: "這是單一首歌的連結，GuessSong 需要一整個歌單。請打開你自己建立的公開歌單（或把這首歌加進去），再貼上歌單的連結。",
@@ -212,6 +211,16 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   playlist_not_found: {
     en: "We couldn't open that playlist. Check that it's public, and that it's one you created yourself rather than a Spotify editorial playlist.",
     zh: "找不到這個歌單。請確認：1) 歌單是公開的 2) 歌單是你自己建立的，不是 Spotify 官方編輯歌單。",
+  },
+  /**
+   * An album's 404, kept apart from a playlist's because the remedy differs:
+   * an album has no "make it public", so the private sentence would send the
+   * host to a setting that does not exist. Deterministic and given the
+   * wrong-link help — the link is the only thing that can change.
+   */
+  album_not_found: {
+    en: "Spotify has no album at that link. Check the link, or paste a playlist instead.",
+    zh: "Spotify 上找不到這張專輯。請檢查連結，或改貼一個歌單。",
   },
   playlist_editorial: {
     en: "Spotify editorial and algorithmic playlists can't be used. Please use a public playlist you created.",
@@ -789,8 +798,8 @@ export function errorMessage(
  * `playlist_shortlink_unavailable` is excluded for both reasons at once. The
  * short link was not followed — we timed out, or the connection dropped — so
  * nothing has been learned about it, and the next attempt may simply work.
- * The three `playlist_link_*` codes beside it in the set are the other
- * outcome of the same request: the link *was* followed, and led to an album.
+ * The two `playlist_link_*` codes beside it in the set are the other
+ * outcome of the same request: the link *was* followed, and led to a track.
  *
  * `tests/error-messages.test.ts` pins both halves of that.
  */
@@ -799,11 +808,12 @@ const DETERMINISTIC_PLAYLIST_CODES = new Set<AppErrorCode>([
   "playlist_url_required",
   "invalid_playlist_url",
   // What the link *is*, read off the string or off where a short link leads.
-  // An album does not become a playlist on the second press.
-  "playlist_link_album",
+  // A track does not become a playlist on the second press.
   "playlist_link_track",
   "playlist_link_artist",
   "playlist_not_found",
+  // An album Spotify has not got: nothing the host does to the link changes it.
+  "album_not_found",
   "playlist_editorial",
   "playlist_empty",
 ]);

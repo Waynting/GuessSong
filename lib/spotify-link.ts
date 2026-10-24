@@ -38,17 +38,27 @@ import type { AppErrorCode } from "@/lib/error-messages";
 
 export type SpotifyLink =
   | { kind: "playlist"; id: string }
+  /** An album plays like a playlist: one Spotify call, the same cache. */
+  | { kind: "album"; id: string }
   /** `url` is rebuilt from the host and the slug, never the pasted text. */
   | { kind: "shortlink"; url: string }
   | { kind: "track" }
-  | { kind: "album" }
   | { kind: "artist" }
   | { kind: "unknown" };
 
 export type SpotifyLinkKind = SpotifyLink["kind"];
 
-/** The three kinds that are real Spotify links to something that is not a playlist. */
-export type NamedLinkKind = "album" | "track" | "artist";
+/**
+ * A link the server can turn into a game, by id. Albums joined on
+ * 2026-10-25: they had been the one refusal the app could choose to lift,
+ * and `playlist_invalid:album` read ~245 a week of them.
+ */
+export type PlayableLink = Extract<SpotifyLink, { kind: "playlist" | "album" }>;
+
+export type PlayableKind = PlayableLink["kind"];
+
+/** The two kinds that are real Spotify links to something that cannot be played. */
+export type NamedLinkKind = "track" | "artist";
 
 /**
  * The hosts Spotify's share sheets mint short links on. `spotify.link` is the
@@ -134,9 +144,10 @@ const SHORTLINK_RE = new RegExp(
  * sentence, and a paste from a chat brings its surroundings with it.
  *
  * The order is a decision. A playlist link wins over everything else in the
- * same text, because it is the one thing that can be played. A short link
- * comes next because it may well *be* a playlist — it has to be followed to
- * find out — and only then the three kinds that certainly are not.
+ * same text, then an album: both can be played, and a playlist is what the
+ * site is for. A short link comes next because it may well *be* one of
+ * those — it has to be followed to find out — and only then the two kinds
+ * that certainly are not.
  */
 export function classifySpotifyLink(raw: unknown): SpotifyLink {
   if (typeof raw !== "string") return { kind: "unknown" };
@@ -145,15 +156,30 @@ export function classifySpotifyLink(raw: unknown): SpotifyLink {
   const playlist = text.match(PLAYLIST_RE);
   if (playlist) return { kind: "playlist", id: playlist[1] };
 
+  const album = text.match(ALBUM_RE);
+  if (album) return { kind: "album", id: album[1] };
+
   const shortlink = text.match(SHORTLINK_RE);
   if (shortlink) {
     return { kind: "shortlink", url: `https://${shortlink[1].toLowerCase()}/${shortlink[2]}` };
   }
 
   if (TRACK_RE.test(text)) return { kind: "track" };
-  if (ALBUM_RE.test(text)) return { kind: "album" };
   if (ARTIST_RE.test(text)) return { kind: "artist" };
   return { kind: "unknown" };
+}
+
+export function isPlayableLink(link: SpotifyLink): link is PlayableLink {
+  return link.kind === "playlist" || link.kind === "album";
+}
+
+/**
+ * The playlist or album in a pasted string, or null. Never follows a short
+ * link — that is network, and lives in `lib/spotify-shortlink.ts`.
+ */
+export function playableLinkFrom(raw: unknown): PlayableLink | null {
+  const link = classifySpotifyLink(raw);
+  return isPlayableLink(link) ? link : null;
 }
 
 /** The playlist id in a pasted string, or null. Never follows a short link. */
@@ -165,6 +191,16 @@ export function playlistIdFromLink(raw: unknown): string | null {
 /** The one spelling of a playlist's address this app writes. */
 export function playlistUrlFromId(id: string): string {
   return `https://open.spotify.com/playlist/${id}`;
+}
+
+/** The one spelling of an album's address this app writes. */
+export function albumUrlFromId(id: string): string {
+  return `https://open.spotify.com/album/${id}`;
+}
+
+/** The canonical address of whatever a playable link names. */
+export function playableUrl(link: PlayableLink): string {
+  return link.kind === "album" ? albumUrlFromId(link.id) : playlistUrlFromId(link.id);
 }
 
 /**
@@ -199,8 +235,8 @@ export function isEditorialPlaylistLink(raw: unknown): boolean {
  * hosts are pasting.
  */
 export function isSubmittablePlaylistLink(raw: unknown): boolean {
-  const kind = classifySpotifyLink(raw).kind;
-  return kind === "playlist" || kind === "shortlink";
+  const link = classifySpotifyLink(raw);
+  return isPlayableLink(link) || link.kind === "shortlink";
 }
 
 /**
@@ -210,7 +246,6 @@ export function isSubmittablePlaylistLink(raw: unknown): boolean {
  * be able to name the same link two ways.
  */
 export const NAMED_LINK_CODES = {
-  album: "playlist_link_album",
   track: "playlist_link_track",
   artist: "playlist_link_artist",
 } as const satisfies Record<NamedLinkKind, AppErrorCode>;
@@ -218,7 +253,7 @@ export const NAMED_LINK_CODES = {
 export type NamedLinkCode = (typeof NAMED_LINK_CODES)[NamedLinkKind];
 
 export function isNamedLinkKind(kind: SpotifyLinkKind): kind is NamedLinkKind {
-  return kind === "album" || kind === "track" || kind === "artist";
+  return kind === "track" || kind === "artist";
 }
 
 export interface PlaylistLinkCheck {
@@ -229,7 +264,7 @@ export interface PlaylistLinkCheck {
    * there is nothing to say: the field is blank, or the link is fine.
    */
   problem: NamedLinkCode | "invalid_playlist_url" | null;
-  /** Set when the link is an album, a track or an artist page. */
+  /** Set when the link is a track or an artist page. */
   named: NamedLinkKind | null;
 }
 
@@ -237,7 +272,7 @@ export interface PlaylistLinkCheck {
  * Everything a playlist field needs to know about what is in it.
  *
  * A form used to have one bit — valid or not — and a button that went grey
- * without a word when it was not. Whoever pasted an album link on the join
+ * without a word when it was not. Whoever pasted a track link on the join
  * page had no way to learn that the link worked and was simply the wrong
  * kind. `problem` is never null for a non-blank value the server would
  * refuse, so a disabled button always has its reason beside it.
@@ -248,8 +283,9 @@ export function checkPlaylistLink(raw: unknown): PlaylistLinkCheck {
   if (typeof raw !== "string" || raw.trim() === "") {
     return { submittable: false, problem: null, named: null };
   }
-  const { kind } = classifySpotifyLink(raw);
-  if (kind === "playlist" || kind === "shortlink") {
+  const link = classifySpotifyLink(raw);
+  const { kind } = link;
+  if (isPlayableLink(link) || kind === "shortlink") {
     return { submittable: true, problem: null, named: null };
   }
   if (isNamedLinkKind(kind)) {

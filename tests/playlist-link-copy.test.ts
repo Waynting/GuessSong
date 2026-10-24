@@ -26,9 +26,18 @@ describe("/share/unsupported", () => {
 
   it("has an entry to read", () => {
     expect(table).not.toBe("");
-    for (const type of ["track", "album", "artist", "unknown"]) {
+    for (const type of ["track", "artist", "unknown"]) {
       expect(table, type).toMatch(new RegExp(`\\b${type}: \\{`));
     }
+  });
+
+  it("has nothing to say about an album, because an album plays", () => {
+    // The album entry was rewritten to promise nothing while
+    // `playlist_invalid:album` measured the demand; since 2026-10-25 a shared
+    // album lands on the setup page, so a sentence here would be a refusal
+    // the server no longer makes.
+    expect(table).not.toMatch(/\balbum: \{/);
+    expect(isSubmittablePlaylistLink(`https://open.spotify.com/album/${ID}`)).toBe(true);
   });
 
   it("never sends anyone to a playlist the server refuses", () => {
@@ -40,10 +49,6 @@ describe("/share/unsupported", () => {
     expect(table).not.toMatch(/any playlist you like/i);
     expect(table).not.toMatch(/artist's playlists|one of the artist/i);
     expect(table).toMatch(/playlist of your own/);
-  });
-
-  it("promises nothing about albums", () => {
-    expect(table).not.toMatch(/\byet\b|roadmap|soon|coming|for now/i);
   });
 
   it("says in the tip which playlists cannot be loaded", () => {
@@ -73,12 +78,23 @@ describe("the guide", () => {
   });
 
   it("still lists what the classifier refuses", () => {
-    expect(isSubmittablePlaylistLink(`https://open.spotify.com/album/${ID}`)).toBe(false);
-    expect(failing).toMatch(/album/i);
+    expect(isSubmittablePlaylistLink(`https://open.spotify.com/track/${ID}`)).toBe(false);
+    expect(isSubmittablePlaylistLink(`https://open.spotify.com/artist/${ID}`)).toBe(false);
     expect(failing).toMatch(/artist or track/i);
   });
 
-  it("still says what to do with the two spellings that work", () => {
+  it("lists an album among the links that work, now that it does", () => {
+    // It was the first entry under "the ones that fail" until 2026-10-25.
+    expect(isSubmittablePlaylistLink(`https://open.spotify.com/album/${ID}`)).toBe(true);
+    expect(failing).not.toMatch(/album/i);
+    const works = section.match(/spellings that look wrong and are not[\s\S]*?<ul>([\s\S]*?)<\/ul>/)?.[1] ?? "";
+    expect(works).not.toBe("");
+    expect(works).toMatch(/album/i);
+    // And it does not promise the one thing an album cannot do.
+    expect(works).toMatch(/order/i);
+  });
+
+  it("still says what to do with the spellings that work", () => {
     expect(section).toMatch(/spotify:playlist/);
     expect(section).toMatch(/spotify\.link/);
   });

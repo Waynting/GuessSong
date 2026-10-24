@@ -51,7 +51,7 @@ const NOTHING_PASTED: AppErrorCode[] = ["missing_playlist_url", "playlist_url_re
 /**
  * Every code that says the link itself is the problem: the ones
  * `isDeterministicPlaylistFailure` names, plus anything called
- * `playlist_link_*` — the naming the per-kind refusals (album, track, artist)
+ * `playlist_link_*` — the naming the per-kind refusals (track, artist)
  * use — so that one of those is caught here whether or not it has been added
  * to the deterministic set yet.
  */
@@ -64,14 +64,22 @@ const TOPICS = Object.keys(PLAYLIST_HELP_TOPICS) as PlaylistHelpTopic[];
 describe("which refusals get help", () => {
   it("covers every refusal that is the link's own fault", () => {
     // Adding one is a single line in PLAYLIST_HELP_BY_CODE:
-    //   playlist_link_album: "wrong_link",
+    //   playlist_link_track: "wrong_link",
     const missing = LINK_CODES.filter(
       (code) => !NOTHING_PASTED.includes(code) && playlistHelpTopic(code) === null
     );
     expect(missing, `no help for: ${missing.join(", ")}`).toEqual([]);
   });
 
-  it("covers the four refusals the server counts as permanent", () => {
+  it("sends an album Spotify has not got to the wrong-link help, never the private one", () => {
+    // An album has no "make it public"; the private step would name a
+    // setting that does not exist.
+    expect(playlistHelpTopic("album_not_found")).toBe("wrong_link");
+    expect(PLAYLIST_HELP_TOPICS.wrong_link.step.en).toMatch(/album/i);
+    expect(PLAYLIST_HELP_TOPICS.wrong_link.step.zh).toMatch(/專輯/);
+  });
+
+  it("covers the five refusals the server counts as permanent", () => {
     // `playlist_refused:<code>` in lib/loop-stats.ts — 2,535 of them in the
     // week this was written. These are the people it is for.
     for (const code of PLAYLIST_REFUSAL_CODES) {
@@ -305,6 +313,8 @@ describe("the private refusal's recheck", () => {
       "playlist_editorial",
       "invalid_playlist_url",
       "playlist_empty",
+      // An album cannot be made public, so there is nothing to check again.
+      "album_not_found",
       "spotify_daily_budget_spent",
       "spotify_quota_exhausted",
       "playlist_load_failed",

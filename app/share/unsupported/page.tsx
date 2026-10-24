@@ -17,21 +17,17 @@ import { trackEvent, type ShareType } from "@/lib/analytics";
  * an artist are mostly its own. A page whose whole job is the next step
  * must not make the next step a second refusal.
  *
- * The album entry also promised support ("on the roadmap", "yet"). Whether
- * albums are worth building is what `playlist_invalid:album` is measuring;
- * until that is read there is nothing to promise, so this says what works
- * today. The same rule as `playlist_link_album` in lib/error-messages.ts,
- * which is this sentence on the paste path. `tests/playlist-link-copy.test.ts`
+ * There is no album entry any more. The one there was promised support ("on
+ * the roadmap", "yet") and was rewritten to promise nothing while
+ * `playlist_invalid:album` measured the demand; it read ~245 a week, and
+ * since 2026-10-25 a shared album lands on the setup page like a playlist
+ * (`shareDestination` in lib/share-target.ts). `tests/playlist-link-copy.test.ts`
  * reads this table for all of it.
  */
 const COPY: Record<ShareType, { title: string; body: string }> = {
   track: {
     title: "That's a single track",
     body: "GuessSong needs a whole playlist to build a game. Share a public playlist you made yourself — add this song to it first if you like.",
-  },
-  album: {
-    title: "That's an album",
-    body: "GuessSong plays playlists. Add the album's songs to a playlist of your own, make it public, and share that playlist.",
   },
   artist: {
     title: "That's an artist page",
@@ -45,7 +41,7 @@ const COPY: Record<ShareType, { title: string; body: string }> = {
 
 function readType(): ShareType {
   const t = new URLSearchParams(window.location.search).get("type");
-  return t === "track" || t === "album" || t === "artist" ? t : "unknown";
+  return t === "track" || t === "artist" ? t : "unknown";
 }
 
 export default function ShareUnsupportedPage() {

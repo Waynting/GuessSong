@@ -156,16 +156,15 @@ describe("the message table", () => {
   });
 
   /**
-   * The three links that are real Spotify links to the wrong thing. Each has
+   * The two links that are real Spotify links to the wrong thing. Each has
    * to say what the link is and what to paste instead — and the instead has
    * to be something the server will then accept. The share page's artist
    * copy used to say "like a This Is playlist you saved", which is one of
    * Spotify's own and is refused every time: a sentence that walks the
    * reader from one refusal into the next.
    */
-  it("names an album, a track and an artist link, and sends each to a playlist of the reader's own", () => {
+  it("names a track and an artist link, and sends each to a playlist of the reader's own", () => {
     const names = {
-      playlist_link_album: { en: /album/i, zh: /專輯/ },
       playlist_link_track: { en: /song|track/i, zh: /歌/ },
       playlist_link_artist: { en: /artist/i, zh: /歌手/ },
     } as const;
@@ -195,12 +194,23 @@ describe("the message table", () => {
     }
   });
 
-  it("promises nothing about albums", () => {
-    // Whether albums get built is what `playlist_invalid:album` is measuring.
-    // Until someone has read it, "not yet" is a promise nobody made.
-    const { en, zh } = ERROR_MESSAGES.playlist_link_album;
-    expect(en).not.toMatch(/\byet\b|soon|roadmap|coming|for now|not supported|aren't supported|future/i);
-    expect(zh).not.toMatch(/尚未|還不|還沒|目前|暫時|即將|未來|之後會|敬請期待/);
+  it("no longer refuses an album, and tells an album Spotify has not got apart from a private playlist", () => {
+    // `playlist_invalid:album` was read (~245 a week) and albums load since
+    // 2026-10-25. What is left is the 404, and an album has no "make it
+    // public", so that sentence must not send anyone to a setting.
+    expect(isAppErrorCode("playlist_link_album")).toBe(false);
+    const { en, zh } = ERROR_MESSAGES.album_not_found;
+    expect(en).toMatch(/album/i);
+    expect(zh).toMatch(/專輯/);
+    expect(en).not.toMatch(/public|private/i);
+    expect(zh).not.toMatch(/公開|私人/);
+    // And what works: a playlist.
+    expect(en).toMatch(/playlist/i);
+    expect(zh).toMatch(/歌單/);
+    expect(isDeterministicPlaylistFailure("album_not_found")).toBe(true);
+    // The catch-all sentence names both kinds that work.
+    expect(ERROR_MESSAGES.invalid_playlist_url.en).toMatch(/album/i);
+    expect(ERROR_MESSAGES.invalid_playlist_url.zh).toMatch(/專輯/);
   });
 
   /**
@@ -326,10 +336,10 @@ describe("isDeterministicPlaylistFailure", () => {
       "missing_playlist_url",
       "playlist_url_required",
       "invalid_playlist_url",
-      "playlist_link_album",
       "playlist_link_track",
       "playlist_link_artist",
       "playlist_not_found",
+      "album_not_found",
       "playlist_editorial",
       "playlist_empty",
     ] as const) {
@@ -345,10 +355,10 @@ describe("isDeterministicPlaylistFailure", () => {
       "missing_playlist_url",
       "playlist_url_required",
       "invalid_playlist_url",
-      "playlist_link_album",
       "playlist_link_track",
       "playlist_link_artist",
       "playlist_not_found",
+      "album_not_found",
       "playlist_editorial",
       "playlist_empty",
     ]);
@@ -379,15 +389,15 @@ describe("isDeterministicPlaylistFailure", () => {
   it("never suppresses a retry after a short link that could not be followed", () => {
     // The third way to strand a host. A short link is followed on the
     // server; when that times out nothing has been learned about the link,
-    // and the next press may simply work. The three `playlist_link_*` codes
-    // are the *other* outcome of the same request — followed, and it was an
-    // album — which is why they are in the set and this is not.
+    // and the next press may simply work. The two `playlist_link_*` codes
+    // are the *other* outcome of the same request — followed, and it was a
+    // track — which is why they are in the set and this is not.
     expect(isDeterministicPlaylistFailure("playlist_shortlink_unavailable")).toBe(false);
     expect(shouldRememberRejection(new AppError("playlist_shortlink_unavailable"))).toBe(false);
     // One contributor's short link timing out must not write off a whole mix.
     expect(
       shouldRememberAllRejections([
-        new AppError("playlist_link_album"),
+        new AppError("playlist_link_track"),
         new AppError("playlist_shortlink_unavailable"),
       ])
     ).toBe(false);

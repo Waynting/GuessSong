@@ -55,7 +55,7 @@ import { readStored, removeStored, writeStored } from "@/lib/host-session";
 // is why the sub-mode allow-list below is a `Record` the compiler checks
 // against the union rather than `MIXED_SUB_MODES` itself.
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
-import { isEditorialId, isPlaylistId, playlistIdOf, playlistUrlOf } from "@/lib/playlist-ref";
+import { isEditorialId, isPlayableRef, playableRefOf, playableUrlOf } from "@/lib/playlist-ref";
 import type { RequestedSetupMode } from "@/lib/setup-arrival";
 import {
   DEFAULT_SONG_COUNT_STATE,
@@ -127,6 +127,11 @@ export interface RememberedSetup {
 }
 
 export interface RecentPlaylist {
+  /**
+   * A playable ref (`lib/playlist-ref.ts`): a playlist's bare id, or
+   * `album:<id>`. Named `id` because that is the stored field, and what it
+   * held before albums could load is still exactly what it holds for one.
+   */
   id: string;
   name: string;
 }
@@ -228,8 +233,8 @@ function readPlayers(value: unknown): string[] {
  * no link is dropped with it — it would be the name of nothing.
  */
 export function normalizeSetup(data: Record<string, unknown>): RememberedSetup {
-  const id = typeof data.playlistUrl === "string" ? playlistIdOf(data.playlistUrl) : null;
-  const playlistUrl = isPlaylistId(id) ? playlistUrlOf(id) : "";
+  const id = typeof data.playlistUrl === "string" ? playableRefOf(data.playlistUrl) : null;
+  const playlistUrl = isPlayableRef(id) ? playableUrlOf(id) : "";
   return {
     playlistUrl,
     playlistName:
@@ -311,7 +316,7 @@ export function parseRecentPlaylists(raw: string | null): RecentPlaylist[] {
     if (recent.length >= RECENT_PLAYLISTS_MAX) break;
     if (typeof entry !== "object" || entry === null) continue;
     const { id, name } = entry as Record<string, unknown>;
-    if (!isPlaylistId(id) || isEditorialId(id) || seen.has(id)) continue;
+    if (!isPlayableRef(id) || isEditorialId(id) || seen.has(id)) continue;
     if (typeof name !== "string") continue;
     const label = clampText(name, PLAYLIST_NAME_MAX);
     if (!label) continue;
@@ -336,9 +341,9 @@ export function addRecentPlaylist(
 ): RecentPlaylist[] {
   // `unknown`, and checked: both arrive from the page, and the name arrives
   // there out of a response body the compiler took on trust.
-  const id = typeof loaded.url === "string" ? playlistIdOf(loaded.url) : null;
+  const id = typeof loaded.url === "string" ? playableRefOf(loaded.url) : null;
   const name = typeof loaded.name === "string" ? clampText(loaded.name, PLAYLIST_NAME_MAX) : "";
-  if (!isPlaylistId(id) || isEditorialId(id) || !name) return [...list];
+  if (!isPlayableRef(id) || isEditorialId(id) || !name) return [...list];
   return [{ id, name }, ...list.filter((p) => p.id !== id)].slice(0, RECENT_PLAYLISTS_MAX);
 }
 
@@ -355,8 +360,8 @@ export function chipsFor(
   recent: readonly RecentPlaylist[],
   remembered: RememberedSetup | null
 ): RecentPlaylist[] {
-  const id = remembered ? playlistIdOf(remembered.playlistUrl) : null;
-  if (!remembered || !isPlaylistId(id) || isEditorialId(id) || !remembered.playlistName) {
+  const id = remembered ? playableRefOf(remembered.playlistUrl) : null;
+  if (!remembered || !isPlayableRef(id) || isEditorialId(id) || !remembered.playlistName) {
     return [...recent];
   }
   // Already listed: the list's order and its name for the playlist stand.

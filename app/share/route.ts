@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(target, 302);
   }
 
-  // track / album / artist / plain text → friendly explanation page
+  // track / artist / plain text → friendly explanation page
   const fallback = new URL("/share/unsupported", req.url);
   fallback.searchParams.set("type", destination.type);
   return NextResponse.redirect(fallback, 302);
