@@ -111,6 +111,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `order_round:*`, and `arranged` on GA4's `order_round_resolved`.
     `npm run stats` prints both rows under the order line.
 
+### Removed
+
+- **The "play online" fake door** (`lib/remote-door.ts`, the link under the
+  Mixed and Taste Quiz links on `/`), two weeks after it went up. It asked
+  whether online rooms should be built, and the answer is no: from
+  2026-10-10 to 2026-10-24 it was shown 109,115 times and tapped 510
+  (0.5%), 16–67 taps a day with no rise, against the 3.6% bar agreed when it
+  went up (the Mixed nudge's rate, which is shown only to a host with three
+  names typed). Buzzer games — the hosts who already put a phone in every
+  player's hand — were 1.9% of games in the same window, Mixed 71 a week.
+  Recorded under "Rejected and still rejected" in `docs/decisions.md`. A door
+  that stays up after the question is settled is a promise, so it comes down
+  rather than being left as a link to nowhere.
+  - Gone with it: `reportRemoteDoor`, the `remote_door` pulse kind and GA4
+    event, `recordRemoteDoor` and the `remote_door:*` key family, the
+    `.remote-door` styles, and `tests/remote-door.test.ts`. The counters
+    already written stay readable for their 30 days and print under "Other
+    counters" in `npm run stats` until they expire; nothing writes them now.
+
 ### Fixed
 
 - **A "private" playlist that is public by now gets checked again by itself**

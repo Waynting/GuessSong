@@ -10,7 +10,6 @@ import {
   GAME_OVER_TAPS,
   MIXED_NUDGE_STAGES,
   SOLO_NUDGE_STAGES,
-  REMOTE_DOOR_STAGES,
   GAME_ROUND_CEILING,
   GAME_SCREENS,
   HOST_INDEX_CEILING,
@@ -456,17 +455,6 @@ describe("parsePulse — the setup page's nudge for a host alone", () => {
     }
     for (const stage of ["clicked", "", "SHOWN", "__proto__", 1, null, undefined]) {
       expect(parsePulse({ kind: "solo_nudge", stage })).toBeNull();
-    }
-  });
-});
-
-describe("parsePulse — the setup page's play-online fake door", () => {
-  it("accepts the two stages and nothing else", () => {
-    for (const stage of REMOTE_DOOR_STAGES) {
-      expect(parsePulse({ kind: "remote_door", stage })).toEqual({ kind: "remote_door", stage });
-    }
-    for (const stage of ["started", "", "TAPPED", "__proto__", 1, null, undefined]) {
-      expect(parsePulse({ kind: "remote_door", stage })).toBeNull();
     }
   });
 });

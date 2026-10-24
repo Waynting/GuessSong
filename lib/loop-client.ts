@@ -31,7 +31,6 @@ import type {
   GameOverTap,
   MixedNudgeStage,
   SoloNudgeStage,
-  RemoteDoorStage,
   GameScreen,
 } from "@/lib/loop-stats";
 import { sendPulse } from "@/lib/pulse-client";
@@ -293,15 +292,6 @@ export function reportMixedNudge(stage: MixedNudgeStage): void {
 export function reportSoloNudge(stage: SoloNudgeStage): void {
   trackEvent("solo_nudge", { stage });
   sendPulse({ kind: "solo_nudge", stage });
-}
-
-/**
- * Call when the setup page's "play online" fake door is first drawn, and on
- * its first tap. See `lib/remote-door.ts`.
- */
-export function reportRemoteDoor(stage: RemoteDoorStage): void {
-  trackEvent("remote_door", { stage });
-  sendPulse({ kind: "remote_door", stage });
 }
 
 /**

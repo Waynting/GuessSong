@@ -32,7 +32,6 @@ const {
   GAME_OVER_TAPS,
   MIXED_NUDGE_STAGES,
   SOLO_NUDGE_STAGES,
-  REMOTE_DOOR_STAGES,
   GAME_ROUND_CEILING,
   GAME_ROUND_FLOOR,
   GAME_SCREENS,
@@ -45,7 +44,6 @@ const {
   recordGameOverTap,
   recordMixedNudge,
   recordSoloNudge,
-  recordRemoteDoor,
   HOST_INDEX_CEILING,
   LOOP_STATS_TTL_SECONDS,
   MIXED_SUB_MODES,
@@ -271,12 +269,6 @@ describe("the key format is the contract between writer and reader", () => {
       kv.incrs = [];
       await recordSoloNudge(stage);
       expect(keysWritten()).toContain(expected.soloNudge[stage]);
-    }
-
-    for (const stage of REMOTE_DOOR_STAGES) {
-      kv.incrs = [];
-      await recordRemoteDoor(stage);
-      expect(keysWritten()).toContain(expected.remoteDoor[stage]);
     }
 
     for (const code of PLAYLIST_REFUSAL_CODES) {
@@ -533,10 +525,6 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
       expect(keys.soloNudge[stage]).toBe(`loop:stats:2026-08-09:solo_nudge:${stage}`);
     }
     expect(Object.keys(keys.soloNudge)).toHaveLength(SOLO_NUDGE_STAGES.length);
-    for (const stage of REMOTE_DOOR_STAGES) {
-      expect(keys.remoteDoor[stage]).toBe(`loop:stats:2026-08-09:remote_door:${stage}`);
-    }
-    expect(Object.keys(keys.remoteDoor)).toHaveLength(REMOTE_DOOR_STAGES.length);
   });
 
   it("names a key for every game mode, alone and crossed with the ends and the bands", () => {
@@ -1445,7 +1433,6 @@ describe("the digest prints what the recorders write", () => {
       "game_mode_players:",
       "game_end_mode_players:",
       "game_left_mode_players:",
-      "remote_door:",
     ]) {
       expect(rendered, `${prefix} is not claimed`).toContain(`"${prefix}"`);
     }
@@ -1461,9 +1448,6 @@ describe("the digest prints what the recorders write", () => {
     }
     for (const stage of SOLO_NUDGE_STAGES) {
       expect(script, `${stage} is never read`).toMatch(new RegExp(`get\\("solo_nudge:${stage}"\\)`));
-    }
-    for (const stage of REMOTE_DOOR_STAGES) {
-      expect(script, `${stage} is never read`).toMatch(new RegExp(`get\\("remote_door:${stage}"\\)`));
     }
     // The rest are read by template over lists the script mirrors by hand,
     // so the lists are what has to agree with the writer's.

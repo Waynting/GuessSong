@@ -8,7 +8,6 @@ import {
   recordGameOverTap,
   recordMixedNudge,
   recordSoloNudge,
-  recordRemoteDoor,
   recordRefusalRecovery,
   recordGameStart,
   recordLoopImpression,
@@ -105,9 +104,6 @@ export async function POST(req: NextRequest) {
       break;
     case "solo_nudge":
       await recordSoloNudge(event.stage);
-      break;
-    case "remote_door":
-      await recordRemoteDoor(event.stage);
       break;
     case "refusal_recovery":
       await recordRefusalRecovery(event.stage, event.topic, event.stage === "recovered" ? event.via : undefined);

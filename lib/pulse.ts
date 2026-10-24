@@ -50,7 +50,6 @@ import {
   GAME_OVER_TAPS,
   MIXED_NUDGE_STAGES,
   SOLO_NUDGE_STAGES,
-  REMOTE_DOOR_STAGES,
   GAME_ROUND_CEILING,
   GAME_ROUND_FLOOR,
   GAME_SCREENS,
@@ -65,7 +64,6 @@ import {
   type GameOverTap,
   type MixedNudgeStage,
   type SoloNudgeStage,
-  type RemoteDoorStage,
   type GameScreen,
   type MixedSubMode,
   type QuizShareBy,
@@ -130,10 +128,6 @@ function isMixedNudgeStage(value: unknown): value is MixedNudgeStage {
 
 function isSoloNudgeStage(value: unknown): value is SoloNudgeStage {
   return typeof value === "string" && (SOLO_NUDGE_STAGES as readonly string[]).includes(value);
-}
-
-function isRemoteDoorStage(value: unknown): value is RemoteDoorStage {
-  return typeof value === "string" && (REMOTE_DOOR_STAGES as readonly string[]).includes(value);
 }
 
 /**
@@ -203,7 +197,6 @@ export type PulseEvent =
   | { kind: "game_over_tap"; target: GameOverTap }
   | { kind: "mixed_nudge"; stage: MixedNudgeStage }
   | { kind: "solo_nudge"; stage: SoloNudgeStage }
-  | { kind: "remote_door"; stage: RemoteDoorStage }
   | { kind: "refusal_recovery"; stage: "refused"; topic: PlaylistHelpTopic }
   | { kind: "refusal_recovery"; stage: "recovered"; topic: PlaylistHelpTopic; via: SetupSource }
   | { kind: "quiz_copied"; by: QuizShareBy; outcome: QuizCopyOutcome }
@@ -358,10 +351,6 @@ export function parsePulse(body: unknown): PulseEvent | null {
 
   if (raw.kind === "solo_nudge") {
     return isSoloNudgeStage(raw.stage) ? { kind: "solo_nudge", stage: raw.stage } : null;
-  }
-
-  if (raw.kind === "remote_door") {
-    return isRemoteDoorStage(raw.stage) ? { kind: "remote_door", stage: raw.stage } : null;
   }
 
   if (raw.kind === "quiz_shared") {
