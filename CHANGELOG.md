@@ -34,16 +34,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `quiz_from:internal` and the `mixed` start count. No tap counter was
       added for the choices.
 
-### Changed
-
-- **The prose under the form is shorter.**
-  - "What is GuessSong?" is one paragraph.
-  - The four FAQ answers are each one or two sentences and fold under their
-    questions (`<details>`). They are still in the HTML and still the same
-    `FAQS` the FAQPage JSON-LD reads.
-  - The guides list is titles only.
-  - None of it was removed outright: 88% of first-time hosts arrive from
-    Google, and this is most of the page's indexable text.
+- **The owner's preview can send the quiz** (`sendable()` and `ownerSend` in
+  `app/q/[code]/quiz-client.tsx`). In the week to 2026-10-26, 82.2% of
+  quizzes had their maker open `/q/<CODE>` as a preview, but only 13.6%
+  tapped Send and 0.6 friends opened each quiz. The preview was the one owner
+  screen with no way to send the link: the intro offered only "Start the
+  preview" and the result only "See results". Send, Copy and the platform
+  row now sit under Start on the intro (Send a step down, `secondary`) and
+  are the first thing after the note on the result (Send is the green
+  button there). They send the plain `/q/<CODE>` with the panel's sentence
+  (`ownerShareText`), never the taker's score line.
+  - Counted under a fourth `QuizShareBy`, **`preview`**, not `owner`, so the
+    panel's row keeps meaning the panel. `npm run stats` prints
+    `preview share` / `preview copy` / `preview social` against `owner
+    opened`. Read it beside `owner share` and `opened per quiz`, a week after
+    deploy.
+  - The quiz page still makes one `reportQuizShare` call and one
+    `reportQuizCopy` call. `by` is chosen from `view.owner`, which is the
+    server's answer, and `tests/pulse.test.ts` / `tests/social-share.test.ts`
+    were updated to pin that shape.
 
 - **An album link plays** (`getAlbumWithTracks` in `lib/spotify.ts`,
   `PlayableLink` in `lib/spotify-link.ts`, `playableFor` in
@@ -190,6 +199,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Counted: `order_arranged:<moved|untouched>:<verdict>` beside
     `order_round:*`, and `arranged` on GA4's `order_round_resolved`.
     `npm run stats` prints both rows under the order line.
+
+### Changed
+
+- **The prose under the form is shorter.**
+  - "What is GuessSong?" is one paragraph.
+  - The four FAQ answers are each one or two sentences and fold under their
+    questions (`<details>`). They are still in the HTML and still the same
+    `FAQS` the FAQPage JSON-LD reads.
+  - The guides list is titles only.
+  - None of it was removed outright: 88% of first-time hosts arrive from
+    Google, and this is most of the page's indexable text.
 
 ### Removed
 

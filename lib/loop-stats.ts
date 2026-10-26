@@ -300,9 +300,15 @@ export const SOLO_NUDGE_STAGES: readonly SoloNudgeStage[] = ["shown", "tapped", 
  * `quiz_copy:<by>:<outcome>`, below. Expect `owner:copied` to step down on
  * the day this deployed; the taps did not stop, they moved.
  */
-export type QuizShareBy = "owner" | "taker" | "board";
+export type QuizShareBy = "owner" | "taker" | "board" | "preview";
 
-export const QUIZ_SHARE_BYS: readonly QuizShareBy[] = ["owner", "taker", "board"];
+/**
+ * `preview` is the owner sending from their own run of the quiz on
+ * `/q/<CODE>` (since 2026-10-26) — its own `by`, not `owner`, so the panel's
+ * row keeps meaning the panel and the preview's buttons can be read against
+ * the previews opened.
+ */
+export const QUIZ_SHARE_BYS: readonly QuizShareBy[] = ["owner", "taker", "board", "preview"];
 
 export type QuizShareOutcome = ShareLinkOutcome;
 

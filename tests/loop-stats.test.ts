@@ -877,7 +877,7 @@ describe("the quiz's owner, copy and source counters", () => {
   });
 
   it("counts the results page as a third sharer, beside the owner and the taker", () => {
-    expect([...QUIZ_SHARE_BYS]).toEqual(["owner", "taker", "board"]);
+    expect([...QUIZ_SHARE_BYS]).toEqual(["owner", "taker", "board", "preview"]);
     for (const outcome of QUIZ_SHARE_OUTCOMES) {
       expect(keys.quizShare.board[outcome]).toBe(`loop:stats:2026-08-09:quiz_share:board:${outcome}`);
     }

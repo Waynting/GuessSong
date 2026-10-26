@@ -105,20 +105,23 @@ describe("the row", () => {
     expect(css).toMatch(/\.quiz-social-row \{[^}]*flex-wrap: wrap/);
   });
 
-  it("is on all three surfaces, under the right sharer, with the plain quiz address", () => {
-    for (const [file, by] of [
-      ["components/quiz-panel.tsx", "owner"],
-      ["app/q/[code]/board/page.tsx", "board"],
-      ["app/q/[code]/quiz-client.tsx", "taker"],
+  it("is on every surface, under the right sharer, with the plain quiz address", () => {
+    // The quiz page draws it twice: a friend's result (`taker`) and the
+    // owner's preview (`preview`, since 2026-10-26), each its own `by`.
+    for (const [file, bys] of [
+      ["components/quiz-panel.tsx", ["owner"]],
+      ["app/q/[code]/board/page.tsx", ["board"]],
+      ["app/q/[code]/quiz-client.tsx", ["preview", "taker"]],
     ] as const) {
       const body = code(read(file));
       const uses = [...body.matchAll(/<QuizSocialLinks\s+by="(\w+)"\s+url=\{([^}]*\}?)\}/g)];
-      expect(uses, file).toHaveLength(1);
-      expect(uses[0][1], file).toBe(by);
+      expect(uses.map((u) => u[1]).sort(), file).toEqual([...bys].sort());
       // `quizUrl` is `/q/<CODE>` and nothing else; the taker's tab URL may
       // carry whatever the link it arrived by carried.
-      expect(uses[0][2], file).toMatch(/^(url|quizUrl\(view\.code\))$/);
-      if (file.endsWith("quiz-client.tsx")) expect(uses[0][2]).toBe("quizUrl(view.code)");
+      for (const u of uses) {
+        expect(u[2], file).toMatch(/^(url|quizUrl\((view|v)\.code\))$/);
+        if (file.endsWith("quiz-client.tsx")) expect(u[2]).toMatch(/^quizUrl\((view|v)\.code\)$/);
+      }
     }
   });
 });
