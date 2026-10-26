@@ -58,7 +58,7 @@ describe("the setup page's wiring", () => {
       /soloNudgeShownRef\.current\) return;\s*soloNudgeShownRef\.current = true;\s*reportSoloNudge\("shown"\)/
     );
     expect(body).toMatch(
-      /soloNudgeTappedRef\.current = true;\s*reportSoloNudge\("tapped"\);\s*choosePlayStyle\("order"\)/
+      /soloNudgeTappedRef\.current = true;\s*reportSoloNudge\("tapped"\);\s*chooseWho\("solo"\)/
     );
   });
 

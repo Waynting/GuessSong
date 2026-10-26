@@ -111,7 +111,16 @@ import { QUIZ_SETUP_HREF, quizArrivalHref, requestedSetupMode } from "@/lib/setu
 import { SiteFooter } from "@/components/site-footer";
 import { getGuide } from "@/lib/guides";
 import { InstallBanner } from "@/components/install-banner";
-import { CheckIcon, SetupBackdrop, SetupStyles, SpotifyIcon } from "@/components/setup-chrome";
+import {
+  CheckIcon,
+  LinkIcon,
+  MixIcon,
+  MusicIcon,
+  OrderIcon,
+  SetupBackdrop,
+  SetupStyles,
+  SpotifyIcon,
+} from "@/components/setup-chrome";
 import {
   MixedPlaylistCollector,
   type MixedContribution,
@@ -127,6 +136,7 @@ import {
   isCustomSelected,
 } from "@/lib/song-count";
 import { MIXED_MIN_CONTRIBUTORS, startState, type SetupMode } from "@/lib/start-status";
+import { setupForWho, soloRoster, whoFromSetup, type WhoPlaying } from "@/lib/who-playing";
 
 // `CLIP_DURATIONS` and `MIXED_SAMPLE_COUNTS` were declared here until the form
 // started remembering itself. They are in lib/setup-memory.ts now, because
@@ -193,22 +203,48 @@ const HOME_GUIDES = [
   .map((slug) => getGuide(slug))
   .filter((guide): guide is NonNullable<typeof guide> => Boolean(guide));
 
+/**
+ * The three choices of "Who's playing?", in the order a visitor reads them:
+ * the one most first visits are (alone) first. The title says who it is for;
+ * the line under the row, for the chosen one only, says what happens.
+ */
+const WHO_ROWS: { who: WhoPlaying; title: string; sub: string; icon: React.ReactNode }[] = [
+  {
+    who: "solo",
+    title: "Just me",
+    sub: "Order four songs by release year. Scores itself.",
+    icon: <OrderIcon />,
+  },
+  {
+    who: "group",
+    title: "A group",
+    sub: "Play a clip, everyone shouts the title.",
+    icon: <MusicIcon />,
+  },
+  {
+    who: "mixed",
+    title: "Everyone's playlists",
+    sub: "Everyone adds a playlist, guess whose song.",
+    icon: <MixIcon />,
+  },
+];
+
 const FAQS: { q: string; a: string }[] = [
   {
     q: "How do you play the guess the song game?",
-    a: "One person hosts on a single screen: paste a public Spotify playlist, add everyone's names, and the game plays a short clip from a random track. Everyone guesses out loud and the host taps whoever got it first — 3 points for the song, 1 more for the album.",
+    a: "Paste a public Spotify playlist and add everyone's names. A short clip plays, everyone guesses out loud, and the host taps whoever got it first: 3 points for the song, 1 for the album.",
   },
   {
     q: "Do I need a Spotify account, and is it free?",
-    a: "No login, no accounts and nothing to pay for — GuessSong is free and open source. It reads the track list from any public playlist link and plays a short preview of each song.",
+    a: "No account, no login, nothing to pay. GuessSong is free and open source.",
   },
   {
     q: "Can everyone use their own playlist?",
-    a: "Yes — that's Mixed Playlist Mode: everyone adds a playlist, GuessSong merges them into one pool, and you get a bonus point for guessing whose playlist a track came from. Turn on Buzzer Mode and players buzz in from their own phones instead of shouting.",
+    a: "Yes. Pick \"Everyone brings a playlist\" and GuessSong mixes them into one pool, with a bonus point for guessing whose song it was.",
   },
   {
     q: "Which playlists work?",
-    a: "Any public Spotify playlist link; private playlists and Spotify's own editorial ones (Discover Weekly and the like) can't be read. Spotify stopped providing preview clips for many tracks in 2024, so clips come from iTunes and Deezer, and the few songs with no preview anywhere are skipped.",
+    a: "Any public playlist or album link; private playlists and Spotify's own (Discover Weekly and the like) can't be read. Clips come from iTunes and Deezer, and the few songs with none are skipped.",
   },
 ];
 
@@ -247,6 +283,9 @@ export default function SetupPage() {
   // is picked; the buzzer stays, and there puts the cards on every phone.
   // The rules are in lib/order-game.ts and lib/order-phone.ts.
   const [playStyle, setPlayStyle] = useState<PlayStyle>(DEFAULT_PLAY_STYLE);
+  // The answer to "Who's playing?" (lib/who-playing.ts). Derived from every
+  // restore rather than stored; set by the three rows, and by nothing else.
+  const [who, setWho] = useState<WhoPlaying>("group");
   // One room, opened BEFORE the game starts so players have time to scan in,
   // and carrying whichever backends the chosen modes need. Null until the host
   // opens it, and never opened at all for the flows that need no phones.
@@ -447,6 +486,23 @@ export default function SetupPage() {
   }
 
   /**
+   * A tap on one of the "Who's playing?" rows. Someone alone gets no buzzer:
+   * the room it opens is for other phones, and with nobody else there is
+   * nothing for it to do but sit in the settings line reading "Phones off".
+   */
+  function chooseWho(next: WhoPlaying) {
+    if (next === who) return;
+    const set = setupForWho(next, who);
+    if (set.setupMode !== setupMode) chooseMode(set.setupMode);
+    if (set.playStyle) choosePlayStyle(set.playStyle);
+    if (next === "solo" && buzzerEnabled) {
+      setBuzzerEnabled(false);
+      resetRoom();
+    }
+    setWho(next);
+  }
+
+  /**
    * Put a whole form on screen: the restore on arrival, and "Start fresh".
    * What the form *is* gets decided by `initialSetup` in lib/setup-memory.ts,
    * where the suite can reach it; this is only the wiring.
@@ -467,6 +523,7 @@ export default function SetupPage() {
     setSongCount(form.songCount);
     setSampledPerPlayer(form.sampledPerPlayer);
     setPlayStyle(form.playStyle);
+    setWho(whoFromSetup(form));
     setBuzzerEnabled(form.buzzer && isBuzzerConfigured());
   }, []);
 
@@ -742,7 +799,10 @@ export default function SetupPage() {
     }
     setFailure(null);
     setRecheckFoundKey(null);
-    const validPlayers = players.filter((p) => p.trim());
+    // "Just me" shows no roster, so it never starts on one: the one name the
+    // form still holds, or SOLO_DEFAULT_NAME.
+    const roster = who === "solo" ? soloRoster(players) : players;
+    const validPlayers = roster.filter((p) => p.trim());
     if (!playlistUrl.trim()) {
       setFailure(failureFor("playlist_url_required", locale));
       return;
@@ -1198,7 +1258,7 @@ export default function SetupPage() {
   function takeMixedNudge() {
     nudgeTappedRef.current = true;
     reportMixedNudge("tapped");
-    chooseMode("mixed");
+    chooseWho("mixed");
   }
 
   // One name and no second, on the guess game: offer the game that scores
@@ -1213,7 +1273,7 @@ export default function SetupPage() {
   function takeSoloNudge() {
     soloNudgeTappedRef.current = true;
     reportSoloNudge("tapped");
-    choosePlayStyle("order");
+    chooseWho("solo");
   }
 
   const startClick = setupMode === "single"
@@ -1323,21 +1383,38 @@ export default function SetupPage() {
           {/* Card */}
           <div
             className={`card ${mounted ? "fade-in fade-in-2" : ""}`}
-            style={{ padding: "28px", display: "flex", flexDirection: "column", gap: "24px", scrollMarginTop: "32px" }}
+            style={{ padding: "28px", display: "flex", flexDirection: "column", gap: "20px", scrollMarginTop: "32px" }}
           >
 
-            {/* The mode, when it is not the default. Single Playlist is
-                what 95% of games are, so it gets no label and no pill: the
-                card simply opens on it. Mixed is reached from the link under
-                the Start button, and this header is the way back. */}
-            {setupMode === "mixed" && (
-              <div className="settings-row">
-                <p className="section-label" style={{ marginBottom: 0 }}>Mixed Playlist</p>
-                <button type="button" className="text-link" onClick={() => chooseMode("single")}>
-                  ← Single playlist
-                </button>
+            {/* Who's playing? — the first question, because the room's size
+                decides the game (lib/who-playing.ts). It replaced the "How to
+                play" pills, the Mixed header and the Mixed link under Start:
+                three places that each held a third of this choice, two of
+                them below the fold on a phone. A radio group, so arrow keys
+                and a screen reader treat it as one choice. */}
+            <div>
+              <p className="who-q" id="who-q">Who&apos;s playing?</p>
+              <div className="who-list" role="radiogroup" aria-labelledby="who-q">
+                {WHO_ROWS.map((row) => (
+                  <button
+                    key={row.who}
+                    type="button"
+                    role="radio"
+                    aria-checked={who === row.who}
+                    className={`who-opt${who === row.who ? " active" : ""}`}
+                    onClick={() => chooseWho(row.who)}
+                  >
+                    <span className="who-icon" aria-hidden>{row.icon}</span>
+                    <span className="who-title">{row.title}</span>
+                  </button>
+                ))}
               </div>
-            )}
+              {/* What the chosen row means, one line. Three across rather
+                  than three stacked rows with a subline each: stacked, the
+                  question cost the guess game's Start button 256px on a
+                  390x844 phone and put it well under the fold. */}
+              <p className="who-sub">{WHO_ROWS.find((row) => row.who === who)?.sub}</p>
+            </div>
 
             {setupMode === "single" && (
               <div>
@@ -1423,7 +1500,7 @@ export default function SetupPage() {
                 same names again is how the two lists drifted apart and points
                 went to players who did not exist. Mixed mode takes its roster
                 from the contributors instead. */}
-            {setupMode === "single" && !buzzerEnabled && (
+            {setupMode === "single" && !buzzerEnabled && who !== "solo" && (
                   <div>
                     <p className="section-label">Players</p>
                     <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -1478,37 +1555,6 @@ export default function SetupPage() {
                   </div>
             )}
 
-            {/* How to play — the one choice that changes which page the game
-                is on. Two pills, in both modes, and not behind "Change ▾":
-                the order game is the first way to play that needs no audio,
-                and a choice hidden in the settings is a choice nobody finds. */}
-            <div>
-              <p className="section-label">How to play</p>
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className={`pill${!isOrder ? " active" : ""}`}
-                  onClick={() => choosePlayStyle("guess")}
-                  aria-pressed={!isOrder}
-                >
-                  Guess the song
-                </button>
-                <button
-                  type="button"
-                  className={`pill${isOrder ? " active" : ""}`}
-                  onClick={() => choosePlayStyle("order")}
-                  aria-pressed={isOrder}
-                >
-                  Put them in order
-                </button>
-              </div>
-              <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
-                {isOrder
-                  ? "Four songs at a time, oldest to newest. No audio, so it works anywhere."
-                  : "Play a clip, everyone shouts the title, you award the points."}
-              </p>
-            </div>
-
             {/* Settings — clip length, song count and the buzzer, behind one
                 line that reads the current values. Everything here has a
                 default, and the things a host must decide (playlist, players)
@@ -1521,7 +1567,8 @@ export default function SetupPage() {
               <div className="settings-row">
                 <p className="settings-summary">
                   {[
-                    isOrder ? "Order by year" : `${clipDuration}s clips`,
+                    ...(who === "solo" ? [] : [isOrder ? "Put them in order" : "Guess the song"]),
+                    ...(isOrder ? [] : [`${clipDuration}s clips`]),
                     setupMode === "mixed"
                       ? `${sampledPerPlayer} songs per player`
                       : isOrder
@@ -1529,7 +1576,7 @@ export default function SetupPage() {
                       : songCount.count === "all"
                       ? "All songs"
                       : `${songCount.count} songs`,
-                    ...(isBuzzerConfigured()
+                    ...(isBuzzerConfigured() && who !== "solo"
                       ? [`${isOrder ? "Phones" : "Buzzer"} ${buzzerEnabled ? "on" : "off"}`]
                       : []),
                   ].join(" · ")}
@@ -1550,6 +1597,40 @@ export default function SetupPage() {
                   id="setup-settings"
                   style={{ display: "flex", flexDirection: "column", gap: "20px", marginTop: "16px" }}
                 >
+                  {/* The game, for a room. It sat above the settings as "How to
+                      play" until "Who's playing?" took its place: a room that
+                      wants the order game is the rarer case (Just me is the
+                      order game already), and the summary line above names the
+                      game, so the choice is read even while it is folded. */}
+                  {who !== "solo" && (
+                    <div>
+                      <p className="section-label">Game</p>
+                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className={`pill${!isOrder ? " active" : ""}`}
+                          onClick={() => choosePlayStyle("guess")}
+                          aria-pressed={!isOrder}
+                        >
+                          Guess the song
+                        </button>
+                        <button
+                          type="button"
+                          className={`pill${isOrder ? " active" : ""}`}
+                          onClick={() => choosePlayStyle("order")}
+                          aria-pressed={isOrder}
+                        >
+                          Put them in order
+                        </button>
+                      </div>
+                      <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
+                        {isOrder
+                          ? "Four songs at a time, oldest to newest. No audio, so it works anywhere."
+                          : "Play a clip, everyone shouts the title, you award the points."}
+                      </p>
+                    </div>
+                  )}
+
                   {/* Clip Duration — the guess game's; the order game plays nothing */}
                   {!isOrder && (
                     <div>
@@ -1626,7 +1707,7 @@ export default function SetupPage() {
                   {/* Buzzer Mode — the reason the host gets to play too. With
                       the order game the same room puts the cards on every
                       phone instead, so the switch says that. */}
-                  {isBuzzerConfigured() && (
+                  {isBuzzerConfigured() && who !== "solo" && (
                     <div>
                       <p className="section-label">{isOrder ? "Play on phones" : "Buzzer Mode"}</p>
                       {/* Label says what the tap does, colour says what the state is.
@@ -1776,44 +1857,41 @@ export default function SetupPage() {
               </div>
               {starterPlace === "refusal" && starterChips}
 
-              {/* The other two ways in, as links rather than a pill row above
-                  the form: one is 3% of games and the other is not a game and
-                  has its own page. */}
-              <div className="mode-links">
-                {setupMode !== "mixed" && (
-                  <button type="button" className="text-link" onClick={() => chooseMode("mixed")}>
-                    Everyone brings a playlist? Mixed mode →
-                  </button>
-                )}
-                {setupMode === "single" && <span className="mode-links-sep" aria-hidden>·</span>}
-                <Link href={QUIZ_SETUP_HREF} className="text-link">
-                  Make a Taste Quiz link →
-                </Link>
-              </div>
             </div>
           </div>
+
+          {/* The quiz is not a game played tonight, so it is not a row in
+              "Who's playing?" — it is the thing to do instead. Its own card,
+              under the form and above the fold for someone alone, where a
+              text link under Start had sat below it. */}
+          <Link href={QUIZ_SETUP_HREF} className="quiz-card">
+            <span className="quiz-card-icon" aria-hidden>
+              <LinkIcon />
+            </span>
+            <span>
+              <span className="quiz-card-title">Not playing right now?</span>
+              <span className="quiz-card-sub">Make a Taste Quiz link for friends →</span>
+            </span>
+          </Link>
 
           {/* Install pitch — under the card, for hosts who have run a game
               before. It arrives after hydration, so it sits where its late
               arrival moves nothing the host is already reading. */}
           <InstallBanner />
 
-          {/* Prose for search engines and first-time visitors alike. */}
+          {/* Prose for search engines and first-time visitors alike. Cut to
+              the bone on 2026-10-26 ("too long and says nothing"), but not
+              removed: 88% of first-time hosts arrive from Google, and this
+              and the FAQ are most of the indexable text on the page AdSense
+              once refused as low-value. Each answer folds, so a reader sees
+              four questions, not four paragraphs; the folded text is still in
+              the HTML and still matches the FAQPage JSON-LD above. */}
           <section className="seo-section">
             <h2 className="seo-h2">What is GuessSong?</h2>
             <p className="seo-p">
-              GuessSong is a free music guessing game for parties: paste any public
-              Spotify playlist, and the host plays a short clip while everyone races to
-              name the song. No login and no accounts — one screen and a room full of
-              people is all you need.
-            </p>
-            <p className="seo-p" style={{ marginTop: "12px" }}>
-              Too loud for clips? Pick <strong>Put them in order</strong> instead: each
-              round shows four songs from the playlist and the room puts them in order
-              of release year, oldest first, with nothing played at all.
-            </p>
-            <p style={{ marginTop: "14px" }}>
-              <a href="/about" className="link-btn">See how to play →</a>
+              A free music guessing game for parties. Paste any public Spotify playlist,
+              play short clips, and race to name the song. No login.{" "}
+              <a href="/about" className="text-link">How to play →</a>
             </p>
           </section>
 
@@ -1821,36 +1899,31 @@ export default function SetupPage() {
             <h2 className="seo-h2">Frequently asked questions</h2>
             <div className="faq-list">
               {FAQS.map((faq) => (
-                <div key={faq.q}>
-                  <h3 className="faq-q">{faq.q}</h3>
+                <details key={faq.q} className="faq-item">
+                  <summary><h3 className="faq-q">{faq.q}</h3></summary>
                   <p className="faq-a">{faq.a}</p>
-                </div>
+                </details>
               ))}
             </div>
           </section>
 
-          {/* A few of the guides, deliberately not all of them — this is a
-              teaser under a form, not a second index. HOME_GUIDES names which;
-              the copy comes from lib/guides.ts so a retitled guide is retitled
-              here too. (The count used to be written into this comment, and it
-              went stale the first time a guide was added.) */}
+          {/* A few of the guides, titles only — a teaser under a form, not a
+              second index. HOME_GUIDES names which; the titles come from
+              lib/guides.ts so a retitled guide is retitled here too. This is
+              also the only link a new guide gets from the homepage, which is
+              what gets it crawled. */}
           <section className="seo-section">
             <h2 className="seo-h2">Guides</h2>
-            <p className="seo-p">
-              Longer pieces on running one of these evenings — what to put on, how hard to
-              make it, and what to do when Spotify refuses your link.
-            </p>
-            <div className="guide-links">
+            <ul className="guide-titles">
               {HOME_GUIDES.map((guide) => (
-                <a key={guide.slug} href={`/guides/${guide.slug}`} className="guide-link">
-                  <span className="guide-link-title">{guide.navTitle}</span>
-                  <span className="guide-link-desc">{guide.description}</span>
-                </a>
+                <li key={guide.slug}>
+                  <a href={`/guides/${guide.slug}`} className="text-link">{guide.navTitle} →</a>
+                </li>
               ))}
-            </div>
-            <p style={{ marginTop: "14px" }}>
-              <a href="/guides" className="link-btn">All guides →</a>
-            </p>
+              <li>
+                <a href="/guides" className="text-link">All guides →</a>
+              </li>
+            </ul>
           </section>
 
           <ServiceNotice />

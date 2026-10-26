@@ -41,7 +41,7 @@ describe("the setup page's wiring", () => {
   it("counts shown once per page load, and a tap before switching the mode", () => {
     const effect = body.slice(body.indexOf("useEffect(() => {\n    if (!mixedNudge"));
     expect(effect).toMatch(/nudgeShownRef\.current\) return;\s*nudgeShownRef\.current = true;\s*reportMixedNudge\("shown"\)/);
-    expect(body).toMatch(/nudgeTappedRef\.current = true;\s*reportMixedNudge\("tapped"\);\s*chooseMode\("mixed"\)/);
+    expect(body).toMatch(/nudgeTappedRef\.current = true;\s*reportMixedNudge\("tapped"\);\s*chooseWho\("mixed"\)/);
   });
 
   it("credits a Mixed start to the nudge where every hosted start is counted", () => {

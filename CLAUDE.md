@@ -435,7 +435,9 @@ for each:
   page calls `reportGameEnd` / `reportGameLeft` with `orderRoundsPlayed`,
   never `countRoundsPlayed`, and never `recordHostedStart` or `reportFirstClip`.
 
-The setup page's "How to play" row is the only way in: picking it hides the
+Two ways in on the setup page: "Who's playing? → Just me" (`lib/who-playing.ts`,
+which also starts it on `soloRoster` and hides the roster and the buzzer), and
+the "Game" pills inside the settings fold for a room. Either hides the
 clip-length pills and relabels the buzzer toggle "Play on phones"
 (`choosePlayStyle` no longer touches the buzzer or the room), `initialSetup`
 restores the buzzer beside either style, and all three start paths refuse
