@@ -44,6 +44,14 @@ export const QUIZ_TTL_SECONDS = 7 * 24 * 60 * 60;
  * in a group chat finishes ten taps and drops out of twenty. A host who wants
  * more still has three presets and the typed field; the default is for the
  * one who does not think about it, and that one's friends were not finishing.
+ *
+ * That read is weaker than it looks, and the week to 2026-10-26 showed it:
+ * with ten the default, twenty finished at 0.35 per quiz and ten at 0.05 —
+ * the 2026-09-22 read upside down. In both weeks the length a maker *chose*
+ * beat the default, because the default row is every maker who did not care.
+ * So neither read says which length friends finish; moving the default back
+ * to twenty on it would only flip the table again. Kept at ten on 2026-10-26.
+ * Compare a preset with a preset, not with `default`.
  * `scripts/loop-stats.mjs` mirrors this value to tag the length table.
  */
 export const QUIZ_QUESTION_COUNTS = [10, 20, 30, 50] as const;

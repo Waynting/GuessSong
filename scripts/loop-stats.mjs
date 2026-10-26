@@ -1237,6 +1237,11 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwn
           `${q ? (f / q).toFixed(1).padStart(10) : "         —"}`
       );
     }
+    console.log(
+      "  how to read it: the default row is every maker who did not choose, so it reads low against\n" +
+        "  any chosen length whichever length is the default — set preset against preset, never\n" +
+        "  against `default`, before moving the default"
+    );
     const clamped = get("quiz_clamped");
     if (clamped > 0) {
       console.log(
