@@ -54,6 +54,49 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.22.0",
+    date: "2026-10-26",
+    headline: "Album links play, the order game works on everyone's phone, and the setup page asks who's playing.",
+    headlineZh: "專輯連結可以玩了、排順序可以在每個人的手機上玩，設定頁也會先問誰要玩。",
+    changes: [
+      {
+        kind: "new",
+        text: "Paste an album link instead of a playlist and it plays like one.",
+        textZh: "貼專輯連結也可以玩了，用起來跟歌單一樣。",
+      },
+      {
+        kind: "new",
+        text: "The setup page starts with \"Who's playing?\": Just me goes straight to putting songs in order, which you can play on your own; A group is the guessing game; Everyone's playlists is Mixed Playlist Mode.",
+        textZh: "設定頁一開始會問「誰要玩？」：選「只有我」會直接進排順序，一個人也能玩；「一群人」是猜歌；「每個人的歌單」是混合歌單模式。",
+      },
+      {
+        kind: "new",
+        text: "Put them in order: drag the cards into place before the reveal, and the reveal shows how many you got right. Playing alone, it keeps score for you.",
+        textZh: "排順序：揭曉前可以直接拖動卡片排好，揭曉時會標出排對了幾張。一個人玩的時候會自動幫你計分。",
+      },
+      {
+        kind: "new",
+        text: "With Play on phones turned on, everyone arranges the cards on their own phone and locks in their answer, and everyone who gets it right scores.",
+        textZh: "打開「用手機玩」，每個人都能在自己的手機上排卡片、鎖定答案，排對的人都會得分。",
+      },
+      {
+        kind: "better",
+        text: "Taste Quiz: you can send your quiz to friends right from your own preview of it.",
+        textZh: "品味鑒定：在你自己預覽測驗的畫面上，就能直接把測驗傳給朋友。",
+      },
+      {
+        kind: "fixed",
+        text: "If Spotify says your playlist is private, there's an \"I made it public — try again\" button, and the page checks once more by itself half a minute later, because Spotify can take a moment to notice a playlist was made public.",
+        textZh: "Spotify 回報歌單是私人的時候，會出現「我已經設成公開，再試一次」的按鈕；半分鐘後頁面也會自己再檢查一次，因為 Spotify 有時要過一下才會發現歌單已經公開。",
+      },
+      {
+        kind: "better",
+        text: "When Spotify is busy, a playlist someone played in the last week still loads.",
+        textZh: "Spotify 忙不過來的時候，一週內有人玩過的歌單還是載得進來。",
+      },
+    ],
+  },
+  {
     version: "1.21.0",
     date: "2026-10-10",
     headline: "A new way to play: put four songs in order of release year, no audio needed.",
