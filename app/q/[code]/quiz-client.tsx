@@ -138,6 +138,7 @@ import {
   fillCopy,
   formatQuizDate,
   hintWord,
+  ownerShareText,
   quizTitle,
   takerShareText,
   type QuizCopy,
@@ -1012,29 +1013,50 @@ export function QuizClient({ code }: { code: string }) {
     }
   }
 
+  /**
+   * The one send the page offers, for whoever is reading. A friend shares
+   * their score: this tab's address, their result in the sentence. The
+   * owner's preview sends the quiz itself — the plain `/q/<CODE>` and the
+   * panel's sentence — and is counted as `preview`, its own `by`, because
+   * 82% of quizzes had their maker open this page and it was the one place
+   * the owner went with no way to send from it. The panel's `owner` row stays
+   * the panel's.
+   */
+  function sendable(): { by: "preview" | "taker"; url: string; text: string } | null {
+    if (!view) return null;
+    if (view.owner) {
+      return { by: "preview", url: quizUrl(view.code), text: ownerShareText(copy, view) };
+    }
+    if (!result) return null;
+    return { by: "taker", url: window.location.href, text: takerShareText(copy, view, result) };
+  }
+
   async function handleShare() {
-    if (!view || !result) return;
+    const send = sendable();
+    if (!send) return;
+    const { by, url, text } = send;
     setShareFailedUrl(null);
-    const url = window.location.href;
-    const text = takerShareText(copy, view, result);
-    const outcome = await shareLink({ url, text }, `${text} ${url}`);
+    const outcome = await shareLink(
+      { url, text, ...(by === "preview" ? { title: copy.panelShareTitle } : {}) },
+      `${text} ${url}`
+    );
     if (outcome === "copied") {
       setCopied(true);
       setTimeout(() => setCopied(false), COPIED_FLASH_MS);
     } else if (outcome === "failed") {
       setShareFailedUrl(url);
     }
-    reportQuizShare("taker", outcome);
+    reportQuizShare(by, outcome);
   }
 
   // The explicit Copy button beside Share: the same sentence and link the
   // share falls back to, through the clipboard alone, on its own reporter —
   // a Copy tap filed as a share's `copied` is the two-meanings problem.
   async function handleCopy() {
-    if (!view || !result) return;
+    const send = sendable();
+    if (!send) return;
+    const { by, url, text } = send;
     setShareFailedUrl(null);
-    const url = window.location.href;
-    const text = takerShareText(copy, view, result);
     const outcome = await copyLink(`${text} ${url}`);
     if (outcome === "copied") {
       setLinkCopied(true);
@@ -1042,7 +1064,36 @@ export function QuizClient({ code }: { code: string }) {
     } else {
       setShareFailedUrl(url);
     }
-    reportQuizCopy("taker", outcome);
+    reportQuizCopy(by, outcome);
+  }
+
+  /**
+   * The owner's send block: Send, Copy, and the platforms where there is no
+   * sheet. On the preview's intro, under Start, for the owner who came to
+   * check the quiz looks right and is ready to send it; on the preview's
+   * result, as the only thing left to do. `lead` is which of the two: on the
+   * intro Start is the green button and Send sits a step down beside it.
+   */
+  function ownerSend(v: QuizView, lead: boolean) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Button variant={lead ? "default" : "secondary"} className="q-primary" onClick={() => void handleShare()}>
+          {copied ? copy.copied : copy.panelSend}
+        </Button>
+        <Button variant="outline" className="q-primary" onClick={() => void handleCopy()}>
+          {linkCopied ? copy.copied : copy.copyLinkButton}
+        </Button>
+        <QuizSocialLinks by="preview" url={quizUrl(v.code)} text={ownerShareText(copy, v)} locale={locale} />
+        {shareFailedUrl && (
+          <>
+            <p className="q-muted" role="status">
+              {copy.shareFailed}
+            </p>
+            <p className="q-share-url">{shareFailedUrl}</p>
+          </>
+        )}
+      </div>
+    );
   }
 
   const title = quizTitle(copy, view?.ownerName);
@@ -1145,6 +1196,17 @@ export function QuizClient({ code }: { code: string }) {
           <Button className="q-primary" onClick={start} disabled={!canStart}>
             {owner ? copy.previewStart : copy.startButton}
           </Button>
+          {/* The preview is where most owners go straight from the panel,
+              and until 2026-10-26 nothing here could send the link: the
+              owner had to find their way back to /quiz to do the one thing
+              the quiz needs. Under Start, so checking it first stays the
+              obvious path and sending without checking is one tap. */}
+          {owner && (
+            <>
+              <p className="q-muted">{copy.previewSendLead}</p>
+              {ownerSend(view, false)}
+            </>
+          )}
           {mine && (
             <>
               <Button variant="secondary" className="q-primary" onClick={() => void replay(mine)}>
@@ -1379,17 +1441,16 @@ export function QuizClient({ code }: { code: string }) {
         </div>
 
         {result.preview ? (
-          // The owner's run. No share button: "I got 9/10 on my own quiz" is
-          // not a sentence anyone sends. And no `quiz_result` call to action
-          // — that surface is a friend who has just finished, its impression
-          // is the denominator of the loop's one warm arm, and the person
-          // looking at this screen already made a quiz. What they have left
-          // to do is send it, and the results page is where that is: both
-          // share buttons, for this quiz whichever one the device made last.
+          // The owner's run. Not the taker's "share my score" — "I got 9/10
+          // on my own quiz" is not a sentence anyone sends — and no
+          // `quiz_result` call to action, whose impression is the
+          // denominator of the loop's one warm arm. What the owner has left
+          // to do is send the quiz, so that is what this offers, first.
           <div className="flex flex-col gap-2">
             <p className="q-preview" role="note">
               {copy.previewResultNote}
             </p>
+            {ownerSend(view, true)}
             <a href={`/q/${view.code}/board`} className="q-home">
               {copy.panelBoardLink}
             </a>

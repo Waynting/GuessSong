@@ -622,7 +622,7 @@ export type AnalyticsEvent =
        */
       name: "quiz_copy_tapped";
       params: {
-        by: "owner" | "taker" | "board";
+        by: "owner" | "taker" | "board" | "preview";
         outcome: "copied" | "failed";
       };
     }
@@ -636,7 +636,7 @@ export type AnalyticsEvent =
        */
       name: "quiz_social_tapped";
       params: {
-        by: "owner" | "taker" | "board";
+        by: "owner" | "taker" | "board" | "preview";
         platform: "line" | "threads" | "x" | "facebook" | "whatsapp";
       };
     }
@@ -652,7 +652,7 @@ export type AnalyticsEvent =
        */
       name: "quiz_share_tapped";
       params: {
-        by: "owner" | "taker" | "board";
+        by: "owner" | "taker" | "board" | "preview";
         outcome: "shared" | "copied" | "dismissed" | "failed";
       };
     };
