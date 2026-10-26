@@ -142,6 +142,8 @@ export interface QuizCopy {
   /** Two facts, because both are what an owner would otherwise worry about: not saved, not shown. */
   previewIntro: string;
   previewStart: string;
+  /** Over the owner's Send on the preview's intro: sending without playing first is fine. */
+  previewSendLead: string;
   /** Under the verdict card, in place of `boardFull`: not written for a different reason. */
   previewResultNote: string;
   /* The quiz form on /quiz, before the link exists */
@@ -308,6 +310,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     previewIntro:
       "This is your own quiz, as your friends will see it. Your answers aren't saved and won't show on the leaderboard.",
     previewStart: "Start the preview →",
+    previewSendLead: "Or send it now — this is the link your friends open.",
     previewResultNote: "Preview only — this score wasn't saved, and your friends won't see it.",
     createTitle: "Taste Quiz",
     createSubtitle:
@@ -444,6 +447,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     previewKicker: "預覽",
     previewIntro: "這是你自己做的測驗，朋友看到的就是這個樣子。你的作答不會存下來，也不會出現在排行榜上。",
     previewStart: "開始預覽 →",
+    previewSendLead: "或是直接傳出去，朋友打開的就是這個連結。",
     previewResultNote: "這只是預覽，分數沒有存下來，朋友也看不到。",
     createTitle: "品味鑒定",
     createSubtitle: "做一個連結傳給朋友，讓他們猜你的歌單，看看誰最懂你。",

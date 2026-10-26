@@ -645,14 +645,17 @@ describe("the route records every kind the parser accepts", () => {
     for (const [file, by] of [
       ["components/quiz-panel.tsx", "owner"],
       ["app/q/[code]/board/page.tsx", "board"],
-      ["app/q/[code]/quiz-client.tsx", "taker"],
+      // The quiz page's one pair serves two readers: `by` is "preview" for
+      // the owner and "taker" for a friend, chosen in `sendable()`.
+      ["app/q/[code]/quiz-client.tsx", "by"],
     ] as const) {
       const body = code(read(file));
       const share = body.match(/async function handleShare\(\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
       const copy = body.match(/async function handleCopy\(\) \{([\s\S]*?)\n  \}/)?.[1] ?? "";
-      expect(share, `${file} handleShare`).toContain(`reportQuizShare("${by}", outcome)`);
+      const arg = by === "by" ? "by" : `"${by}"`;
+      expect(share, `${file} handleShare`).toContain(`reportQuizShare(${arg}, outcome)`);
       expect(share, `${file} handleShare`).not.toContain("reportQuizCopy");
-      expect(copy, `${file} handleCopy`).toContain(`reportQuizCopy("${by}", outcome)`);
+      expect(copy, `${file} handleCopy`).toContain(`reportQuizCopy(${arg}, outcome)`);
       expect(copy, `${file} handleCopy`).not.toContain("reportQuizShare");
       // One call each in the whole file, and no third path to GA4 alone.
       expect(body.match(/reportQuizShare\(/g) ?? [], file).toHaveLength(1);

@@ -1134,8 +1134,10 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwn
       ? `${pct(taps, quizCreated)} of quizzes`
       : by === "board"
         ? `${pct(taps, quizBoard)} of board opens`
-        : `${pct(taps, quizCompleted)} of finishes`;
-  for (const by of ["owner", "taker", "board"]) {
+        : by === "preview"
+          ? `${pct(taps, quizOwnerOpened)} of previews`
+          : `${pct(taps, quizCompleted)} of finishes`;
+  for (const by of ["owner", "preview", "taker", "board"]) {
     const counts = shareOutcomes.map((o) => get(`quiz_share:${by}:${o}`));
     const taps = counts.reduce((t, c) => t + c, 0);
     if (taps === 0) continue;
@@ -1150,7 +1152,7 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwn
   // with neither is one its maker never tried to send.
   const copyOutcomes = ["copied", "failed"];
   let copyTaps = 0;
-  for (const by of ["owner", "taker", "board"]) {
+  for (const by of ["owner", "preview", "taker", "board"]) {
     const counts = copyOutcomes.map((o) => get(`quiz_copy:${by}:${o}`));
     const taps = counts.reduce((t, c) => t + c, 0);
     if (taps === 0) continue;
@@ -1175,7 +1177,7 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwn
   // Platforms mirror SOCIAL_PLATFORMS in lib/social-share.ts.
   const socialPlatforms = ["line", "threads", "x", "facebook", "whatsapp"];
   let socialTaps = 0;
-  for (const by of ["owner", "taker", "board"]) {
+  for (const by of ["owner", "preview", "taker", "board"]) {
     const counts = socialPlatforms.map((p) => get(`quiz_social:${by}:${p}`));
     const taps = counts.reduce((t, c) => t + c, 0);
     if (taps === 0) continue;
