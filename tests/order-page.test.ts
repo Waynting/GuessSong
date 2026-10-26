@@ -307,14 +307,17 @@ describe("the setup page starts an order game the same way on all three paths", 
 
   it("hides the clip length in the order style, and offers the buzzer there as phones", () => {
     expect(setup).toMatch(/\{!isOrder && \(\s*<div>\s*<p className="section-label">Clip Duration<\/p>/);
-    expect(setup).toMatch(/\{isBuzzerConfigured\(\) && \(\s*<div>\s*<p className="section-label">\{isOrder \? "Play on phones" : "Buzzer Mode"\}<\/p>/);
+    expect(setup).toMatch(/\{isBuzzerConfigured\(\) && who !== "solo" && \(\s*<div>\s*<p className="section-label">\{isOrder \? "Play on phones" : "Buzzer Mode"\}<\/p>/);
     expect(setup).not.toMatch(/isBuzzerConfigured\(\) && !isOrder/);
     expect(setup).toMatch(/choosePlayStyle\("order"\)/);
     expect(setup).toMatch(/choosePlayStyle\("guess"\)/);
   });
 
   it("says what the song count means in this style, and never a clip length", () => {
-    expect(setup).toMatch(/isOrder \? "Order by year" : `\$\{clipDuration\}s clips`/);
+    // The summary names the game for a room ("Just me" is the order game
+    // already) and gives a clip length only to the guess game.
+    expect(setup).toMatch(/who === "solo" \? \[\] : \[isOrder \? "Put them in order" : "Guess the song"\]/);
+    expect(setup).toMatch(/isOrder \? \[\] : \[`\$\{clipDuration\}s clips`\]/);
     expect(setup).toMatch(/orderSummary\(songCount\.count\)/);
   });
 });

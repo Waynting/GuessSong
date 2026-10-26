@@ -302,7 +302,7 @@ describe("/ after the quiz left it", () => {
     // that renders one of those panels renders <SetupStyles />, and neither
     // page declares the classes again.
     const chrome = read("components/setup-chrome.tsx");
-    for (const cls of [".card", ".start-btn", ".pill", ".url-input", ".player-input", ".text-link", ".mode-links", ".start-status", ".hero-title"]) {
+    for (const cls of [".card", ".start-btn", ".pill", ".url-input", ".player-input", ".text-link", ".who-opt", ".quiz-card", ".start-status", ".hero-title"]) {
       expect(chrome, cls).toMatch(new RegExp(`^\\s*${cls.replace(".", "\\.")} \\{`, "m"));
       for (const page of [HOME, QUIZ_PAGE, QUIZ_FORM]) {
         expect(read(page), `${page} redeclares ${cls}`).not.toMatch(new RegExp(`^\\s*${cls.replace(".", "\\.")} \\{`, "m"));
@@ -348,8 +348,10 @@ describe("the FAQ on / is one list, rendered twice", () => {
   });
 
   it("renders the visible list from the same FAQS, question then answer", () => {
+    // Folded since 2026-10-26: the answer sits in the <details> under its
+    // question, still in the HTML, so it still matches the JSON-LD.
     expect(body).toMatch(
-      /FAQS\.map\(\(faq\)\s*=>\s*\(\s*<div key=\{faq\.q\}>\s*<h3 className="faq-q">\{faq\.q\}<\/h3>\s*<p className="faq-a">\{faq\.a\}<\/p>\s*<\/div>\s*\)\)/
+      /FAQS\.map\(\(faq\)\s*=>\s*\(\s*<details key=\{faq\.q\} className="faq-item">\s*<summary><h3 className="faq-q">\{faq\.q\}<\/h3><\/summary>\s*<p className="faq-a">\{faq\.a\}<\/p>\s*<\/details>\s*\)\)/
     );
   });
 

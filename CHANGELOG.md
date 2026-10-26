@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **"Who's playing?" opens the setup card** (`lib/who-playing.ts`,
+  `app/page.tsx`).
+  - **The three choices:** Just me → the order game, A group → the guess
+    game, Everyone's playlists → Mixed. They replace the "How to play" pills,
+    the Mixed header, and the two text links under Start.
+  - **Why:** 68% of games in the week to 2026-10-26 had one player and played
+    out at 13.6% on the guess game, against 30.4% on the order game, which sat
+    behind a pill.
+  - **Nothing new is stored.** `whoFromSetup` derives the choice from every
+    restore, so remembered setups, `?mode=` and Start fresh need no migration.
+  - **Just me** hides the roster and the buzzer, and starts on `soloRoster`:
+    the one name the form still holds, else "You".
+  - **A room's game** ("Game" pills) moved into the settings fold. The summary
+    line now names the game.
+  - Both nudges now go through `chooseWho`.
+  - **The Taste Quiz** is a card under the form, "Not playing right now?",
+    instead of a text link under Start.
+  - **Measured at 390×844 on the production build:**
+    - Just me: Start ends at 701px, down from 890 on main, and the quiz card
+      is above the fold.
+    - A group: Start ends at 932px, 42px lower than before.
+    - **Read it with** `game_mode_players` (order · 1 vs party · 1),
+      `quiz_from:internal` and the `mixed` start count. No tap counter was
+      added for the choices.
+
 - **The owner's preview can send the quiz** (`sendable()` and `ownerSend` in
   `app/q/[code]/quiz-client.tsx`). In the week to 2026-10-26, 82.2% of
   quizzes had their maker open `/q/<CODE>` as a preview, but only 13.6%
@@ -174,6 +199,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Counted: `order_arranged:<moved|untouched>:<verdict>` beside
     `order_round:*`, and `arranged` on GA4's `order_round_resolved`.
     `npm run stats` prints both rows under the order line.
+
+### Changed
+
+- **The prose under the form is shorter.**
+  - "What is GuessSong?" is one paragraph.
+  - The four FAQ answers are each one or two sentences and fold under their
+    questions (`<details>`). They are still in the HTML and still the same
+    `FAQS` the FAQPage JSON-LD reads.
+  - The guides list is titles only.
+  - None of it was removed outright: 88% of first-time hosts arrive from
+    Google, and this is most of the page's indexable text.
 
 ### Removed
 

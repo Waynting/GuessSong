@@ -128,20 +128,60 @@ export function SetupStyles() {
           text-align: center;
         }
 
-        .mode-links {
+        /* "Who's playing?" (lib/who-playing.ts). Three tiles across, the
+           chosen one in the green the pills use, and one line under them for
+           what the chosen one means. Each tile is the whole tap target. */
+        .who-q { font-size: 17px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+        .who-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+        .who-opt {
           display: flex;
-          flex-wrap: wrap;
-          justify-content: center;
+          flex-direction: column;
           align-items: center;
-          gap: 6px 14px;
-          margin-top: 18px;
+          justify-content: center;
+          gap: 6px;
+          min-height: 66px;
+          padding: 8px 6px;
+          background: var(--surface2);
+          border: 1.5px solid var(--border);
+          border-radius: 12px;
+          font-family: 'Outfit', sans-serif;
+          color: #bbb;
+          text-align: center;
+          cursor: pointer;
+          transition: border-color 0.15s, background 0.15s;
         }
-        .mode-links .text-link { color: #999; }
-        @media (hover: hover) { .mode-links .text-link:hover { color: var(--green); } }
-        .mode-links-sep { color: #444; font-size: 12px; }
-        /* On a phone the two links never fit one line, and a dot left at the
-           end of the first one reads as a stray mark. The row gap separates them. */
-        @media (max-width: 600px) { .mode-links-sep { display: none; } }
+        .who-icon { display: flex; color: #888; }
+        .who-title { font-size: 13px; font-weight: 600; line-height: 1.25; }
+        .who-sub { margin-top: 8px; font-size: 12px; color: #888; line-height: 1.45; }
+        @media (hover: hover) { .who-opt:hover { border-color: #444; } }
+        .who-opt.active { border-color: var(--green); background: rgba(29,185,84,0.08); color: var(--text); }
+        .who-opt.active .who-icon { color: var(--green); }
+        .who-opt:active { background: rgba(29,185,84,0.14); transition: none; }
+        .who-opt:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+        /* The Taste Quiz, under the card: not a game played tonight, so a
+           card of its own beside the form rather than a row inside it. */
+        .quiz-card {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-top: 14px;
+          padding: 14px 16px;
+          border: 1px solid rgba(29,185,84,0.35);
+          border-radius: 14px;
+          background: rgba(29,185,84,0.04);
+          color: #ccc;
+          text-decoration: none;
+          font-size: 14px;
+          line-height: 1.4;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .quiz-card-icon { display: flex; color: var(--green); flex-shrink: 0; }
+        .quiz-card-title { display: block; color: var(--text); font-weight: 600; }
+        .quiz-card-sub { display: block; }
+        @media (hover: hover) { .quiz-card:hover { background: rgba(29,185,84,0.1); border-color: rgba(29,185,84,0.55); } }
+        .quiz-card:active { background: rgba(29,185,84,0.16); transition: none; }
+        .quiz-card:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
         /* Under the roster once three names are typed: the one moment Mixed
            plainly fits. A whole-row button, quieter than Start and the pills,
@@ -433,37 +473,29 @@ export function SetupStyles() {
           color: #666;
         }
         .seo-p + .seo-p { margin-top: 10px; }
-        .guide-links {
-          margin-top: 14px;
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-          gap: 10px;
+        .faq-list { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; }
+        /* Each answer folds under its question. The summary is the tap
+           target, the marker is ours (the native triangle differs by
+           browser), and the h3 inside it stays an h3 for the outline. */
+        .faq-item summary {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          min-height: 44px;
+          cursor: pointer;
+          list-style: none;
+          border-radius: 6px;
         }
-        .guide-link {
-          display: block;
-          background: #1a1a1a;
-          border: 1px solid #2a2a2a;
-          border-radius: 10px;
-          padding: 14px 16px;
-          text-decoration: none;
-          transition: border-color 0.15s ease;
-        }
-        @media (hover: hover) { .guide-link:hover { border-color: #1DB954; } }
-        .guide-link:active { border-color: #1DB954; background: #1f1f1f; transition: none; }
-        .guide-link-title {
-          color: #f0f0f0;
-          font-size: 14.5px;
-          font-weight: 600;
-          line-height: 1.4;
-          margin-bottom: 4px;
-        }
-        .guide-link-desc {
-          color: #888;
-          font-size: 12.5px;
-          font-weight: 300;
-          line-height: 1.5;
-        }
-        .faq-list { margin-top: 12px; display: flex; flex-direction: column; gap: 14px; }
+        .faq-item summary::-webkit-details-marker { display: none; }
+        .faq-item summary::after { content: "+"; color: #666; font-size: 18px; flex-shrink: 0; }
+        .faq-item[open] summary::after { content: "−"; }
+        @media (hover: hover) { .faq-item summary:hover .faq-q { color: var(--text); } }
+        .faq-item summary:active { opacity: 0.7; transition: none; }
+        .faq-item summary:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+        .faq-item .faq-q { margin-bottom: 0; }
+        .faq-item .faq-a { padding-bottom: 10px; }
+        .guide-titles { list-style: none; margin-top: 10px; display: flex; flex-direction: column; gap: 14px; }
         .faq-q {
           font-size: 13px;
           font-weight: 500;
@@ -549,6 +581,61 @@ export function CheckIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-5 h-5">
       <polyline points="20 6 9 17 4 12" />
     </svg>
+  );
+}
+
+/* The line icons on "Who's playing?" and the quiz card. Stroke, not fill, so
+   they read as labels beside the text rather than as buttons of their own. */
+function LineIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      width={22}
+      height={22}
+    >
+      {children}
+    </svg>
+  );
+}
+
+export function OrderIcon() {
+  return (
+    <LineIcon>
+      <path d="M4 6h10M4 12h7M4 18h4" />
+      <path d="M18 4v16M15 17l3 3 3-3" />
+    </LineIcon>
+  );
+}
+
+export function MusicIcon() {
+  return (
+    <LineIcon>
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </LineIcon>
+  );
+}
+
+export function MixIcon() {
+  return (
+    <LineIcon>
+      <path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+    </LineIcon>
+  );
+}
+
+export function LinkIcon() {
+  return (
+    <LineIcon>
+      <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" />
+      <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
+    </LineIcon>
   );
 }
 
