@@ -245,3 +245,18 @@ describe("the drag: an arrangement, and how it reads at the reveal", async () =>
     expect(readArrangement(["C", "A", "D", "B"], round)).toEqual({ inPlace: 0, exact: false, oldest: false });
   });
 });
+
+describe("hostArranged", () => {
+  // Value: protects=the one predicate behind order_arranged and order_bounce — an
+  //   arrangement counts only for its own round and only once a card moved;
+  //   fails_when=the round check or the moved check is dropped, so a stale or dealt
+  //   arrangement reads as the host's drag; why_new=the page spelled it inline, in regex
+  //   reach only; seam=none; no_claim=the page passes the right round (its source tests).
+  it("is true only for an arrangement of that round that was moved", async () => {
+    const { hostArranged } = await import("@/lib/order-game");
+    expect(hostArranged({ round: 2, ids: ["a", "b"], moved: true }, 2)).toBe(true);
+    expect(hostArranged({ round: 2, ids: ["a", "b"], moved: false }, 2)).toBe(false);
+    expect(hostArranged({ round: 1, ids: ["a", "b"], moved: true }, 2)).toBe(false);
+    expect(hostArranged(null, 0)).toBe(false);
+  });
+});

@@ -32,7 +32,6 @@ import {
   reportMixedNudge,
   reportRefusal,
   reportRefusalRecovered,
-  reportSoloNudge,
 } from "@/lib/loop-client";
 import {
   NO_REFUSAL,
@@ -44,7 +43,6 @@ import {
   type RecoveryState,
 } from "@/lib/refusal-recovery";
 import { showMixedNudge } from "@/lib/mixed-nudge";
-import { showSoloNudge } from "@/lib/solo-nudge";
 import { playerBand } from "@/lib/game-players";
 import { currentArrival } from "@/lib/arrival";
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
@@ -367,10 +365,6 @@ export default function SetupPage() {
   // remembered so a Mixed start from this page can be credited to it.
   const nudgeShownRef = useRef(false);
   const nudgeTappedRef = useRef(false);
-  // The solo nudge (lib/solo-nudge.ts): the same two memories, so an order
-  // game started after its tap can be credited to it.
-  const soloNudgeShownRef = useRef(false);
-  const soloNudgeTappedRef = useRef(false);
   // Whether this tab showed a permanent refusal, and whether a game started
   // after it — carried across a reload, read back in the mount effect. See
   // lib/refusal-recovery.ts.
@@ -745,10 +739,6 @@ export default function SetupPage() {
     if (mixed && nudgeTappedRef.current) {
       nudgeTappedRef.current = false;
       reportMixedNudge("started");
-    }
-    if (mode === "order" && soloNudgeTappedRef.current) {
-      soloNudgeTappedRef.current = false;
-      reportSoloNudge("started");
     }
     return {
       host_game_index: hostGameIndex,
@@ -1261,19 +1251,17 @@ export default function SetupPage() {
     chooseWho("mixed");
   }
 
-  // One name and no second, on the guess game: offer the game that scores
-  // itself. The tap switches the play style; the pill row below shows it.
-  const soloNudge = showSoloNudge({ setupMode, buzzerEnabled, players, playStyle });
-  useEffect(() => {
-    if (!soloNudge || soloNudgeShownRef.current) return;
-    soloNudgeShownRef.current = true;
-    reportSoloNudge("shown");
-  }, [soloNudge]);
-
-  function takeSoloNudge() {
-    soloNudgeTappedRef.current = true;
-    reportSoloNudge("tapped");
-    chooseWho("solo");
+  /**
+   * The buzzer, offered under the roster and not only in the settings fold.
+   * 1.22.0 moved the toggle into the fold and buzzer games fell from 59 to 23
+   * a day, while a buzzer room of two or more plays out 45% of the time, the
+   * best of any mode. The same two calls as the fold's toggle, which is still
+   * the way to turn it off. No counter of its own: the read is
+   * `game_mode:buzzer` per day against those two figures.
+   */
+  function offerBuzzer() {
+    setBuzzerEnabled(true);
+    resetRoom();
   }
 
   const startClick = setupMode === "single"
@@ -1539,16 +1527,26 @@ export default function SetupPage() {
                         </span>
                       </button>
                     )}
-                    {/* The other end of the roster: one name. The guess game
-                        needs a judge, and alone there is none; the order game
-                        scores itself. lib/solo-nudge.ts. */}
-                    {soloNudge && (
-                      <button type="button" className="solo-nudge" onClick={takeSoloNudge}>
-                        <span aria-hidden style={{ fontSize: "18px" }}>📅</span>
+                    {/* The buzzer, where a room can see it. Under the roster
+                        because that is what it replaces — everyone types their
+                        own name as they scan in. With the order game the same
+                        room puts the cards on every phone, so the row says that.
+                        The solo nudge that sat here came off on 2026-11-01:
+                        "Just me" does its job, and its tap rate had fallen to 1%.
+                        One callout at a time: once three names are typed the
+                        Mixed nudge above owns this slot, and Mixed is the arm
+                        of the loop that converts. On by default, before any
+                        name is typed, because the room it asks about is the
+                        one the host is about to type; measured at 390×844 it
+                        puts Start at 1009px, 77px under 1.22.0's 932. */}
+                    {isBuzzerConfigured() && !mixedNudge && (
+                      <button type="button" className="buzzer-nudge" onClick={offerBuzzer}>
+                        <span aria-hidden style={{ fontSize: "18px" }}>📱</span>
                         <span>
-                          Playing on your own? The guessing game needs someone to judge.{" "}
-                          <strong>Try Put them in order →</strong> — four songs, oldest to
-                          newest, and it scores itself.
+                          {isOrder
+                            ? "Everyone has a phone? Each arranges on theirs. "
+                            : "Everyone has a phone? Buzz in from them. "}
+                          <strong>{isOrder ? "Play on phones →" : "Turn on Buzzer Mode →"}</strong>
                         </span>
                       </button>
                     )}

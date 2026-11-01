@@ -82,6 +82,7 @@ import {
   trueOrder,
   type OrderPhoneCoverage,
   type OrderRound,
+  hostArranged,
 } from "@/lib/order-game";
 import { displayTitle } from "@/lib/quiz";
 
@@ -198,6 +199,15 @@ export default function OrderPage() {
   // Read by the leave beacon, which runs from `pagehide` and so off the render.
   const playersRef = useRef<Player[]>([]);
   playersRef.current = players;
+  // Mirrored for the leave beacon too: the arrangement of the round still
+  // face down, and whether a buzzer room is in play. The beacon runs off
+  // `pagehide`, outside a render, and reads `arranged` from the one source
+  // the End Game beacon reads, the `arrangement` state; the recorder files
+  // it as `order_bounce:<left|ended>:<moved|untouched>` (lib/loop-stats.ts).
+  const arrangementRef = useRef(arrangement);
+  arrangementRef.current = arrangement;
+  const buzzerRoomRef = useRef(false);
+  buzzerRoomRef.current = buzzerRoom !== null;
   const currentIndexRef = useRef(0);
   currentIndexRef.current = currentIndex;
   const roundCountRef = useRef(0);
@@ -328,6 +338,12 @@ export default function OrderPage() {
     if (phaseRef.current === "finished") return;
     leftRef.current = true;
     if (firstPageRef.current === false) return;
+    // The shared screen's drag only. A buzzer room's phones arrange for
+    // themselves, so the room sends no `arranged`, as closeRound sends none
+    // for a phone round.
+    const arranged = buzzerRoomRef.current
+      ? undefined
+      : hostArranged(arrangementRef.current, currentIndexRef.current);
     reportGameLeft(
       orderRoundsPlayed(currentIndexRef.current, phaseRef.current),
       hostKindRef.current,
@@ -335,7 +351,8 @@ export default function OrderPage() {
       setupSourceRef.current,
       "order",
       playerBand(playersRef.current.length),
-      gameScored(playersRef.current)
+      gameScored(playersRef.current),
+      arranged
     );
   }, []);
 
@@ -471,7 +488,7 @@ export default function OrderPage() {
     reportOrderRound(
       orderVerdict({ exact: exactWinner !== null, oldest: oldestWinner !== null }),
       currentIndex + 1,
-      arrangement?.round === currentIndex && arrangement.moved
+      hostArranged(arrangement, currentIndex)
     );
   }
 
@@ -494,6 +511,12 @@ export default function OrderPage() {
       mode: "order",
       players: playerBand(players.length),
       scored: gameScored(players),
+      // Whether this Game Over draws the Mixed link — the link's denominator.
+      linkDrawn: gameOverOnward(layout, players.length).mixedLink,
+      // Whether the round still face down had been touched — read at round
+      // zero only, as `order_bounce:ended`. The shared screen's drag only: a
+      // buzzer room's phones arrange for themselves, so it sends none.
+      ...(buzzerRoom ? {} : { arranged: hostArranged(arrangement, currentIndex) }),
     });
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,
@@ -637,9 +660,9 @@ export default function OrderPage() {
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
   const maxScore = sortedPlayers[0]?.score ?? 0;
   const leftoverLine = orderLeftoverLine(leftover);
-  const onward = gameOverOnward(screen);
+  const onward = gameOverOnward(screen, players.length);
   const lastRound = currentIndex + 1 >= rounds.length;
-  const hostMoved = arrangement?.round === currentIndex && arrangement.moved;
+  const hostMoved = hostArranged(arrangement, currentIndex);
   // The one drag, shared with the phones (lib/use-card-drag.ts). Live only
   // while the cards are face down.
   const cardDrag = useCardDrag(arrangedIds, phase === "showing", setIds);
@@ -1655,10 +1678,12 @@ export default function OrderPage() {
               )}
 
               {/* The QR for a room looking at a shared screen; a link for a
-                  host holding the screen. Not rendered on a phone, because
-                  rendering is what reports its impression. lib/game-over.ts. */}
-              {onward === "qr" && <LoopQr />}
-              {onward === "mixed_link" && (
+                  host holding the screen, and under the QR as well on a
+                  desktop with a room of two or more. The QR is not rendered
+                  on a phone, because rendering is what reports its
+                  impression. lib/game-over.ts. */}
+              {onward.qr && <LoopQr />}
+              {onward.mixedLink && (
                 <a className="next-game-link" href={MIXED_SETUP_HREF} onClick={openMixedSetup}>
                   {MIXED_NEXT_GAME_LABEL}
                 </a>

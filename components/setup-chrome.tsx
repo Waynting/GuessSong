@@ -186,7 +186,7 @@ export function SetupStyles() {
         /* Under the roster once three names are typed: the one moment Mixed
            plainly fits. A whole-row button, quieter than Start and the pills,
            louder than the text link under Start it points to. */
-        .mixed-nudge {
+        .mixed-nudge, .buzzer-nudge {
           display: flex;
           align-items: center;
           gap: 10px;
@@ -204,39 +204,21 @@ export function SetupStyles() {
           cursor: pointer;
           transition: background 0.15s, border-color 0.15s;
         }
-        .mixed-nudge strong { color: var(--green); font-weight: 600; }
+        .mixed-nudge strong, .buzzer-nudge strong { color: var(--green); font-weight: 600; }
         @media (hover: hover) {
           .mixed-nudge:hover { background: rgba(29,185,84,0.12); border-color: rgba(29,185,84,0.45); }
         }
         .mixed-nudge:active { background: rgba(29,185,84,0.18); transition: none; }
-        .mixed-nudge:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-        /* Under the roster when exactly one name is typed: the same row, for
-           the opposite room size (lib/solo-nudge.ts). Its own rules rather
-           than a shared selector so each keeps its own pressed state. */
-        .solo-nudge {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          width: 100%;
-          margin-top: 12px;
-          padding: 12px 14px;
-          background: rgba(29,185,84,0.06);
-          border: 1px solid rgba(29,185,84,0.25);
-          border-radius: 10px;
-          font-family: 'Outfit', sans-serif;
-          font-size: 14px;
-          line-height: 1.4;
-          color: #ccc;
-          text-align: left;
-          cursor: pointer;
-          transition: background 0.15s, border-color 0.15s;
-        }
-        .solo-nudge strong { color: var(--green); font-weight: 600; }
+        .mixed-nudge:focus-visible, .buzzer-nudge:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+        /* Under the roster for a group: the buzzer, offered where the room can
+           see it rather than only in the settings fold. It shares the Mixed
+           nudge's base rules above; only its hover and :active blocks are its
+           own, because tests/mixed-nudge.test.ts and tests/order-page.test.ts
+           each read those by selector name. */
         @media (hover: hover) {
-          .solo-nudge:hover { background: rgba(29,185,84,0.12); border-color: rgba(29,185,84,0.45); }
+          .buzzer-nudge:hover { background: rgba(29,185,84,0.12); border-color: rgba(29,185,84,0.45); }
         }
-        .solo-nudge:active { background: rgba(29,185,84,0.18); transition: none; }
-        .solo-nudge:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+        .buzzer-nudge:active { background: rgba(29,185,84,0.18); transition: none; }
 
         .card {
           background: var(--surface);

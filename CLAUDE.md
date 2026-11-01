@@ -434,6 +434,14 @@ for each:
   `npm run stats` subtracts `game_mode:order` from its denominator. The order
   page calls `reportGameEnd` / `reportGameLeft` with `orderRoundsPlayed`,
   never `countRoundsPlayed`, and never `recordHostedStart` or `reportFirstClip`.
+  Both beacons also carry `arranged` — whether a card had been moved in the
+  round still face down, read from the one `arrangement` state (mirrored into
+  a ref because the leave runs off `pagehide`), and omitted when a buzzer
+  room is in play, since there the phones arrange — and the recorder turns it into
+  `order_bounce:<left|ended>:<moved|untouched>` only for `mode: "order"` at
+  round zero: an order game over before any reveal, split by whether the host
+  tried. About 20% of solo order games ended that way in the first week of
+  "Just me", and the two halves call for different fixes.
 
 Two ways in on the setup page: "Who's playing? → Just me" (`lib/who-playing.ts`,
 which also starts it on `soloRoster` and hides the roster and the buzzer), and

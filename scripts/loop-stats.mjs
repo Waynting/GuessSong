@@ -438,10 +438,20 @@ if (reachedEnd > 0) {
 
 const screenPhone = get("game_end_screen:phone");
 const screenDesktop = get("game_end_screen:desktop");
+/**
+ * Ends that drew the Mixed link (`game_end_link:<screen>`, since 2026-11-01):
+ * the denominator for the link's taps below, written only by a page that
+ * drew it — every phone Game Over, a desktop one with two or more players —
+ * and never by a page from before the split, so neither rate is diluted by
+ * an end that showed no link or by an older tab.
+ */
+const linkPhone = get("game_end_link:phone");
+const linkDesktop = get("game_end_link:desktop");
 if (screenPhone + screenDesktop > 0) {
   console.log(
     `                    Game Over was drawn on a phone ${screenPhone} times ` +
-      `(${pct(screenPhone, screenPhone + screenDesktop).trim()}) and on a desktop ${screenDesktop}`
+      `(${pct(screenPhone, screenPhone + screenDesktop).trim()}) and on a desktop ${screenDesktop}` +
+      (linkPhone + linkDesktop > 0 ? ` — of those, drew the Mixed link: phone ${linkPhone} · desktop ${linkDesktop}` : "")
   );
 }
 
@@ -720,10 +730,10 @@ if (playerCols.length > 0) {
  * denominator), `game_end_mode_players:<mode>:<band>:<end>` and
  * `game_left_mode_players:<mode>:<band>:<rband>` on the beacons, all since
  * 2026-10-25. Two columns per mode — one player, and a room — because that is
- * the question the two tables above cannot answer apart: the solo nudge
- * (lib/solo-nudge.ts) sends a host who is alone to the order game, and
- * whether that game keeps them is only readable against the solo guess game
- * beside it. Read with `--since` the deploy day.
+ * the question the two tables above cannot answer apart: "Who's playing? →
+ * Just me" (lib/who-playing.ts) sends a host who is alone to the order game,
+ * and whether that game keeps them is only readable against the solo guess
+ * game beside it. Read with `--since` the deploy day.
  */
 const ROOM_BANDS = ["p2", "p3_4", "p5_plus"];
 const crossCols = [];
@@ -757,8 +767,8 @@ if (crossCols.length > 0) {
   console.log(sourcePctRow("left by round 2, %", leftEarly, started));
   console.log(
     "  how to read it: `party 1` is the guess game with nobody to judge; `order 1` is the\n" +
-      "  order game scoring itself for one person, the game the solo nudge sends a host\n" +
-      "  alone to. `order 1` playing out well above `party 1` says a solo visitor will play\n" +
+      "  order game scoring itself for one person, the game `Just me` sends a host alone\n" +
+      "  to. `order 1` playing out well above `party 1` says a solo visitor will play\n" +
       "  when the game lets them; the two level says they are looking, not playing, and\n" +
       "  the first-visit work is the landing, not the game."
   );
@@ -804,6 +814,23 @@ const orderVerdicts = [
   ["none", "nobody"],
 ];
 const orderRounds = orderVerdicts.reduce((t, [v]) => t + get(`order_round:${v}`), 0);
+/**
+ * Order games over before the first reveal:
+ * `order_bounce:<left|ended>:<moved|untouched>`, from the leave and end
+ * beacons at round zero. "Just me" sends most solo hosts to this game, and
+ * round-zero leaves went from ~70 to ~360 a day when it did (2026-10-26).
+ * Pages before 2026-11-01 send nothing, so the line sums to at most the
+ * round-0 rows of the two histograms above. Read at top level, not under the
+ * revealed-rounds guard: a bounce is by definition a game with no revealed
+ * round, so a window of bounces alone must still print.
+ */
+const bounce = (end) => ({
+  moved: get(`order_bounce:${end}:moved`),
+  untouched: get(`order_bounce:${end}:untouched`),
+});
+const bounceLeft = bounce("left");
+const bounceEnded = bounce("ended");
+const bounced = bounceLeft.moved + bounceLeft.untouched + bounceEnded.moved + bounceEnded.untouched;
 if (orderRounds > 0) {
   const parts = orderVerdicts
     .map(([v, label]) => `${label} ${get(`order_round:${v}`)} (${pct(get(`order_round:${v}`), orderRounds).trim()})`)
@@ -872,6 +899,22 @@ if (orderRounds > 0) {
     );
   }
 }
+if (bounced > 0) {
+  // A window of bounces with no revealed round still gets its heading.
+  if (orderRounds === 0) console.log("\nOrder rounds        0 revealed in this window");
+    console.log(
+      `  before any reveal  ${bounced} games — left ${bounceLeft.moved + bounceLeft.untouched}` +
+        ` (moved a card ${bounceLeft.moved} · untouched ${bounceLeft.untouched})` +
+        ` · pressed End Game ${bounceEnded.moved + bounceEnded.untouched}` +
+        ` (moved a card ${bounceEnded.moved} · untouched ${bounceEnded.untouched})`
+    );
+    console.log(
+      "  how to read it: an order game over with no round revealed. `untouched` is a host who\n" +
+        "  saw four cards and did nothing — a first screen that did not explain itself, or a\n" +
+        "  tile that promised music; `moved a card` is a host who started arranging and\n" +
+        "  stopped. Set the total against `order · 1` started in the mode × players table."
+    );
+}
 
 /**
  * The first Play press of each game: `first_clip:<path>:<outcome>`.
@@ -924,20 +967,38 @@ if (firstClips > 0) {
 }
 
 /**
- * What a host who reached Game Over tapped next: `game_over_tap:<target>`.
- * `play_again` is against every Game Over; `mixed` is the link phones get in
- * place of the QR, so it is against the phone screens only.
+ * What a host who reached Game Over tapped next. Since 2026-11-01 a page that
+ * can say its layout writes `game_over_tap_screen:<target>:<screen>` and the
+ * bare `game_over_tap:<target>` is written only by a page that cannot (an
+ * older page, a webview with no matchMedia) — one command per tap — so each
+ * target's total is the sum of its three keys. `play_again` is against every
+ * Game Over. The Mixed link's rate, per screen, is its taps over
+ * `game_end_link:<screen>` — the Game Overs that drew it, written by the
+ * same pages — so a window straddling the deploy is clean on both sides of
+ * the fraction. Every key under both prefixes is read.
  */
-const tapAgain = get("game_over_tap:play_again");
-const tapMixed = get("game_over_tap:mixed");
+const tapAgainBare = get("game_over_tap:play_again");
+const tapMixedBare = get("game_over_tap:mixed");
+const tapAgainPhone = get("game_over_tap_screen:play_again:phone");
+const tapAgainDesktop = get("game_over_tap_screen:play_again:desktop");
+const tapMixedPhone = get("game_over_tap_screen:mixed:phone");
+const tapMixedDesktop = get("game_over_tap_screen:mixed:desktop");
+const tapAgain = tapAgainBare + tapAgainPhone + tapAgainDesktop;
+const tapMixed = tapMixedBare + tapMixedPhone + tapMixedDesktop;
 if (tapAgain + tapMixed > 0) {
   console.log(
-    `\nTapped on Game Over  Play Again ${tapAgain} (${pct(tapAgain, reachedEnd).trim()} of Game Overs)` +
-      ` · Mixed link ${tapMixed} (${pct(tapMixed, screenPhone).trim()} of phone Game Overs)`
+    `\nTapped on Game Over  Play Again ${tapAgain} (${pct(tapAgain, reachedEnd).trim()} of Game Overs; phone ${tapAgainPhone} · desktop ${tapAgainDesktop})` +
+      ` · Mixed link ${tapMixed} — on a phone ${tapMixedPhone} (${pct(tapMixedPhone, linkPhone).trim()} of the phone Game Overs that drew it)` +
+      ` · on a desktop ${tapMixedDesktop} (${pct(tapMixedDesktop, linkDesktop).trim()} of the desktop ones that drew it)`
   );
   console.log(
-    "  how to read it: the Mixed link is where the QR used to be on a phone, so its rate\n" +
-      "  is the one to set beside the game_over row above."
+    "  how to read it: each rate is the link's taps over the Game Overs that drew it, both\n" +
+      "  written only by pages from 2026-11-01 on, so a window straddling that day is clean\n" +
+      `  on both sides of the fraction; ${tapAgainBare + tapMixedBare} taps came from pages before it or that\n` +
+      "  could not say their screen — in the totals, in neither rate. The phone rate is the\n" +
+      "  one to set beside the game_over row above; on a desktop with two or more players\n" +
+      "  the QR and the link are drawn together from that day, so read the QR's game_over\n" +
+      "  row beside the desktop taps, not against the weeks before."
   );
 }
 
@@ -957,28 +1018,6 @@ if (nudgeShown + nudgeTapped + nudgeStarted > 0) {
     "  how to read it: shown counts page loads where three names were typed, not hosts.\n" +
       "  A tap that does not start is a host who looked at Mixed and went back; set\n" +
       "  started beside `Playlist came from … mixed` to see what share of Mixed it brought."
-  );
-}
-
-/**
- * The setup page's nudge for a host alone (`lib/solo-nudge.ts`), shown when
- * exactly one name is typed on the guess game; a tap switches the play style
- * to "put them in order", and `started` is an order game begun after a tap.
- * Whether that game then keeps them is the mode × players table above.
- */
-const soloShown = get("solo_nudge:shown");
-const soloTapped = get("solo_nudge:tapped");
-const soloStarted = get("solo_nudge:started");
-if (soloShown + soloTapped + soloStarted > 0) {
-  console.log(
-    `\nSolo nudge on setup  shown ${soloShown} · tapped ${soloTapped} (${pct(soloTapped, soloShown).trim()})` +
-      ` · started an order game ${soloStarted} (${pct(soloStarted, soloTapped).trim()} of taps)`
-  );
-  console.log(
-    "  how to read it: shown counts page loads where one name was typed and no second, on\n" +
-      "  the guess game — most first visits. A tap is a host alone who would rather play\n" +
-      "  than leave; set `started` beside `order · 1` in the mode × players table, which is\n" +
-      "  whether the game they were sent to kept them."
   );
 }
 
@@ -1315,6 +1354,7 @@ const RENDERED_PREFIXES = [
   "game_end_host:",
   "game_end_early:",
   "game_end_screen:",
+  "game_end_link:",
   "game_left_round:",
   "game_left_host:",
   "game_end_source:",
@@ -1332,12 +1372,13 @@ const RENDERED_PREFIXES = [
   "game_left_scored:",
   "order_round:",
   "order_arranged:",
+  "order_bounce:",
   "order_phone:",
   "order_phone_verdict:",
   "first_clip:",
   "game_over_tap:",
+  "game_over_tap_screen:",
   "mixed_nudge:",
-  "solo_nudge:",
   "refusal_recovery:",
   "refusal_recovery_via:",
   "playlist_refused:",

@@ -1,5 +1,7 @@
 /**
- * What the Game Over screen offers the host to do next, by layout.
+ * What the Game Over screen offers the host to do next, by layout and by
+ * room size: a phone gets the Mixed link, a desktop the QR, and a desktop
+ * with two or more players the link under the QR as well.
  *
  * ## Why the phone does not get the QR
  *
@@ -59,19 +61,43 @@ export function gameScreenFor(matchesPhoneQuery: boolean | null | undefined): Ga
 }
 
 /**
- *   qr          the loop's QR code, for a room looking at a shared screen
- *   mixed_link  the link to Mixed Playlist Mode, for a host holding the screen
- *   nothing     the layout is not known yet
+ * What the screen offers onward, by layout and by room:
  *
- * `nothing` while unknown, rather than a default: either default is wrong for
- * somebody, and the wrong one on a phone is an impression reported for a code
- * that was on screen for one frame.
+ *   qr         the loop's QR code, for a room looking at a shared screen
+ *   mixedLink  the link to Mixed Playlist Mode
+ *
+ * A phone gets the link and never the QR (above). A desktop keeps the QR and,
+ * when two or more were playing, gets the link under it as well: Mixed is the
+ * one arm of the loop that converts — its join link read 35.6% followed in
+ * the week to 2026-10-31 against 0.9% for this QR, and "Everyone's playlists"
+ * as a tile on `/` took Mixed from 11 to 40 starts a day — and the moment a
+ * room is still looking at the final scores is the one moment the offer costs
+ * nothing. Not for a host alone, who is 84% of games: "everyone brings their
+ * own playlist" is a sentence for a room, and to one person it is an offer
+ * nobody there can take up.
+ *
+ * Both false while the layout is unknown, rather than a default: either
+ * default is wrong for somebody, and the wrong one on a phone is an
+ * impression reported for a code that was on screen for one frame.
  */
-export type GameOverOnward = "qr" | "mixed_link" | "nothing";
+export interface GameOverOnward {
+  qr: boolean;
+  mixedLink: boolean;
+}
 
-export function gameOverOnward(screen: GameScreen | null): GameOverOnward {
-  if (screen === null) return "nothing";
-  return screen === "phone" ? "mixed_link" : "qr";
+/**
+ * The smallest room the desktop's Mixed link is drawn for. Deliberately
+ * below `MIXED_NUDGE_MIN_PLAYERS` (3, lib/mixed-nudge.ts): the nudge
+ * interrupts a form being filled in, the link is an offer on a screen the
+ * room is done with, and a pair that just played is the smallest room a
+ * mix of two playlists can be put to.
+ */
+export const MIXED_LINK_MIN_PLAYERS = 2;
+
+export function gameOverOnward(screen: GameScreen | null, players: number): GameOverOnward {
+  if (screen === null) return { qr: false, mixedLink: false };
+  if (screen === "phone") return { qr: false, mixedLink: true };
+  return { qr: true, mixedLink: players >= MIXED_LINK_MIN_PLAYERS };
 }
 
 /**

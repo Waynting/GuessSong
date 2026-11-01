@@ -4,6 +4,7 @@ import {
   MIXED_SETUP_HREF,
   PHONE_MAX_WIDTH_PX,
   PHONE_MEDIA_QUERY,
+  MIXED_LINK_MIN_PLAYERS,
   gameOverOnward,
   gameScreenFor,
   readGameScreen,
@@ -13,25 +14,39 @@ import { GAME_SCREENS } from "@/lib/loop-stats";
 /**
  * What the Game Over screen offers next. On a phone the QR read 3 followed of
  * 994 shown, because the screen showing the code is the one device in the
- * room that cannot scan it.
+ * room that cannot scan it. On a desktop the QR stays, and a room of two or
+ * more gets the Mixed link under it — the one arm of the loop that converts.
  */
-describe("the phone gets a link, the desktop keeps the QR", () => {
-  it("offers the QR on a desktop, exactly as before", () => {
-    expect(gameOverOnward("desktop")).toBe("qr");
+describe("the phone gets a link, the desktop keeps the QR and a room gets the link too", () => {
+  it("offers the QR on a desktop, exactly as before, and no link to a host alone", () => {
+    expect(gameOverOnward("desktop", 1)).toEqual({ qr: true, mixedLink: false });
+    expect(gameOverOnward("desktop", 0)).toEqual({ qr: true, mixedLink: false });
   });
 
-  it("offers the Mixed link on a phone, and not the QR", () => {
-    expect(gameOverOnward("phone")).toBe("mixed_link");
+  it("adds the Mixed link under the desktop's QR for a room of two or more", () => {
+    expect(MIXED_LINK_MIN_PLAYERS).toBe(2);
+    for (const players of [2, 3, 4, 12]) {
+      expect(gameOverOnward("desktop", players)).toEqual({ qr: true, mixedLink: true });
+    }
+  });
+
+  it("offers the Mixed link on a phone, never the QR, whatever the room", () => {
+    for (const players of [0, 1, 2, 5]) {
+      expect(gameOverOnward("phone", players)).toEqual({ qr: false, mixedLink: true });
+    }
   });
 
   it("offers nothing until the layout is known", () => {
     // Either default is wrong for somebody, and the wrong one on a phone is
     // an impression reported for a code that was on screen for one frame.
-    expect(gameOverOnward(null)).toBe("nothing");
+    expect(gameOverOnward(null, 3)).toEqual({ qr: false, mixedLink: false });
   });
 
   it("answers for every screen the server keys", () => {
-    for (const screen of GAME_SCREENS) expect(gameOverOnward(screen)).not.toBe("nothing");
+    for (const screen of GAME_SCREENS) {
+      const onward = gameOverOnward(screen, 2);
+      expect(onward.qr || onward.mixedLink).toBe(true);
+    }
   });
 });
 
