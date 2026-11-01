@@ -7,7 +7,6 @@ import {
   recordGameLeft,
   recordGameOverTap,
   recordMixedNudge,
-  recordSoloNudge,
   recordRefusalRecovery,
   recordGameStart,
   recordLoopImpression,
@@ -82,13 +81,15 @@ export async function POST(req: NextRequest) {
         mode: event.mode,
         players: event.players,
         scored: event.scored,
+        arranged: event.arranged,
+        linkDrawn: event.linkDrawn,
       });
       break;
     case "first_clip":
       await recordFirstClip(event.path, event.outcome);
       break;
     case "game_left":
-      await recordGameLeft(event.roundsPlayed, event.host, event.source, event.mode, event.players, event.scored);
+      await recordGameLeft(event.roundsPlayed, event.host, event.source, event.mode, event.players, event.scored, event.arranged);
       break;
     case "order_round":
       await recordOrderRound(event.verdict, event.arranged);
@@ -97,13 +98,10 @@ export async function POST(req: NextRequest) {
       await recordOrderPhone(event.locked, { exact: event.exact, oldest: event.oldest, none: event.none });
       break;
     case "game_over_tap":
-      await recordGameOverTap(event.target);
+      await recordGameOverTap(event.target, event.screen);
       break;
     case "mixed_nudge":
       await recordMixedNudge(event.stage);
-      break;
-    case "solo_nudge":
-      await recordSoloNudge(event.stage);
       break;
     case "refusal_recovery":
       await recordRefusalRecovery(event.stage, event.topic, event.stage === "recovered" ? event.via : undefined);

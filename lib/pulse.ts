@@ -49,7 +49,6 @@ import {
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
   MIXED_NUDGE_STAGES,
-  SOLO_NUDGE_STAGES,
   GAME_ROUND_CEILING,
   GAME_ROUND_FLOOR,
   GAME_SCREENS,
@@ -63,7 +62,6 @@ import {
   type GameHostKind,
   type GameOverTap,
   type MixedNudgeStage,
-  type SoloNudgeStage,
   type GameScreen,
   type MixedSubMode,
   type QuizShareBy,
@@ -126,10 +124,6 @@ function isMixedNudgeStage(value: unknown): value is MixedNudgeStage {
   return typeof value === "string" && (MIXED_NUDGE_STAGES as readonly string[]).includes(value);
 }
 
-function isSoloNudgeStage(value: unknown): value is SoloNudgeStage {
-  return typeof value === "string" && (SOLO_NUDGE_STAGES as readonly string[]).includes(value);
-}
-
 /**
  * A round off the wire, or null when it is not a number at all.
  *
@@ -181,6 +175,10 @@ export type PulseEvent =
       mode?: GameMode;
       players?: PlayerBand;
       scored?: GameScored;
+      /** The order page's: a card had been moved in the round face down at the end. */
+      arranged?: boolean;
+      /** Whether this Game Over drew the Mixed link — its denominator. */
+      linkDrawn?: boolean;
     }
   | { kind: "first_clip"; path: FirstClipPath; outcome: FirstClipOutcome }
   | {
@@ -191,12 +189,12 @@ export type PulseEvent =
       mode?: GameMode;
       players?: PlayerBand;
       scored?: GameScored;
+      arranged?: boolean;
     }
   | { kind: "order_round"; verdict: OrderVerdict; arranged?: boolean }
   | { kind: "order_phone"; locked: OrderPhoneCoverage; exact: number; oldest: number; none: number }
-  | { kind: "game_over_tap"; target: GameOverTap }
+  | { kind: "game_over_tap"; target: GameOverTap; screen?: GameScreen }
   | { kind: "mixed_nudge"; stage: MixedNudgeStage }
-  | { kind: "solo_nudge"; stage: SoloNudgeStage }
   | { kind: "refusal_recovery"; stage: "refused"; topic: PlaylistHelpTopic }
   | { kind: "refusal_recovery"; stage: "recovered"; topic: PlaylistHelpTopic; via: SetupSource }
   | { kind: "quiz_copied"; by: QuizShareBy; outcome: QuizCopyOutcome }
@@ -282,6 +280,11 @@ export function parsePulse(body: unknown): PulseEvent | null {
       // How many it was for, and whether anyone scored. Both are keys.
       ...(isPlayerBand(raw.players) ? { players: raw.players } : {}),
       ...(isGameScored(raw.scored) ? { scored: raw.scored } : {}),
+      // Whether a card had been moved — the order page's, read at round zero
+      // only (`order_bounce`). Only a real boolean survives, as on `order_round`.
+      ...(typeof raw.arranged === "boolean" ? { arranged: raw.arranged } : {}),
+      // Whether the Mixed link was drawn (`game_end_link`). A real boolean only.
+      ...(typeof raw.linkDrawn === "boolean" ? { linkDrawn: raw.linkDrawn } : {}),
     };
   }
 
@@ -304,6 +307,7 @@ export function parsePulse(body: unknown): PulseEvent | null {
       ...(isGameMode(raw.mode) ? { mode: raw.mode } : {}),
       ...(isPlayerBand(raw.players) ? { players: raw.players } : {}),
       ...(isGameScored(raw.scored) ? { scored: raw.scored } : {}),
+      ...(typeof raw.arranged === "boolean" ? { arranged: raw.arranged } : {}),
     };
   }
 
@@ -331,7 +335,14 @@ export function parsePulse(body: unknown): PulseEvent | null {
   }
 
   if (raw.kind === "game_over_tap") {
-    return isGameOverTap(raw.target) ? { kind: "game_over_tap", target: raw.target } : null;
+    if (!isGameOverTap(raw.target)) return null;
+    // The layout the tap was drawn in: a second key under the tap, dropped
+    // when the page could not tell (`game_over_tap_screen`).
+    return {
+      kind: "game_over_tap",
+      target: raw.target,
+      ...(isGameScreen(raw.screen) ? { screen: raw.screen } : {}),
+    };
   }
 
   if (raw.kind === "refusal_recovery") {
@@ -347,10 +358,6 @@ export function parsePulse(body: unknown): PulseEvent | null {
 
   if (raw.kind === "mixed_nudge") {
     return isMixedNudgeStage(raw.stage) ? { kind: "mixed_nudge", stage: raw.stage } : null;
-  }
-
-  if (raw.kind === "solo_nudge") {
-    return isSoloNudgeStage(raw.stage) ? { kind: "solo_nudge", stage: raw.stage } : null;
   }
 
   if (raw.kind === "quiz_shared") {

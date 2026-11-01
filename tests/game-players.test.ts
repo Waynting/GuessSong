@@ -49,7 +49,11 @@ describe("the pages send both, on every path", () => {
     it(`${page} sends the band and the score on the end and the leave`, () => {
       const body = code(read(page));
       expect(body).toMatch(/players: playerBand\(players\.length\),\s*scored: gameScored\(players\),/);
-      expect(body).toMatch(/playerBand\(playersRef\.current\.length\),\s*gameScored\(playersRef\.current\)\s*\)/);
+      // The order page sends one more field after the score — whether a card
+      // had been moved, for the round-zero split (`order_bounce`).
+      expect(body).toMatch(
+        /playerBand\(playersRef\.current\.length\),\s*gameScored\(playersRef\.current\)(?:,\s*arranged)?\s*\)/
+      );
       expect(body).toMatch(/playersRef\.current = players;/);
     });
   }

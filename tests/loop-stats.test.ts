@@ -31,7 +31,8 @@ const {
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
   MIXED_NUDGE_STAGES,
-  SOLO_NUDGE_STAGES,
+  ORDER_ARRANGED,
+  ORDER_BOUNCE_ENDS,
   GAME_ROUND_CEILING,
   GAME_ROUND_FLOOR,
   GAME_SCREENS,
@@ -43,7 +44,6 @@ const {
   ORDER_VERDICTS,
   recordGameOverTap,
   recordMixedNudge,
-  recordSoloNudge,
   HOST_INDEX_CEILING,
   LOOP_STATS_TTL_SECONDS,
   MIXED_SUB_MODES,
@@ -267,10 +267,15 @@ describe("the key format is the contract between writer and reader", () => {
       expect(keysWritten()).toContain(expected.mixedNudge[stage]);
     }
 
-    for (const stage of SOLO_NUDGE_STAGES) {
-      kv.incrs = [];
-      await recordSoloNudge(stage);
-      expect(keysWritten()).toContain(expected.soloNudge[stage]);
+    // One write per tap: the screen-keyed one when the page could say its
+    // layout, never both — the most tapped button keeps costing one command.
+    for (const target of GAME_OVER_TAPS) {
+      for (const screen of GAME_SCREENS) {
+        kv.incrs = [];
+        await recordGameOverTap(target, screen);
+        expect(keysWritten()).toContain(expected.gameOverTapScreen[target][screen]);
+        expect(keysWritten()).not.toContain(expected.gameOverTap[target]);
+      }
     }
 
     for (const code of PLAYLIST_REFUSAL_CODES) {
@@ -515,6 +520,10 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
       expect(keys.gameEndScreen[screen]).toBe(`loop:stats:2026-08-09:game_end_screen:${screen}`);
     }
     expect(Object.keys(keys.gameEndScreen)).toHaveLength(GAME_SCREENS.length);
+    for (const screen of GAME_SCREENS) {
+      expect(keys.gameEndLink[screen]).toBe(`loop:stats:2026-08-09:game_end_link:${screen}`);
+    }
+    expect(Object.keys(keys.gameEndLink)).toHaveLength(GAME_SCREENS.length);
     for (const target of GAME_OVER_TAPS) {
       expect(keys.gameOverTap[target]).toBe(`loop:stats:2026-08-09:game_over_tap:${target}`);
     }
@@ -523,10 +532,57 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
       expect(keys.mixedNudge[stage]).toBe(`loop:stats:2026-08-09:mixed_nudge:${stage}`);
     }
     expect(Object.keys(keys.mixedNudge)).toHaveLength(MIXED_NUDGE_STAGES.length);
-    for (const stage of SOLO_NUDGE_STAGES) {
-      expect(keys.soloNudge[stage]).toBe(`loop:stats:2026-08-09:solo_nudge:${stage}`);
+    for (const target of GAME_OVER_TAPS) {
+      for (const screen of GAME_SCREENS) {
+        expect(keys.gameOverTapScreen[target][screen]).toBe(
+          `loop:stats:2026-08-09:game_over_tap_screen:${target}:${screen}`
+        );
+      }
+      expect(Object.keys(keys.gameOverTapScreen[target])).toHaveLength(GAME_SCREENS.length);
     }
-    expect(Object.keys(keys.soloNudge)).toHaveLength(SOLO_NUDGE_STAGES.length);
+    expect(Object.keys(keys.gameOverTapScreen)).toHaveLength(GAME_OVER_TAPS.length);
+    for (const end of ORDER_BOUNCE_ENDS) {
+      for (const state of ORDER_ARRANGED) {
+        expect(keys.orderBounce[end][state]).toBe(`loop:stats:2026-08-09:order_bounce:${end}:${state}`);
+      }
+      expect(Object.keys(keys.orderBounce[end])).toHaveLength(ORDER_ARRANGED.length);
+    }
+    expect(Object.keys(keys.orderBounce)).toHaveLength(ORDER_BOUNCE_ENDS.length);
+  });
+
+  it("splits an order game over before its first reveal by whether a card was moved, and only then", async () => {
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    // A leave at round zero, untouched: the host saw four cards and did nothing.
+    await recordGameLeft(0, "first", "starter", "order", "p1", "unscored", false);
+    expect(keysWritten()).toContain(keys.orderBounce.left.untouched);
+    expect(keysWritten()).not.toContain(keys.orderBounce.left.moved);
+    // A leave at round zero after a drag: started arranging and stopped.
+    kv.incrs = [];
+    await recordGameLeft(0, undefined, undefined, "order", undefined, undefined, true);
+    expect(keysWritten()).toContain(keys.orderBounce.left.moved);
+    // End Game at round zero, the same split under its own head.
+    kv.incrs = [];
+    await recordGameEnd("ended_early", 0, { mode: "order", arranged: false });
+    expect(keysWritten()).toContain(keys.orderBounce.ended.untouched);
+    kv.incrs = [];
+    await recordGameEnd("ended_early", 0, { mode: "order", arranged: true });
+    expect(keysWritten()).toContain(keys.orderBounce.ended.moved);
+    // Not a bounce: a round was revealed, the game was not the order game,
+    // or the page did not say (an older page sends no `arranged`).
+    for (const run of [
+      () => recordGameLeft(1, undefined, undefined, "order", undefined, undefined, false),
+      () => recordGameLeft(0, undefined, undefined, "party", undefined, undefined, false),
+      () => recordGameLeft(0, undefined, undefined, "order"),
+      () => recordGameEnd("ended_early", 2, { mode: "order", arranged: false }),
+      () => recordGameEnd("ended_early", 0, { mode: "party", arranged: true }),
+      () => recordGameEnd("ended_early", 0, { mode: "order" }),
+      () => recordGameEnd("played_out", 0, { mode: "order", arranged: false }),
+      () => recordGameLeft(0, undefined, undefined, "order", undefined, undefined, "true" as never),
+    ]) {
+      kv.incrs = [];
+      await run();
+      expect(keysWritten().some((k) => k.includes("order_bounce:"))).toBe(false);
+    }
   });
 
   it("names a key for every game mode, alone and crossed with the ends and the bands", () => {
@@ -632,6 +688,27 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
     }
   });
 
+  it("counts an end that drew the Mixed link, by screen, only when the page said so — the link's denominator", async () => {
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    await recordGameEnd("played_out", 9, { screen: "desktop", players: "p2", linkDrawn: true });
+    expect(keysWritten()).toContain(keys.gameEndLink.desktop);
+    kv.incrs = [];
+    await recordGameEnd("ended_early", 1, { screen: "phone", linkDrawn: true });
+    expect(keysWritten()).toContain(keys.gameEndLink.phone);
+    // No link drawn, an older page that cannot say, or an undeclared screen: nothing.
+    for (const details of [
+      { screen: "desktop" as const, linkDrawn: false },
+      { screen: "desktop" as const, players: "p2" as const },
+      { linkDrawn: true },
+      { screen: "tablet" as never, linkDrawn: true },
+      { screen: "phone" as const, linkDrawn: "true" as never },
+    ]) {
+      kv.incrs = [];
+      await recordGameEnd("ended_early", 1, details);
+      expect(keysWritten().some((k) => k.includes("game_end_link:"))).toBe(false);
+    }
+  });
+
   it("counts an order round's verdict once, and refuses one it does not know", async () => {
     await recordOrderRound("exact");
     expect(keysWritten()).toEqual([keys.orderRound.exact, keys.live]);
@@ -666,6 +743,27 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
   it("refuses a tap it does not know", async () => {
     await recordGameOverTap("save_results" as never);
     expect(kv.incrs).toEqual([]);
+  });
+
+  // Added by the /ship test coverage audit, 2026-11-01.
+  // Value: protects=a missing or unknown screen never becomes a key tail under
+  //   `game_over_tap_screen`, and the tap's total still counts;
+  //   fails_when=the isGameScreen guard is dropped or turned into a truthiness check,
+  //   so `game_over_tap_screen:mixed:undefined` or `:tablet` is written;
+  //   why_new=the contract test above asserts toContain on the total only, which an
+  //   extra key passes; seam=none;
+  //   no_claim=green does not prove the page sends a screen — the kv mock stands in
+  //   for Upstash, and the body reaching the recorder is the parser's job.
+  it("keys the screen only when it is one it knows — a missing or unknown screen leaves the total alone", async () => {
+    // An older page, or a webview with no matchMedia: the tap counts as it always did.
+    await recordGameOverTap("mixed");
+    expect(keysWritten()).toEqual([keys.gameOverTap.mixed, keys.live]);
+    // A screen off the wire that is not one of GAME_SCREENS: the total, and nothing under it.
+    for (const screen of ["tablet", "", "PHONE", "__proto__", null, 1]) {
+      kv.incrs = [];
+      await recordGameOverTap("play_again", screen as never);
+      expect(keysWritten()).toEqual([keys.gameOverTap.play_again]);
+    }
   });
 });
 
@@ -1461,14 +1559,16 @@ describe("the digest prints what the recorders write", () => {
       "game_end_host:",
       "game_end_early:",
       "game_end_screen:",
+      "game_end_link:",
       "game_left_round:",
       "game_left_host:",
       "game_end_source:",
       "game_left_source:",
       "first_clip:",
       "game_over_tap:",
+      "game_over_tap_screen:",
       "mixed_nudge:",
-      "solo_nudge:",
+      "order_bounce:",
       "game_mode_players:",
       "game_end_mode_players:",
       "game_left_mode_players:",
@@ -1485,9 +1585,35 @@ describe("the digest prints what the recorders write", () => {
     for (const stage of MIXED_NUDGE_STAGES) {
       expect(script, `${stage} is never read`).toMatch(new RegExp(`get\\("mixed_nudge:${stage}"\\)`));
     }
-    for (const stage of SOLO_NUDGE_STAGES) {
-      expect(script, `${stage} is never read`).toMatch(new RegExp(`get\\("solo_nudge:${stage}"\\)`));
+    // Reader and writer checked over the same two lists: a target the recorder
+    // keys by screen and the script does not read is a counter printed nowhere.
+    for (const target of GAME_OVER_TAPS) {
+      for (const screen of GAME_SCREENS) {
+        expect(script, `the ${target} tap on a ${screen} is never read`).toMatch(
+          new RegExp(`get\\("game_over_tap_screen:${target}:${screen}"\\)`)
+        );
+      }
     }
+    // A bounce is a game with no revealed round, so its read and its print
+    // sit at column zero under their own guard, never the revealed-rounds one.
+    expect(script).toMatch(/^const bounced = /m);
+    expect(script).toMatch(/^if \(bounced > 0\) \{/m);
+    // The link's denominator: both screens read, and each rate divides by its own.
+    for (const screen of GAME_SCREENS) {
+      expect(script, `game_end_link:${screen} is never read`).toMatch(new RegExp(`get\\("game_end_link:${screen}"\\)`));
+    }
+    expect(script).toContain("pct(tapMixedPhone, linkPhone)");
+    expect(script).toContain("pct(tapMixedDesktop, linkDesktop)");
+    for (const end of ORDER_BOUNCE_ENDS) {
+      expect(script, `order_bounce:${end} is never read`).toContain(`bounce("${end}")`);
+    }
+    for (const state of ORDER_ARRANGED) {
+      expect(script, `order_bounce:*:${state} is never read`).toContain("`order_bounce:${end}:" + state + "`");
+    }
+    // The retired solo nudge: its keys must fall through to "Other counters"
+    // until they expire, not print a block for a row nobody can see.
+    expect(rendered).not.toContain('"solo_nudge:"');
+    expect(script).not.toMatch(/get\("solo_nudge:/);
     // The rest are read by template over lists the script mirrors by hand,
     // so the lists are what has to agree with the writer's.
     const literal = (name: string) =>
@@ -1515,6 +1641,7 @@ describe("the digest prints what the recorders write", () => {
     // The source table reads its columns off SETUP_SOURCE_ORDER, so that list
     // has to be the writer's, and both prefixes have to be read by name.
     expect(flat("SETUP_SOURCE_ORDER")).toEqual([...SETUP_SOURCES]);
+
     expect(script).toContain("`${prefix}:${s}:${tail}`");
     expect(script).toMatch(/bySource\("game_end_source", "played_out"\)/);
     expect(script).toMatch(/bySource\("game_end_source", "ended_early"\)/);

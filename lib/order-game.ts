@@ -332,3 +332,22 @@ export const ORDER_PHONE_VERDICTS: readonly OrderPhoneVerdict[] = ["exact", "old
 export function isOrderPhoneVerdict(value: unknown): value is OrderPhoneVerdict {
   return typeof value === "string" && (ORDER_PHONE_VERDICTS as readonly string[]).includes(value);
 }
+
+/** The host's arrangement of one round, as the order page holds it in state. */
+export interface HostArrangement {
+  round: number;
+  ids: string[];
+  moved: boolean;
+}
+
+/**
+ * Whether the host moved a card in `round` on this screen: the arrangement
+ * the drag wrote belongs to that round and was moved. The one predicate
+ * behind `order_arranged` (a revealed round), `order_bounce` (a game over
+ * before any reveal, from both beacons) and the reveal's own reading. Here
+ * rather than in the page so the suite can reach it; `null` is a round
+ * nobody has touched.
+ */
+export function hostArranged(arrangement: HostArrangement | null, round: number): boolean {
+  return arrangement !== null && arrangement.round === round && arrangement.moved;
+}

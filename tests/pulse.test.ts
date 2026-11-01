@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parsePulse } from "@/lib/pulse";
@@ -9,7 +9,6 @@ import {
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
   MIXED_NUDGE_STAGES,
-  SOLO_NUDGE_STAGES,
   GAME_ROUND_CEILING,
   GAME_SCREENS,
   HOST_INDEX_CEILING,
@@ -20,6 +19,23 @@ import {
   ORDER_VERDICTS,
 } from "@/lib/loop-stats";
 import { LOOP_SURFACES } from "@/lib/loop-links";
+
+// What the game pages hand the beacon, captured where it leaves the client.
+// The same seam `tests/setup-assist.test.ts` uses for `reportGameStart`.
+const pulse = vi.hoisted(() => ({ sent: [] as unknown[] }));
+
+vi.mock("@/lib/pulse-client", () => ({
+  sendPulse: (event: unknown) => {
+    pulse.sent.push(event);
+    return true;
+  },
+}));
+
+const { reportGameEnd, reportGameLeft, reportGameOverTap } = await import("@/lib/loop-client");
+
+beforeEach(() => {
+  pulse.sent = [];
+});
 
 describe("parsePulse — impressions", () => {
   it("accepts every declared surface", () => {
@@ -448,14 +464,9 @@ describe("parsePulse — the setup page's Mixed nudge", () => {
   });
 });
 
-describe("parsePulse — the setup page's nudge for a host alone", () => {
-  it("accepts the three stages and nothing else", () => {
-    for (const stage of SOLO_NUDGE_STAGES) {
-      expect(parsePulse({ kind: "solo_nudge", stage })).toEqual({ kind: "solo_nudge", stage });
-    }
-    for (const stage of ["clicked", "", "SHOWN", "__proto__", 1, null, undefined]) {
-      expect(parsePulse({ kind: "solo_nudge", stage })).toBeNull();
-    }
+describe("parsePulse — the retired solo nudge", () => {
+  it("is no longer a kind: a page cached from before 2026-11-01 is answered 400 and records nothing", () => {
+    expect(parsePulse({ kind: "solo_nudge", stage: "shown" })).toBeNull();
   });
 });
 
@@ -469,6 +480,25 @@ describe("parsePulse — taps on Game Over", () => {
     }
     for (const target of ["save", "qr", "", "MIXED", "__proto__", 1, null, undefined]) {
       expect(parsePulse({ kind: "game_over_tap", target })).toBeNull();
+    }
+  });
+
+  it("carries the screen the tap was drawn in, and drops one it does not know", () => {
+    // `game_over_tap_screen:<target>:<screen>` is a key, so only a declared
+    // screen survives; a page that could not tell sends none and the tap
+    // still counts under its total.
+    for (const screen of GAME_SCREENS) {
+      expect(parsePulse({ kind: "game_over_tap", target: "mixed", screen })).toEqual({
+        kind: "game_over_tap",
+        target: "mixed",
+        screen,
+      });
+    }
+    for (const bad of ["tablet", "", "PHONE", 1, null, undefined]) {
+      expect(parsePulse({ kind: "game_over_tap", target: "play_again", screen: bad })).toEqual({
+        kind: "game_over_tap",
+        target: "play_again",
+      });
     }
   });
 });
@@ -621,15 +651,20 @@ describe("the route records every kind the parser accepts", () => {
     expect(route).toMatch(/case "quiz_shared":\s*await recordQuizShare\(event\.by, event\.outcome\);/);
     expect(route).toMatch(/case "quiz_social":\s*await recordQuizSocial\(event\.by, event\.platform\);/);
     expect(route).toMatch(/case "order_round":\s*await recordOrderRound\(event\.verdict, event\.arranged\);/);
+    // The tap's screen, and the two beacons' `arranged`, each reach their
+    // recorder — a field parsed and not passed is a counter that never moves.
+    expect(route).toMatch(/case "game_over_tap":\s*await recordGameOverTap\(event\.target, event\.screen\);/);
     // The mode rides to all three game recorders, or the KV rows read as
     // "no mode was ever sent".
     expect(route).toMatch(
       /recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source, event\.mode, event\.players, event\.from\)/
     );
     expect(route).toMatch(
-      /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored\)/
+      /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored, event\.arranged\)/
     );
-    expect(route).toMatch(/mode: event\.mode,\s*players: event\.players,\s*scored: event\.scored,\s*\}\);/);
+    expect(route).toMatch(
+      /mode: event\.mode,\s*players: event\.players,\s*scored: event\.scored,\s*arranged: event\.arranged,\s*linkDrawn: event\.linkDrawn,\s*\}\);/
+    );
   });
 
   it("has each button on the panel and the board report through its own function", () => {
@@ -676,6 +711,90 @@ describe("the route records every kind the parser accepts", () => {
     expect(client).toMatch(
       /export function reportQuizSocial\([^)]*\): void \{\s*trackEvent\("quiz_social_tapped", \{ by, platform \}\);\s*sendPulse\(\{ kind: "quiz_social", by, platform \}\);\s*\}/
     );
+  });
+});
+
+// Added by the /ship test coverage audit, 2026-11-01.
+// Value: protects=the client half of the wire — `arranged` on the two game beacons and
+//   `screen` on the tap reach the body the parser keeps, and are omitted rather than sent
+//   as a sentinel when the page has none;
+//   fails_when=a conditional spread in lib/loop-client.ts is dropped, renamed (`moved`),
+//   or sends `undefined`/`null`, so the counter never moves while every parser and
+//   recorder test stays green; why_new=the parser tests feed hand-written bodies and the
+//   route test reads the route, so nothing starts from the function the pages call;
+//   seam=none (the pulse-client mock is the existing one); no_claim=green does not prove
+//   the order page computes `arranged` correctly or that the beacon survives pagehide —
+//   those are the page's source tests and the browser.
+describe("the game pages' reporters send what the parser keeps", () => {
+  /** Through a JSON round trip, which is what the beacon is. */
+  const parsed = () => parsePulse(JSON.parse(JSON.stringify(pulse.sent[0])));
+
+  it("carries `arranged` on the end beacon only when the page said, and the parser keeps that boolean", () => {
+    reportGameEnd("ended_early", 0, { host: "first", screen: "desktop", mode: "order", players: "p1", scored: "unscored", arranged: false });
+    expect(pulse.sent).toHaveLength(1);
+    expect(parsed()).toEqual({
+      kind: "game_finished",
+      end: "ended_early",
+      roundsPlayed: 0,
+      host: "first",
+      screen: "desktop",
+      mode: "order",
+      players: "p1",
+      scored: "unscored",
+      arranged: false,
+    });
+    for (const arranged of [true, false]) {
+      pulse.sent = [];
+      reportGameEnd("ended_early", 0, { mode: "order", arranged });
+      expect(parsed()).toEqual({ kind: "game_finished", end: "ended_early", roundsPlayed: 0, mode: "order", arranged });
+    }
+    // The guess game, and an order page with nothing to say: no key at all, not a sentinel.
+    pulse.sent = [];
+    reportGameEnd("played_out", 12, { mode: "party" });
+    expect(Object.keys(pulse.sent[0] as object)).toEqual(["kind", "end", "roundsPlayed", "mode"]);
+    pulse.sent = [];
+    reportGameEnd("ended_early", 0, { mode: "order", arranged: undefined });
+    expect(pulse.sent[0]).not.toHaveProperty("arranged");
+  });
+
+  it("carries `arranged` on the leave beacon as the last field, and omits it when it was not a boolean", () => {
+    reportGameLeft(0, "first", "unload", "starter", "order", "p1", "unscored", false);
+    expect(parsed()).toEqual({
+      kind: "game_left",
+      roundsPlayed: 0,
+      host: "first",
+      source: "starter",
+      mode: "order",
+      players: "p1",
+      scored: "unscored",
+      arranged: false,
+    });
+    pulse.sent = [];
+    reportGameLeft(0, "repeat", "navigation", undefined, "order", undefined, undefined, true);
+    expect(parsed()).toEqual({ kind: "game_left", roundsPlayed: 0, host: "repeat", mode: "order", arranged: true });
+    // The guess game's call, unchanged: no `arranged` key, and `via` is GA4's alone.
+    pulse.sent = [];
+    reportGameLeft(2, "first", "unload", "typed", "party", "p3_4", "scored");
+    expect(Object.keys(pulse.sent[0] as object)).toEqual(["kind", "roundsPlayed", "host", "source", "mode", "players", "scored"]);
+    expect(pulse.sent[0]).not.toHaveProperty("via");
+  });
+
+  it("carries the tap's screen when the page knew it, and sends the bare tap when it did not", () => {
+    for (const screen of GAME_SCREENS) {
+      for (const target of GAME_OVER_TAPS) {
+        pulse.sent = [];
+        reportGameOverTap(target, screen);
+        expect(pulse.sent).toEqual([{ kind: "game_over_tap", target, screen }]);
+        expect(parsed()).toEqual({ kind: "game_over_tap", target, screen });
+      }
+    }
+    // No matchMedia to ask (lib/game-over.ts readGameScreen → null): the body an
+    // older page sent, byte for byte, so the total counts as it always did.
+    pulse.sent = [];
+    reportGameOverTap("mixed", null);
+    expect(pulse.sent).toEqual([{ kind: "game_over_tap", target: "mixed" }]);
+    expect(Object.keys(pulse.sent[0] as object)).toEqual(["kind", "target"]);
+    expect(parsed()).toEqual({ kind: "game_over_tap", target: "mixed" });
   });
 });
 
@@ -786,6 +905,43 @@ describe("parsePulse — an order round, and whether it was dragged", () => {
       expect(parsePulse({ kind: "order_round", verdict: "partial", arranged: junk })).toEqual({
         kind: "order_round",
         verdict: "partial",
+      });
+    }
+  });
+
+  it("carries the same boolean on the end and leave beacons, for the round-zero split", () => {
+    // `order_bounce:<left|ended>:<moved|untouched>` reads it at round zero;
+    // the same rule as above — only a real boolean survives.
+    expect(parsePulse({ kind: "game_left", roundsPlayed: 0, mode: "order", arranged: false })).toEqual({
+      kind: "game_left",
+      roundsPlayed: 0,
+      mode: "order",
+      arranged: false,
+    });
+    expect(
+      parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: 0, mode: "order", arranged: true })
+    ).toEqual({ kind: "game_finished", end: "ended_early", roundsPlayed: 0, mode: "order", arranged: true });
+    // The end beacon's other boolean, the link's denominator: the same rule.
+    expect(parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 5, linkDrawn: true })).toEqual({
+      kind: "game_finished",
+      end: "played_out",
+      roundsPlayed: 5,
+      linkDrawn: true,
+    });
+    expect(parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 5, linkDrawn: "yes" })).toEqual({
+      kind: "game_finished",
+      end: "played_out",
+      roundsPlayed: 5,
+    });
+    for (const junk of ["false", 0, null, undefined, {}]) {
+      expect(parsePulse({ kind: "game_left", roundsPlayed: 0, arranged: junk })).toEqual({
+        kind: "game_left",
+        roundsPlayed: 0,
+      });
+      expect(parsePulse({ kind: "game_finished", end: "ended_early", roundsPlayed: 0, arranged: junk })).toEqual({
+        kind: "game_finished",
+        end: "ended_early",
+        roundsPlayed: 0,
       });
     }
   });

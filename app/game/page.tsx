@@ -1096,6 +1096,8 @@ export default function GamePage() {
       mode,
       players: playerBand(players.length),
       scored: gameScored(players),
+      // Whether this Game Over draws the Mixed link — the link's denominator.
+      linkDrawn: gameOverOnward(layout, players.length).mixedLink,
     });
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,
@@ -1407,7 +1409,7 @@ export default function GamePage() {
   const roundSummaryLine = describeRounds(summarizeRounds(roundHistory));
   const maxScore = sortedPlayers[0]?.score ?? 0;
   const skippedLine = silentSkippedLine(silentSkipped);
-  const onward = gameOverOnward(screen);
+  const onward = gameOverOnward(screen, players.length);
 
   if (tracks.length === 0) {
     return (
@@ -2071,8 +2073,9 @@ export default function GamePage() {
           margin-top: 10px;
         }
 
-        /* The phone's way onward from Game Over, where the desktop has the
-           QR. A link and not a button: it goes somewhere, and it is the
+        /* The phone's way onward from Game Over, and the room's under the
+           QR on a desktop with two or more players. A link and not a
+           button: it goes somewhere, and it is the
            quietest thing on the screen by design, under a primary and a row
            of ghosts. 44px tall because it is tapped with a thumb, and free
            to wrap because the sentence is 48 characters and a 360px phone
@@ -2682,9 +2685,10 @@ export default function GamePage() {
                   costs the host nothing to offer. On a phone the screen *is*
                   the phone in hand, so the way onward is a link — and the QR
                   is not rendered at all, because rendering is what reports
-                  its impression. lib/game-over.ts. */}
-              {onward === "qr" && <LoopQr />}
-              {onward === "mixed_link" && (
+                  its impression. A desktop with a room of two or more gets
+                  the link under the QR as well. lib/game-over.ts. */}
+              {onward.qr && <LoopQr />}
+              {onward.mixedLink && (
                 <a className="next-game-link" href={MIXED_SETUP_HREF} onClick={openMixedSetup}>
                   {MIXED_NEXT_GAME_LABEL}
                 </a>

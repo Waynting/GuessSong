@@ -178,10 +178,11 @@ export function earlyEndBand(round: number): EarlyEndBand {
 
 /**
  * Which layout the Game Over screen was drawn in. The phone layout is the
- * `max-width: 768px` one (`lib/game-over.ts`), and it is what decides
- * whether that screen shows the QR or the Mixed link — so it is also the
- * denominator `game_over_tap:mixed` needs, and the only record of how many
- * hosts reach the end on a phone at all.
+ * `max-width: 768px` one (`lib/game-over.ts`), and it decides whether the QR
+ * is drawn at all (a desktop with a room of two or more gets the Mixed link
+ * under it as well). It is the only record of how many hosts reach the end
+ * on a phone; the Mixed link's own denominator is `game_end_link:<screen>`,
+ * see `GameOverTap`.
  */
 export type GameScreen = "phone" | "desktop";
 
@@ -236,8 +237,16 @@ export const FIRST_CLIP_OUTCOMES: readonly FirstClipOutcome[] = [
  * What a host tapped on the Game Over screen: `play_again` is the primary
  * button, `mixed` is the link to Mixed Playlist Mode that replaced the QR on
  * phones (994 shown, 3 followed — nobody scans a code off the phone in their
- * own hand). Both are client-side navigations, so unlike a loop link these
- * can be beacons: the document survives the tap.
+ * own hand) and, from 2026-11-01, sits under the QR on a desktop too when
+ * two or more were playing. Both are client-side navigations, so unlike a
+ * loop link these can be beacons: the document survives the tap. A page that
+ * can say its layout writes `game_over_tap_screen:<target>:<screen>` instead
+ * of the bare key — one command per tap either way; the bare key is an older
+ * page's, and `npm run stats` sums the three. Each screen's rate divides by
+ * `game_end_link:<screen>`, written by `recordGameEnd` only when the page
+ * says it drew the link (`linkDrawn`, from `gameOverOnward`), so both halves
+ * of the fraction come from the same pages: neither an older tab nor an end
+ * that showed no link can dilute it.
  */
 export type GameOverTap = "play_again" | "mixed";
 
@@ -253,15 +262,28 @@ export type MixedNudgeStage = "shown" | "tapped" | "started";
 export const MIXED_NUDGE_STAGES: readonly MixedNudgeStage[] = ["shown", "tapped", "started"];
 
 /**
- * The setup page's nudge for a host alone (`lib/solo-nudge.ts`): `shown` once
- * per page load, `tapped`, and `started` for an order game started after a
- * tap on this page. The same three stages as the Mixed nudge, read the same
- * way; whether the game it sends them to keeps them is
- * `game_end_mode_players:order:p1:*` below.
+ * An order game over before its first reveal: the host saw four cards and
+ * left, or pressed End Game, with no round played. Written from the leave
+ * and end beacons (`recordGameLeft`, `recordGameEnd`) when the mode is
+ * `order`, the round is zero and the page said whether a card had been
+ * moved: `order_bounce:<left|ended>:<moved|untouched>`.
+ *
+ * It exists because "Who's playing? → Just me" (2026-10-26) sent most solo
+ * hosts to the order game and round-zero leaves went from ~70 to ~360 a day.
+ * `untouched` is a first screen that did not explain itself, or a tile that
+ * promised music; `moved` is a host who started arranging and stopped. The
+ * two call for different work, which is why the leave is split rather than
+ * counted. An older page sends no `arranged` and writes nothing here, so the
+ * rows sum to at most the round-0 rows of the two histograms.
  */
-export type SoloNudgeStage = "shown" | "tapped" | "started";
+export type OrderBounceEnd = "left" | "ended";
 
-export const SOLO_NUDGE_STAGES: readonly SoloNudgeStage[] = ["shown", "tapped", "started"];
+export const ORDER_BOUNCE_ENDS: readonly OrderBounceEnd[] = ["left", "ended"];
+
+/** Whether a card had been moved on the host's screen — the drag's two states, as key tails. */
+export type OrderArranged = "moved" | "untouched";
+
+export const ORDER_ARRANGED: readonly OrderArranged[] = ["moved", "untouched"];
 
 /**
  * Who tapped a quiz's share button, and what came of it.
@@ -828,6 +850,8 @@ export function loopStatsKeys(
   gameEndHost: Record<GameHostKind, Record<GameEnd, string>>;
   gameEndEarly: Record<GameHostKind, Record<EarlyEndBand, string>>;
   gameEndScreen: Record<GameScreen, string>;
+  /** Ends that drew the Mixed link, by screen: the link's denominator — see `GameOverTap`. */
+  gameEndLink: Record<GameScreen, string>;
   /** Indexed by round, like `gameEndRound`. */
   gameLeftRound: string[];
   gameLeftHost: Record<GameHostKind, Record<EarlyEndBand, string>>;
@@ -845,14 +869,17 @@ export function loopStatsKeys(
   gameLeftModePlayers: Record<GameMode, Record<PlayerBand, Record<EarlyEndBand, string>>>;
   gameEndScored: Record<GameScored, Record<GameEnd, string>>;
   gameLeftScored: Record<GameScored, Record<EarlyEndBand, string>>;
-  orderArranged: Record<"moved" | "untouched", Record<OrderVerdict, string>>;
+  orderArranged: Record<OrderArranged, Record<OrderVerdict, string>>;
+  /** Order games over before any reveal — see `OrderBounceEnd`. */
+  orderBounce: Record<OrderBounceEnd, Record<OrderArranged, string>>;
   orderRound: Record<OrderVerdict, string>;
   orderPhone: Record<OrderPhoneCoverage, string>;
   orderPhoneVerdict: Record<OrderPhoneVerdict, string>;
   firstClip: Record<FirstClipPath, Record<FirstClipOutcome, string>>;
   gameOverTap: Record<GameOverTap, string>;
+  /** The same taps by the layout they were drawn in — see `GameOverTap`. */
+  gameOverTapScreen: Record<GameOverTap, Record<GameScreen, string>>;
   mixedNudge: Record<MixedNudgeStage, string>;
-  soloNudge: Record<SoloNudgeStage, string>;
   refusalRecovery: Record<RecoveryStage, Record<PlaylistHelpTopic, string>>;
   refusalRecoveryVia: Record<SetupSource, string>;
   playlistRefused: Record<PlaylistRefusalCode, string>;
@@ -952,7 +979,8 @@ export function loopStatsKeys(
     ) as Record<GameMode, Record<PlayerBand, Record<EarlyEndBand, string>>>,
     gameEndScored: byList("game_end_scored", GAME_SCORED, GAME_ENDS),
     gameLeftScored: byList("game_left_scored", GAME_SCORED, EARLY_END_BANDS),
-    orderArranged: byList("order_arranged", ["moved", "untouched"] as const, ORDER_VERDICTS),
+    orderArranged: byList("order_arranged", ORDER_ARRANGED, ORDER_VERDICTS),
+    orderBounce: byList("order_bounce", ORDER_BOUNCE_ENDS, ORDER_ARRANGED),
     orderRound: Object.fromEntries(
       ORDER_VERDICTS.map((v) => [v, key(day, `order_round:${v}`)])
     ) as Record<OrderVerdict, string>,
@@ -977,9 +1005,10 @@ export function loopStatsKeys(
     mixedNudge: Object.fromEntries(
       MIXED_NUDGE_STAGES.map((s) => [s, key(day, `mixed_nudge:${s}`)])
     ) as Record<MixedNudgeStage, string>,
-    soloNudge: Object.fromEntries(
-      SOLO_NUDGE_STAGES.map((s) => [s, key(day, `solo_nudge:${s}`)])
-    ) as Record<SoloNudgeStage, string>,
+    gameOverTapScreen: byList("game_over_tap_screen", GAME_OVER_TAPS, GAME_SCREENS),
+    gameEndLink: Object.fromEntries(
+      GAME_SCREENS.map((s) => [s, key(day, `game_end_link:${s}`)])
+    ) as Record<GameScreen, string>,
     refusalRecovery: Object.fromEntries(
       RECOVERY_STAGES.map((stage) => [
         stage,
@@ -1206,9 +1235,9 @@ export async function recordGameStart(
   // The two crossed, when the page sent both: `game_mode_players:<mode>:<band>`,
   // the denominator for the crossed end and leave rows. One more command on
   // every start from a page new enough to say, since 2026-10-25, for the
-  // question the solo nudge (lib/solo-nudge.ts) asks — does the order game
-  // keep a host who is alone where the guess game does not — which the mode
-  // table and the players table cannot answer apart.
+  // question "Who's playing? → Just me" (lib/who-playing.ts) asks — does the
+  // order game keep a host who is alone where the guess game does not — which
+  // the mode table and the players table cannot answer apart.
   if (isGameMode(mode) && isPlayerBand(players)) await bump(`game_mode_players:${mode}:${players}`);
   // Where a first-time host came from (lib/arrival.ts). A first game only —
   // one command on ~40% of starts — because the question is who is arriving.
@@ -1248,6 +1277,10 @@ export async function recordGameEnd(
     mode?: GameMode;
     players?: PlayerBand;
     scored?: GameScored;
+    /** The order game only: whether a card had been moved in the round face down at the end. */
+    arranged?: boolean;
+    /** Whether this Game Over drew the Mixed link (`gameOverOnward`). */
+    linkDrawn?: boolean;
   } = {}
 ): Promise<void> {
   if (!GAME_ENDS.includes(end)) return;
@@ -1259,6 +1292,11 @@ export async function recordGameEnd(
   // Which game it was, joined to the end — `game_mode:*` is the denominator.
   if (isGameMode(details.mode)) extras.push(bump(`game_end_mode:${details.mode}:${end}`));
   if (isGameScreen(details.screen)) extras.push(bump(`game_end_screen:${details.screen}`));
+  // The Mixed link's denominator: ends that drew it, by screen — only a page
+  // that can say so writes it, so an older tab never dilutes the rate.
+  if (isGameScreen(details.screen) && details.linkDrawn === true) {
+    extras.push(bump(`game_end_link:${details.screen}`));
+  }
   if (isPlayerBand(details.players)) extras.push(bump(`game_end_players:${details.players}:${end}`));
   if (isGameMode(details.mode) && isPlayerBand(details.players)) {
     extras.push(bump(`game_end_mode_players:${details.mode}:${details.players}:${end}`));
@@ -1271,6 +1309,10 @@ export async function recordGameEnd(
   const round = clampRound(roundsPlayed);
   await bump(`game_end_round:${round}`);
   if (host) extras.push(bump(`game_end_early:${host}:${earlyEndBand(round)}`));
+  // End Game before the first reveal of an order game — see `OrderBounceEnd`.
+  if (details.mode === "order" && round === GAME_ROUND_FLOOR && typeof details.arranged === "boolean") {
+    extras.push(bump(`order_bounce:ended:${details.arranged ? "moved" : "untouched"}`));
+  }
   await Promise.all(extras);
 }
 
@@ -1320,7 +1362,8 @@ export function recordFirstClip(path: FirstClipPath, outcome: FirstClipOutcome):
  * same arithmetic as the end beacon, so the two histograms can be read
  * against each other row for row. The host band and the source band
  * (`game_left_source:<source>:<band>`) are each written only when the page
- * sent one, for the reason `recordGameEnd` gives.
+ * sent one, for the reason `recordGameEnd` gives. `arranged` is the order
+ * page's, and is read only at round zero — see `OrderBounceEnd`.
  */
 export async function recordGameLeft(
   roundsPlayed: number,
@@ -1328,7 +1371,8 @@ export async function recordGameLeft(
   source?: SetupSource,
   mode?: GameMode,
   players?: PlayerBand,
-  scored?: GameScored
+  scored?: GameScored,
+  arranged?: boolean
 ): Promise<void> {
   const round = clampRound(roundsPlayed);
   await bump(`game_left_round:${round}`);
@@ -1342,6 +1386,9 @@ export async function recordGameLeft(
       ? bump(`game_left_mode_players:${mode}:${players}:${band}`)
       : undefined,
     isGameScored(scored) ? bump(`game_left_scored:${scored}:${band}`) : undefined,
+    mode === "order" && round === GAME_ROUND_FLOOR && typeof arranged === "boolean"
+      ? bump(`order_bounce:left:${arranged ? "moved" : "untouched"}`)
+      : undefined,
   ]);
 }
 
@@ -1385,10 +1432,16 @@ export async function recordOrderPhone(
   );
 }
 
-/** A tap on the Game Over screen. See `GameOverTap`. */
-export function recordGameOverTap(target: GameOverTap): Promise<void> {
+/**
+ * A tap on the Game Over screen. See `GameOverTap`. One write: keyed by the
+ * screen when the page could say which it was, the bare key otherwise (an
+ * older page, or a webview with no matchMedia). `npm run stats` sums the
+ * three, so the total reads across the day the split began — and the most
+ * tapped button on the site keeps costing one command, not two.
+ */
+export function recordGameOverTap(target: GameOverTap, screen?: GameScreen): Promise<void> {
   if (!GAME_OVER_TAPS.includes(target)) return Promise.resolve();
-  return bump(`game_over_tap:${target}`);
+  return bump(isGameScreen(screen) ? `game_over_tap_screen:${target}:${screen}` : `game_over_tap:${target}`);
 }
 
 /**
@@ -1411,12 +1464,6 @@ export async function recordRefusalRecovery(
 export function recordMixedNudge(stage: MixedNudgeStage): Promise<void> {
   if (!MIXED_NUDGE_STAGES.includes(stage)) return Promise.resolve();
   return bump(`mixed_nudge:${stage}`);
-}
-
-/** The setup page's nudge for a host alone. See `SoloNudgeStage`. */
-export function recordSoloNudge(stage: SoloNudgeStage): Promise<void> {
-  if (!SOLO_NUDGE_STAGES.includes(stage)) return Promise.resolve();
-  return bump(`solo_nudge:${stage}`);
 }
 
 /**

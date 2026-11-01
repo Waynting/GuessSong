@@ -30,7 +30,6 @@ import type {
   GameHostKind,
   GameOverTap,
   MixedNudgeStage,
-  SoloNudgeStage,
   GameScreen,
 } from "@/lib/loop-stats";
 import { sendPulse } from "@/lib/pulse-client";
@@ -153,6 +152,10 @@ export function reportGameEnd(
     mode?: GameMode;
     players?: PlayerBand;
     scored?: GameScored;
+    /** The order page's: a card had been moved in the round face down at the end. */
+    arranged?: boolean;
+    /** Whether this Game Over drew the Mixed link (`gameOverOnward`). */
+    linkDrawn?: boolean;
   } = {}
 ): void {
   sendPulse({
@@ -165,6 +168,8 @@ export function reportGameEnd(
     ...(details.mode ? { mode: details.mode } : {}),
     ...(details.players ? { players: details.players } : {}),
     ...(details.scored ? { scored: details.scored } : {}),
+    ...(typeof details.arranged === "boolean" ? { arranged: details.arranged } : {}),
+    ...(typeof details.linkDrawn === "boolean" ? { linkDrawn: details.linkDrawn } : {}),
   });
 }
 
@@ -195,7 +200,8 @@ export function reportGameLeft(
   source?: SetupSource,
   mode?: GameMode,
   players?: PlayerBand,
-  scored?: GameScored
+  scored?: GameScored,
+  arranged?: boolean
 ): void {
   trackEvent("game_left", {
     rounds_played: roundsPlayed,
@@ -211,6 +217,7 @@ export function reportGameLeft(
     ...(mode ? { mode } : {}),
     ...(players ? { players } : {}),
     ...(scored ? { scored } : {}),
+    ...(typeof arranged === "boolean" ? { arranged } : {}),
   });
 }
 
@@ -259,7 +266,7 @@ export function reportOrderPhoneRound(
  */
 export function reportGameOverTap(target: GameOverTap, screen: GameScreen | null): void {
   trackEvent("game_over_tap", screen ? { target, screen } : { target });
-  sendPulse({ kind: "game_over_tap", target });
+  sendPulse({ kind: "game_over_tap", target, ...(screen ? { screen } : {}) });
 }
 
 /** Call with what `lib/refusal-recovery.ts` returns to report. */
@@ -282,16 +289,6 @@ export function reportRefusalRecovered(topic: PlaylistHelpTopic, via: SetupSourc
 export function reportMixedNudge(stage: MixedNudgeStage): void {
   trackEvent("mixed_nudge", { stage });
   sendPulse({ kind: "mixed_nudge", stage });
-}
-
-/**
- * Call when the setup page's nudge for a host alone is first drawn, on its
- * first tap, and from `recordHostedStart` for an order game started after
- * the tap. See `lib/solo-nudge.ts`.
- */
-export function reportSoloNudge(stage: SoloNudgeStage): void {
-  trackEvent("solo_nudge", { stage });
-  sendPulse({ kind: "solo_nudge", stage });
 }
 
 /**

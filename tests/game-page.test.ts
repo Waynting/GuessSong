@@ -306,15 +306,19 @@ describe("the Game Over screen", () => {
     // The impression is reported from an effect inside the component, so
     // hiding it with CSS would keep counting a surface nobody was shown.
     expect(body.match(/<LoopQr\b/g) ?? []).toHaveLength(1);
-    expect(body).toMatch(/\{onward === "qr" && <LoopQr \/>\}/);
-    expect(body).toMatch(/const onward = gameOverOnward\(screen\);/);
+    expect(body).toMatch(/\{onward\.qr && <LoopQr \/>\}/);
+    // The rule takes the room's size: a desktop with two or more gets the
+    // Mixed link under the QR, a host alone does not.
+    expect(body).toMatch(/const onward = gameOverOnward\(screen, players\.length\);/);
     expect(body).not.toMatch(/reportLoopImpression/);
     expect(code(read("components/loop-qr.tsx"))).toMatch(/reportLoopImpression\(surface\)/);
+    // The end beacon says whether this Game Over draws the link — its denominator.
+    expect(member("trackGameFinished")).toMatch(/linkDrawn: gameOverOnward\(layout, players\.length\)\.mixedLink,/);
   });
 
   it("gives the phone a link to Mixed Playlist Mode, from the constants in lib/", () => {
     expect(body).toMatch(
-      /\{onward === "mixed_link" && \(\s*<a className="next-game-link" href=\{MIXED_SETUP_HREF\} onClick=\{openMixedSetup\}>\s*\{MIXED_NEXT_GAME_LABEL\}/
+      /\{onward\.mixedLink && \(\s*<a className="next-game-link" href=\{MIXED_SETUP_HREF\} onClick=\{openMixedSetup\}>\s*\{MIXED_NEXT_GAME_LABEL\}/
     );
     expect(body).not.toContain("mode=mixed");
   });

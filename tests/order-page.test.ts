@@ -119,6 +119,11 @@ describe("the order page's beacons", () => {
     expect(finished).toMatch(/game_mode: "order",/);
     expect(finished).toMatch(/orderRoundsPlayed\(currentIndex, phase\)/);
     expect(body).not.toMatch(/countRoundsPlayed/);
+    // Whether the round still face down had been touched, for the round-zero
+    // split (`order_bounce:ended`). The shared screen's drag, as closeRound's.
+    expect(finished).toMatch(/\.\.\.\(buzzerRoom \? \{\} : \{ arranged: hostArranged\(arrangement, currentIndex\) \}\),/);
+    // The link's denominator: the end says whether this Game Over draws it.
+    expect(finished).toMatch(/linkDrawn: gameOverOnward\(layout, players\.length\)\.mixedLink,/);
   });
 
   it("reports a round's verdict once, from the one place a revealed round closes", () => {
@@ -154,6 +159,19 @@ describe("the order page's beacons", () => {
     expect(leave).toMatch(/orderRoundsPlayed\(currentIndexRef\.current, phaseRef\.current\)/);
     expect(leave).toMatch(/setupSourceRef\.current,\s*"order",/);
     expect(body.match(/reportGameLeft\(/g) ?? []).toHaveLength(1);
+    // The leave runs off `pagehide`, so `arranged` is read from a mirror of
+    // the same `arrangement` state the End Game beacon reads — one source — and
+    // a buzzer room sends none, as closeRound sends none for a phone round.
+    expect(body).toMatch(/const arrangementRef = useRef\(arrangement\);\s*arrangementRef\.current = arrangement;/);
+    expect(body).toMatch(/const buzzerRoomRef = useRef\(false\);\s*buzzerRoomRef\.current = buzzerRoom !== null;/);
+    expect(leave).toMatch(
+      /const arranged = buzzerRoomRef\.current\s*\?\s*undefined\s*:\s*hostArranged\(arrangementRef\.current, currentIndexRef\.current\);/
+    );
+    expect(leave).toMatch(/gameScored\(playersRef\.current\),\s*arranged\s*\);/);
+    // One predicate, in lib/: the page never spells "moved" itself.
+    expect(leave).not.toMatch(/\.moved\b/);
+    expect(body.match(/hostArranged\(/g) ?? []).toHaveLength(4);
+    expect(body).not.toMatch(/arrangement\?\.round === currentIndex && arrangement\.moved/);
   });
 
   it("never calls recordHostedStart or the first-clip reporter — a start is the setup page's, a clip is not here", () => {
@@ -164,14 +182,14 @@ describe("the order page's beacons", () => {
 describe("the order page's Game Over", () => {
   it("renders the QR only where the rule says to, so a phone never reports its impression", () => {
     expect(body.match(/<LoopQr\b/g) ?? []).toHaveLength(1);
-    expect(body).toMatch(/\{onward === "qr" && <LoopQr \/>\}/);
-    expect(body).toMatch(/const onward = gameOverOnward\(screen\);/);
+    expect(body).toMatch(/\{onward\.qr && <LoopQr \/>\}/);
+    expect(body).toMatch(/const onward = gameOverOnward\(screen, players\.length\);/);
     expect(body).not.toMatch(/reportLoopImpression/);
   });
 
   it("gives the phone the Mixed link from the constants in lib/, and counts both taps before navigating", () => {
     expect(body).toMatch(
-      /\{onward === "mixed_link" && \(\s*<a className="next-game-link" href=\{MIXED_SETUP_HREF\} onClick=\{openMixedSetup\}>\s*\{MIXED_NEXT_GAME_LABEL\}/
+      /\{onward\.mixedLink && \(\s*<a className="next-game-link" href=\{MIXED_SETUP_HREF\} onClick=\{openMixedSetup\}>\s*\{MIXED_NEXT_GAME_LABEL\}/
     );
     expect(body).not.toContain("mode=mixed");
     expect(member("playAgain")).toMatch(/reportGameOverTap\("play_again", screen\);\s*router\.push\("\/"\);/);
@@ -313,6 +331,24 @@ describe("the setup page starts an order game the same way on all three paths", 
     expect(setup).toMatch(/choosePlayStyle\("guess"\)/);
   });
 
+  it("offers the buzzer under a group's roster, through the fold's own two calls, and no solo nudge", () => {
+    // 1.22.0 left the toggle in the settings fold alone and buzzer games fell
+    // 61%. The row sits inside the roster block — single playlist, buzzer off,
+    // not "Just me" — so it is never drawn where it has nothing to do.
+    const roster = setup.match(/\{setupMode === "single" && !buzzerEnabled && who !== "solo" && \(([\s\S]*?)\n            \)\}/)?.[1] ?? "";
+    // One callout at a time: at three names the Mixed nudge owns the slot.
+    expect(roster).toMatch(/\{isBuzzerConfigured\(\) && !mixedNudge && \(\s*<button type="button" className="buzzer-nudge" onClick=\{offerBuzzer\}>/);
+    expect(roster).toMatch(/isOrder \? "Play on phones →" : "Turn on Buzzer Mode →"/);
+    expect(setup).toMatch(/function offerBuzzer\(\) \{\s*setBuzzerEnabled\(true\);\s*resetRoom\(\);\s*\}/);
+    expect(setup.match(/className="buzzer-nudge"/g) ?? []).toHaveLength(1);
+    // The solo nudge came off on 2026-11-01: "Just me" does its job.
+    expect(setup).not.toMatch(/solo-nudge|showSoloNudge|reportSoloNudge|soloNudge/);
+    const css = read("components/setup-chrome.tsx");
+    expect(css).toMatch(/@media \(hover: hover\) \{\s*\.buzzer-nudge:hover/);
+    expect(css).toMatch(/\.buzzer-nudge:active \{[^}]*transition: none/);
+    expect(css).not.toMatch(/solo-nudge/);
+  });
+
   it("says what the song count means in this style, and never a clip length", () => {
     // The summary names the game for a room ("Just me" is the order game
     // already) and gives a clip length only to the guess game.
@@ -361,6 +397,6 @@ describe("the order page's drag", () => {
   });
 
   it("reports whether the round was dragged", () => {
-    expect(src).toMatch(/arrangement\?\.round === currentIndex && arrangement\.moved\s*\);/);
+    expect(src).toMatch(/hostArranged\(arrangement, currentIndex\)\s*\);/);
   });
 });
