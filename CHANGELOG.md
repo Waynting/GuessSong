@@ -7,6 +7,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An order game over before its first reveal is counted by whether a card
+  was moved** (`order_bounce:<left|ended>:<moved|untouched>`, `OrderBounceEnd`
+  in `lib/loop-stats.ts`). The 2026-10-31 read of "Who's playing?" found
+  round-zero leaves up from ~70 to ~360 a day — about 20% of solo order games
+  end with no round revealed — and nothing could say whether the host had
+  tried the drag. The order page now sends `arranged` on both beacons (from a
+  ref the drag keeps, because the leave runs off `pagehide`); `parsePulse`
+  keeps a real boolean only; the recorder writes the key only for
+  `mode: "order"` at round zero. The page reads `arranged` from one source
+  for both beacons — the `arrangement` state, mirrored into a ref for the
+  `pagehide` path — and sends none when a buzzer room is in play, because
+  there the phones arrange and the host's screen is not expected to be
+  touched (`closeRound`'s rule for a phone round). Both came out of review:
+  the first cut kept a second ref the drag wrote and sent the host's drag
+  for a phone room too, which would have filed a room that locked in and
+  then ended as "a host who did nothing". The predicate itself, `hostArranged`
+  in `lib/order-game.ts`, is the one spelling the page's four readers share.
+  `npm run stats` prints it under
+  "Order rounds" as `before any reveal`, at top level so a window of bounces
+  with no revealed round still prints. `untouched` is a first screen that did not
+  explain itself, or a tile that promised music; `moved a card` is a host who
+  started arranging and stopped — the two call for different fixes, which is
+  why the leave is split rather than counted. Read with `--since` the deploy
+  day; older pages write nothing here.
+- **The buzzer is offered under a group's roster** (`offerBuzzer` and the
+  `.buzzer-nudge` row in `app/page.tsx`). 1.22.0 left the toggle in the
+  settings fold alone and buzzer games fell from 59 to 23 a day, while a
+  buzzer room of two or more plays out 45% of the time, the best of any mode.
+  One tap does what the fold's toggle does; the fold still turns it off. No
+  counter of its own: the read is `game_mode:buzzer` per day against those
+  two figures. One callout at a time: once three names are typed the Mixed
+  nudge owns the slot and the row is not drawn (review finding — the solo
+  nudge it replaced could never coincide with the Mixed nudge; this one
+  could). Measured at 390×844 on the production build: the row is 65px
+  (two lines) and A group's Start ends at 1009px, 77px lower than 1.22.0's
+  932; Just me is unchanged, since the row sits in the roster block it hides.
+  Verified through CDP: the tap turns the buzzer on and opens the Room panel
+  with the fold's summary reading "Buzzer on".
+- **A desktop Game Over with two or more players gets the Mixed link under
+  the QR** (`gameOverOnward(screen, players)` in `lib/game-over.ts`, which now
+  returns `{ qr, mixedLink }`). A Mixed room's join link read 35.6% followed
+  against 0.9% for the QR, and the "Everyone's playlists" tile took Mixed
+  from 11 to 40 starts a day. A host alone still gets no link there. The tap
+  now carries its screen: a page that can say its layout writes
+  `game_over_tap_screen:<target>:<screen>` *instead of* the bare key (one
+  command per tap, as before; the bare key is now an older page's), and
+  `npm run stats` sums the three. Each screen's rate gets an exact
+  denominator: the end beacon carries `linkDrawn` (what `gameOverOnward`
+  decided for that screen) and `recordGameEnd` writes `game_end_link:<screen>`
+  only when it is true, so the link's taps divide by the Game Overs that drew
+  it, written by the same pages — a window straddling the deploy is clean on
+  both sides of the fraction. Three cuts in review: the first wrote the screen
+  key *beside* the bare one (~1,000 duplicate commands a day on the
+  most-tapped button) and divided desktop taps by every desktop Game Over,
+  84% of which are solo and never drew the link; the second crossed screen
+  with player band, which an older tab still open after the deploy also
+  feeds (it sends screen and players, but can never tap a link it did not
+  draw), and wrote eight keys of which the solo half printed nowhere.
+  Verified on the production build: a two-player game's desktop Game Over
+  draws the QR and the link under it, a one-player game's the QR alone, and
+  the tap's beacon carries `screen: "desktop"`; the order page's round-zero
+  leave and End Game each carry `arranged` true after one arrow-key move and
+  false untouched.
+
+### Removed
+
+- **The solo nudge** (`lib/solo-nudge.ts`, `solo_nudge:*`, the `solo_nudge`
+  GA4 event and pulse kind). "Who's playing? → Just me" does its job: after
+  2026-10-26 the nudge was drawn only for hosts who had chosen "A group" and
+  typed one name, and its tap rate fell from 3.1% to 1%. Keys already in KV
+  print under "Other counters" until they expire, as the fake door's did; a
+  cached page's `solo_nudge` beacon is answered 400 and records nothing.
+
 ## [1.22.0] - 2026-10-26
 
 ### Added
