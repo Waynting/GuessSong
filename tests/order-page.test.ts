@@ -331,22 +331,29 @@ describe("the setup page starts an order game the same way on all three paths", 
     expect(setup).toMatch(/choosePlayStyle\("guess"\)/);
   });
 
-  it("offers the buzzer under a group's roster, through the fold's own two calls, and no solo nudge", () => {
+  it("offers the buzzer under a group's roster, through the fold's own two calls, and no nudge", () => {
     // 1.22.0 left the toggle in the settings fold alone and buzzer games fell
     // 61%. The row sits inside the roster block — single playlist, buzzer off,
     // not "Just me" — so it is never drawn where it has nothing to do.
     const roster = setup.match(/\{setupMode === "single" && !buzzerEnabled && who !== "solo" && \(([\s\S]*?)\n            \)\}/)?.[1] ?? "";
-    // One callout at a time: at three names the Mixed nudge owns the slot.
-    expect(roster).toMatch(/\{isBuzzerConfigured\(\) && !mixedNudge && \(\s*<button type="button" className="buzzer-nudge" onClick=\{offerBuzzer\}>/);
+    // The row yields to nothing: the Mixed nudge that owned this slot at three
+    // names came off on 2026-11-10 at a 1.2% tap rate, so the buzzer — the
+    // best cell in the mode × players table at 2+ — shows under every roster.
+    expect(roster).toMatch(/\{isBuzzerConfigured\(\) && \(\s*<button type="button" className="buzzer-nudge" onClick=\{offerBuzzer\}>/);
+    expect(setup).not.toMatch(/mixed-nudge|showMixedNudge|reportMixedNudge|mixedNudge|takeMixedNudge/);
     expect(roster).toMatch(/isOrder \? "Play on phones →" : "Turn on Buzzer Mode →"/);
     expect(setup).toMatch(/function offerBuzzer\(\) \{\s*setBuzzerEnabled\(true\);\s*resetRoom\(\);\s*\}/);
     expect(setup.match(/className="buzzer-nudge"/g) ?? []).toHaveLength(1);
     // The solo nudge came off on 2026-11-01: "Just me" does its job.
     expect(setup).not.toMatch(/solo-nudge|showSoloNudge|reportSoloNudge|soloNudge/);
     const css = read("components/setup-chrome.tsx");
+    // The base rule used to be shared with the Mixed nudge; deleting the block
+    // with it would leave the row unstyled while the hover pin still passed.
+    expect(css).toMatch(/\.buzzer-nudge \{[^}]*width: 100%;[^}]*border-radius: 10px;/);
+    expect(css).toMatch(/\.buzzer-nudge strong \{ color: var\(--green\)/);
     expect(css).toMatch(/@media \(hover: hover\) \{\s*\.buzzer-nudge:hover/);
     expect(css).toMatch(/\.buzzer-nudge:active \{[^}]*transition: none/);
-    expect(css).not.toMatch(/solo-nudge/);
+    expect(css).not.toMatch(/solo-nudge|mixed-nudge/);
   });
 
   it("says what the song count means in this style, and never a clip length", () => {

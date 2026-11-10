@@ -453,6 +453,32 @@ chrome out of the guess page.
 
 ---
 
+## D13 — The order game stays silent: the reveal-time clip, asked and declined
+
+**Decided:** 2026-11-10, at the review of the four fixes from that day's
+stats read.
+
+The proposal: one clip at the reveal of a solo order round — "hear the oldest
+song" — as the thing a Google looker was promised by a music game. The
+numbers it was weighed against: 84% of games are solo and the order game is
+69% of them; a clip at the reveal is one preview lookup per revealed round,
+about +6–7% preview volume at the day's 86.4% cache hit rate; the mode exists
+because 44% of guess games never pressed Play; and 41.1% of revealed order
+rounds scored nobody for a reason — the years too close together, D12's read
+— that a clip does not touch.
+
+The no-audio invariant stands ("Put them in order plays no audio" in
+CLAUDE.md). The owner's call, taken with the numbers in hand.
+
+**Rejected:**
+
+- *One clip at the reveal.* The preview path is the hottest in the app and
+  throttles the deployment as one client; a quiet mode chosen for being quiet
+  would start spending upstream calls at the one moment every solo round
+  reaches. Reopen only if the first-screen work (the order starter list, the
+  drag cue, the year-gap deal) leaves `order_bounce:*:untouched` where it
+  was — and then as a measured arm, not a default.
+
 ## Rejected and still rejected
 
 Short entries, so they are not re-proposed as new ideas.

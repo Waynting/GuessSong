@@ -49,6 +49,8 @@ import {
   isPlayableLink,
   NAMED_LINK_CODES,
   playableUrl,
+  unplayableKind,
+  unplayableLinkCode,
   type PlayableKind,
   type PlayableLink,
 } from "@/lib/spotify-link";
@@ -1110,7 +1112,11 @@ class PlaylistLinkError extends SpotifyApiError {
     code: AppErrorCode,
     readonly invalid: PlaylistInvalidKind
   ) {
-    super(code, 400);
+    // The bucket rides on the response as `params.kind` — a closed-set value
+    // under the `ApiErrorBody.params` contract, filling no placeholder today —
+    // so a per-bucket sentence or a GA4 dimension can read it later without
+    // a server change.
+    super(code, 400, { params: { kind: invalid } });
   }
 }
 
@@ -1160,7 +1166,13 @@ async function playableFor(pasted: string): Promise<PlayableLink> {
   if (isNamedLinkKind(link.kind)) {
     throw new PlaylistLinkError(NAMED_LINK_CODES[link.kind], link.kind);
   }
-  throw new PlaylistLinkError("invalid_playlist_url", "other");
+  // Everything else is split by what it was — a cut-off link, Liked Songs,
+  // a profile, a podcast, YouTube, text — and the sentence follows the
+  // bucket through the one function the forms also use. Read off the paste,
+  // never off a followed short link: a short link that led nowhere usable
+  // was thrown above as `shortlink`.
+  const kind = unplayableKind(pasted);
+  throw new PlaylistLinkError(unplayableLinkCode(kind), kind);
 }
 
 async function loadPlaylistUncounted(

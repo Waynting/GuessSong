@@ -11,6 +11,7 @@ import {
   __resetInFlightForTests,
 } from "@/lib/playlist-cache";
 import { isDeterministicPlaylistFailure } from "@/lib/error-messages";
+import { PLAYLIST_INVALID_KINDS } from "@/lib/loop-stats";
 import type { Track } from "@/types";
 
 /**
@@ -300,8 +301,10 @@ describe("a link that was never a playlist is named, and counted by what it was"
   const day = new Date().toISOString().slice(0, 10);
   const stat = (metric: string) =>
     (kv.mem.get(`loop:stats:${day}:${metric}`)?.value as number | undefined) ?? 0;
-  const KINDS = ["track", "artist", "shortlink", "other"] as const;
-  const split = () => KINDS.reduce((total, kind) => total + stat(`playlist_invalid:${kind}`), 0);
+  // The writer's closed set, every member: since 2026-11-10 the classifier's
+  // `unknown` is split ten ways (UNPLAYABLE_KINDS in lib/spotify-link.ts).
+  const split = () =>
+    PLAYLIST_INVALID_KINDS.reduce((total, kind) => total + stat(`playlist_invalid:${kind}`), 0);
 
   it("answers a track and an artist link with its own code, and never asks Spotify", async () => {
     for (const kind of ["track", "artist"] as const) {
@@ -326,6 +329,7 @@ describe("a link that was never a playlist is named, and counted by what it was"
       `https://open.spotify.com/artist/${playlistId("z")}`,
       "my party mix",
       "https://example.com/not-a-playlist",
+      "https://open.spotify.com/collection/tracks",
       `https://open.spotify.com/track/${playlistId("x")}`, // a retry counts again
     ];
     for (const link of pasted) await loadPlaylist(link).catch(() => {});
@@ -333,12 +337,51 @@ describe("a link that was never a playlist is named, and counted by what it was"
     expect(stat("playlist_refused:invalid_playlist_url")).toBe(pasted.length);
     expect(split()).toBe(pasted.length);
     expect(stat("playlist_invalid:track")).toBe(3);
-    expect(stat("playlist_invalid:other")).toBe(2);
-    // An album is not among them any more, and nothing new joined the refusal set.
+    // `other` is text with no link in it; a link to another site has its own
+    // bucket, and so does Liked Songs.
+    expect(stat("playlist_invalid:other")).toBe(1);
+    expect(stat("playlist_invalid:other_url")).toBe(1);
+    expect(stat("playlist_invalid:spotify_collection")).toBe(1);
+    // An album is not among them any more, and nothing new joined the refusal
+    // set — the Spotify-other sentence is counted under the total like a track's.
     expect(stat("playlist_invalid:album")).toBe(0);
-    for (const code of ["playlist_link_album", "playlist_link_track", "playlist_link_artist"]) {
+    for (const code of [
+      "playlist_link_album",
+      "playlist_link_track",
+      "playlist_link_artist",
+      "playlist_link_spotify_other",
+    ]) {
       expect(stat(`playlist_refused:${code}`)).toBe(0);
     }
+  });
+
+  it("names a Spotify page that is not a playlist, carries the bucket, and never asks Spotify", async () => {
+    // Liked Songs, a profile, a podcast: ~104 a day were told their Spotify
+    // link "doesn't look like a Spotify link". One coarse sentence, and the
+    // bucket on the response so a per-kind one can follow without a server
+    // change.
+    const cases: Array<[string, string]> = [
+      ["https://open.spotify.com/collection/tracks", "spotify_collection"],
+      ["https://open.spotify.com/user/someone", "spotify_user"],
+      [`https://open.spotify.com/episode/${playlistId("e")}`, "spotify_show"],
+      ["https://www.spotify.com/download", "spotify_other"],
+    ];
+    for (const [link, kind] of cases) {
+      await expect(loadPlaylist(link), link).rejects.toMatchObject({
+        code: "playlist_link_spotify_other",
+        status: 400,
+        params: { kind },
+      });
+      expect(stat(`playlist_invalid:${kind}`), kind).toBe(1);
+    }
+    // A link to another service keeps today's sentence, and its own bucket.
+    await expect(loadPlaylist("https://www.youtube.com/playlist?list=PL1")).rejects.toMatchObject({
+      code: "invalid_playlist_url",
+      params: { kind: "youtube" },
+    });
+    expect(stat("playlist_invalid:youtube")).toBe(1);
+    expect(upstreamCalls()).toBe(0);
+    expect(albumUpstreamCalls()).toBe(0);
   });
 
   it("refuses a malformed id without spending a call on being told it is nothing", async () => {
@@ -355,7 +398,12 @@ describe("a link that was never a playlist is named, and counted by what it was"
       });
     }
     expect(upstreamCalls()).toBe(0);
-    expect(stat("playlist_invalid:other")).toBe(3);
+    // A `/playlist/` segment with no valid id after it is a cut-off link —
+    // its own bucket, matched before "another Spotify page", and it keeps
+    // today's sentence because that is the true one for it. A bare id with
+    // no address around it is text.
+    expect(stat("playlist_invalid:spotify_playlist_malformed")).toBe(2);
+    expect(stat("playlist_invalid:other")).toBe(1);
   });
 
   it("refuses a playlist path that is not on Spotify", async () => {

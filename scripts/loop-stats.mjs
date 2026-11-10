@@ -1003,25 +1003,6 @@ if (tapAgain + tapMixed > 0) {
 }
 
 /**
- * The setup page's nudge toward Mixed mode (`lib/mixed-nudge.ts`), shown once
- * a host has typed three names. `started` is a Mixed game begun after a tap.
- */
-const nudgeShown = get("mixed_nudge:shown");
-const nudgeTapped = get("mixed_nudge:tapped");
-const nudgeStarted = get("mixed_nudge:started");
-if (nudgeShown + nudgeTapped + nudgeStarted > 0) {
-  console.log(
-    `\nMixed nudge on setup  shown ${nudgeShown} · tapped ${nudgeTapped} (${pct(nudgeTapped, nudgeShown).trim()})` +
-      ` · started a Mixed game ${nudgeStarted} (${pct(nudgeStarted, nudgeTapped).trim()} of taps)`
-  );
-  console.log(
-    "  how to read it: shown counts page loads where three names were typed, not hosts.\n" +
-      "  A tap that does not start is a host who looked at Mixed and went back; set\n" +
-      "  started beside `Playlist came from … mixed` to see what share of Mixed it brought."
-  );
-}
-
-/**
  * The playlist quiz funnel: created → opened → started → completed → board,
  * then the share surface's own row above. Each stage is a server-side count
  * (the route that did the thing bumps it), so unlike the surface table
@@ -1378,7 +1359,6 @@ const RENDERED_PREFIXES = [
   "first_clip:",
   "game_over_tap:",
   "game_over_tap_screen:",
-  "mixed_nudge:",
   "refusal_recovery:",
   "refusal_recovery_via:",
   "playlist_refused:",
@@ -1576,11 +1556,23 @@ if (refusals.length > 0) {
   // name over the closed set lib/loop-stats.ts declares (PLAYLIST_INVALID_KINDS)
   // and in its order: a kind that was never pasted prints as 0, which is an
   // answer here, where a missing word would be a question.
+  // From 2026-11-10 the classifier's `unknown` is split ten ways
+  // (UNPLAYABLE_KINDS in lib/spotify-link.ts); before that date `other` held
+  // every non-Spotify paste, so a window across it reads `other` by the day.
   const invalidKinds = [
     ["track", "track"],
     ["artist", "artist"],
     ["shortlink", "dead short link"],
-    ["other", "anything else"],
+    ["spotify_playlist_malformed", "a cut-off playlist link"],
+    ["spotify_album_malformed", "a cut-off album link"],
+    ["spotify_collection", "Liked Songs"],
+    ["spotify_user", "a Spotify profile"],
+    ["spotify_show", "a podcast"],
+    ["spotify_other", "another Spotify page"],
+    ["youtube", "YouTube"],
+    ["apple_music", "Apple Music"],
+    ["other_url", "another site"],
+    ["other", "not a link"],
   ];
   // `album` left the set on 2026-10-25, when albums began to load. The days
   // before still hold the key, and it is the number the line below is read
@@ -1592,7 +1584,10 @@ if (refusals.length > 0) {
     console.log(`  not a playlist URL, by what it was: ${split}`);
     console.log(
       "  the forms that block a wrong link never send it, so this is the party\n" +
-        "  form and the quiz only"
+        "  form and the quiz only. Liked Songs cannot be lifted (it needs the host's\n" +
+        "  login); a Spotify profile can get its own sentence; a large YouTube row is\n" +
+        "  a reason to open that work. Before 2026-11-10 `not a link` held anything\n" +
+        "  that was not a Spotify link."
     );
     const unsplit = get("playlist_refused:invalid_playlist_url") - invalidTotal - albumsRefusedBefore;
     if (unsplit > 0) {

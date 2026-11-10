@@ -260,11 +260,6 @@ export type AnalyticsEvent =
       params: { target: "play_again" | "mixed"; screen?: "phone" | "desktop" };
     }
   | {
-      /** The setup page's nudge toward Mixed mode. See `lib/mixed-nudge.ts`. */
-      name: "mixed_nudge";
-      params: { stage: "shown" | "tapped" | "started" };
-    }
-  | {
       /**
        * A permanent playlist refusal shown on the setup page, and a game
        * started after one. See `lib/refusal-recovery.ts`.

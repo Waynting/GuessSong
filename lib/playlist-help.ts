@@ -159,6 +159,7 @@ export const PLAYLIST_HELP_BY_CODE: Partial<Record<AppErrorCode, PlaylistHelpTop
   invalid_playlist_url: "wrong_link",
   playlist_link_track: "wrong_link",
   playlist_link_artist: "wrong_link",
+  playlist_link_spotify_other: "wrong_link",
   // An album Spotify has not got. Not `private`: an album has no such setting.
   album_not_found: "wrong_link",
   playlist_empty: "empty",

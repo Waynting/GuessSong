@@ -40,6 +40,7 @@ import { QUIZ_SOURCES, isQuizSource, type QuizSource } from "@/lib/quiz-source";
 import type { PreviewStatus } from "@/types/preview";
 import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
 import { isPlaylistHelpTopic, PLAYLIST_HELP_TOPIC_NAMES, type PlaylistHelpTopic } from "@/lib/playlist-help";
+import { UNPLAYABLE_KINDS, type UnplayableKind } from "@/lib/spotify-link";
 import { RECOVERY_STAGES, type RecoveryStage } from "@/lib/refusal-recovery";
 import { SETUP_SOURCES, isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { GAME_MODES, isGameMode, type GameMode } from "@/lib/game-session";
@@ -253,15 +254,6 @@ export type GameOverTap = "play_again" | "mixed";
 export const GAME_OVER_TAPS: readonly GameOverTap[] = ["play_again", "mixed"];
 
 /**
- * The setup page's nudge toward Mixed mode (`lib/mixed-nudge.ts`): `shown`
- * once per page load, `tapped`, and `started` for a Mixed game started after
- * a tap on this page. `started ÷ tapped` is whether it works.
- */
-export type MixedNudgeStage = "shown" | "tapped" | "started";
-
-export const MIXED_NUDGE_STAGES: readonly MixedNudgeStage[] = ["shown", "tapped", "started"];
-
-/**
  * An order game over before its first reveal: the host saw four cards and
  * left, or pressed End Game, with no round played. Written from the leave
  * and end beacons (`recordGameLeft`, `recordGameEnd`) when the mode is
@@ -443,7 +435,16 @@ export function isPlaylistRefusalCode(value: unknown): value is PlaylistRefusalC
  *   artist     an artist's page
  *   shortlink  a `spotify.link` that was followed and led nowhere usable: a
  *              dead slug, or a podcast, a profile, the home page
- *   other      no Spotify link in it at all, or one too mangled to read
+ *
+ * and, since 2026-11-10, for every paste the classifier calls `unknown`, one
+ * of `UNPLAYABLE_KINDS` from `lib/spotify-link.ts` (`unplayableKind`): a
+ * cut-off playlist or album link, Liked Songs, a profile, a podcast, another
+ * Spotify page, YouTube, Apple Music, another site, or `other` — now text
+ * with no link in it. `other` had read ~104 a day as "anything else", three
+ * times the artist row, and could not say which of those it was; the split
+ * is what decides the next sentence or lift (TODOS.md E3). Before that date
+ * `other` holds every non-Spotify paste, so a window across it reads the
+ * kind's meaning from the date.
  *
  * A short link that leads to a track is `track`, not `shortlink` — the
  * question is what people are trying to play, and how the link was spelled
@@ -452,17 +453,17 @@ export function isPlaylistRefusalCode(value: unknown): value is PlaylistRefusalC
  * retryable, and it is not a refusal.
  *
  * **Written in the same call as `playlist_refused:invalid_playlist_url`, one
- * for one**, so the four sum to it exactly and that weekly series keeps its
+ * for one**, so the parts sum to it exactly and that weekly series keeps its
  * meaning against the 748. This is a second reading of one refusal code,
  * not a code of its own.
  */
-export type PlaylistInvalidKind = "track" | "artist" | "shortlink" | "other";
+export type PlaylistInvalidKind = "track" | "artist" | "shortlink" | UnplayableKind;
 
 export const PLAYLIST_INVALID_KINDS: readonly PlaylistInvalidKind[] = [
   "track",
   "artist",
   "shortlink",
-  "other",
+  ...UNPLAYABLE_KINDS,
 ];
 
 /**
@@ -879,7 +880,6 @@ export function loopStatsKeys(
   gameOverTap: Record<GameOverTap, string>;
   /** The same taps by the layout they were drawn in — see `GameOverTap`. */
   gameOverTapScreen: Record<GameOverTap, Record<GameScreen, string>>;
-  mixedNudge: Record<MixedNudgeStage, string>;
   refusalRecovery: Record<RecoveryStage, Record<PlaylistHelpTopic, string>>;
   refusalRecoveryVia: Record<SetupSource, string>;
   playlistRefused: Record<PlaylistRefusalCode, string>;
@@ -1002,9 +1002,6 @@ export function loopStatsKeys(
       play_again: key(day, "game_over_tap:play_again"),
       mixed: key(day, "game_over_tap:mixed"),
     },
-    mixedNudge: Object.fromEntries(
-      MIXED_NUDGE_STAGES.map((s) => [s, key(day, `mixed_nudge:${s}`)])
-    ) as Record<MixedNudgeStage, string>,
     gameOverTapScreen: byList("game_over_tap_screen", GAME_OVER_TAPS, GAME_SCREENS),
     gameEndLink: Object.fromEntries(
       GAME_SCREENS.map((s) => [s, key(day, `game_end_link:${s}`)])
@@ -1458,12 +1455,6 @@ export async function recordRefusalRecovery(
   if (stage === "recovered" && via && SETUP_SOURCES.includes(via)) {
     await bump(`refusal_recovery_via:${via}`);
   }
-}
-
-/** The setup page's Mixed nudge. See `MixedNudgeStage`. */
-export function recordMixedNudge(stage: MixedNudgeStage): Promise<void> {
-  if (!MIXED_NUDGE_STAGES.includes(stage)) return Promise.resolve();
-  return bump(`mixed_nudge:${stage}`);
 }
 
 /**

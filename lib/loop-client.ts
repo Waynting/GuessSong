@@ -29,7 +29,6 @@ import type {
   FirstClipPath,
   GameHostKind,
   GameOverTap,
-  MixedNudgeStage,
   GameScreen,
 } from "@/lib/loop-stats";
 import { sendPulse } from "@/lib/pulse-client";
@@ -279,16 +278,6 @@ export function reportRefusal(topic: PlaylistHelpTopic): void {
 export function reportRefusalRecovered(topic: PlaylistHelpTopic, via: SetupSource): void {
   trackEvent("refusal_recovery", { stage: "recovered", topic, via });
   sendPulse({ kind: "refusal_recovery", stage: "recovered", topic, via });
-}
-
-/**
- * Call when the setup page's Mixed nudge is first drawn, tapped, or followed
- * by a Mixed start. The start is reported before `router.push` like
- * `reportGameStart`, and for the same reason it can be a beacon.
- */
-export function reportMixedNudge(stage: MixedNudgeStage): void {
-  trackEvent("mixed_nudge", { stage });
-  sendPulse({ kind: "mixed_nudge", stage });
 }
 
 /**

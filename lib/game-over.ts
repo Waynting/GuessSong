@@ -86,11 +86,10 @@ export interface GameOverOnward {
 }
 
 /**
- * The smallest room the desktop's Mixed link is drawn for. Deliberately
- * below `MIXED_NUDGE_MIN_PLAYERS` (3, lib/mixed-nudge.ts): the nudge
- * interrupts a form being filled in, the link is an offer on a screen the
- * room is done with, and a pair that just played is the smallest room a
- * mix of two playlists can be put to.
+ * The smallest room the desktop's Mixed link is drawn for. Two, not three
+ * (the setup page's retired Mixed nudge asked for three): the link is an
+ * offer on a screen the room is done with, and a pair that just played is
+ * the smallest room a mix of two playlists can be put to.
  */
 export const MIXED_LINK_MIN_PLAYERS = 2;
 

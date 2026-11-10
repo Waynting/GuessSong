@@ -48,7 +48,6 @@ import {
   GAME_ENDS,
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
-  MIXED_NUDGE_STAGES,
   GAME_ROUND_CEILING,
   GAME_ROUND_FLOOR,
   GAME_SCREENS,
@@ -61,7 +60,6 @@ import {
   type GameEnd,
   type GameHostKind,
   type GameOverTap,
-  type MixedNudgeStage,
   type GameScreen,
   type MixedSubMode,
   type QuizShareBy,
@@ -118,10 +116,6 @@ function isFirstClipOutcome(value: unknown): value is FirstClipOutcome {
 
 function isGameOverTap(value: unknown): value is GameOverTap {
   return typeof value === "string" && (GAME_OVER_TAPS as readonly string[]).includes(value);
-}
-
-function isMixedNudgeStage(value: unknown): value is MixedNudgeStage {
-  return typeof value === "string" && (MIXED_NUDGE_STAGES as readonly string[]).includes(value);
 }
 
 /**
@@ -194,7 +188,6 @@ export type PulseEvent =
   | { kind: "order_round"; verdict: OrderVerdict; arranged?: boolean }
   | { kind: "order_phone"; locked: OrderPhoneCoverage; exact: number; oldest: number; none: number }
   | { kind: "game_over_tap"; target: GameOverTap; screen?: GameScreen }
-  | { kind: "mixed_nudge"; stage: MixedNudgeStage }
   | { kind: "refusal_recovery"; stage: "refused"; topic: PlaylistHelpTopic }
   | { kind: "refusal_recovery"; stage: "recovered"; topic: PlaylistHelpTopic; via: SetupSource }
   | { kind: "quiz_copied"; by: QuizShareBy; outcome: QuizCopyOutcome }
@@ -354,10 +347,6 @@ export function parsePulse(body: unknown): PulseEvent | null {
       return { kind: "refusal_recovery", stage: "recovered", topic: raw.topic, via: raw.via };
     }
     return null;
-  }
-
-  if (raw.kind === "mixed_nudge") {
-    return isMixedNudgeStage(raw.stage) ? { kind: "mixed_nudge", stage: raw.stage } : null;
   }
 
   if (raw.kind === "quiz_shared") {

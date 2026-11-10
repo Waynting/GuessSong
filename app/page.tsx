@@ -29,7 +29,6 @@ import {
 } from "@/lib/auto-recheck";
 import {
   reportGameStart,
-  reportMixedNudge,
   reportRefusal,
   reportRefusalRecovered,
 } from "@/lib/loop-client";
@@ -42,7 +41,6 @@ import {
   serializeRecovery,
   type RecoveryState,
 } from "@/lib/refusal-recovery";
-import { showMixedNudge } from "@/lib/mixed-nudge";
 import { playerBand } from "@/lib/game-players";
 import { currentArrival } from "@/lib/arrival";
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
@@ -363,8 +361,6 @@ export default function SetupPage() {
   const roomPoolRef = useRef<{ code: string; data: RoomPoolResponse } | null>(null);
   // The Mixed nudge: counted once per page load when first drawn, and its tap
   // remembered so a Mixed start from this page can be credited to it.
-  const nudgeShownRef = useRef(false);
-  const nudgeTappedRef = useRef(false);
   // Whether this tab showed a permanent refusal, and whether a game started
   // after it — carried across a reload, read back in the mount effect. See
   // lib/refusal-recovery.ts.
@@ -736,10 +732,6 @@ export default function SetupPage() {
     const recovery = noteStart(recoveryRef.current, setupSource);
     if (recovery.state !== recoveryRef.current) setRecovery(recovery.state);
     if (recovery.report) reportRefusalRecovered(recovery.report.topic, recovery.report.via);
-    if (mixed && nudgeTappedRef.current) {
-      nudgeTappedRef.current = false;
-      reportMixedNudge("started");
-    }
     return {
       host_game_index: hostGameIndex,
       arrived_from: arrivedFrom(recallLoopRef()),
@@ -1237,20 +1229,6 @@ export default function SetupPage() {
     mixedContributions: mixedContributions.length,
     roomSubmissions: roomSubmissions.length,
   });
-  // A room's worth of names on Single Playlist: offer the mode built for it.
-  const mixedNudge = showMixedNudge({ setupMode, buzzerEnabled, players });
-  useEffect(() => {
-    if (!mixedNudge || nudgeShownRef.current) return;
-    nudgeShownRef.current = true;
-    reportMixedNudge("shown");
-  }, [mixedNudge]);
-
-  function takeMixedNudge() {
-    nudgeTappedRef.current = true;
-    reportMixedNudge("tapped");
-    chooseWho("mixed");
-  }
-
   /**
    * The buzzer, offered under the roster and not only in the settings fold.
    * 1.22.0 moved the toggle into the fold and buzzer games fell from 59 to 23
@@ -1518,28 +1496,23 @@ export default function SetupPage() {
                         Add Player
                       </button>
                     </div>
-                    {mixedNudge && (
-                      <button type="button" className="mixed-nudge" onClick={takeMixedNudge}>
-                        <span aria-hidden style={{ fontSize: "18px" }}>🎧</span>
-                        <span>
-                          Three or more of you? Everyone brings a playlist and you also
-                          guess whose it was. <strong>Try Mixed mode →</strong>
-                        </span>
-                      </button>
-                    )}
                     {/* The buzzer, where a room can see it. Under the roster
                         because that is what it replaces — everyone types their
                         own name as they scan in. With the order game the same
                         room puts the cards on every phone, so the row says that.
-                        The solo nudge that sat here came off on 2026-11-01:
-                        "Just me" does its job, and its tap rate had fallen to 1%.
-                        One callout at a time: once three names are typed the
-                        Mixed nudge above owns this slot, and Mixed is the arm
-                        of the loop that converts. On by default, before any
-                        name is typed, because the room it asks about is the
-                        one the host is about to type; measured at 390×844 it
-                        puts Start at 1009px, 77px under 1.22.0's 932. */}
-                    {isBuzzerConfigured() && !mixedNudge && (
+                        Two nudges sat here before it and both came off at a 1%
+                        tap rate: the solo nudge on 2026-11-01 ("Just me" does
+                        its job) and the Mixed nudge on 2026-11-10 (shown 1,172,
+                        tapped 14, started 3 in ten days — the "Everyone's
+                        playlists" tile made it redundant). This row yields to
+                        nothing: a buzzer room of two or more plays out 53.9%,
+                        the best cell in the mode × players table, and the row
+                        is what brought buzzer games back from 23 to 58 a day.
+                        On by default, before any name is typed, because the
+                        room it asks about is the one the host is about to type;
+                        measured at 390×844 it puts Start at 1009px, 77px under
+                        1.22.0's 932. */}
+                    {isBuzzerConfigured() && (
                       <button type="button" className="buzzer-nudge" onClick={offerBuzzer}>
                         <span aria-hidden style={{ fontSize: "18px" }}>📱</span>
                         <span>

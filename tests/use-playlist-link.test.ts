@@ -82,6 +82,17 @@ describe("usePlaylistLinkCheck", () => {
       named: "track",
     });
     expect(type("my party mix").problem).toBe("invalid_playlist_url");
+    // A Spotify page that is not a playlist: the one coarse sentence, so a
+    // room form no longer says the link "doesn't look like a Spotify link".
+    expect(type("https://open.spotify.com/collection/tracks")).toEqual({
+      submittable: false,
+      problem: "playlist_link_spotify_other",
+      named: null,
+    });
+    // A cut-off playlist link keeps today's sentence — the true one for it.
+    expect(type("https://open.spotify.com/playlist/3cEYpjA9oz9GiPac4AsH4").problem).toBe(
+      "invalid_playlist_url"
+    );
   });
 
   it("reports a named link once, when the field becomes one", () => {

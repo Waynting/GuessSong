@@ -40,7 +40,11 @@ import { selectPreset, typeCustom, commitCustom, isCustomSelected } from "@/lib/
  * second quiz, or by accident — must not rewrite the text under a link that
  * has already been sent.
  */
-type CreatedQuiz = CreateQuizResponse & { ownerName: string | null };
+type CreatedQuiz = CreateQuizResponse & {
+  ownerName: string | null;
+  /** What the host asked for; the panel compares it with what was built. */
+  requestedCount: number;
+};
 
 /**
  * What the panel is drawn from: a quiz made on this visit, or the one this
@@ -213,7 +217,7 @@ export function QuizCreate() {
       if (!res.ok) throw apiError(data, "quiz_create_failed");
       const created = data as CreateQuizResponse;
       const owner = ownerName.trim() || null;
-      setCreatedQuiz({ ...created, ownerName: owner });
+      setCreatedQuiz({ ...created, ownerName: owner, requestedCount: questionCount });
       const remembered: LastQuiz = {
         code: created.code,
         ownerName: owner,
@@ -383,6 +387,7 @@ export function QuizCreate() {
               ownerName={shown.ownerName}
               playlistName={shown.playlistName}
               questionCount={shown.questionCount}
+              requestedCount={createdQuiz?.requestedCount ?? null}
               expiresAt={shown.expiresAt}
               locale={locale}
             />

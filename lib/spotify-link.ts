@@ -240,6 +240,112 @@ export function isSubmittablePlaylistLink(raw: unknown): boolean {
 }
 
 /**
+ * What a paste that is no playable link actually was.
+ *
+ * `playlist_invalid:other` read ~104 a day in the ten days to 2026-11-10 —
+ * three times the artist row — and nothing could say what those pastes
+ * were: a profile, Liked Songs, a podcast, a YouTube list, a link cut off
+ * in a chat. These are the buckets, written as `playlist_invalid:<kind>` by
+ * `lib/playlist-cache.ts` for every refusal `classifySpotifyLink` calls
+ * `unknown`. The kinds the classifier names itself (`track`, `artist`,
+ * `shortlink`) are counted under their own names and never reach here;
+ * `tests/spotify-link.test.ts` pins that only an `unknown` does.
+ *
+ * The order is a decision, twice over. The two malformed kinds come first:
+ * a `/playlist/` or `/album/` segment with no valid 22-character id after
+ * it is a link cut off in a chat or with a character glued to the id, and
+ * filing it as "another Spotify page" would send the host for a different
+ * link when the one they hold is nearly right — so those two keep today's
+ * `invalid_playlist_url` sentence, which is the true one for them. And
+ * `/collection/` wins over `/user/`, so `open.spotify.com/user/<x>/collection`
+ * is Liked Songs: that is the bucket a per-kind sentence would act on, and
+ * it stays clean.
+ *
+ * One ordered table walked by one loop, exported so the tests iterate it
+ * instead of hand-listing ten kinds. The matchers follow the rules at the
+ * top of this file: a consumed character in front of the host, no
+ * lookbehind, the input sliced to `LINK_INPUT_MAX`.
+ */
+export const UNPLAYABLE_KINDS = [
+  "spotify_playlist_malformed",
+  "spotify_album_malformed",
+  "spotify_collection",
+  "spotify_user",
+  "spotify_show",
+  "spotify_other",
+  "youtube",
+  "apple_music",
+  "other_url",
+  "other",
+] as const;
+
+export type UnplayableKind = (typeof UNPLAYABLE_KINDS)[number];
+
+/** The web player's host up to the path's first segment, without `WEB`'s optional `/user/<name>/`. */
+const SPOTIFY_PATH = `${EDGE}(?:open|play)\\.spotify\\.com(?:/intl-[\\w-]{2,16})?(?:/embed)?/`;
+
+/** A hostname ends here: the next character cannot be part of one. */
+const HOST_END = "(?![A-Za-z0-9-])";
+
+/**
+ * Each kind's matcher, in the order they are tried. `other` has none: it is
+ * what is left when nothing matched — text with no link in it at all.
+ */
+export const UNPLAYABLE_MATCHERS: ReadonlyArray<readonly [Exclude<UnplayableKind, "other">, RegExp]> = [
+  ["spotify_playlist_malformed", new RegExp(`(?:${WEB}playlist/|${URI}playlist:)`, "i")],
+  ["spotify_album_malformed", new RegExp(`(?:${WEB}album/|${URI}album:)`, "i")],
+  ["spotify_collection", new RegExp(`(?:${WEB}collection|${URI}collection)(?![A-Za-z0-9])`, "i")],
+  ["spotify_user", new RegExp(`(?:${SPOTIFY_PATH}user/|${EDGE}spotify:user:)`, "i")],
+  ["spotify_show", new RegExp(`(?:${WEB}(?:show|episode)/|${URI}(?:show|episode):)`, "i")],
+  ["spotify_other", new RegExp(`${EDGE}(?:(?:[A-Za-z0-9-]+\\.)*spotify\\.com${HOST_END}|spotify:)`, "i")],
+  ["youtube", new RegExp(`${EDGE}(?:[A-Za-z0-9-]+\\.)*(?:youtube\\.com|youtu\\.be)${HOST_END}`, "i")],
+  ["apple_music", new RegExp(`${EDGE}music\\.apple\\.com${HOST_END}`, "i")],
+  ["other_url", /https?:\/\//i],
+];
+
+/**
+ * The kinds that are a real Spotify link to something that is neither a
+ * playlist nor an album: a profile, Liked Songs, a podcast, any other page.
+ */
+export const SPOTIFY_OTHER_KINDS: readonly UnplayableKind[] = [
+  "spotify_collection",
+  "spotify_user",
+  "spotify_show",
+  "spotify_other",
+];
+
+/** `Extract`, so a code that leaves the union is a compile error here, not a sentence that stops rendering. */
+export type UnplayableLinkCode = Extract<AppErrorCode, "playlist_link_spotify_other" | "invalid_playlist_url">;
+
+/**
+ * The sentence for an unplayable paste. One coarse sentence for the four
+ * Spotify kinds — a per-kind one waits for the split's read, E3 in
+ * TODOS.md — and today's for everything else, the two malformed kinds
+ * included: "doesn't look like a playlist or album link" is the truth about
+ * a link cut off in a chat. Declared beside the table for the reason
+ * `NAMED_LINK_CODES` is: the server (`lib/playlist-cache.ts`) and the forms
+ * (`checkPlaylistLink`) both render from it and must not be able to name
+ * the same paste two ways.
+ */
+export function unplayableLinkCode(kind: UnplayableKind): UnplayableLinkCode {
+  return SPOTIFY_OTHER_KINDS.includes(kind) ? "playlist_link_spotify_other" : "invalid_playlist_url";
+}
+
+/**
+ * The bucket a non-playable paste belongs in. Call it only for a string
+ * `classifySpotifyLink` called `unknown`; a track, an artist page or a short
+ * link has its own name and its own count.
+ */
+export function unplayableKind(raw: unknown): UnplayableKind {
+  if (typeof raw !== "string") return "other";
+  const text = raw.slice(0, LINK_INPUT_MAX);
+  for (const [kind, re] of UNPLAYABLE_MATCHERS) {
+    if (re.test(text)) return kind;
+  }
+  return "other";
+}
+
+/**
  * The sentence for each kind of link that is a real Spotify link to the
  * wrong thing. Declared here, beside the classifier, because the server
  * (`lib/playlist-cache.ts`) and the forms both render from it and must not
@@ -263,7 +369,7 @@ export interface PlaylistLinkCheck {
    * What to say under the field, as a code for `errorMessage`, or null when
    * there is nothing to say: the field is blank, or the link is fine.
    */
-  problem: NamedLinkCode | "invalid_playlist_url" | null;
+  problem: NamedLinkCode | UnplayableLinkCode | null;
   /** Set when the link is a track or an artist page. */
   named: NamedLinkKind | null;
 }
@@ -278,6 +384,10 @@ export interface PlaylistLinkCheck {
  * refuse, so a disabled button always has its reason beside it.
  *
  * Blank is silent: an empty field is not a mistake yet.
+ *
+ * Anything else is read by `unplayableKind` and named by `unplayableLinkCode`
+ * — the same two the server uses — so a room form, which never sends the
+ * paste, shows the sentence the party form would have been sent.
  */
 export function checkPlaylistLink(raw: unknown): PlaylistLinkCheck {
   if (typeof raw !== "string" || raw.trim() === "") {
@@ -291,5 +401,5 @@ export function checkPlaylistLink(raw: unknown): PlaylistLinkCheck {
   if (isNamedLinkKind(kind)) {
     return { submittable: false, problem: NAMED_LINK_CODES[kind], named: kind };
   }
-  return { submittable: false, problem: "invalid_playlist_url", named: null };
+  return { submittable: false, problem: unplayableLinkCode(unplayableKind(raw)), named: null };
 }
