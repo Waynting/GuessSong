@@ -407,3 +407,83 @@ describe("the order page's drag", () => {
     expect(src).toMatch(/hostArranged\(arrangement, currentIndex\)\s*\);/);
   });
 });
+
+describe("the order game's first screen (2026-11-10)", () => {
+  const globals = read("app/globals.css");
+  const phone = read("components/order-phone.tsx");
+
+  it("beckons with the last card, from showDragCue, and only while nothing is lifted", () => {
+    // 82% of round-zero bounces moved nothing. The cue is the gesture asked
+    // for — the last card lifting toward the top — never the top card, which
+    // under "Oldest on top" reads as a hint about the answer. Derived from
+    // state, no timer.
+    expect(body).toMatch(
+      /const beckon = phase === "showing" && showDragCue\(\{ round: currentIndex, moved: hostMoved, phones: Boolean\(buzzerRoom\) \}\);/
+    );
+    expect(body).toMatch(/const beckoning = beckon && i === cards\.length - 1;/);
+    expect(body).toMatch(/\$\{beckoning \? " beckon" : ""\}/);
+    expect(body).not.toMatch(/setTimeout\([^)]*beckon|setInterval/);
+    // The keyframe lives once, in app/globals.css, under reduced-motion, and
+    // never fights the drag's inline transform.
+    const motion = globals.match(/@media \(prefers-reduced-motion: no-preference\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+    expect(motion).toMatch(/\.beckon:not\(\.lifted\) \{ animation: beckon 1\.6s ease 0\.8s 2; \}/);
+    expect(motion).toMatch(/@keyframes beckon \{[\s\S]*translateY\(-7px\)/);
+    expect(globals.match(/@keyframes beckon/g) ?? []).toHaveLength(1);
+    expect(source).not.toMatch(/@keyframes beckon/);
+    expect(phone).not.toMatch(/@keyframes/);
+    // No other card rule animates; the page wrapper's fade-in is unchanged.
+    const cardRules = source.match(/\.order-card[^{]*\{[^}]*animation[^}]*\}/g) ?? [];
+    expect(cardRules).toEqual([]);
+    expect(source).toMatch(/@keyframes fade-in/);
+  });
+
+  it("gives every face-down card the shared grip, hidden from a screen reader, at the trailing edge", () => {
+    expect(body).toMatch(/\{!isRevealed && <CardGrip \/>\}/);
+    expect(body.indexOf("{!isRevealed && <CardGrip />}")).toBeGreaterThan(body.indexOf('<div className="order-text">'));
+    expect(body.indexOf("{!isRevealed && <CardGrip />}")).toBeLessThan(body.indexOf('<span className="order-mark">'));
+    expect(phone).toMatch(/\{!revealed && <CardGrip className=\{lifted \? "text-\[#1DB954\]" : "text-\[#666\]"\} \/>\}/);
+    const grip = read("components/card-grip.tsx");
+    expect(grip).toMatch(/aria-hidden="true"/);
+    expect(grip).toMatch(/fill="currentColor"/);
+    expect(grip).toMatch(/viewBox="0 0 10 16"/);
+    expect(rule(source, ".card-grip")).toMatch(/color: #666/);
+    expect(source).toMatch(/\.order-card\.lifted \.card-grip \{ color: #1DB954; \}/);
+  });
+
+  it("says the instruction in sentence case at an AA grey, and keeps the green uppercase for the result", () => {
+    const prompt = rule(source, ".order-prompt");
+    expect(prompt).toMatch(/color: #9a9a9a/);
+    expect(prompt).not.toMatch(/uppercase|letter-spacing/);
+    expect(source).toMatch(/\.order-prompt\.revealed \{ color: #1DB954; letter-spacing: 0\.06em; text-transform: uppercase; \}/);
+    expect(body).toMatch(/"Oldest on top\. Drag the cards into order, then reveal"/);
+  });
+
+  it("draws Reveal as a green-bordered ghost on round one until a card moves, never disabled", () => {
+    expect(body).toMatch(/const revealUntouched = currentIndex === 0 && !hostMoved && !buzzerRoom;/);
+    expect(body).toMatch(
+      /<button className=\{revealUntouched \? "btn-ghost btn-ghost-accent" : "btn-primary"\} onClick=\{reveal\}>/
+    );
+    expect(body).not.toMatch(/onClick=\{reveal\}[^>]*disabled/);
+    // The primary's box: border taken out of the padding, so the swap moves nothing.
+    const accent = rule(source, ".btn-ghost.btn-ghost-accent");
+    expect(accent).toMatch(/border: 1\.5px solid #1DB954/);
+    expect(accent).toMatch(/padding: 10\.5px 12px/);
+    expect(accent).toMatch(/font-size: 15px/);
+    expect(rule(source, ".btn-primary")).toMatch(/padding: 12px;/);
+    const phoneCss = phoneBlock(source);
+    expect(rule(phoneCss, ".btn-ghost.btn-ghost-accent")).toMatch(/min-height: 48px/);
+    expect(rule(phoneCss, ".btn-primary")).toMatch(/min-height: 48px/);
+    expect(source).toMatch(/\.btn-ghost\.btn-ghost-accent:active \{[^}]*transition: none/);
+  });
+
+  it("tells an untouched host what they did not do — only when nothing scored and no phones played", () => {
+    // A deal left alone is still graded, and the top card is the oldest one
+    // time in four: the line must never contradict a scoreboard that moved.
+    expect(body).toMatch(
+      /\{!hostMoved && !buzzerRoom && exactWinner === null && oldestWinner === null && \(\s*<p className="order-untouched">Left as dealt — drag the cards next round to score\.<\/p>/
+    );
+    expect(body.indexOf('className="order-untouched"')).toBeGreaterThan(body.indexOf('className={`order-result'));
+    expect(rule(source, ".order-untouched")).toMatch(/color: #888/);
+    expect(body).not.toMatch(/order_untouched|reportOrderUntouched/); // no new key: order_bounce is the read
+  });
+});

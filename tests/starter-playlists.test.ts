@@ -4,8 +4,14 @@ import { isDeterministicPlaylistFailure } from "@/lib/error-messages";
 import { PLAYLIST_REFUSAL_CODES } from "@/lib/loop-stats";
 import { isEditorialId, isPlaylistId } from "@/lib/playlist-ref";
 import {
+  STARTER_KEYS,
   STARTER_PLAYLISTS,
+  fieldChipRow,
+  isStarterKey,
+  starterCaption,
+  starterKeyForId,
   starterPlacement,
+  startersFor,
   type StarterContext,
   type StarterPlaylist,
 } from "@/lib/starter-playlists";
@@ -19,20 +25,29 @@ import {
  */
 
 const FIXTURE: readonly StarterPlaylist[] = [
-  { id: "3cEYpjA9oz9GiPac4AsH4n", name: "Party Hits", blurb: "Songs everyone knows" },
-  { id: "5FJXhjdILmRA2z5bvz4nzf", name: "90s Rock", blurb: "Guitars, mostly" },
+  { id: "3cEYpjA9oz9GiPac4AsH4n", starterKey: "party_hits", game: "guess", name: "Party Hits", blurb: "Songs everyone knows" },
+  { id: "5FJXhjdILmRA2z5bvz4nzf", starterKey: "reggaeton", game: "guess", name: "90s Rock", blurb: "Guitars, mostly" },
+];
+const ORDER_FIXTURE: readonly StarterPlaylist[] = [
+  { id: "1AbCdEfGhIjKlMnOpQrStU", starterKey: "decades", game: "order", name: "Every decade", blurb: "1960s to now" },
 ];
 
-/** A first visit: Single Playlist, nothing typed, nothing remembered, no error. */
+/** A first visit: Single Playlist, the guess game, nothing typed, nothing remembered, no error. */
 function context(over: Partial<StarterContext> = {}): StarterContext {
   return {
     starters: FIXTURE,
+    playStyle: "guess",
     singleMode: true,
     fieldEmpty: true,
     recentCount: 0,
     failureCode: null,
     ...over,
   };
+}
+
+/** The order style, with its own list: the form a "Just me" host sees. */
+function orderContext(over: Partial<StarterContext> = {}): StarterContext {
+  return context({ starters: ORDER_FIXTURE, playStyle: "order", ...over });
 }
 
 describe("the list as it ships", () => {
@@ -63,8 +78,23 @@ describe("the list as it ships", () => {
     }
   });
 
+  it("names each with a key from STARTER_KEYS, once, and gives each game at least one list", () => {
+    // The key is what the counter is written under (host_setup_starter:<key>)
+    // and what GA4's starter_key carries; the game is what partitions the
+    // offer, so the order style never loses its chips to a guess list.
+    const keys = STARTER_PLAYLISTS.map((p) => p.starterKey);
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const key of keys) expect(isStarterKey(key), key).toBe(true);
+    expect([...STARTER_KEYS]).toEqual(["party_hits", "reggaeton", "decades"]);
+    expect(startersFor("guess").length).toBeGreaterThan(0);
+    expect(startersFor("order").length).toBeGreaterThan(0);
+    // The order game's list: 375 dated songs over 62 years on 2026-11-10.
+    expect(startersFor("order").map((p) => p.starterKey)).toEqual(["decades"]);
+    expect(startersFor("order")[0].id).toBe("0RRc1JAhWKFm7QSWGiI5y8");
+  });
+
   it("holds the fixture to the same rules, so the checks above are known to bite", () => {
-    for (const { id } of FIXTURE) {
+    for (const { id } of [...FIXTURE, ...ORDER_FIXTURE]) {
       expect(isPlaylistId(id)).toBe(true);
       expect(isEditorialId(id)).toBe(false);
     }
@@ -75,17 +105,115 @@ describe("the list as it ships", () => {
 });
 
 describe("with the list empty, nothing is offered anywhere", () => {
-  it("returns null for every state the page can be in", () => {
-    for (const singleMode of [true, false]) {
-      for (const fieldEmpty of [true, false]) {
-        for (const recentCount of [0, 1, 5]) {
-          for (const failureCode of [null, "playlist_not_found", "playlist_editorial", "spotify_rate_limited"]) {
-            const state = { singleMode, fieldEmpty, recentCount, failureCode };
-            expect(starterPlacement({ ...state, starters: [] }), JSON.stringify(state)).toBeNull();
+  it("returns null for every state the page can be in, in either style", () => {
+    for (const playStyle of ["guess", "order"] as const) {
+      for (const singleMode of [true, false]) {
+        for (const fieldEmpty of [true, false]) {
+          for (const recentCount of [0, 1, 5]) {
+            for (const failureCode of [null, "playlist_not_found", "playlist_editorial", "spotify_rate_limited", "order_too_few_dated"]) {
+              const state = { playStyle, singleMode, fieldEmpty, recentCount, failureCode };
+              expect(starterPlacement({ ...state, starters: [] }), JSON.stringify(state)).toBeNull();
+            }
           }
         }
       }
     }
+  });
+});
+
+describe("startersFor partitions the list by game", () => {
+  const both = [...FIXTURE, ...ORDER_FIXTURE];
+  it("hands each style its own entries and never the other's", () => {
+    expect(startersFor("guess", both)).toEqual(FIXTURE);
+    expect(startersFor("order", both)).toEqual(ORDER_FIXTURE);
+    expect(startersFor("order", FIXTURE)).toEqual([]);
+  });
+});
+
+describe("in the order style, the starter is for the returning host", () => {
+  it("is offered beside the field whatever is in it and whatever the device remembers", () => {
+    // `restored` was the largest round-zero source (~145/day): the host it is
+    // for has a filled field and recent chips. A deliberate departure from
+    // the guess game's rule, for this style only.
+    expect(starterPlacement(orderContext())).toBe("field");
+    expect(starterPlacement(orderContext({ fieldEmpty: false }))).toBe("field");
+    expect(starterPlacement(orderContext({ recentCount: 3 }))).toBe("field");
+    expect(starterPlacement(orderContext({ fieldEmpty: false, recentCount: 5 }))).toBe("field");
+  });
+
+  it("answers order_too_few_dated under the box, and leaves order_dates_pending to clear by itself", () => {
+    expect(starterPlacement(orderContext({ fieldEmpty: false, failureCode: "order_too_few_dated" }))).toBe("refusal");
+    expect(starterPlacement(orderContext({ fieldEmpty: false, failureCode: "order_dates_pending" }))).toBe("field");
+    // The link's own permanent refusals still win the slot.
+    expect(starterPlacement(orderContext({ fieldEmpty: false, failureCode: "playlist_not_found" }))).toBe("refusal");
+  });
+
+  it("never offers the guess game's lists, and is still never offered in Mixed mode", () => {
+    expect(starterPlacement(orderContext({ starters: startersFor("order", FIXTURE) }))).toBeNull();
+    expect(starterPlacement(orderContext({ singleMode: false }))).toBeNull();
+  });
+
+  it("leaves the guess style's rule exactly as it was", () => {
+    expect(starterPlacement(context({ fieldEmpty: false }))).toBeNull();
+    expect(starterPlacement(context({ recentCount: 1 }))).toBeNull();
+    expect(starterPlacement(context({ failureCode: "order_too_few_dated", fieldEmpty: false }))).toBeNull();
+  });
+});
+
+describe("the row under the field", () => {
+  const recent = [
+    { id: "5FJXhjdILmRA2z5bvz4nzf", name: "90s Rock" }, // also the second starter
+    { id: "7axyIwzJZsCS6M9PlwQp1U", name: "Road trip" },
+  ];
+
+  it("is the recent chips alone when the starters go elsewhere", () => {
+    for (const place of [null, "refusal"] as const) {
+      const row = fieldChipRow(recent, FIXTURE, place);
+      expect(row.playlists).toEqual(recent);
+      expect(row.starterIds.size).toBe(0);
+      expect(row.caption).toBeNull();
+      expect(row.label).toBe("Recent");
+    }
+  });
+
+  it("puts the starters after the recents, once each — a recent entry wins the id — and names which are starters", () => {
+    const row = fieldChipRow(recent, FIXTURE, "field");
+    expect(row.playlists.map((p) => p.id)).toEqual([
+      "5FJXhjdILmRA2z5bvz4nzf",
+      "7axyIwzJZsCS6M9PlwQp1U",
+      "3cEYpjA9oz9GiPac4AsH4n",
+    ]);
+    expect(row.playlists[0]).toEqual(recent[0]); // the recent spelling, not the starter's
+    expect([...row.starterIds]).toEqual(["3cEYpjA9oz9GiPac4AsH4n"]);
+    expect(row.caption).toBeNull();
+    expect(row.label).toBe("Playlists");
+  });
+
+  it("is the starters with their sentence when there is nothing else — exactly what a first visit saw before", () => {
+    const row = fieldChipRow([], FIXTURE, "field");
+    expect(row.playlists).toEqual(FIXTURE);
+    expect(row.caption).toBe("No playlist handy? Try one of these");
+    expect(row.label).toBe("Starter playlists");
+    // One chip under "try one of these" reads as a fragment.
+    expect(fieldChipRow([], ORDER_FIXTURE, "field").caption).toBe("No playlist handy? Start with ours");
+    expect(starterCaption(1)).toBe("No playlist handy? Start with ours");
+    expect(starterCaption(2)).toBe("No playlist handy? Try one of these");
+  });
+});
+
+describe("starterKeyForId", () => {
+  it("names the list in the field by any route, as a ref compared with a ref", () => {
+    // What the field holds is a playable ref (lib/playlist-ref.ts): a
+    // playlist's bare id. Each starter's is built the same way, so an album
+    // starter one day compares album:<id> with album:<id>.
+    expect(starterKeyForId("3cEYpjA9oz9GiPac4AsH4n", FIXTURE)).toBe("party_hits");
+    expect(starterKeyForId("5FJXhjdILmRA2z5bvz4nzf", FIXTURE)).toBe("reggaeton");
+    expect(starterKeyForId("1AbCdEfGhIjKlMnOpQrStU", [...FIXTURE, ...ORDER_FIXTURE])).toBe("decades");
+    expect(starterKeyForId("0RRc1JAhWKFm7QSWGiI5y8")).toBe("decades");
+    expect(starterKeyForId("7axyIwzJZsCS6M9PlwQp1U", FIXTURE)).toBeNull();
+    expect(starterKeyForId("album:3cEYpjA9oz9GiPac4AsH4n", FIXTURE)).toBeNull();
+    expect(starterKeyForId(null, FIXTURE)).toBeNull();
+    expect(starterKeyForId("", FIXTURE)).toBeNull();
   });
 });
 

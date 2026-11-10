@@ -15,6 +15,7 @@ import type { ArrivedFrom, LoopSurface } from "@/lib/loop-links";
 // Type-only for the same reason: lib/loop-stats.ts imports lib/kv.ts, and a
 // value import here would carry the Upstash client into the browser bundle.
 import type { SetupSource } from "@/lib/loop-stats";
+import type { StarterKey } from "@/lib/starter-playlists";
 import type { QuizVerdict } from "@/lib/quiz";
 import type { QuizSource } from "@/lib/quiz-source";
 
@@ -115,6 +116,13 @@ export type AnalyticsEvent =
          * A closed union, never the link itself: a pasted URL is user input.
          */
         setup_source?: SetupSource;
+        /**
+         * Which starter list the game was played from, when the link in the
+         * field was one of ours — by any route, not only the chip. The KV
+         * twin is `host_setup_starter:<key>`. Register it as a custom
+         * dimension (Event scope) on release: registration is not retroactive.
+         */
+        starter_key?: StarterKey;
         /**
          * How many games this device has hosted, this one included. 1 for a
          * first-time host.

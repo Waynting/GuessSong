@@ -42,6 +42,12 @@
  */
 
 import { isLoopSurface, type LoopSurface } from "@/lib/loop-links";
+// lib/starter-playlists.ts is pure: its chain is lib/playlist-help.ts →
+// lib/guides.ts → lib/page-metadata.ts (a type-only `next` import) plus
+// lib/playlist-ref.ts → lib/spotify-link.ts and a type from
+// lib/order-game.ts. Nothing in it may grow an import of lib/kv.ts, or this
+// module and the client's beacon types would carry Upstash with them.
+import { isStarterKey, type StarterKey } from "@/lib/starter-playlists";
 import {
   FIRST_CLIP_OUTCOMES,
   FIRST_CLIP_PATHS,
@@ -158,6 +164,8 @@ export type PulseEvent =
       mode?: GameMode;
       players?: PlayerBand;
       from?: Arrival;
+      /** Which starter list was played, when the link in the field was one of ours. */
+      starter?: StarterKey;
     }
   | {
       kind: "game_finished";
@@ -244,7 +252,11 @@ export function parsePulse(body: unknown): PulseEvent | null {
     const banded = isPlayerBand(raw.players) ? { ...moded, players: raw.players } : moded;
     // Where the tab came from (lib/arrival.ts), once more under the same
     // trade: `new_host_from:${value}` is a key, and an older page sends none.
-    return isArrival(raw.from) ? { ...banded, from: raw.from } : banded;
+    const arrived = isArrival(raw.from) ? { ...banded, from: raw.from } : banded;
+    // And which starter list it was, once more under the same trade:
+    // `host_setup_starter:${value}` is a key, most games have none, and an
+    // unknown value is dropped rather than the game.
+    return isStarterKey(raw.starter) ? { ...arrived, starter: raw.starter } : arrived;
   }
 
   if (raw.kind === "game_finished") {

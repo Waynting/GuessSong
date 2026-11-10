@@ -80,7 +80,13 @@ import {
   type SetupArrival,
   type SetupForm,
 } from "@/lib/setup-memory";
-import { STARTER_PLAYLISTS, starterPlacement } from "@/lib/starter-playlists";
+import {
+  fieldChipRow,
+  starterCaption,
+  starterKeyForId,
+  starterPlacement,
+  startersFor,
+} from "@/lib/starter-playlists";
 import {
   EditorialWarning,
   PlaylistChips,
@@ -94,6 +100,7 @@ import { ServiceNotice } from "@/components/service-notice";
 import { buildGamePayload, findDuplicateName, type GameMode } from "@/lib/game-session";
 import {
   DEFAULT_PLAY_STYLE,
+  ORDER_BLURB,
   orderRefusal,
   orderSummary,
   usableOrderTracks,
@@ -208,7 +215,8 @@ const WHO_ROWS: { who: WhoPlaying; title: string; sub: string; icon: React.React
   {
     who: "solo",
     title: "Just me",
-    sub: "Order four songs by release year. Scores itself.",
+    // The game described once, with the fold's pill: lib/order-game.ts.
+    sub: ORDER_BLURB,
     icon: <OrderIcon />,
   },
   {
@@ -728,7 +736,19 @@ export default function SetupPage() {
   function recordHostedStart(mixed: MixedSubMode | undefined, mode: GameMode, playerCount: number) {
     const hostGameIndex = bumpHostGameCount();
     const setupSource = setupSourceFor(Boolean(mixed));
-    reportGameStart(hostGameIndex, mixed, setupSource, mode, playerBand(playerCount), currentArrival());
+    // Which starter list, if the link in the field is one of ours — by any
+    // route (a recent chip, a restored link), and only on a single-playlist
+    // start: a Mixed room's start can still see a starter id sitting in the
+    // single form's field, and that game was not played from it.
+    const starter = mixed === undefined ? starterKeyForId(currentPlaylistId) : null;
+    reportGameStart(hostGameIndex, {
+      mixed,
+      source: setupSource,
+      mode,
+      players: playerBand(playerCount),
+      from: currentArrival(),
+      ...(starter ? { starter } : {}),
+    });
     const recovery = noteStart(recoveryRef.current, setupSource);
     if (recovery.state !== recoveryRef.current) setRecovery(recovery.state);
     if (recovery.report) reportRefusalRecovered(recovery.report.topic, recovery.report.via);
@@ -736,6 +756,7 @@ export default function SetupPage() {
       host_game_index: hostGameIndex,
       arrived_from: arrivedFrom(recallLoopRef()),
       setup_source: setupSource,
+      ...(starter ? { starter_key: starter } : {}),
     };
   }
 
@@ -1261,19 +1282,26 @@ export default function SetupPage() {
           locale
         )
       : null;
-  // Null while lib/starter-playlists.ts ships an empty list, so nothing below
-  // that reads it renders.
+  // This style's starters only — the order game never offers the guess
+  // lists, which is where ~130 round-zero bounces a day were coming from.
+  // Null placement while the style's list is empty, so nothing below renders.
+  const styleStarters = startersFor(playStyle);
   const starterPlace = starterPlacement({
+    starters: styleStarters, playStyle,
     singleMode: setupMode === "single",
     fieldEmpty: !playlistUrl.trim(),
     recentCount: recentPlaylists.length,
     failureCode: failure?.code ?? null,
   });
+  // The one row under the field: the recent chips and, in the order style,
+  // the order starter beside them (lib/starter-playlists.ts, fieldChipRow).
+  const fieldRow = fieldChipRow(recentPlaylists, styleStarters, starterPlace);
+  // Under a refusal: the style's starters alone, with their sentence.
   const starterChips = (
     <PlaylistChips
       label="Starter playlists"
-      caption="No playlist handy? Try one of these"
-      playlists={STARTER_PLAYLISTS}
+      caption={starterCaption(styleStarters.length)}
+      playlists={styleStarters}
       currentId={currentPlaylistId}
       onPick={(playlist) => pickPlaylist(playlist.id, "starter")}
     />
@@ -1420,16 +1448,21 @@ export default function SetupPage() {
                 {/* The playlists this device has played, newest first; the
                     one in the field is lit, which is the only place on the
                     form a link has a name. One row, so five of them cost the
-                    Start button the same height as one. With none, and an
-                    empty field, the slot goes to the starters — a list that
-                    ships empty. */}
+                    Start button the same height as one. In the guess style
+                    the starters take the row only when there is nothing
+                    else to offer; in the order style the order starter sits
+                    beside the recent chips, filled field or not, deduped
+                    on id — the host it is for has a filled field. The pick
+                    names its source by which list the chip came from. */}
                 <PlaylistChips
-                  label="Recent"
-                  playlists={recentPlaylists}
+                  label={fieldRow.label}
+                  caption={fieldRow.caption ?? undefined}
+                  playlists={fieldRow.playlists}
                   currentId={currentPlaylistId}
-                  onPick={(playlist) => pickPlaylist(playlist.id, "recent")}
+                  onPick={(playlist) =>
+                    pickPlaylist(playlist.id, fieldRow.starterIds.has(playlist.id) ? "starter" : "recent")
+                  }
                 />
-                {starterPlace === "field" && starterChips}
               </div>
             )}
 
@@ -1596,7 +1629,7 @@ export default function SetupPage() {
                       </div>
                       <p style={{ marginTop: "8px", fontSize: "12px", color: "#666" }}>
                         {isOrder
-                          ? "Four songs at a time, oldest to newest. No audio, so it works anywhere."
+                          ? ORDER_BLURB
                           : "Play a clip, everyone shouts the title, you award the points."}
                       </p>
                     </div>

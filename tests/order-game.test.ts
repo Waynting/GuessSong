@@ -4,6 +4,7 @@ import {
   DEFAULT_PLAY_STYLE,
   ORDER_MIN_ROUND_SIZE,
   ORDER_MIN_YEAR,
+  ORDER_PREFERRED_YEAR_GAP,
   ORDER_ROUND_SIZE,
   ORDER_VERDICTS,
   PLAY_STYLES,
@@ -18,6 +19,7 @@ import {
   orderSummary,
   orderVerdict,
   releaseYear,
+  showDragCue,
   trueOrder,
   usableOrderTracks,
 } from "@/lib/order-game";
@@ -212,6 +214,145 @@ describe("the setup page's words", () => {
     expect(orderLeftoverLine(-1)).toBeNull();
     expect(orderLeftoverLine(1)).toMatch(/^1 song left out/);
     expect(orderLeftoverLine(3)).toMatch(/^3 songs left out/);
+    // "Too close in year", since the deal keeps a gap: the same year is the
+    // special case, and a card a year off every other card is left out too.
+    expect(orderLeftoverLine(3)).toMatch(/too close in year to every other card$/);
+  });
+});
+
+describe("the deal prefers a year gap (2026-11-10)", () => {
+  // 41.1% of revealed rounds scored nobody and 70% of the rounds left as
+  // dealt did: 2019 against 2021 against 2022 is not a question. The deal
+  // ladders from ORDER_PREFERRED_YEAR_GAP down to distinct years and takes
+  // the widest gap whose whole deal gives nothing up.
+  const years = (round: { tracks: Track[] }) => round.tracks.map((t) => releaseYear(t) as number);
+  const pairwiseGap = (round: { tracks: Track[] }) => {
+    const ys = years(round);
+    let min = Infinity;
+    for (let i = 0; i < ys.length; i++)
+      for (let j = i + 1; j < ys.length; j++) min = Math.min(min, Math.abs(ys[i] - ys[j]));
+    return min;
+  };
+  const measure = (deal: { rounds: { tracks: Track[] }[]; leftover: number }) => ({
+    rounds: deal.rounds.length,
+    full: deal.rounds.filter((r) => r.tracks.length === ORDER_ROUND_SIZE).length,
+    cards: deal.rounds.reduce((n, r) => n + r.tracks.length, 0),
+    leftover: deal.leftover,
+  });
+
+  it("ladders from the constant, which is three, and the default deal is the laddered one", () => {
+    expect(ORDER_PREFERRED_YEAR_GAP).toBe(3);
+    const tracks = [2000, 2001, 2010, 2020, 2002, 2011, 2021, 2003].map((y) => track(String(y)));
+    expect(buildOrderRounds(tracks)).toEqual(buildOrderRounds(tracks, ORDER_ROUND_SIZE, ORDER_PREFERRED_YEAR_GAP));
+    // A knob, not decoration: the gap-1 deal of the same list is a different game.
+    expect(buildOrderRounds(tracks)).not.toEqual(buildOrderRounds(tracks, ORDER_ROUND_SIZE, 1));
+    expect(buildOrderRounds(tracks, ORDER_ROUND_SIZE, 1).rounds[0].tracks.map((t) => releaseYear(t))).toEqual([
+      2000, 2001, 2010, 2020,
+    ]);
+  });
+
+  it("deals a wide list with no two cards closer than the gap, and loses nothing to it", () => {
+    // The shape of "Hits from every decade": 375 songs over 66 years.
+    const tracks = Array.from({ length: 375 }, (_, i) => track(String(1961 + ((i * 37) % 66))));
+    const deal = buildOrderRounds(tracks);
+    const plain = buildOrderRounds(tracks, ORDER_ROUND_SIZE, 1);
+    for (const round of deal.rounds) expect(pairwiseGap(round)).toBeGreaterThanOrEqual(ORDER_PREFERRED_YEAR_GAP);
+    expect(measure(deal).rounds).toBeGreaterThanOrEqual(measure(plain).rounds);
+    expect(measure(deal).full).toBeGreaterThanOrEqual(measure(plain).full);
+    expect(measure(deal).cards).toBe(375);
+    expect(deal.leftover).toBe(0);
+  });
+
+  it("takes the widest gap whose whole deal gives nothing up, not the widest that fills round one", () => {
+    // Gap 3 deals round one as 2000 · 2010 · 2020 · 2003 and then strands a
+    // card (2001, 2002, 2011, 2021 cannot all sit three apart). Gap 2 deals
+    // both rounds full. A per-round ladder would have taken gap 3 for the
+    // first round and a different game would follow; the whole-deal ladder
+    // takes gap 2 for both — design review F15.
+    const tracks = [2000, 2001, 2010, 2020, 2002, 2011, 2021, 2003].map((y) => track(String(y)));
+    const { rounds, leftover } = buildOrderRounds(tracks);
+    expect(rounds.map(years)).toEqual([
+      [2000, 2010, 2020, 2002],
+      [2001, 2011, 2021, 2003],
+    ]);
+    expect(leftover).toBe(0);
+    expect(rounds[0] && years(rounds[0])).not.toEqual([2000, 2010, 2020, 2003]);
+    for (const round of rounds) expect(pairwiseGap(round)).toBeGreaterThanOrEqual(2);
+  });
+
+  it("falls back to distinct years on a list of consecutive years, and deals exactly as before", () => {
+    // Seven consecutive years: at gap 3 the rounds come out three cards wide
+    // (1990 · 1993 · 1996) — more rounds, fewer full ones. ORDER_ROUND_SIZE
+    // is a decision, so the full-round count is in the comparison and the
+    // ladder falls through to the deal of 2026-10.
+    const seven = Array.from({ length: 20 }, (_, i) => track(String(1990 + (i % 7))));
+    expect(buildOrderRounds(seven)).toEqual(buildOrderRounds(seven, ORDER_ROUND_SIZE, 1));
+    expect(buildOrderRounds(seven).rounds.map((r) => r.tracks.length)).toEqual([4, 4, 4, 4, 4]);
+    expect(years(buildOrderRounds(seven).rounds[0])).toEqual([1990, 1991, 1992, 1993]);
+    const four = [
+      ...["1990", "1991", "1992", "1993"].map((y) => track(y)),
+      ...["1990", "1991", "1992", "1993"].map((y) => track(y)),
+      track("1990"),
+      track("1991"),
+    ];
+    expect(buildOrderRounds(four)).toEqual(buildOrderRounds(four, ORDER_ROUND_SIZE, 1));
+    expect(buildOrderRounds(four).rounds.map((r) => r.tracks.length)).toEqual([4, 4, 2]);
+  });
+
+  it("settles for gap 2 on a 17-year playlist of 50 songs — the written expectation for the A2a read", () => {
+    // The shape of "Party Hits 2010–2026", the starter most order games were
+    // dealt from. Gap 3 strands cards here, gap 2 does not: round one is
+    // 2010 · 2012 · 2014 · 2016, not 2010 · 2013 · 2016 · 2019. A nobody
+    // share that barely moves on such lists is the gap settling at 2, not
+    // the rule having no effect.
+    const tracks = Array.from({ length: 50 }, (_, i) => track(String(2010 + (i % 17))));
+    const deal = buildOrderRounds(tracks);
+    expect(years(deal.rounds[0])).toEqual([2010, 2012, 2014, 2016]);
+    expect(deal.rounds.map((r) => r.tracks.length)).toEqual([4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2]);
+    expect(deal.leftover).toBe(0);
+    for (const round of deal.rounds) expect(pairwiseGap(round)).toBeGreaterThanOrEqual(2);
+  });
+
+  it("never deals fewer rounds, fewer full rounds or fewer cards than distinct years would, over shuffled lists", () => {
+    // A seeded generator, so a failure here is a fixture and not a flake.
+    let seed = 20261110;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+    for (let n = 0; n < 300; n++) {
+      const count = 5 + Math.floor(rand() * 56);
+      const span = 2 + Math.floor(rand() * 65);
+      const tracks: Track[] = [];
+      for (let i = 0; i < count; i++) {
+        const roll = rand();
+        if (roll < 0.05) tracks.push(track(undefined));
+        else if (roll < 0.1) tracks.push({ ...track(String(1960 + Math.floor(rand() * span))), albumCompilation: true });
+        else tracks.push(track(String(1960 + Math.floor(rand() * span))));
+      }
+      const deal = buildOrderRounds(tracks);
+      const plain = buildOrderRounds(tracks, ORDER_ROUND_SIZE, 1);
+      const d = measure(deal);
+      const p = measure(plain);
+      const label = `list ${n}: ${count} songs over ${span} years`;
+      expect(d.rounds, label).toBeGreaterThanOrEqual(p.rounds);
+      expect(d.full, label).toBeGreaterThanOrEqual(p.full);
+      expect(d.cards, label).toBeGreaterThanOrEqual(p.cards);
+      expect(d.leftover, label).toBeLessThanOrEqual(p.leftover);
+      expect(d.cards + d.leftover, label).toBe(tracks.length);
+      for (const round of deal.rounds) {
+        expect(round.tracks.length, label).toBeLessThanOrEqual(ORDER_ROUND_SIZE);
+        expect(round.tracks.length, label).toBeGreaterThanOrEqual(ORDER_MIN_ROUND_SIZE);
+        expect(pairwiseGap(round), label).toBeGreaterThanOrEqual(1);
+      }
+      expect(buildOrderRounds(tracks), label).toEqual(deal);
+    }
+  });
+
+  it("leaves the refusal rule where it was: a list that dealt before still deals", () => {
+    expect(orderRefusal([track("2023"), track("2023"), track("2023")])).toBe("order_too_few_dated");
+    expect(orderRefusal([track("2023"), track("2024")])).toBeNull();
+    expect(orderRefusal([track("2020"), track("2021"), track("2022"), track("2023")])).toBeNull();
   });
 });
 
@@ -243,6 +384,15 @@ describe("the drag: an arrangement, and how it reads at the reveal", async () =>
     expect(readArrangement(["A", "B", "C", "D"], round)).toEqual({ inPlace: 4, exact: true, oldest: true });
     expect(readArrangement(["A", "C", "B", "D"], round)).toEqual({ inPlace: 2, exact: false, oldest: true });
     expect(readArrangement(["C", "A", "D", "B"], round)).toEqual({ inPlace: 0, exact: false, oldest: false });
+  });
+});
+
+describe("showDragCue", () => {
+  it("runs on round zero, before anything moved, on the screen that arranges — and nowhere else", () => {
+    expect(showDragCue({ round: 0, moved: false, phones: false })).toBe(true);
+    expect(showDragCue({ round: 0, moved: true, phones: false })).toBe(false);
+    expect(showDragCue({ round: 0, moved: false, phones: true })).toBe(false);
+    expect(showDragCue({ round: 1, moved: false, phones: false })).toBe(false);
   });
 });
 

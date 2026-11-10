@@ -16,7 +16,9 @@
 
 import { useState } from "react";
 import type { OrderRoundView } from "@/lib/buzzer-protocol";
+import { showDragCue } from "@/lib/order-game";
 import { useCardDrag } from "@/lib/use-card-drag";
+import { CardGrip } from "@/components/card-grip";
 
 const ART_PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Crect width='200' height='200' fill='%231a1a1a'/%3E%3Ccircle cx='100' cy='100' r='40' fill='%23222'/%3E%3Ccircle cx='100' cy='100' r='10' fill='%23111'/%3E%3C/svg%3E";
@@ -40,6 +42,11 @@ export function OrderPhone({ view, playerId, connected, onLock }: OrderPhoneProp
 
   const cardDrag = useCardDrag(ids, !revealed, (next) => setLocal({ key: dealKey, ids: next }));
   const { drag } = cardDrag;
+  // The first-round cue, the host's screen's rule (lib/order-game.ts) with
+  // this phone as the player: a card moved here, or an answer locked in,
+  // ends it. The class and keyframe are app/globals.css's, spelled the same
+  // as the host's card list.
+  const beckon = !revealed && showDragCue({ round: view.round, moved: local?.key === dealKey || view.mine !== null, phones: false });
 
   const byId = new Map(view.cards.map((c) => [c.id, c]));
   const shown = revealed && view.reveal ? view.reveal.order : ids;
@@ -59,6 +66,7 @@ export function OrderPhone({ view, playerId, connected, onLock }: OrderPhoneProp
           const card = byId.get(id);
           if (!card) return null;
           const lifted = drag?.id === id;
+          const beckoning = beckon && i === shown.length - 1;
           const slot = answered ? answered.indexOf(id) : -1;
           const mark = revealed && answered ? (slot === i ? "right" : "wrong") : null;
           return (
@@ -83,7 +91,7 @@ export function OrderPhone({ view, playerId, connected, onLock }: OrderPhoneProp
                   : mark === "wrong"
                   ? "border-red-500/35 bg-[#161616]"
                   : "border-[#262626] bg-[#161616]"
-              }`}
+              }${beckoning ? " beckon" : ""}`}
             >
               <span className="w-5 shrink-0 text-center text-lg font-bold text-[#555]">
                 {revealed ? i + 1 : String.fromCharCode(65 + dealt.indexOf(id))}
@@ -99,6 +107,7 @@ export function OrderPhone({ view, playerId, connected, onLock }: OrderPhoneProp
                 <p className="truncate text-sm font-semibold">{card.title}</p>
                 <p className="truncate text-xs text-muted-foreground">{card.artist}</p>
               </div>
+              {!revealed && <CardGrip className={lifted ? "text-[#1DB954]" : "text-[#666]"} />}
               {revealed && view.reveal && (
                 <span className="flex shrink-0 flex-col items-end">
                   <span className="text-xl font-bold text-[#1DB954]">{view.reveal.years[id]}</span>

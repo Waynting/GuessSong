@@ -117,6 +117,27 @@ describe("parsePulse — the mixed sub-mode", () => {
   });
 });
 
+describe("parsePulse — which starter list (2026-11-10)", () => {
+  it("keeps a declared key, drops an undeclared one, and leaves a body without one unchanged", () => {
+    for (const starter of ["party_hits", "reggaeton", "decades"] as const) {
+      expect(parsePulse({ kind: "game_started", hostGameIndex: 2, source: "recent", starter })).toEqual({
+        kind: "game_started",
+        hostGameIndex: 2,
+        source: "recent",
+        starter,
+      });
+    }
+    // `host_setup_starter:${value}` is a key; most games carry none.
+    for (const bad of ["Decades", "0RRc1JAhWKFm7QSWGiI5y8", "", "__proto__", 1, null, {}, ["decades"]]) {
+      const parsed = parsePulse({ kind: "game_started", hostGameIndex: 1, starter: bad });
+      expect(parsed, String(bad)).toEqual({ kind: "game_started", hostGameIndex: 1 });
+      expect(parsed && "starter" in parsed, String(bad)).toBe(false);
+    }
+    const plain = parsePulse({ kind: "game_started", hostGameIndex: 1 });
+    expect(plain).toEqual({ kind: "game_started", hostGameIndex: 1 });
+  });
+});
+
 describe("parsePulse — the setup source", () => {
   it("accepts every declared source", () => {
     for (const source of SETUP_SOURCES) {
@@ -656,7 +677,7 @@ describe("the route records every kind the parser accepts", () => {
     // The mode rides to all three game recorders, or the KV rows read as
     // "no mode was ever sent".
     expect(route).toMatch(
-      /recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source, event\.mode, event\.players, event\.from\)/
+      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,\s*players: event\.players,\s*from: event\.from,\s*starter: event\.starter,\s*\}\)/
     );
     expect(route).toMatch(
       /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored, event\.arranged\)/

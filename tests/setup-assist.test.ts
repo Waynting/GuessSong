@@ -57,7 +57,7 @@ describe("reportGameStart carries the setup source", () => {
   it("sends it beside the index, and the server reads it back as the same source", () => {
     for (const source of SETUP_SOURCES) {
       pulse.sent = [];
-      reportGameStart(2, undefined, source);
+      reportGameStart(2, { source });
       expect(pulse.sent).toEqual([{ kind: "game_started", hostGameIndex: 2, source }]);
       // Through a JSON round trip, which is what the beacon is.
       expect(parsePulse(JSON.parse(JSON.stringify(pulse.sent[0])))).toEqual({
@@ -69,7 +69,7 @@ describe("reportGameStart carries the setup source", () => {
   });
 
   it("sends a mixed game's sub-mode and source together", () => {
-    reportGameStart(1, "room", "mixed");
+    reportGameStart(1, { mixed: "room", source: "mixed" });
     expect(pulse.sent).toEqual([{ kind: "game_started", hostGameIndex: 1, mixed: "room", source: "mixed" }]);
   });
 
@@ -78,8 +78,16 @@ describe("reportGameStart carries the setup source", () => {
     expect(pulse.sent).toEqual([{ kind: "game_started", hostGameIndex: 4 }]);
     expect(Object.keys(pulse.sent[0] as object)).toEqual(["kind", "hostGameIndex"]);
     pulse.sent = [];
-    reportGameStart(4, "phone");
+    reportGameStart(4, { mixed: "phone" });
     expect(pulse.sent).toEqual([{ kind: "game_started", hostGameIndex: 4, mixed: "phone" }]);
+  });
+
+  it("carries which starter list was played, when the setup page found one", () => {
+    reportGameStart(3, { source: "restored", mode: "order", players: "p1", starter: "decades" });
+    expect(pulse.sent).toEqual([
+      { kind: "game_started", hostGameIndex: 3, source: "restored", mode: "order", players: "p1", starter: "decades" },
+    ]);
+    expect(parsePulse(JSON.parse(JSON.stringify(pulse.sent[0])))).toMatchObject({ starter: "decades" });
   });
 });
 
@@ -256,8 +264,23 @@ describe("the setup source follows the link into the field", () => {
   });
 
   it("names the chip it came from", () => {
-    expect(body).toMatch(/onPick=\{\(playlist\) => pickPlaylist\(playlist\.id, "recent"\)\}/);
+    // One row under the field holds recents and, in the order style, the
+    // order starter; the pick names its source by which list the chip was
+    // in (lib/starter-playlists.ts, fieldChipRow). Under a refusal the
+    // starters stand alone and say so.
+    expect(body).toMatch(
+      /pickPlaylist\(playlist\.id, fieldRow\.starterIds\.has\(playlist\.id\) \? "starter" : "recent"\)/
+    );
     expect(body).toMatch(/onPick=\{\(playlist\) => pickPlaylist\(playlist\.id, "starter"\)\}/);
+  });
+
+  it("derives which starter list was played at the start, from the field, on a single-playlist start only", () => {
+    // By any route — a recent chip or a restored link whose id is one of
+    // ours — and never on a Mixed start, whose form can still hold one.
+    expect(body).toMatch(/const starter = mixed === undefined \? starterKeyForId\(currentPlaylistId\) : null;/);
+    expect(body).toMatch(/\.\.\.\(starter \? \{ starter \} : \{\}\),/);
+    expect(body).toMatch(/\.\.\.\(starter \? \{ starter_key: starter \} : \{\}\),/);
+    expect(body).not.toMatch(/starterKey\b.*useState|setStarterKey/);
   });
 
   it("is derived once, and reaches the start beacon, GA4 and the stored game", () => {
@@ -267,7 +290,7 @@ describe("the setup source follows the link into the field", () => {
     expect(body).toMatch(/const setupSource = setupSourceFor\(Boolean\(mixed\)\);/);
     expect(body.match(/setupSource: setupSourceFor\(true\),/g) ?? []).toHaveLength(2);
     expect(body.match(/setupSource: setupSourceFor\(false\),/g) ?? []).toHaveLength(1);
-    expect(body).toMatch(/reportGameStart\(hostGameIndex, mixed, setupSource, mode, /);
+    expect(body).toMatch(/reportGameStart\(hostGameIndex, \{\s*mixed,\s*source: setupSource,\s*mode,/);
     expect(body).toMatch(/setup_source: setupSource,/);
     // The three callers still say only which mixed route it was — and,
     // since 1.21.0, which game: the mode the payload is stored with, passed
@@ -281,7 +304,7 @@ describe("the setup source follows the link into the field", () => {
   it("types the GA4 param as the same closed union, and the route hands the source on", () => {
     expect(code(read("lib/analytics.ts"))).toMatch(/setup_source\?: SetupSource;/);
     expect(code(read("app/api/pulse/route.ts"))).toMatch(
-      /recordGameStart\(event\.hostGameIndex, event\.mixed, event\.source, event\.mode[,)]/
+      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,/
     );
   });
 });
@@ -350,9 +373,12 @@ describe("the chips", () => {
       body.indexOf('{setupMode === "single" && ('),
       body.indexOf('{setupMode === "mixed" && mixedSubMode === "phone" && (')
     );
-    expect(single).toMatch(/<PlaylistChips\s+label="Recent"\s+playlists=\{recentPlaylists\}/);
+    // One instance, fed by fieldChipRow: the recents, and in the order
+    // style the order starter beside them (two instances were two rows).
+    expect(single).toMatch(/<PlaylistChips\s+label=\{fieldRow\.label\}\s+caption=\{fieldRow\.caption \?\? undefined\}\s+playlists=\{fieldRow\.playlists\}/);
     expect(single.indexOf("<PlaylistChips")).toBeGreaterThan(single.indexOf('className={`url-input'));
-    expect(positions(body, 'label="Recent"')).toHaveLength(1);
+    expect(body).toMatch(/const fieldRow = fieldChipRow\(recentPlaylists, styleStarters, starterPlace\);/);
+    expect(positions(body, "fieldChipRow(")).toHaveLength(1);
   });
 
   it("lights the chip whose playlist is in the field", () => {
@@ -381,10 +407,13 @@ describe("the chips", () => {
   });
 
   it("offers the starters in one of two places, and only through starterPlacement", () => {
-    expect(body).toMatch(/\{starterPlace === "field" && starterChips\}/);
+    // Under the field through fieldChipRow (above); under a refusal alone.
     expect(body).toMatch(/\{starterPlace === "refusal" && starterChips\}/);
-    expect(positions(body, "starterChips}")).toHaveLength(2);
-    expect(positions(body, "STARTER_PLAYLISTS")).toHaveLength(2); // the import, and the one list of chips
+    expect(positions(body, "starterChips}")).toHaveLength(1);
+    // This style's list only — the order game never offers the guess lists.
+    expect(body).toMatch(/const styleStarters = startersFor\(playStyle\);/);
+    expect(body).toMatch(/starters: styleStarters,\s*playStyle,/);
+    expect(body).not.toMatch(/STARTER_PLAYLISTS/);
     expect(body).toMatch(/failureCode: failure\?\.code \?\? null,/);
     expect(body).toMatch(/recentCount: recentPlaylists\.length,/);
     // Under the box means after it.
