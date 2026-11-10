@@ -50,6 +50,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and an artist game's played-out rate not below `party`'s 25.9%; below it,
   the lift is reverted to a refusal with an honest sentence. A payload stored
   before this deploy has no kind and reads as a playlist.
+### Changed
+
+- **The wrong-link sentences name all three playable kinds.** `invalid_playlist_url`
+  reads "playlist, album or artist link" and `playlist_link_spotify_other`
+  "not a playlist, album or artist", in both languages; the `wrong_link` help
+  step says "or the artist's page". `playlist_invalid:<kind>` loses `artist`
+  (its place is `playlist_artist:loaded`), `PLAYLIST_REFUSAL_CODES` gains
+  `artist_not_found`, and `ShareType` loses `artist`. A new env var,
+  `SPOTIFY_DEFAULT_MARKET`, is documented in `.env.example`, the README,
+  `docs/operations.md` and CLAUDE.md.
+## [1.23.0] - 2026-11-10
+
+### Added
+
 - **The order game has its own starter list, and the chip reaches the host
   it is for** (`startersFor`, `starterKey`, `starterKeyForId`, `fieldChipRow`
   in `lib/starter-playlists.ts`; `host_setup_starter:<key>`). The starter row
@@ -229,14 +243,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The wrong-link sentences name all three playable kinds.** `invalid_playlist_url`
-  reads "playlist, album or artist link" and `playlist_link_spotify_other`
-  "not a playlist, album or artist", in both languages; the `wrong_link` help
-  step says "or the artist's page". `playlist_invalid:<kind>` loses `artist`
-  (its place is `playlist_artist:loaded`), `PLAYLIST_REFUSAL_CODES` gains
-  `artist_not_found`, and `ShareType` loses `artist`. A new env var,
-  `SPOTIFY_DEFAULT_MARKET`, is documented in `.env.example`, the README,
-  `docs/operations.md` and CLAUDE.md.
 - **The order game's deal prefers a gap between the years**
   (`ORDER_PREFERRED_YEAR_GAP = 3`, `buildOrderRounds(tracks, size,
   preferredGap)` in `lib/order-game.ts`). 41.1% of revealed order rounds in
