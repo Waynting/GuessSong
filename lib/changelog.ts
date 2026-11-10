@@ -54,6 +54,54 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.23.0",
+    date: "2026-11-10",
+    headline: "Playing alone gets its own playlist and a first round that shows you the move; wrong links say what they are.",
+    headlineZh: "一個人玩有了自己的歌單，第一回合會直接示範怎麼動；貼錯連結時會告訴你那是什麼。",
+    changes: [
+      {
+        kind: "new",
+        text: "Just me offers a playlist made for putting songs in order — Hits from every decade, 1960s to now — right beside the playlists you played before.",
+        textZh: "「只有我」會提供一個專門為排順序準備的歌單：Hits from every decade，從 1960 年代到現在的名曲，就放在你玩過的歌單旁邊。",
+      },
+      {
+        kind: "better",
+        text: "The order game's first round shows you the move: every card has a grip, the bottom card lifts toward the top until you drag one, and the Reveal button waits with a green outline until you have. Reveal without moving anything and it tells you what you skipped.",
+        textZh: "排順序的第一回合會示範怎麼玩：每張卡片都有拖曳把手，最下面那張會往上抬一下，直到你動了卡片為止；揭曉按鈕也會先只顯示綠色外框，等你拖過才變實心。什麼都沒動就揭曉，它會告訴你漏了什麼。",
+      },
+      {
+        kind: "better",
+        text: "The cards in a round are dealt with their years further apart when the playlist allows, so 2019 against 2021 against 2022 comes up less often.",
+        textZh: "同一回合的卡片會盡量發得年份差遠一點（歌單允許的話），2019、2021、2022 擠在一起的情況會少很多。",
+      },
+      {
+        kind: "better",
+        text: "The Just me tile says what you get: four songs, oldest to newest, no sound, scored for you.",
+        textZh: "「只有我」的說明寫清楚了：四首歌照年份排、沒有聲音、自動計分。",
+      },
+      {
+        kind: "better",
+        text: "Paste a Spotify link that isn't a playlist or album — your profile, Liked Songs, a podcast — and the message says so and what to paste instead, rather than calling it not a Spotify link.",
+        textZh: "貼了不是歌單或專輯的 Spotify 連結（個人頁面、已按讚的歌曲、Podcast），訊息會直接說明並告訴你該貼什麼，而不是說它不像 Spotify 連結。",
+      },
+      {
+        kind: "better",
+        text: "Taste Quiz: when a playlist only had enough different songs for a shorter quiz than you picked, the panel says so.",
+        textZh: "品味鑒定：歌單的不同歌曲不夠出你選的題數時，面板會直接說明做成了幾題、為什麼。",
+      },
+      {
+        kind: "new",
+        text: "For a group, the buzzer is offered right under the names — Everyone has a phone? Buzz in from them — and a desktop Game Over with two or more players shows the Mixed Playlist link beside the QR code.",
+        textZh: "一群人玩的時候，名字欄下面會直接提供搶答模式（每個人都有手機？用手機搶答），電腦上的結算畫面在兩人以上時也會在 QR code 旁邊顯示混合歌單的連結。",
+      },
+      {
+        kind: "better",
+        text: "The setup page is shorter: the hint about Mixed Playlist Mode that used to appear under three names is gone, because the Everyone's playlists tile already does that job.",
+        textZh: "設定頁變短了：輸入三個名字後出現的混合歌單提示拿掉了，「每個人的歌單」那個選項已經做了同樣的事。",
+      },
+    ],
+  },
+  {
     version: "1.22.0",
     date: "2026-10-26",
     headline: "Album links play, the order game works on everyone's phone, and the setup page asks who's playing.",
