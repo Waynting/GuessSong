@@ -117,6 +117,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leave and End Game each carry `arranged` true after one arrow-key move and
   false untouched.
 
+### Changed
+
+- **The order game's deal prefers a gap between the years**
+  (`ORDER_PREFERRED_YEAR_GAP = 3`, `buildOrderRounds(tracks, size,
+  preferredGap)` in `lib/order-game.ts`). 41.1% of revealed order rounds in
+  the ten days to 2026-11-10 scored nobody, and 70% of the rounds left as
+  dealt did — 2019 against 2021 against 2022 is not a question a stranger to
+  the playlist can answer. The deal now tries rounds whose years are pairwise
+  three apart, then two, then merely distinct (the deal as it was), and takes
+  the widest gap whose **whole deal** gives nothing up: at least as many
+  rounds, as many full rounds and as many cards as the distinct-years deal. A
+  whole-deal ladder, not a per-round one (design review F15), and the
+  full-round count is in the comparison because seven consecutive years
+  ladder into rounds of three at gap 3 — more rounds, smaller ones — and
+  `ORDER_ROUND_SIZE` is a decision. Deterministic over the stored array, so
+  a reload deals the same game; `usableOrderTracks` and `orderRefusal` are
+  unchanged, so every list that dealt before deals the same number of rounds
+  or more. `tests/order-game.test.ts` pins the ladder's top equals the
+  constant, the whole-deal fixture, the consecutive-years fallback, a
+  17-year/50-song fixture (gap 2 wins there — the written expectation for
+  the read), and a 300-list property check. The leftover line now says "too
+  close in year", the same year being the special case. Read: `order_round`
+  nobody share against 41.1% and full-order share against 36.0%, for three
+  days before the first-screen work ships.
+
 ### Removed
 
 - **The Mixed nudge** (`lib/mixed-nudge.ts`, `mixed_nudge:*`, the
