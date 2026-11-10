@@ -416,6 +416,19 @@ for each:
   `releaseYear` refuses anything before `ORDER_MIN_YEAR` (Spotify sends
   `0000` for some local files) and reads the year only, because Spotify's
   precision is often `year`.
+- **The deal prefers a gap between the years, and the ladder is a
+  whole-deal one.** `buildOrderRounds(tracks, size, preferredGap =
+  ORDER_PREFERRED_YEAR_GAP)` tries rounds pairwise `preferredGap` years
+  apart, then one less, down to distinct years, and takes the widest gap
+  whose complete deal has at least as many rounds, as many full rounds and
+  as many cards as the distinct-years deal. Three things must not drift: the
+  comparison is over the whole deal (a per-round ladder deals a different
+  game on a mixed list and makes the `order_round` read ambiguous); the
+  full-round count is in it (seven consecutive years ladder into rounds of
+  three at gap 3, and `ORDER_ROUND_SIZE` is a decision); and the constant is
+  the knob — a literal 3/2/1 would make it decorative. On a 17-year list
+  gap 3 mostly falls through to 2, which the read must not mistake for "no
+  effect". `tests/order-game.test.ts` pins all three.
 - **`releaseDate` reached `Track` one release before the mode, and
   `CACHE_VERSION` in `lib/playlist-cache.ts` stayed at `v1`.** A bump would
   have turned ~2,900 warm hits a day into cold loads against a 2,000-a-day

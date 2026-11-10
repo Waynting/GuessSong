@@ -28,6 +28,15 @@
  *   cannot see is a point taken away for a reason nobody can explain.
  *   `buildOrderRounds` deals greedily and defers a same-year track to a later
  *   round — the `poolContributions` pattern in `lib/mixed-playlist.ts`.
+ * - **The deal prefers a gap between the years, when the list allows it.**
+ *   41.1% of revealed rounds in the ten days to 2026-11-10 scored nobody, and
+ *   70% of the rounds left as dealt did: 2019 against 2021 against 2022 is
+ *   not a question a stranger to the playlist can answer. So the deal first
+ *   tries rounds whose years are pairwise `ORDER_PREFERRED_YEAR_GAP` apart,
+ *   then one less, down to merely distinct — and takes the widest gap whose
+ *   whole deal gives up nothing: as many rounds, as many full rounds and as
+ *   many cards as the distinct-years deal. A playlist of consecutive years
+ *   deals exactly as it did before.
  * - **A short last round is kept down to two cards.** Two songs is still a
  *   question ("which is older?"); one is not. A playlist whose songs share a
  *   year yields fewer rounds than songs, and the page says how many were left
@@ -75,6 +84,15 @@ export const ORDER_ROUND_SIZE = 4;
 
 /** The fewest cards a round is worth playing with. */
 export const ORDER_MIN_ROUND_SIZE = 2;
+
+/**
+ * How far apart, in years, the deal tries to keep the cards of one round
+ * before it settles for less. Three: a decade is too much to ask of a 2010s
+ * playlist, two is 2019 against 2021 — the pairs that score nobody. The knob
+ * `buildOrderRounds` ladders down from; `order_round:<verdict>` is what says
+ * whether it is right (above ~60% full order it comes down).
+ */
+export const ORDER_PREFERRED_YEAR_GAP = 3;
 
 export const ORDER_EXACT_POINTS = 3;
 export const ORDER_OLDEST_POINTS = 1;
@@ -152,51 +170,101 @@ export interface OrderRound<T = Track> {
 }
 
 /**
- * Deal `tracks` into rounds of `size` cards with distinct years, in the order
- * given — so the caller's shuffle is the only randomness, and a reload that
- * reads the same stored list deals the same game.
+ * One deal of an already-usable pool: rounds of up to `size` cards whose
+ * years are pairwise at least `minGap` apart, in the order given. `minGap`
+ * of 1 is "distinct years" — the deal as it was before 2026-11-10.
  *
- * Greedy with deferral: each pass takes the first track of every year it has
- * not seen until the round is full, and what it passed over starts the next
- * round. The passes get shorter as the years run out, so the short round, if
- * there is one, is the last. `leftover` is every track that was not dealt —
- * no date, or a year every remaining card already had — and the page prints
- * it, because a 20-song game that turns out to be three rounds should say so.
+ * Greedy with deferral: each pass takes the first track whose year is far
+ * enough from every year already in the round until the round is full, and
+ * what it passed over starts the next round. The passes get shorter as the
+ * years run out, so the short round, if there is one, is the last.
+ * `stranded` is every track the gap left undealt.
  */
-export function buildOrderRounds<T extends Pick<Track, "releaseDate" | "albumCompilation">>(
-  tracks: readonly T[],
-  size: number = ORDER_ROUND_SIZE
-): { rounds: OrderRound<T>[]; leftover: number } {
+function dealRounds<T extends Pick<Track, "releaseDate">>(
+  usable: readonly T[],
+  size: number,
+  minGap: number
+): { rounds: OrderRound<T>[]; stranded: number } {
   const rounds: OrderRound<T>[] = [];
-  let pool = usableOrderTracks(tracks);
-  let leftover = tracks.length - pool.length;
+  let pool: readonly T[] = usable;
+  let stranded = 0;
 
   for (;;) {
     if (pool.length < ORDER_MIN_ROUND_SIZE) {
-      leftover += pool.length;
+      stranded += pool.length;
       break;
     }
     const round: T[] = [];
-    const years = new Set<number>();
+    const years: number[] = [];
     const rest: T[] = [];
     for (const track of pool) {
       const year = releaseYear(track) as number;
-      if (round.length < size && !years.has(year)) {
+      if (round.length < size && years.every((y) => Math.abs(y - year) >= minGap)) {
         round.push(track);
-        years.add(year);
+        years.push(year);
       } else {
         rest.push(track);
       }
     }
     if (round.length < ORDER_MIN_ROUND_SIZE) {
-      leftover += pool.length;
+      stranded += pool.length;
       break;
     }
     rounds.push({ tracks: round });
     pool = rest;
   }
 
-  return { rounds, leftover };
+  return { rounds, stranded };
+}
+
+/** What a deal is measured by, when two are compared: rounds, full rounds, cards dealt. */
+function dealSize(deal: { rounds: OrderRound<unknown>[] }, size: number): [number, number, number] {
+  const cards = deal.rounds.reduce((n, r) => n + r.tracks.length, 0);
+  const full = deal.rounds.filter((r) => r.tracks.length >= size).length;
+  return [deal.rounds.length, full, cards];
+}
+
+/**
+ * Deal `tracks` into rounds of `size` cards, in the order given — so the
+ * caller's shuffle is the only randomness, and a reload that reads the same
+ * stored list deals the same game.
+ *
+ * The deal prefers a gap between the years: it tries `preferredGap`, then one
+ * less, down to 1 (distinct years, the deal before 2026-11-10), and takes the
+ * **first whole deal that gives up nothing** against the distinct-years deal —
+ * at least as many rounds, at least as many full rounds, at least as many
+ * cards. A whole-deal ladder, not a per-round one: gap 3 for this round and
+ * gap 2 for the next would deal a different game on a mixed list and make
+ * the `order_round` read ambiguous. The full-round count is in the comparison
+ * because a wider gap can deal *more* rounds of *fewer* cards — seven
+ * consecutive years ladder into rounds of three at gap 3 — and
+ * `ORDER_ROUND_SIZE` is a decision, not a ceiling to be eaten by a gap.
+ *
+ * `leftover` is every track that was not dealt — no date, a compilation, or
+ * a year too close to every other remaining card — and the page prints it,
+ * because a 20-song game that turns out to be three rounds should say so. A
+ * gapped deal never raises it: it is taken only when it deals at least as
+ * many cards.
+ */
+export function buildOrderRounds<T extends Pick<Track, "releaseDate" | "albumCompilation">>(
+  tracks: readonly T[],
+  size: number = ORDER_ROUND_SIZE,
+  preferredGap: number = ORDER_PREFERRED_YEAR_GAP
+): { rounds: OrderRound<T>[]; leftover: number } {
+  const usable = usableOrderTracks(tracks);
+  const undealable = tracks.length - usable.length;
+  const base = dealRounds(usable, size, 1);
+  const floor = dealSize(base, size);
+  const top = Number.isFinite(preferredGap) ? Math.trunc(preferredGap) : 1;
+
+  for (let gap = top; gap > 1; gap--) {
+    const gapped = dealRounds(usable, size, gap);
+    const measure = dealSize(gapped, size);
+    if (measure.every((n, i) => n >= floor[i])) {
+      return { rounds: gapped.rounds, leftover: undealable + gapped.stranded };
+    }
+  }
+  return { rounds: base.rounds, leftover: undealable + base.stranded };
 }
 
 /** The round's cards oldest first. Distinct by construction, so the sort is total. */
@@ -248,8 +316,8 @@ export function orderSummary(songCount: number | "all"): string {
 export function orderLeftoverLine(leftover: number): string | null {
   if (!Number.isInteger(leftover) || leftover <= 0) return null;
   return leftover === 1
-    ? "1 song left out — no release year, or the same year as every other card"
-    : `${leftover} songs left out — no release year, or the same year as every other card`;
+    ? "1 song left out — no release year, or too close in year to every other card"
+    : `${leftover} songs left out — no release year, or too close in year to every other card`;
 }
 
 /**
