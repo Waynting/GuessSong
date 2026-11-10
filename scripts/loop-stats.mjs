@@ -797,6 +797,49 @@ if (crossCols.length > 0) {
   );
 }
 
+/**
+ * The album and artist lifts, read by how their games ended: `game_kind:<kind>`
+ * on the start (the denominator), `game_end_kind:<kind>:<end>` and
+ * `game_left_kind:<kind>:<band>` on the beacons, written only when the link
+ * was not a playlist (CROSSED_PLAYLIST_KINDS in lib/loop-stats.ts) — a
+ * playlist's games are the tables above, the baseline. Bar for the artist
+ * lift, set before it shipped: `playlist_artist:loaded` ≥ 25/day and an
+ * artist game's played-out rate not below `party`'s; below it, the lift is
+ * reverted to a refusal with an honest sentence. Read with `--since` the
+ * deploy day.
+ */
+const KIND_ORDER = ["album", "artist"];
+const kindCols = KIND_ORDER.filter((kind) =>
+  [...totals.keys()].some(
+    (k) =>
+      k === `game_kind:${kind}` ||
+      k.startsWith(`game_end_kind:${kind}:`) ||
+      k.startsWith(`game_left_kind:${kind}:`)
+  )
+);
+if (kindCols.length > 0) {
+  const started = kindCols.map((k) => get(`game_kind:${k}`));
+  const playedOut = kindCols.map((k) => get(`game_end_kind:${k}:played_out`));
+  const endedEarly = kindCols.map((k) => get(`game_end_kind:${k}:ended_early`));
+  const leftBands = earlyBands.map(([band]) => kindCols.map((k) => get(`game_left_kind:${k}:${band}`)));
+  const left = kindCols.map((_, i) => leftBands.reduce((t, row) => t + row[i], 0));
+  const leftEarly = kindCols.map((_, i) => leftBands[0][i] + leftBands[1][i]);
+  console.log("\nHow games ended, by what the link was (playlists are the tables above)");
+  console.log(sourceRow("", kindCols));
+  console.log(sourceRow("started", started));
+  console.log(sourceRow("played out", playedOut));
+  console.log(sourceRow("ended early", endedEarly));
+  console.log(sourceRow("left mid-game", left));
+  earlyBands.forEach(([, label], i) => console.log(sourceRow(`  ${label}`, leftBands[i])));
+  console.log(sourcePctRow("played out, % of started", playedOut, started));
+  console.log(sourcePctRow("left by round 2, %", leftEarly, started));
+  console.log(
+    "  how to read it: set an artist game's played-out beside `party`'s above; the bar\n" +
+      "  is 25 played a day and a rate no lower. An album's games were unreadable before\n" +
+      "  this table; its ten-song games end early by construction, so read rounds, not ends."
+  );
+}
+
 const scoredCols = [
   ["scored", "scored"],
   ["unscored", "no points"],
@@ -1388,6 +1431,10 @@ const RENDERED_PREFIXES = [
   "playlist_refused:",
   "playlist_invalid:",
   "playlist_album:",
+  "playlist_artist:",
+  "game_kind:",
+  "game_end_kind:",
+  "game_left_kind:",
   "playlist_shortlink:",
   "playlist_recheck:",
   "playlist_autocheck:",
@@ -1564,6 +1611,7 @@ const REFUSAL_LABELS = {
   playlist_empty: "empty",
   invalid_playlist_url: "not a playlist URL",
   album_not_found: "album not on Spotify",
+  artist_not_found: "artist not on Spotify",
 };
 const refusals = [...totals.keys()]
   .filter((m) => m.startsWith("playlist_refused:"))
@@ -1585,7 +1633,6 @@ if (refusals.length > 0) {
   // every non-Spotify paste, so a window across it reads `other` by the day.
   const invalidKinds = [
     ["track", "track"],
-    ["artist", "artist"],
     ["shortlink", "dead short link"],
     ["spotify_playlist_malformed", "a cut-off playlist link"],
     ["spotify_album_malformed", "a cut-off album link"],
@@ -1602,6 +1649,8 @@ if (refusals.length > 0) {
   // before still hold the key, and it is the number the line below is read
   // against, so it is read here by name for as long as the window has it.
   const albumsRefusedBefore = get("playlist_invalid:album");
+  // And `artist` on 2026-11-10, for the same reason: artist pages load now.
+  const artistsRefusedBefore = get("playlist_invalid:artist");
   const invalidTotal = invalidKinds.reduce((t, [k]) => t + get(`playlist_invalid:${k}`), 0);
   if (invalidTotal > 0) {
     const split = invalidKinds.map(([k, label]) => `${label} ${get(`playlist_invalid:${k}`)}`).join(" · ");
@@ -1613,7 +1662,8 @@ if (refusals.length > 0) {
         "  a reason to open that work. Before 2026-11-10 `not a link` held anything\n" +
         "  that was not a Spotify link."
     );
-    const unsplit = get("playlist_refused:invalid_playlist_url") - invalidTotal - albumsRefusedBefore;
+    const unsplit =
+      get("playlist_refused:invalid_playlist_url") - invalidTotal - albumsRefusedBefore - artistsRefusedBefore;
     if (unsplit > 0) {
       console.log(`  (${unsplit} more were refused before the split was counted)`);
     }
@@ -1630,6 +1680,24 @@ if (refusals.length > 0) {
       `  album links: played ${albumsLoaded} · not on Spotify ${albumsMissing}` +
         (albumsRefusedBefore > 0
           ? ` · refused before albums could play ${albumsRefusedBefore} (days before 2026-10-25)`
+          : "")
+    );
+  }
+  // Artist links, the album's shape one lift on (2026-11-10): the four
+  // outcomes an artist link has, so the line sums like the album's. `empty`
+  // is also inside `playlist_empty` above — an artist Spotify lists nothing
+  // for in the host's market — and `not on Spotify` is the dead id. A jump in
+  // the latter across many ids is the endpoint, not the links (a 404 is
+  // cached as deterministic); docs/operations.md.
+  const artistsLoaded = get("playlist_artist:loaded");
+  const artistsEmpty = get("playlist_artist:empty");
+  const artistsMissing = get("playlist_refused:artist_not_found");
+  if (artistsLoaded + artistsEmpty + artistsMissing + artistsRefusedBefore > 0) {
+    console.log(
+      `  artist links: played ${artistsLoaded} · no songs in that market ${artistsEmpty}` +
+        ` · not on Spotify ${artistsMissing}` +
+        (artistsRefusedBefore > 0
+          ? ` · refused before artists could play ${artistsRefusedBefore} (days before 2026-11-10)`
           : "")
     );
   }

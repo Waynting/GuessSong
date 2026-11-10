@@ -42,7 +42,7 @@ describe("the pages send both, on every path", () => {
     expect(body).toMatch(/recordHostedStart\("room", gameMode\(Boolean\(room\)\), data\.players\.length\)/);
     expect(body).toMatch(/recordHostedStart\("phone", gameMode\(Boolean\(room\)\), mixedContributions\.length\)/);
     expect(body).toMatch(
-      /recordHostedStart\(\s*undefined,\s*gameMode\(Boolean\(room\)\),\s*room \? buzzerPlayerCount \+ 1 : validPlayers\.length\s*\)/
+      /recordHostedStart\(\s*undefined,\s*gameMode\(Boolean\(room\)\),\s*room \? buzzerPlayerCount \+ 1 : validPlayers\.length,\s*playlistKind\s*\)/
     );
     expect(body.match(/\.\.\.recordHostedStart\(/g)).toHaveLength(3);
   });
@@ -52,9 +52,10 @@ describe("the pages send both, on every path", () => {
       const body = code(read(page));
       expect(body).toMatch(/players: playerBand\(players\.length\),\s*scored: gameScored\(players\),/);
       // The order page sends one more field after the score — whether a card
-      // had been moved, for the round-zero split (`order_bounce`).
+      // had been moved, for the round-zero split (`order_bounce`) — and both
+      // pages send what the link was last (`game_left_kind`, 2026-11-10).
       expect(body).toMatch(
-        /playerBand\(playersRef\.current\.length\),\s*gameScored\(playersRef\.current\)(?:,\s*arranged)?\s*\)/
+        /playerBand\(playersRef\.current\.length\),\s*gameScored\(playersRef\.current\),\s*(?:arranged|undefined),\s*playlistKindRef\.current\s*\)/
       );
       expect(body).toMatch(/playersRef\.current = players;/);
     });

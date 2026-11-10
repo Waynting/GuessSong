@@ -50,6 +50,10 @@ const {
   PLAYLIST_REFUSAL_CODES,
   PLAYLIST_INVALID_KINDS,
   PLAYLIST_ALBUM_OUTCOMES,
+  CROSSED_PLAYLIST_KINDS,
+  recordPlaylistKindLoaded,
+  recordPlaylistArtist,
+  PLAYLIST_ARTIST_OUTCOMES,
   recordPlaylistAlbum,
   SHORTLINK_OUTCOMES,
   PLAYLIST_RECHECK_OUTCOMES,
@@ -780,7 +784,7 @@ describe("playlist refusals and quiz shares", () => {
     const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
     expect(PLAYLIST_INVALID_KINDS).toEqual([
       "track",
-      "artist",
+      // `artist` left on 2026-11-10: an artist page plays as its top ten.
       "shortlink",
       // The classifier's `unknown`, split since 2026-11-10 (lib/spotify-link.ts).
       "spotify_playlist_malformed",
@@ -801,6 +805,7 @@ describe("playlist refusals and quiz shares", () => {
       "playlist_empty",
       "invalid_playlist_url",
       "album_not_found",
+      "artist_not_found",
     ]);
 
     for (const kind of PLAYLIST_INVALID_KINDS) {
@@ -817,9 +822,10 @@ describe("playlist refusals and quiz shares", () => {
   });
 
   it("refuses an undeclared kind outright — no part, and no total without its part", async () => {
-    // `album` is undeclared now: an album loads, and a writer that still
-    // sent it would put a refusal on a series that measured the demand.
-    for (const kind of ["playlist", "album", "episode", "", "album:x", "__proto__"]) {
+    // `album` is undeclared now, and `artist` since 2026-11-10: both load, and
+    // a writer that still sent one would put a refusal on a series that
+    // measured the demand.
+    for (const kind of ["playlist", "album", "artist", "episode", "", "album:x", "__proto__"]) {
       kv.incrs = [];
       await recordPlaylistInvalid(kind as never);
       expect(kv.incrs).toEqual([]);
@@ -842,6 +848,62 @@ describe("playlist refusals and quiz shares", () => {
     kv.incrs = [];
     await recordPlaylistRefused("album_not_found");
     expect(keysWritten()).toContain(keys.playlistRefused.album_not_found);
+  });
+
+  it("counts an artist link both ways up, from a closed set, like the album (2026-11-10)", async () => {
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    expect(PLAYLIST_ARTIST_OUTCOMES).toEqual(["loaded", "empty"]);
+    for (const outcome of PLAYLIST_ARTIST_OUTCOMES) {
+      expect(keys.playlistArtist[outcome]).toBe(`loop:stats:2026-08-09:playlist_artist:${outcome}`);
+      kv.incrs = [];
+      await recordPlaylistArtist(outcome);
+      expect(keysWritten()).toContain(keys.playlistArtist[outcome]);
+    }
+    kv.incrs = [];
+    await recordPlaylistArtist("missing" as never);
+    expect(kv.incrs).toEqual([]);
+    kv.incrs = [];
+    await recordPlaylistRefused("artist_not_found");
+    expect(keysWritten()).toContain(keys.playlistRefused.artist_not_found);
+    // The one call `loadPlaylist` makes for either lift.
+    kv.incrs = [];
+    await recordPlaylistKindLoaded("album");
+    expect(keysWritten()).toContain(keys.playlistAlbum.loaded);
+    kv.incrs = [];
+    await recordPlaylistKindLoaded("artist");
+    expect(keysWritten()).toContain(keys.playlistArtist.loaded);
+    kv.incrs = [];
+    await recordPlaylistKindLoaded("playlist" as never);
+    expect(kv.incrs).toEqual([]);
+  });
+
+  it("crosses a game with what its link was — for an album or an artist only, never a playlist", async () => {
+    // ~300 commands a day for the ~3% of games the lifts are, not the ~9k a
+    // per-game cross would cost; a playlist's games are the existing tables.
+    const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+    expect(CROSSED_PLAYLIST_KINDS).toEqual(["album", "artist"]);
+    for (const kind of CROSSED_PLAYLIST_KINDS) {
+      kv.incrs = [];
+      await recordGameStart(1, { mode: "party", playlistKind: kind });
+      expect(keysWritten()).toContain(keys.gameKind[kind]);
+      kv.incrs = [];
+      await recordGameEnd("played_out", 9, { mode: "party", playlistKind: kind });
+      expect(keysWritten()).toContain(keys.gameEndKind[kind].played_out);
+      kv.incrs = [];
+      await recordGameEnd("ended_early", 2, { playlistKind: kind });
+      expect(keysWritten()).toContain(keys.gameEndKind[kind].ended_early);
+      kv.incrs = [];
+      await recordGameLeft(1, "first", "typed", "party", "p1", "unscored", undefined, kind);
+      expect(keysWritten()).toContain(keys.gameLeftKind[kind].r1_2);
+    }
+    for (const kind of ["playlist", "Album", "show", "", undefined] as const) {
+      kv.incrs = [];
+      await recordGameStart(1, { playlistKind: kind as never });
+      await recordGameEnd("played_out", 9, { playlistKind: kind as never });
+      await recordGameLeft(1, "first", undefined, undefined, undefined, undefined, undefined, kind as never);
+      expect(keysWritten().some((k) => k.includes("_kind:")), String(kind)).toBe(false);
+      expect(keysWritten(), String(kind)).toContain(keys.games);
+    }
   });
 
   it("keys an arrival only on a device's first game, and only from the closed set", async () => {
@@ -1437,7 +1499,21 @@ describe("the digest prints what the recorders write", () => {
     const kinds = script.match(/const invalidKinds = \[([\s\S]*?)\n  \];/)?.[1] ?? "";
     for (const kind of PLAYLIST_INVALID_KINDS) expect(kinds, kind).toContain(`["${kind}",`);
     expect(kinds).not.toContain('["album",');
+    expect(kinds).not.toContain('["artist",');
     expect(script).toMatch(/get\(`playlist_invalid:\$\{k\}`\)/);
+    // The artist line, the album's shape one lift on: every outcome, the dead
+    // id, the days before artists could play, and the kind table's keys.
+    for (const outcome of PLAYLIST_ARTIST_OUTCOMES) {
+      expect(script).toMatch(new RegExp(`get\\("playlist_artist:${outcome}"\\)`));
+    }
+    expect(script).toMatch(/get\("playlist_refused:artist_not_found"\)/);
+    expect(script).toMatch(/get\("playlist_invalid:artist"\)/);
+    expect(script).toMatch(/REFUSAL_LABELS = \{[\s\S]*?artist_not_found: "/);
+    expect(script).toMatch(/get\(`game_kind:\$\{k\}`\)/);
+    expect(script).toMatch(/get\(`game_end_kind:\$\{k\}:played_out`\)/);
+    expect(script).toMatch(/get\(`game_left_kind:\$\{k\}:\$\{band\}`\)/);
+    const kindOrder = script.match(/const KIND_ORDER = \[([^\]]*)\]/)?.[1] ?? "";
+    for (const k of CROSSED_PLAYLIST_KINDS) expect(kindOrder, k).toContain(`"${k}"`);
     // The album line: both ways up, and the days before albums could play.
     for (const outcome of PLAYLIST_ALBUM_OUTCOMES) {
       expect(script).toMatch(new RegExp(`get\\("playlist_album:${outcome}"\\)`));
@@ -1613,6 +1689,10 @@ describe("the digest prints what the recorders write", () => {
       "game_over_tap:",
       "game_over_tap_screen:",
       "host_setup_starter:",
+      "playlist_artist:",
+      "game_kind:",
+      "game_end_kind:",
+      "game_left_kind:",
       "order_bounce:",
       "game_mode_players:",
       "game_end_mode_players:",

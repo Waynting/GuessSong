@@ -9,6 +9,8 @@ import {
   nameKey,
   scoreboardName,
   GAME_STORAGE_KEY,
+  PLAYLIST_KINDS,
+  isPlaylistKind,
 } from "@/lib/game-session";
 import type { Track } from "@/types";
 import { SETUP_SOURCES } from "@/lib/setup-source";
@@ -402,5 +404,36 @@ describe("one reading of a player's name", () => {
     expect(findDuplicateName(["Alex", "Sam", ""])).toBeNull();
     expect(findDuplicateName(["", "  "])).toBeNull();
     expect(nameKey("  Alex ")).toBe("alex");
+  });
+});
+
+describe("the playlist kind on the payload (2026-11-10)", () => {
+  it("carries a known kind through build and parse, and drops an unknown one rather than the game", () => {
+    const base = {
+      tracks: [],
+      players: [{ name: "A", score: 0 }],
+      playlistName: "X",
+      clipDuration: 10,
+      playlistSource: "own" as const,
+      mode: "party" as const,
+    };
+    expect(PLAYLIST_KINDS).toEqual(["playlist", "album", "artist"]);
+    for (const playlistKind of PLAYLIST_KINDS) {
+      expect(isPlaylistKind(playlistKind)).toBe(true);
+      const built = buildGamePayload({ ...base, playlistKind });
+      expect(built.playlistKind).toBe(playlistKind);
+      expect(parseGamePayload(JSON.stringify(built))?.playlistKind).toBe(playlistKind);
+    }
+    // Absent stays absent — a stored game from before the field reads as a
+    // playlist by every reader's fallback, never as a dropped payload.
+    const plain = buildGamePayload(base);
+    expect("playlistKind" in plain).toBe(false);
+    expect("playlistKind" in (parseGamePayload(JSON.stringify(plain)) ?? {})).toBe(false);
+    for (const bad of ["Album", "show", "", 1, null, {}]) {
+      expect(isPlaylistKind(bad), String(bad)).toBe(false);
+      const parsed = parseGamePayload(JSON.stringify({ ...plain, playlistKind: bad }));
+      expect(parsed, String(bad)).not.toBeNull();
+      expect("playlistKind" in (parsed ?? {}), String(bad)).toBe(false);
+    }
   });
 });

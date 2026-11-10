@@ -270,7 +270,7 @@ export function QuizCreate() {
             <input
               type="url"
               className={`url-input${isValidSpotifyUrl ? " valid" : ""}`}
-              placeholder="https://open.spotify.com/playlist/..."
+              placeholder="https://open.spotify.com/playlist/... or /album/... or /artist/..."
               value={playlistUrl}
               onChange={(e) => setPlaylistUrl(e.target.value)}
               spellCheck={false}

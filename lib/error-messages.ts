@@ -47,9 +47,8 @@ export type AppErrorCode =
   | "missing_playlist_url"
   | "playlist_url_required"
   | "invalid_playlist_url"
-  // A real Spotify link to the wrong thing — named, see their entries
+  // A real Spotify link to the wrong thing — named, see its entry
   | "playlist_link_track"
-  | "playlist_link_artist"
   // A real Spotify link to anything else — a profile, Liked Songs, a podcast
   | "playlist_link_spotify_other"
   // A short link we could not follow *this time* — retryable, see its entry
@@ -57,6 +56,9 @@ export type AppErrorCode =
   | "playlist_not_found"
   // An album link Spotify has no album for — an album cannot be private
   | "album_not_found"
+  // An artist link Spotify has no artist for, or lists nothing for in this market
+  | "artist_not_found"
+  | "artist_empty"
   | "playlist_editorial"
   | "playlist_empty"
   | "playlist_load_failed"
@@ -161,8 +163,8 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
     zh: "請貼上 Spotify 歌單連結。",
   },
   invalid_playlist_url: {
-    en: "That doesn't look like a Spotify playlist or album link.",
-    zh: "這個連結看起來不是 Spotify 歌單或專輯。",
+    en: "That doesn't look like a Spotify playlist, album or artist link.",
+    zh: "這個連結看起來不是 Spotify 歌單、專輯或歌手連結。",
   },
   /*
    * The two links that are perfectly good Spotify links to something that
@@ -183,15 +185,14 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
    * because whether albums were worth supporting was what
    * `playlist_invalid:album` in lib/loop-stats.ts was there to find out; it
    * read ~245 a week, and since 2026-10-25 an album link loads. Its refusal
-   * now is `album_not_found`, below, for an album Spotify does not have.
+   * now is `album_not_found`, below, for an album Spotify does not have. The
+   * artist sentence went the same way on 2026-11-10 (~33 a day): an artist
+   * page loads as the artist's top ten in the host's market, and what is
+   * left is `artist_not_found` and `artist_empty`, below.
    */
   playlist_link_track: {
     en: "That's a link to a single song, and GuessSong needs a whole playlist. Open a public playlist you made — or add this song to one — and paste that playlist's link instead.",
     zh: "這是單一首歌的連結，GuessSong 需要一整個歌單。請打開你自己建立的公開歌單（或把這首歌加進去），再貼上歌單的連結。",
-  },
-  playlist_link_artist: {
-    en: "That's a link to an artist's page, and GuessSong plays playlists. Add the artist's songs to a playlist of your own, make it public, and paste that playlist's link instead.",
-    zh: "這是歌手頁面的連結，GuessSong 玩的是歌單。請把這位歌手的歌加進你自己建立的歌單、設成公開，再貼上那個歌單的連結。",
   },
   /**
    * A real Spotify link to something that is neither a playlist nor an
@@ -208,8 +209,8 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
    * own or any public one, never an artist's — see above.
    */
   playlist_link_spotify_other: {
-    en: "That's a Spotify link, but not a playlist or album. Open a playlist — one of yours, or any public one — tap Share → Copy link, and paste that.",
-    zh: "這是 Spotify 的連結，但不是歌單或專輯。請打開一個歌單（你自己的或任何公開的），按「分享」→「複製連結」再貼上。",
+    en: "That's a Spotify link, but not a playlist, album or artist. Open a playlist — one of yours, or any public one — tap Share → Copy link, and paste that.",
+    zh: "這是 Spotify 的連結，但不是歌單、專輯或歌手。請打開一個歌單（你自己的或任何公開的），按「分享」→「複製連結」再貼上。",
   },
   /**
    * A short link is followed on the server, and this is the following
@@ -241,6 +242,23 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   album_not_found: {
     en: "Spotify has no album at that link. Check the link, or paste a playlist instead.",
     zh: "Spotify 上找不到這張專輯。請檢查連結，或改貼一個歌單。",
+  },
+  /**
+   * An artist page, since 2026-11-10, plays as the artist's ten most popular
+   * songs in the host's market (`getArtistTopTracks`). Two refusals of its
+   * own: Spotify has no artist at the id, and Spotify lists nothing for the
+   * artist where the host is — the second carries `params.market` so the
+   * device can say which market was resolved, and is counted as
+   * `playlist_empty` beside `playlist_artist:empty`. Neither sends anyone
+   * to "one of the artist's playlists": those are Spotify's own.
+   */
+  artist_not_found: {
+    en: "Spotify has no artist at that link. Check the link, or paste a playlist instead.",
+    zh: "Spotify 上找不到這位歌手。請檢查連結，或改貼一個歌單。",
+  },
+  artist_empty: {
+    en: "Spotify lists no songs for this artist where you are. Paste a playlist instead.",
+    zh: "Spotify 在你所在的地區沒有這位歌手的歌。請改貼一個歌單。",
   },
   playlist_editorial: {
     en: "Spotify editorial and algorithmic playlists can't be used. Please use a public playlist you created.",
@@ -830,12 +848,14 @@ const DETERMINISTIC_PLAYLIST_CODES = new Set<AppErrorCode>([
   // What the link *is*, read off the string or off where a short link leads.
   // A track does not become a playlist on the second press.
   "playlist_link_track",
-  "playlist_link_artist",
   // A profile stays a profile, Liked Songs stay behind a login.
   "playlist_link_spotify_other",
   "playlist_not_found",
   // An album Spotify has not got: nothing the host does to the link changes it.
   "album_not_found",
+  // An artist Spotify has not got, or lists nothing for in this market.
+  "artist_not_found",
+  "artist_empty",
   "playlist_editorial",
   "playlist_empty",
 ]);

@@ -88,7 +88,7 @@ vi.mock("@/lib/kv", () => ({
 // routing decisions are built on them.
 vi.mock("@/lib/spotify", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/spotify")>();
-  return { ...actual, getPlaylistWithTracks: vi.fn(), getAlbumWithTracks: vi.fn() };
+  return { ...actual, getPlaylistWithTracks: vi.fn(), getAlbumWithTracks: vi.fn(), getArtistTopTracks: vi.fn() };
 });
 
 /**
@@ -137,6 +137,15 @@ const albumUpstream = () => vi.mocked(spotify.getAlbumWithTracks);
 const albumUpstreamCalls = () => albumUpstream().mock.calls.length;
 const albumUrlFor = (seed: string) => `https://open.spotify.com/album/${playlistId(seed)}`;
 
+/** `GET /artists/{id}/top-tracks` as lib/spotify.ts hands it back. */
+function artistResult(ids: string[], market = "US") {
+  return { name: "The Band", tracks: ids.map(makeTrack), market: market as never };
+}
+
+const artistUpstream = () => vi.mocked(spotify.getArtistTopTracks);
+const artistUpstreamCalls = () => artistUpstream().mock.calls.length;
+const artistUrlFor = (seed: string) => `https://open.spotify.com/artist/${playlistId(seed)}`;
+
 beforeEach(() => {
   kv.mem.clear();
   kv.writes.length = 0;
@@ -148,6 +157,8 @@ beforeEach(() => {
   upstream().mockResolvedValue(upstreamResult(["a", "b"]));
   albumUpstream().mockReset();
   albumUpstream().mockResolvedValue(albumResult(["x1", "x2"]));
+  artistUpstream().mockReset();
+  artistUpstream().mockResolvedValue(artistResult(["r1", "r2", "r3"]));
 });
 
 describe("playlist cache", () => {
@@ -306,15 +317,14 @@ describe("a link that was never a playlist is named, and counted by what it was"
   const split = () =>
     PLAYLIST_INVALID_KINDS.reduce((total, kind) => total + stat(`playlist_invalid:${kind}`), 0);
 
-  it("answers a track and an artist link with its own code, and never asks Spotify", async () => {
-    for (const kind of ["track", "artist"] as const) {
-      await expect(
-        loadPlaylist(`https://open.spotify.com/intl-ja/${kind}/${playlistId(kind)}?si=x`)
-      ).rejects.toMatchObject({ code: `playlist_link_${kind}`, status: 400 });
-      expect(stat(`playlist_invalid:${kind}`)).toBe(1);
-    }
+  it("answers a track link with its own code, and never asks Spotify", async () => {
+    await expect(
+      loadPlaylist(`https://open.spotify.com/intl-ja/track/${playlistId("track")}?si=x`)
+    ).rejects.toMatchObject({ code: "playlist_link_track", status: 400 });
+    expect(stat("playlist_invalid:track")).toBe(1);
     expect(upstreamCalls()).toBe(0);
     expect(albumUpstreamCalls()).toBe(0);
+    expect(artistUpstreamCalls()).toBe(0);
     // Before the cache is read and before any budget is claimed.
     expect([...kv.mem.keys()].some((k) => k.startsWith("spotify:budget"))).toBe(false);
   });
@@ -326,7 +336,7 @@ describe("a link that was never a playlist is named, and counted by what it was"
     const pasted = [
       `https://open.spotify.com/track/${playlistId("x")}`,
       `spotify:track:${playlistId("y")}`,
-      `https://open.spotify.com/artist/${playlistId("z")}`,
+      `spotify:track:${playlistId("z")}`,
       "my party mix",
       "https://example.com/not-a-playlist",
       "https://open.spotify.com/collection/tracks",
@@ -336,7 +346,7 @@ describe("a link that was never a playlist is named, and counted by what it was"
 
     expect(stat("playlist_refused:invalid_playlist_url")).toBe(pasted.length);
     expect(split()).toBe(pasted.length);
-    expect(stat("playlist_invalid:track")).toBe(3);
+    expect(stat("playlist_invalid:track")).toBe(4);
     // `other` is text with no link in it; a link to another site has its own
     // bucket, and so does Liked Songs.
     expect(stat("playlist_invalid:other")).toBe(1);
@@ -348,7 +358,6 @@ describe("a link that was never a playlist is named, and counted by what it was"
     for (const code of [
       "playlist_link_album",
       "playlist_link_track",
-      "playlist_link_artist",
       "playlist_link_spotify_other",
     ]) {
       expect(stat(`playlist_refused:${code}`)).toBe(0);
@@ -620,6 +629,53 @@ describe("short links on the paste path", () => {
       const res = await post(albumUrlFor("x"));
       expect(res.status).toBe(200);
       await expect(res.json()).resolves.toMatchObject({ name: "My Album", totalTracks: 2 });
+    });
+
+    it("loads an artist link as its top ten, says what it was, and names the two artist refusals", async () => {
+      const res = await post(artistUrlFor("r"));
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({
+        name: "The Band · Top Songs",
+        totalTracks: 3,
+        playlistKind: "artist",
+      });
+      artistUpstream().mockRejectedValue(new spotify.SpotifyApiError("artist_not_found", 404));
+      const missing = await post(artistUrlFor("m"));
+      const missingBody = await missing.json();
+      expect(missing.status).toBe(404);
+      expect(missingBody.code).toBe("artist_not_found");
+      expect(missingBody.error).toMatch(/artist/i);
+      expect(missingBody.error).not.toMatch(/public|private/i);
+      expect(isDeterministicPlaylistFailure(missingBody.code)).toBe(true);
+      artistUpstream().mockResolvedValue(artistResult([], "US"));
+      const empty = await post(artistUrlFor("e"));
+      const emptyBody = await empty.json();
+      expect(empty.status).toBe(400);
+      expect(emptyBody.code).toBe("artist_empty");
+      expect(emptyBody.params).toEqual({ market: "US" });
+      expect(isDeterministicPlaylistFailure(emptyBody.code)).toBe(true);
+    });
+
+    it("reads the market off the request's country header, and falls back to the default", async () => {
+      const withCountry = (url: string, country?: string) =>
+        postPlaylist(
+          new NextRequest("http://127.0.0.1:8000/api/playlist", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-forwarded-for": "203.0.113.8",
+              ...(country ? { "x-vercel-ip-country": country } : {}),
+            },
+            body: JSON.stringify({ url }),
+          })
+        );
+      await withCountry(artistUrlFor("t"), "tw");
+      expect(artistUpstream()).toHaveBeenLastCalledWith(playlistId("t"), "TW", "US");
+      await withCountry(artistUrlFor("u"));
+      expect(artistUpstream()).toHaveBeenLastCalledWith(playlistId("u"), "US", "US");
+      // Not a market: two letters only. `?market=` in the URL is never read.
+      await withCountry(artistUrlFor("v"), "123");
+      expect(artistUpstream()).toHaveBeenLastCalledWith(playlistId("v"), "US", "US");
     });
 
     it("names an album Spotify has not got with a code the page will not retry", async () => {
@@ -1751,5 +1807,78 @@ describe("rechecking a playlist the host has just made public", () => {
     const asked = await post({ url: URL_A, recheck: true });
     expect(asked.status).toBe(404);
     expect((await asked.json()).replayed).toBeUndefined();
+  });
+});
+
+describe("an artist link (2026-11-10)", () => {
+  // `playlist_invalid:artist` read ~33 a day of these being turned away. The
+  // layers below are the playlist's, shared; what is pinned here is that an
+  // artist reaches the top-tracks endpoint with its market, is keyed by
+  // both, and is counted both ways.
+  const day = new Date().toISOString().slice(0, 10);
+  const stat = (metric: string) =>
+    (kv.mem.get(`loop:stats:${day}:${metric}`)?.value as number | undefined) ?? 0;
+  const ARTIST_X = artistUrlFor("x");
+
+  it("loads through the top-tracks endpoint in the given market, never the playlist one, and says what it was", async () => {
+    const result = await loadPlaylist(ARTIST_X, "playlist-api", { market: "TW" as never });
+    expect(result.kind).toBe("artist");
+    expect(result.name).toBe("The Band · Top Songs");
+    expect(result.market).toBe("TW"); // the key's market, the one asked for
+    expect(result.tracks.map((t) => t.id)).toEqual(["r1", "r2", "r3"]);
+    expect(artistUpstream()).toHaveBeenCalledWith(playlistId("x"), "TW", "US");
+    expect(upstreamCalls()).toBe(0);
+    expect(albumUpstreamCalls()).toBe(0);
+    expect(stat("playlist_artist:loaded")).toBe(1);
+  });
+
+  it("is cached under its own key with the market in it, and one market never answers another", async () => {
+    await loadPlaylist(ARTIST_X, "playlist-api", { market: "TW" as never });
+    await loadPlaylist(`spotify:artist:${playlistId("x")}`, "playlist-api", { market: "TW" as never });
+    await loadPlaylist(`  聽這位 ${ARTIST_X}?si=zz `, "playlist-api", { market: "tw".toUpperCase() as never });
+    expect(artistUpstreamCalls()).toBe(1);
+    const keysWritten = kv.writes.map((w) => w.key).filter((k) => k.startsWith("artist:"));
+    expect(keysWritten).toEqual([`artist:v1:${playlistId("x")}:TW`]);
+    await loadPlaylist(ARTIST_X, "playlist-api", { market: "JP" as never });
+    expect(artistUpstreamCalls()).toBe(2);
+    expect(kv.writes.map((w) => w.key).filter((k) => k.startsWith("artist:"))).toEqual([
+      `artist:v1:${playlistId("x")}:TW`,
+      `artist:v1:${playlistId("x")}:JP`,
+    ]);
+    // No market given: the deploy's default, never a guess at the host.
+    await loadPlaylist(ARTIST_X);
+    expect(artistUpstream()).toHaveBeenLastCalledWith(playlistId("x"), "US", "US");
+    expect(kv.writes.some((w) => w.key.startsWith("playlist:v1:") || w.key.startsWith("album:v1:"))).toBe(false);
+  });
+
+  it("never shares an entry with a playlist or an album of the same id", async () => {
+    await loadPlaylist(URL_A);
+    await loadPlaylist(albumUrlFor("a"));
+    await loadPlaylist(artistUrlFor("a"));
+    expect(upstreamCalls()).toBe(1);
+    expect(albumUpstreamCalls()).toBe(1);
+    expect(artistUpstreamCalls()).toBe(1);
+  });
+
+  it("counts an empty top ten as playlist_empty and playlist_artist:empty, and a dead id under its own refusal", async () => {
+    artistUpstream().mockResolvedValue(artistResult([], "US"));
+    const empty = await loadPlaylist(artistUrlFor("e"));
+    expect(empty.tracks).toEqual([]);
+    expect(stat("playlist_refused:playlist_empty")).toBe(1);
+    expect(stat("playlist_artist:empty")).toBe(1);
+    expect(stat("playlist_artist:loaded")).toBe(0);
+    artistUpstream().mockRejectedValue(new spotify.SpotifyApiError("artist_not_found", 404));
+    await expect(loadPlaylist(artistUrlFor("m"))).rejects.toMatchObject({ code: "artist_not_found", status: 404 });
+    expect(stat("playlist_refused:artist_not_found")).toBe(1);
+    // Replayed from the negative cache, under the artist's own code.
+    await expect(loadPlaylist(artistUrlFor("m"))).rejects.toMatchObject({ code: "artist_not_found" });
+    expect(artistUpstreamCalls()).toBe(2);
+  });
+
+  it("does not apply the editorial rule — 37i9 is a playlist-id convention", async () => {
+    await expect(loadPlaylist("https://open.spotify.com/artist/37i9dQZF1DXcBWIGoYBM5M")).resolves.toMatchObject({
+      kind: "artist",
+    });
+    expect(stat("playlist_refused:playlist_editorial")).toBe(0);
   });
 });

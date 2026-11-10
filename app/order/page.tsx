@@ -19,6 +19,7 @@ import {
   type BuzzerRoomHandle,
   type GamePlayer as Player,
   type MixedPlaylistMeta,
+  type PlaylistKind,
 } from "@/lib/game-session";
 import type { BuzzerCapability, OrderReveal, ServerMessage } from "@/lib/buzzer-protocol";
 import { useBuzzerSocket } from "@/lib/use-buzzer-socket";
@@ -217,6 +218,8 @@ export default function OrderPage() {
   /** Read on mount; "unknown" until then and whenever storage will not say. */
   const hostKindRef = useRef<GameHostKind>("unknown");
   const setupSourceRef = useRef<SetupSource | undefined>(undefined);
+  // What the link was, for the end and leave beacons (lib/game-session.ts).
+  const playlistKindRef = useRef<PlaylistKind>("playlist");
   /** False when this page is a reload of a game that already had one. */
   const firstPageRef = useRef<boolean | null>(null);
   const leftRef = useRef(false);
@@ -240,6 +243,7 @@ export default function OrderPage() {
     const hostGames = getHostGameCount();
     hostKindRef.current = hostKindOf(hostGames);
     setupSourceRef.current = data.setupSource;
+    playlistKindRef.current = data.playlistKind ?? "playlist";
     // Claimed once per page, not once per effect run — StrictMode runs this
     // twice in development, and the second run would read its own page as a
     // reload.
@@ -354,7 +358,8 @@ export default function OrderPage() {
       "order",
       playerBand(playersRef.current.length),
       gameScored(playersRef.current),
-      arranged
+      arranged,
+      playlistKindRef.current
     );
   }, []);
 
@@ -519,6 +524,7 @@ export default function OrderPage() {
       // zero only, as `order_bounce:ended`. The shared screen's drag only: a
       // buzzer room's phones arrange for themselves, so it sends none.
       ...(buzzerRoom ? {} : { arranged: hostArranged(arrangement, currentIndex) }),
+      playlistKind: playlistKindRef.current,
     });
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,

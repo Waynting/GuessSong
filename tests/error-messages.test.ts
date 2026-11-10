@@ -163,10 +163,11 @@ describe("the message table", () => {
    * Spotify's own and is refused every time: a sentence that walks the
    * reader from one refusal into the next.
    */
-  it("names a track and an artist link, and sends each to a playlist of the reader's own", () => {
+  it("names a track link, and sends the reader to a playlist of their own", () => {
+    // The artist sentence left on 2026-11-10: an artist page plays as the
+    // artist's top ten, so there is nothing to name.
     const names = {
       playlist_link_track: { en: /song|track/i, zh: /歌/ },
-      playlist_link_artist: { en: /artist/i, zh: /歌手/ },
     } as const;
     for (const code of Object.keys(names) as (keyof typeof names)[]) {
       const { en, zh } = ERROR_MESSAGES[code];
@@ -328,6 +329,28 @@ describe("the message table", () => {
   });
 });
 
+describe("an artist link, since 2026-11-10", () => {
+  it("has two refusals of its own, final, bilingual, naming no playlist Spotify refuses", () => {
+    for (const code of ["artist_not_found", "artist_empty"] as const) {
+      const { en, zh } = ERROR_MESSAGES[code];
+      expect(en, code).toMatch(/artist/i);
+      expect(zh, code).toMatch(/歌手/);
+      expect(en, code).toMatch(/playlist/i);
+      expect(zh, code).toMatch(/歌單/);
+      expect(en, code).not.toMatch(/this is|artist's playlist|one of (the|their) playlists|radio|lives in/i);
+      expect(zh, code).not.toMatch(/This Is|歌手的歌單|電台|官方/i);
+      expect(placeholders(en), code).toEqual([]);
+      expect(en, code).not.toMatch(/public|private|try again|wait/i);
+      expect(isDeterministicPlaylistFailure(code), code).toBe(true);
+    }
+    // The old refusal is gone: the code no longer exists.
+    expect(isAppErrorCode("playlist_link_artist")).toBe(false);
+    // And the generic sentence names all three playable kinds.
+    expect(ERROR_MESSAGES.invalid_playlist_url.en).toMatch(/playlist, album or artist/);
+    expect(ERROR_MESSAGES.invalid_playlist_url.zh).toMatch(/歌手/);
+  });
+});
+
 describe("playlist_link_spotify_other", () => {
   it("says it is a Spotify link, says what to paste instead, and names no playlist Spotify refuses", () => {
     // Raised for a profile, Liked Songs, a podcast and any other Spotify
@@ -336,7 +359,7 @@ describe("playlist_link_spotify_other", () => {
     // for Liked Songs or a podcast.
     const { en, zh } = ERROR_MESSAGES.playlist_link_spotify_other;
     expect(en).toMatch(/Spotify link/);
-    expect(en).toMatch(/not a playlist or album/i);
+    expect(en).toMatch(/not a playlist, album or artist/i);
     expect(en).toMatch(/paste/i);
     expect(zh).toMatch(/Spotify/);
     expect(zh).toMatch(/歌單/);
@@ -357,10 +380,11 @@ describe("isDeterministicPlaylistFailure", () => {
       "playlist_url_required",
       "invalid_playlist_url",
       "playlist_link_track",
-      "playlist_link_artist",
       "playlist_link_spotify_other",
       "playlist_not_found",
       "album_not_found",
+      "artist_not_found",
+      "artist_empty",
       "playlist_editorial",
       "playlist_empty",
     ] as const) {
@@ -377,10 +401,11 @@ describe("isDeterministicPlaylistFailure", () => {
       "playlist_url_required",
       "invalid_playlist_url",
       "playlist_link_track",
-      "playlist_link_artist",
       "playlist_link_spotify_other",
       "playlist_not_found",
       "album_not_found",
+      "artist_not_found",
+      "artist_empty",
       "playlist_editorial",
       "playlist_empty",
     ]);

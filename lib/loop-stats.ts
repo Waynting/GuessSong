@@ -44,7 +44,7 @@ import { UNPLAYABLE_KINDS, type UnplayableKind } from "@/lib/spotify-link";
 import { STARTER_KEYS, isStarterKey, type StarterKey } from "@/lib/starter-playlists";
 import { RECOVERY_STAGES, type RecoveryStage } from "@/lib/refusal-recovery";
 import { SETUP_SOURCES, isSetupSource, type SetupSource } from "@/lib/setup-source";
-import { GAME_MODES, isGameMode, type GameMode } from "@/lib/game-session";
+import { GAME_MODES, isGameMode, isPlaylistKind, type GameMode, type PlaylistKind } from "@/lib/game-session";
 import { ORDER_VERDICTS, isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
 import { ARRIVALS, isArrival, type Arrival } from "@/lib/arrival";
 import {
@@ -387,6 +387,11 @@ export const QUIZ_SOCIAL_PLATFORMS: readonly QuizSocialPlatform[] = SOCIAL_PLATF
  *   album_not_found        an album link Spotify has no album for (since
  *                          2026-10-25, when albums began to load; an album
  *                          cannot be private, so this is a dead link)
+ *   artist_not_found       an artist link Spotify has no artist for (since
+ *                          2026-11-10, when artist pages began to load as
+ *                          the artist's top ten). An artist with nothing
+ *                          listed in the host's market is `playlist_empty`
+ *                          here and `playlist_artist:empty` beside it.
  *
  * Which of these dominates is a product question the hit rate could not
  * ask: a wall of editorial refusals is a room that wants "Today's Top Hits"
@@ -401,6 +406,7 @@ export type PlaylistRefusalCode = Extract<
   | "playlist_empty"
   | "invalid_playlist_url"
   | "album_not_found"
+  | "artist_not_found"
 >;
 
 export const PLAYLIST_REFUSAL_CODES: readonly PlaylistRefusalCode[] = [
@@ -409,6 +415,7 @@ export const PLAYLIST_REFUSAL_CODES: readonly PlaylistRefusalCode[] = [
   "playlist_empty",
   "invalid_playlist_url",
   "album_not_found",
+  "artist_not_found",
 ];
 
 const PLAYLIST_REFUSAL_SET: ReadonlySet<string> = new Set(PLAYLIST_REFUSAL_CODES);
@@ -433,9 +440,13 @@ export function isPlaylistRefusalCode(value: unknown): value is PlaylistRefusalC
  * the other way up; `npm run stats` prints the two on one line.
  *
  *   track      one song
- *   artist     an artist's page
  *   shortlink  a `spotify.link` that was followed and led nowhere usable: a
  *              dead slug, or a podcast, a profile, the home page
+ *
+ * `artist` was a kind here until 2026-11-10, when artist pages began to load
+ * as the artist's top ten (~33 a day had been turned away); its place is
+ * `playlist_artist:loaded`, and `npm run stats` reads the old key by name
+ * for a window that reaches back past that day, as it does `album`.
  *
  * and, since 2026-11-10, for every paste the classifier calls `unknown`, one
  * of `UNPLAYABLE_KINDS` from `lib/spotify-link.ts` (`unplayableKind`): a
@@ -458,11 +469,10 @@ export function isPlaylistRefusalCode(value: unknown): value is PlaylistRefusalC
  * meaning against the 748. This is a second reading of one refusal code,
  * not a code of its own.
  */
-export type PlaylistInvalidKind = "track" | "artist" | "shortlink" | UnplayableKind;
+export type PlaylistInvalidKind = "track" | "shortlink" | UnplayableKind;
 
 export const PLAYLIST_INVALID_KINDS: readonly PlaylistInvalidKind[] = [
   "track",
-  "artist",
   "shortlink",
   ...UNPLAYABLE_KINDS,
 ];
@@ -477,6 +487,35 @@ export const PLAYLIST_INVALID_KINDS: readonly PlaylistInvalidKind[] = [
 export type PlaylistAlbumOutcome = "loaded";
 
 export const PLAYLIST_ALBUM_OUTCOMES: readonly PlaylistAlbumOutcome[] = ["loaded"];
+
+/**
+ * An artist link's outcomes, the album's shape one lift on (2026-11-10):
+ * `loaded` is a top ten that played, `empty` an artist Spotify lists nothing
+ * for in the host's market — also counted as `playlist_refused:playlist_empty`,
+ * so the refusal line stays the one place an empty load is counted, and here
+ * so the artist line sums like the album's. A dead id is
+ * `playlist_refused:artist_not_found`.
+ */
+export type PlaylistArtistOutcome = "loaded" | "empty";
+
+export const PLAYLIST_ARTIST_OUTCOMES: readonly PlaylistArtistOutcome[] = ["loaded", "empty"];
+
+/**
+ * The link kinds whose games are crossed with their outcome
+ * (`game_kind:<kind>`, `game_end_kind:<kind>:<end>`, `game_left_kind:<kind>:<band>`).
+ * A playlist's games are the existing `game_end` / `game_left` tables — the
+ * baseline — so the crosses are written only for the ~3% of games they are
+ * for: three more commands on an album or artist game, ~300 a day, not the
+ * ~9k a per-game cross would cost against the Upstash cap. Retire them once
+ * the bar on the artist lift has been read.
+ */
+export const CROSSED_PLAYLIST_KINDS: readonly Exclude<PlaylistKind, "playlist">[] = ["album", "artist"];
+
+export type CrossedPlaylistKind = (typeof CROSSED_PLAYLIST_KINDS)[number];
+
+function crossedKind(value: unknown): CrossedPlaylistKind | null {
+  return isPlaylistKind(value) && value !== "playlist" ? value : null;
+}
 
 /**
  * How following a short link came out, for every one the server was handed —
@@ -887,6 +926,11 @@ export function loopStatsKeys(
   refusalRecoveryVia: Record<SetupSource, string>;
   playlistRefused: Record<PlaylistRefusalCode, string>;
   playlistAlbum: Record<PlaylistAlbumOutcome, string>;
+  playlistArtist: Record<PlaylistArtistOutcome, string>;
+  /** The album and artist lifts' outcome crosses — never a playlist's. */
+  gameKind: Record<CrossedPlaylistKind, string>;
+  gameEndKind: Record<CrossedPlaylistKind, Record<GameEnd, string>>;
+  gameLeftKind: Record<CrossedPlaylistKind, Record<EarlyEndBand, string>>;
 } {
   const impressions: Record<string, string> = {};
   const clicks: Record<string, string> = {};
@@ -1026,6 +1070,14 @@ export function loopStatsKeys(
     playlistAlbum: Object.fromEntries(
       PLAYLIST_ALBUM_OUTCOMES.map((o) => [o, key(day, `playlist_album:${o}`)])
     ) as Record<PlaylistAlbumOutcome, string>,
+    playlistArtist: Object.fromEntries(
+      PLAYLIST_ARTIST_OUTCOMES.map((o) => [o, key(day, `playlist_artist:${o}`)])
+    ) as Record<PlaylistArtistOutcome, string>,
+    gameKind: Object.fromEntries(
+      CROSSED_PLAYLIST_KINDS.map((k) => [k, key(day, `game_kind:${k}`)])
+    ) as Record<CrossedPlaylistKind, string>,
+    gameEndKind: byList("game_end_kind", CROSSED_PLAYLIST_KINDS, GAME_ENDS),
+    gameLeftKind: byList("game_left_kind", CROSSED_PLAYLIST_KINDS, EARLY_END_BANDS),
     playlistInvalid: Object.fromEntries(
       PLAYLIST_INVALID_KINDS.map((k) => [k, key(day, `playlist_invalid:${k}`)])
     ) as Record<PlaylistInvalidKind, string>,
@@ -1213,11 +1265,13 @@ export interface GameStartDetails {
   players?: PlayerBand;
   from?: Arrival;
   starter?: StarterKey;
+  /** What the link was; crossed only for an album or an artist (`CROSSED_PLAYLIST_KINDS`). */
+  playlistKind?: PlaylistKind;
 }
 
 export async function recordGameStart(
   hostGameIndex: number,
-  { mixed, source, mode, players, from, starter }: GameStartDetails = {}
+  { mixed, source, mode, players, from, starter, playlistKind }: GameStartDetails = {}
 ): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
@@ -1257,6 +1311,10 @@ export async function recordGameStart(
   // hosts. One command on the ~20% of starts that are a starter's; the key
   // tail is a closed set and an unknown value writes nothing.
   if (isStarterKey(starter)) await bump(`host_setup_starter:${starter}`);
+  // The album and artist lifts' denominator — a playlist's games are the
+  // tables above, so nothing is written for one (see CROSSED_PLAYLIST_KINDS).
+  const crossed = crossedKind(playlistKind);
+  if (crossed) await bump(`game_kind:${crossed}`);
 }
 
 /**
@@ -1296,6 +1354,8 @@ export async function recordGameEnd(
     arranged?: boolean;
     /** Whether this Game Over drew the Mixed link (`gameOverOnward`). */
     linkDrawn?: boolean;
+    /** What the link was; crossed only for an album or an artist. */
+    playlistKind?: PlaylistKind;
   } = {}
 ): Promise<void> {
   if (!GAME_ENDS.includes(end)) return;
@@ -1317,6 +1377,9 @@ export async function recordGameEnd(
     extras.push(bump(`game_end_mode_players:${details.mode}:${details.players}:${end}`));
   }
   if (isGameScored(details.scored)) extras.push(bump(`game_end_scored:${details.scored}:${end}`));
+  // How an album or artist game ended — `game_kind:*` is the denominator.
+  const crossed = crossedKind(details.playlistKind);
+  if (crossed) extras.push(bump(`game_end_kind:${crossed}:${end}`));
   if (end !== "ended_early") {
     await Promise.all(extras);
     return;
@@ -1387,12 +1450,15 @@ export async function recordGameLeft(
   mode?: GameMode,
   players?: PlayerBand,
   scored?: GameScored,
-  arranged?: boolean
+  arranged?: boolean,
+  playlistKind?: PlaylistKind
 ): Promise<void> {
   const round = clampRound(roundsPlayed);
   await bump(`game_left_round:${round}`);
   const band = earlyEndBand(round);
+  const crossed = crossedKind(playlistKind);
   await Promise.all([
+    crossed ? bump(`game_left_kind:${crossed}:${band}`) : undefined,
     isGameHostKind(host) ? bump(`game_left_host:${host}:${band}`) : undefined,
     isSetupSource(source) ? bump(`game_left_source:${source}:${band}`) : undefined,
     isGameMode(mode) ? bump(`game_left_mode:${mode}:${band}`) : undefined,
@@ -1514,6 +1580,22 @@ export async function recordPlaylistInvalid(kind: PlaylistInvalidKind): Promise<
 export function recordPlaylistAlbum(outcome: PlaylistAlbumOutcome): Promise<void> {
   if (!PLAYLIST_ALBUM_OUTCOMES.includes(outcome)) return Promise.resolve();
   return bump(`playlist_album:${outcome}`);
+}
+
+/** An artist link's outcome (`PlaylistArtistOutcome`), written like the album's. */
+export function recordPlaylistArtist(outcome: PlaylistArtistOutcome): Promise<void> {
+  if (!PLAYLIST_ARTIST_OUTCOMES.includes(outcome)) return Promise.resolve();
+  return bump(`playlist_artist:${outcome}`);
+}
+
+/**
+ * An album or an artist that played — the one call `loadPlaylist` makes on
+ * the way out for either, so the two lifts are counted the same way.
+ */
+export function recordPlaylistKindLoaded(kind: CrossedPlaylistKind): Promise<void> {
+  if (kind === "album") return recordPlaylistAlbum("loaded");
+  if (kind === "artist") return recordPlaylistArtist("loaded");
+  return Promise.resolve();
 }
 
 /**

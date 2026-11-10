@@ -40,10 +40,11 @@ export type SpotifyLink =
   | { kind: "playlist"; id: string }
   /** An album plays like a playlist: one Spotify call, the same cache. */
   | { kind: "album"; id: string }
+  /** An artist's page plays as their top ten in the host's market (since 2026-11-10). */
+  | { kind: "artist"; id: string }
   /** `url` is rebuilt from the host and the slug, never the pasted text. */
   | { kind: "shortlink"; url: string }
   | { kind: "track" }
-  | { kind: "artist" }
   | { kind: "unknown" };
 
 export type SpotifyLinkKind = SpotifyLink["kind"];
@@ -51,14 +52,17 @@ export type SpotifyLinkKind = SpotifyLink["kind"];
 /**
  * A link the server can turn into a game, by id. Albums joined on
  * 2026-10-25: they had been the one refusal the app could choose to lift,
- * and `playlist_invalid:album` read ~245 a week of them.
+ * and `playlist_invalid:album` read ~245 a week of them. Artists joined on
+ * 2026-11-10 the same way — `playlist_invalid:artist` read ~33 a day, the
+ * next most-pasted unplayable Spotify link — as the artist's top ten in the
+ * host's market, one call (`lib/spotify.ts`, `getArtistTopTracks`).
  */
-export type PlayableLink = Extract<SpotifyLink, { kind: "playlist" | "album" }>;
+export type PlayableLink = Extract<SpotifyLink, { kind: "playlist" | "album" | "artist" }>;
 
 export type PlayableKind = PlayableLink["kind"];
 
-/** The two kinds that are real Spotify links to something that cannot be played. */
-export type NamedLinkKind = "track" | "artist";
+/** The one kind that is a real Spotify link to something that cannot be played. */
+export type NamedLinkKind = "track";
 
 /**
  * The hosts Spotify's share sheets mint short links on. `spotify.link` is the
@@ -144,10 +148,10 @@ const SHORTLINK_RE = new RegExp(
  * sentence, and a paste from a chat brings its surroundings with it.
  *
  * The order is a decision. A playlist link wins over everything else in the
- * same text, then an album: both can be played, and a playlist is what the
- * site is for. A short link comes next because it may well *be* one of
- * those — it has to be followed to find out — and only then the two kinds
- * that certainly are not.
+ * same text, then an album, then an artist: all three can be played, and a
+ * playlist is what the site is for. A short link comes next because it may
+ * well *be* one of those — it has to be followed to find out — and only
+ * then the one kind that certainly is not.
  */
 export function classifySpotifyLink(raw: unknown): SpotifyLink {
   if (typeof raw !== "string") return { kind: "unknown" };
@@ -159,18 +163,20 @@ export function classifySpotifyLink(raw: unknown): SpotifyLink {
   const album = text.match(ALBUM_RE);
   if (album) return { kind: "album", id: album[1] };
 
+  const artist = text.match(ARTIST_RE);
+  if (artist) return { kind: "artist", id: artist[1] };
+
   const shortlink = text.match(SHORTLINK_RE);
   if (shortlink) {
     return { kind: "shortlink", url: `https://${shortlink[1].toLowerCase()}/${shortlink[2]}` };
   }
 
   if (TRACK_RE.test(text)) return { kind: "track" };
-  if (ARTIST_RE.test(text)) return { kind: "artist" };
   return { kind: "unknown" };
 }
 
 export function isPlayableLink(link: SpotifyLink): link is PlayableLink {
-  return link.kind === "playlist" || link.kind === "album";
+  return link.kind === "playlist" || link.kind === "album" || link.kind === "artist";
 }
 
 /**
@@ -198,9 +204,21 @@ export function albumUrlFromId(id: string): string {
   return `https://open.spotify.com/album/${id}`;
 }
 
+/** The one spelling of an artist page's address this app writes. */
+export function artistUrlFromId(id: string): string {
+  return `https://open.spotify.com/artist/${id}`;
+}
+
 /** The canonical address of whatever a playable link names. */
 export function playableUrl(link: PlayableLink): string {
-  return link.kind === "album" ? albumUrlFromId(link.id) : playlistUrlFromId(link.id);
+  switch (link.kind) {
+    case "album":
+      return albumUrlFromId(link.id);
+    case "artist":
+      return artistUrlFromId(link.id);
+    default:
+      return playlistUrlFromId(link.id);
+  }
 }
 
 /**
@@ -349,17 +367,17 @@ export function unplayableKind(raw: unknown): UnplayableKind {
  * The sentence for each kind of link that is a real Spotify link to the
  * wrong thing. Declared here, beside the classifier, because the server
  * (`lib/playlist-cache.ts`) and the forms both render from it and must not
- * be able to name the same link two ways.
+ * be able to name the same link two ways. One entry since 2026-11-10: the
+ * artist sentence left when artist pages began to load.
  */
 export const NAMED_LINK_CODES = {
   track: "playlist_link_track",
-  artist: "playlist_link_artist",
 } as const satisfies Record<NamedLinkKind, AppErrorCode>;
 
 export type NamedLinkCode = (typeof NAMED_LINK_CODES)[NamedLinkKind];
 
 export function isNamedLinkKind(kind: SpotifyLinkKind): kind is NamedLinkKind {
-  return kind === "track" || kind === "artist";
+  return kind === "track";
 }
 
 export interface PlaylistLinkCheck {
@@ -370,7 +388,7 @@ export interface PlaylistLinkCheck {
    * there is nothing to say: the field is blank, or the link is fine.
    */
   problem: NamedLinkCode | UnplayableLinkCode | null;
-  /** Set when the link is a track or an artist page. */
+  /** Set when the link is a track. */
   named: NamedLinkKind | null;
 }
 

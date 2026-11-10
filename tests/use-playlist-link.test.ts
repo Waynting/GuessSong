@@ -110,16 +110,23 @@ describe("usePlaylistLinkCheck", () => {
     expect(analytics.events).toHaveLength(1);
   });
 
-  it("reports the new kind when the field changes to another", () => {
+  it("reports the kind again when the field leaves it and comes back", () => {
     type(`https://open.spotify.com/track/${ID}`, "buzz");
-    type(`https://open.spotify.com/artist/${ID}`, "buzz");
     type("", "buzz");
-    type(`https://open.spotify.com/artist/${ID}`, "buzz");
+    type(`https://open.spotify.com/track/${ID}`, "buzz");
     expect(analytics.events.map((e) => e.params)).toEqual([
       { surface: "buzz", link_kind: "track" },
-      { surface: "buzz", link_kind: "artist" },
-      { surface: "buzz", link_kind: "artist" },
+      { surface: "buzz", link_kind: "track" },
     ]);
+  });
+
+  it("lets an artist link through like a playlist, since 2026-11-10, and reports nothing", () => {
+    expect(type(`https://open.spotify.com/artist/${ID}`, "buzz")).toEqual({
+      submittable: true,
+      problem: null,
+      named: null,
+    });
+    expect(analytics.events).toEqual([]);
   });
 
   it("reports nothing for typing, for text, or for a link that works", () => {
@@ -135,7 +142,7 @@ describe("usePlaylistLinkCheck", () => {
   });
 
   it("never puts the link itself in the event", () => {
-    type(`https://open.spotify.com/artist/${ID}?si=secret`, "room_panel");
+    type(`https://open.spotify.com/track/${ID}?si=secret`, "room_panel");
     expect(JSON.stringify(analytics.events)).not.toContain(ID);
     expect(JSON.stringify(analytics.events)).not.toContain("secret");
   });

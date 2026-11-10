@@ -11,6 +11,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An artist link plays** (`{ kind: "artist"; id }` in `lib/spotify-link.ts`,
+  `getArtistTopTracks` in `lib/spotify.ts`, `lib/market.ts`). `playlist_invalid:artist`
+  read ~33 a day — the next most-pasted unplayable Spotify link after albums,
+  whose lift turned 35 refusals a day into 93 plays. An artist page now loads
+  as the artist's ten most popular songs in the host's market, through one
+  call to `GET /artists/{id}/top-tracks?market=XX`; the loaded name is
+  "<Artist> · Top Songs", read off the credits, so there is no second call.
+  The market is the request's country (`x-vercel-ip-country`, the first
+  platform-specific header in the codebase), validated to two ASCII letters,
+  else `SPOTIFY_DEFAULT_MARKET`, else `US` — never `?market=` from the URL,
+  which would fan the cache key out. The key is `artist:v1:<id>:<market>`,
+  a third id space beside the playlist's and the album's. A 400 — Spotify
+  rejecting a country code such as `XK` that passes a two-letter check — is
+  retried once with the fallback and logged; a second 400 is
+  `playlist_load_failed`, not cached, so no country is pinned to a generic
+  error that spends quota on every retry. `artist_not_found` (dead id,
+  deterministic, `wrong_link` help) and `artist_empty` (nothing listed in
+  this market, counted as `playlist_empty` and `playlist_artist:empty`,
+  carrying `params.market`) replace `playlist_link_artist`, which is gone;
+  every form accepts the link through the shared classifier, a green status
+  line under the field says "An artist link plays their top 10 songs.", the
+  section label, placeholders, `invalid_playlist_url`, the `wrong_link` step,
+  the guide and `/share/unsupported` all name artists, and a shared artist
+  page lands on the setup page. The ten play the guess game (Number of Songs
+  keeps the host's value), deal two order rounds when their years allow, and
+  make a quiz when ten are usable; a Mixed contributor's artist is their top
+  ten. `npm run stats` prints `artist links: played · no songs in that market
+  · not on Spotify · refused before artists could play`, the latter read by
+  name for a window that reaches back past this day.
+- **Every album and artist game is readable by how it ended** (`playlistKind`
+  on the `/api/playlist` response, the stored payload and the three beacons;
+  `game_kind:<kind>`, `game_end_kind:<kind>:<end>`, `game_left_kind:<kind>:<band>`).
+  The album lift had no outcome read. The crosses are written only when the
+  link was not a playlist (`CROSSED_PLAYLIST_KINDS`): three more `incr` per
+  album or artist game, ~300 commands a day against the Upstash cap, not the
+  ~9k a per-game cross would cost; a playlist's games are the existing
+  tables, the baseline. `npm run stats` prints "How games ended, by what the
+  link was". **Bar, set before shipping:** `playlist_artist:loaded` ≥ 25/day
+  and an artist game's played-out rate not below `party`'s 25.9%; below it,
+  the lift is reverted to a refusal with an honest sentence. A payload stored
+  before this deploy has no kind and reads as a playlist.
+### Changed
+
+- **The wrong-link sentences name all three playable kinds.** `invalid_playlist_url`
+  reads "playlist, album or artist link" and `playlist_link_spotify_other`
+  "not a playlist, album or artist", in both languages; the `wrong_link` help
+  step says "or the artist's page". `playlist_invalid:<kind>` loses `artist`
+  (its place is `playlist_artist:loaded`), `PLAYLIST_REFUSAL_CODES` gains
+  `artist_not_found`, and `ShareType` loses `artist`. A new env var,
+  `SPOTIFY_DEFAULT_MARKET`, is documented in `.env.example`, the README,
+  `docs/operations.md` and CLAUDE.md.
+## [1.23.0] - 2026-11-10
+
+### Added
+
 - **The order game has its own starter list, and the chip reaches the host
   it is for** (`startersFor`, `starterKey`, `starterKeyForId`, `fieldChipRow`
   in `lib/starter-playlists.ts`; `host_setup_starter:<key>`). The starter row

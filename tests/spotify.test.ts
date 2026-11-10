@@ -887,3 +887,139 @@ describe("convertSpotifyTrack release date", () => {
     expect(JSON.parse(JSON.stringify(track))).not.toHaveProperty("releaseDate");
   });
 });
+
+const ARTIST_ID = "4dpARuHxo51G3z768sgnrY";
+
+interface ArtistBehaviour {
+  /** Status per market, in call order; 200 unless overridden. */
+  statuses?: number[];
+  /** How many tracks the fake top-tracks answer holds. */
+  total?: number;
+  /** Credit the artist's id on the tracks (the ordinary case). */
+  creditId?: boolean;
+  retryAfter?: string;
+}
+
+/** `GET /artists/{id}/top-tracks` only, counting calls and the markets asked for. */
+function installArtistFetchMock(behaviour: ArtistBehaviour = {}) {
+  const { statuses = [200], total = 10, creditId = true, retryAfter } = behaviour;
+  const urls: string[] = [];
+  let call = 0;
+  const ok = (body: unknown): MockResponse => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: noHeaders(),
+    json: async () => body,
+    text: async () => "",
+  });
+  const fetchMock = vi.fn(async (url: string | URL): Promise<MockResponse> => {
+    const href = typeof url === "string" ? url : url.toString();
+    urls.push(href);
+    if (href === TOKEN_URL) return ok({ access_token: "token-1", expires_in: 3600 });
+    const status = statuses[Math.min(call, statuses.length - 1)];
+    call += 1;
+    if (status !== 200) {
+      return {
+        ok: false,
+        status,
+        statusText: "Error",
+        headers: { get: (name) => (name.toLowerCase() === "retry-after" ? retryAfter ?? null : null) },
+        json: async () => ({ error: { message: "nope" } }),
+        text: async () => "nope",
+      };
+    }
+    return ok({
+      tracks: Array.from({ length: total }, (_, i) => ({
+        id: `top-${i}`,
+        name: `Hit ${i}`,
+        artists: [{ name: "The Band", ...(creditId ? { id: ARTIST_ID } : {}) }, { name: "Guest", id: "other" }],
+        duration_ms: 180000,
+        popularity: 90 - i,
+        album: { name: `LP ${i}`, images: [{ url: "https://i.scdn.co/image/t" }], release_date: `${2000 + i}-01-01`, release_date_precision: "day", album_type: "album" },
+      })),
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return {
+    urls: () => urls,
+    topTrackRequests: () => urls.filter((u) => u.includes("/top-tracks")),
+  };
+}
+
+describe("getArtistTopTracks (2026-11-10)", () => {
+  beforeEach(() => {
+    process.env.SPOTIFY_CLIENT_ID = "id";
+    process.env.SPOTIFY_CLIENT_SECRET = "secret";
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const TW = "TW" as never;
+  const US = "US" as never;
+
+  it("reads the ten in one call, in the market asked for, and names the artist off the credits", async () => {
+    const probe = installArtistFetchMock();
+    const { getArtistTopTracks } = await freshSpotify();
+    const { name, tracks, market } = await getArtistTopTracks(ARTIST_ID, TW, US);
+    expect(name).toBe("The Band");
+    expect(market).toBe("TW");
+    expect(tracks).toHaveLength(10);
+    expect(tracks[0]).toMatchObject({ id: "top-0", name: "Hit 0", artists: ["The Band", "Guest"], albumName: "LP 0", releaseDate: "2000-01-01" });
+    expect(probe.topTrackRequests()).toEqual([`https://api.spotify.com/v1/artists/${ARTIST_ID}/top-tracks?market=TW`]);
+    // No second call to /artists/{id} for the name.
+    expect(probe.urls().filter((u) => u.includes("/artists/")).length).toBe(1);
+  });
+
+  it("falls back to the first credit when no track credits the id", async () => {
+    installArtistFetchMock({ creditId: false });
+    const { getArtistTopTracks } = await freshSpotify();
+    const { name } = await getArtistTopTracks(ARTIST_ID, TW, US);
+    expect(name).toBe("The Band");
+  });
+
+  it("hands back an empty answer with no name, for the callers to refuse as artist_empty", async () => {
+    installArtistFetchMock({ total: 0 });
+    const { getArtistTopTracks } = await freshSpotify();
+    const { name, tracks } = await getArtistTopTracks(ARTIST_ID, TW, US);
+    expect(name).toBeNull();
+    expect(tracks).toEqual([]);
+  });
+
+  it("retries a rejected market once with the fallback, logged, and gives up with a load failure after that", async () => {
+    // Vercel's country header can carry XK or T1; Spotify answers 400.
+    const probe = installArtistFetchMock({ statuses: [400, 200] });
+    const { getArtistTopTracks } = await freshSpotify();
+    const { market, tracks } = await getArtistTopTracks(ARTIST_ID, "XK" as never, US);
+    expect(market).toBe("US");
+    expect(tracks).toHaveLength(10);
+    expect(probe.topTrackRequests().map((u) => new URL(u).searchParams.get("market"))).toEqual(["XK", "US"]);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("market=XK fallback=US"));
+
+    const twice = installArtistFetchMock({ statuses: [400, 400] });
+    const err = await getArtistTopTracks(ARTIST_ID, "XK" as never, US).catch((e) => e);
+    expect(err).toMatchObject({ code: "playlist_load_failed", status: 400 });
+    expect(twice.topTrackRequests()).toHaveLength(2);
+    // The fallback itself rejected: one call, no retry against the same market.
+    const once = installArtistFetchMock({ statuses: [400] });
+    await expect(getArtistTopTracks(ARTIST_ID, US, US)).rejects.toMatchObject({ code: "playlist_load_failed" });
+    expect(once.topTrackRequests()).toHaveLength(1);
+  });
+
+  it("maps a 404 to the artist's own code and a 429 to the shared rate-limit code", async () => {
+    installArtistFetchMock({ statuses: [404] });
+    const { getArtistTopTracks } = await freshSpotify();
+    await expect(getArtistTopTracks(ARTIST_ID, TW, US)).rejects.toMatchObject({ code: "artist_not_found", status: 404 });
+    installArtistFetchMock({ statuses: [429], retryAfter: "30" });
+    await expect(getArtistTopTracks(ARTIST_ID, TW, US)).rejects.toMatchObject({
+      code: "spotify_rate_limited",
+      status: 429,
+      retryAfterSeconds: 30,
+    });
+  });
+});

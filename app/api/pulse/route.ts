@@ -77,6 +77,7 @@ export async function POST(req: NextRequest) {
         players: event.players,
         from: event.from,
         starter: event.starter,
+        playlistKind: event.playlistKind,
       });
       break;
     case "game_finished":
@@ -89,13 +90,14 @@ export async function POST(req: NextRequest) {
         scored: event.scored,
         arranged: event.arranged,
         linkDrawn: event.linkDrawn,
+        playlistKind: event.playlistKind,
       });
       break;
     case "first_clip":
       await recordFirstClip(event.path, event.outcome);
       break;
     case "game_left":
-      await recordGameLeft(event.roundsPlayed, event.host, event.source, event.mode, event.players, event.scored, event.arranged);
+      await recordGameLeft(event.roundsPlayed, event.host, event.source, event.mode, event.players, event.scored, event.arranged, event.playlistKind);
       break;
     case "order_round":
       await recordOrderRound(event.verdict, event.arranged);

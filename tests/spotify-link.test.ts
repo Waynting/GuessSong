@@ -8,10 +8,12 @@ import {
   UNPLAYABLE_KINDS,
   UNPLAYABLE_MATCHERS,
   albumUrlFromId,
+  artistUrlFromId,
   checkPlaylistLink,
   classifySpotifyLink,
   isEditorialPlaylistId,
   isEditorialPlaylistLink,
+  isNamedLinkKind,
   isSpotifyShortlinkHost,
   isSubmittablePlaylistLink,
   playableLinkFrom,
@@ -214,13 +216,63 @@ describe("an album link is playable", () => {
   });
 
   it("is no longer a wrong link anywhere", () => {
-    expect(Object.keys(NAMED_LINK_CODES)).toEqual(["track", "artist"]);
+    expect(Object.keys(NAMED_LINK_CODES)).toEqual(["track"]);
     expect(isAppErrorCode("playlist_link_album")).toBe(false);
   });
 });
 
+describe("an artist link is playable", () => {
+  // Artists were the second named refusal until 2026-11-10, when
+  // `playlist_invalid:artist` had read ~33 a day and they began to load as
+  // the artist's top ten in the host's market.
+  const artists = [
+    `https://open.spotify.com/artist/${ID}`,
+    `https://open.spotify.com/intl-ja/artist/${ID}?si=x`,
+    `spotify:artist:${ID}`,
+  ];
+
+  it("reads the id, like a playlist's, and lets every form send it", () => {
+    for (const pasted of artists) {
+      expect(classifySpotifyLink(pasted), pasted).toEqual({ kind: "artist", id: ID });
+      expect(isSubmittablePlaylistLink(pasted), pasted).toBe(true);
+      expect(checkPlaylistLink(pasted), pasted).toEqual({ submittable: true, problem: null, named: null });
+      expect(playableLinkFrom(pasted), pasted).toEqual({ kind: "artist", id: ID });
+      expect(playlistIdFromLink(pasted), pasted).toBeNull();
+    }
+  });
+
+  it("writes one address per artist, reads it back, and holds it to the id rule", () => {
+    expect(artistUrlFromId(ID)).toBe(`https://open.spotify.com/artist/${ID}`);
+    expect(playableUrl({ kind: "artist", id: ID })).toBe(artistUrlFromId(ID));
+    expect(classifySpotifyLink(artistUrlFromId(ID))).toEqual({ kind: "artist", id: ID });
+    expect(classifySpotifyLink("https://open.spotify.com/artist/abc")).toEqual({ kind: "unknown" });
+    expect(classifySpotifyLink(`https://open.spotify.com/artist/${ID}x`)).toEqual({ kind: "unknown" });
+  });
+
+  it("wins over a short link and a track beside it, and loses to a playlist or an album", () => {
+    expect(classifySpotifyLink(`https://spotify.link/AbCdEfG https://open.spotify.com/artist/${ID}`)).toEqual({
+      kind: "artist",
+      id: ID,
+    });
+    expect(classifySpotifyLink(`https://open.spotify.com/track/${ID} https://open.spotify.com/artist/${ID}`)).toEqual({
+      kind: "artist",
+      id: ID,
+    });
+    expect(classifySpotifyLink(`https://open.spotify.com/artist/${ID} https://open.spotify.com/album/${ID}`)).toEqual({
+      kind: "album",
+      id: ID,
+    });
+  });
+
+  it("is no longer a wrong link anywhere", () => {
+    expect(isNamedLinkKind("artist" as never)).toBe(false);
+    expect(Object.keys(NAMED_LINK_CODES)).toEqual(["track"]);
+    expect(isAppErrorCode("playlist_link_artist")).toBe(false);
+  });
+});
+
 describe("links to the wrong thing are named", () => {
-  const named: Array<["track" | "artist", string[]]> = [
+  const named: Array<["track", string[]]> = [
     [
       "track",
       [
@@ -229,14 +281,10 @@ describe("links to the wrong thing are named", () => {
         `spotify:track:${ID}`,
       ],
     ],
-    [
-      "artist",
-      [`https://open.spotify.com/artist/${ID}`, `spotify:artist:${ID}`],
-    ],
   ];
 
   for (const [kind, links] of named) {
-    it(`calls ${kind === "artist" ? "an" : "a"} ${kind} link ${kind}`, () => {
+    it(`calls a ${kind} link ${kind}`, () => {
       for (const pasted of links) {
         expect(classifySpotifyLink(pasted), pasted).toEqual({ kind });
         expect(isSubmittablePlaylistLink(pasted), pasted).toBe(false);

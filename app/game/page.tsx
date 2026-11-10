@@ -20,6 +20,7 @@ import {
   type GamePlayer as Player,
   type BuzzerRoomHandle,
   type MixedPlaylistMeta,
+  type PlaylistKind,
 } from "@/lib/game-session";
 import { gameScored, playerBand } from "@/lib/game-players";
 import { loadGame } from "@/lib/game-storage";
@@ -262,6 +263,9 @@ export default function GamePage() {
   // for a game stored before the payload carried it; the beacons then send
   // none, as they always did.
   const setupSourceRef = useRef<SetupSource | undefined>(undefined);
+  // What the link was, for the end and leave beacons; a payload from before
+  // 2026-11-10 has none and reads as a playlist, the baseline.
+  const playlistKindRef = useRef<PlaylistKind>("playlist");
   /**
    * False when this page is a reload of a game that already had one. Null
    * until the game has loaded. See claimFirstPage in lib/game-beacons.ts for
@@ -383,6 +387,7 @@ export default function GamePage() {
     const hostGames = getHostGameCount();
     hostKindRef.current = hostKindOf(hostGames);
     setupSourceRef.current = data.setupSource;
+    playlistKindRef.current = data.playlistKind ?? "playlist";
     // Claimed once per page, not once per effect run — StrictMode runs this
     // twice in development, and the second run would find the first's marker
     // and read its own page as a reload.
@@ -521,7 +526,9 @@ export default function GamePage() {
         setupSourceRef.current,
         modeRef.current,
         playerBand(playersRef.current.length),
-        gameScored(playersRef.current)
+        gameScored(playersRef.current),
+        undefined,
+        playlistKindRef.current
       );
     },
     [settleFirstClip]
@@ -1098,6 +1105,7 @@ export default function GamePage() {
       scored: gameScored(players),
       // Whether this Game Over draws the Mixed link — the link's denominator.
       linkDrawn: gameOverOnward(layout, players.length).mixedLink,
+      playlistKind: playlistKindRef.current,
     });
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,

@@ -29,10 +29,6 @@ const COPY: Record<ShareType, { title: string; body: string }> = {
     title: "That's a single track",
     body: "GuessSong needs a whole playlist to build a game. Share a public playlist you made yourself — add this song to it first if you like.",
   },
-  artist: {
-    title: "That's an artist page",
-    body: "GuessSong plays playlists. Add the artist's songs to a playlist of your own, make it public, and share that playlist.",
-  },
   unknown: {
     title: "Couldn't find a playlist link",
     body: "We couldn't spot a Spotify playlist link in what you shared. In Spotify, open a playlist you made → tap ⋯ → Share → GuessSong.",
@@ -41,7 +37,10 @@ const COPY: Record<ShareType, { title: string; body: string }> = {
 
 function readType(): ShareType {
   const t = new URLSearchParams(window.location.search).get("type");
-  return t === "track" || t === "artist" ? t : "unknown";
+  // `artist` was a type until 2026-11-10; a shared artist page now lands on
+  // the setup page and plays as the artist's top ten. An old link with
+  // `?type=artist` reads as unknown, whose copy still says what to share.
+  return t === "track" ? t : "unknown";
 }
 
 export default function ShareUnsupportedPage() {

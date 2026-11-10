@@ -26,6 +26,7 @@
  */
 import {
   albumUrlFromId,
+  artistUrlFromId,
   isEditorialPlaylistId,
   isEditorialPlaylistLink,
   playableLinkFrom,
@@ -63,34 +64,47 @@ export function playlistUrlOf(id: string): string {
 }
 
 /**
- * A playlist or an album as one storable string — the *ref* the setup
- * memory and the recent chips key on (`lib/setup-memory.ts`).
+ * A playlist, an album or an artist as one storable string — the *ref* the
+ * setup memory and the recent chips key on (`lib/setup-memory.ts`).
  *
  * A playlist's ref is its bare 22-character id, byte for byte what the two
  * storage keys held before albums could load, so nothing a host's browser
- * already remembers reads differently. An album's is `album:<id>`: the colon
- * cannot occur in an id, so the two cannot collide, and `isEditorialId` is
- * false for every album ref by construction — `37i9` is a playlist-id
- * convention and the prefix is in front of it.
+ * already remembers reads differently. An album's is `album:<id>` and an
+ * artist's `artist:<id>` (since 2026-11-10): the colon cannot occur in an
+ * id, so the three cannot collide, and `isEditorialId` is false for every
+ * prefixed ref by construction — `37i9` is a playlist-id convention and the
+ * prefix is in front of it.
  */
 const ALBUM_REF_PREFIX = "album:";
+const ARTIST_REF_PREFIX = "artist:";
 
 export function playableRefOf(text: string): string | null {
   const link = playableLinkFrom(text);
   if (!link) return null;
-  return link.kind === "album" ? `${ALBUM_REF_PREFIX}${link.id}` : link.id;
+  if (link.kind === "album") return `${ALBUM_REF_PREFIX}${link.id}`;
+  if (link.kind === "artist") return `${ARTIST_REF_PREFIX}${link.id}`;
+  return link.id;
+}
+
+function prefixOf(value: string): string {
+  if (value.startsWith(ALBUM_REF_PREFIX)) return ALBUM_REF_PREFIX;
+  if (value.startsWith(ARTIST_REF_PREFIX)) return ARTIST_REF_PREFIX;
+  return "";
 }
 
 export function isPlayableRef(value: unknown): value is string {
   if (typeof value !== "string") return false;
-  return value.startsWith(ALBUM_REF_PREFIX)
-    ? PLAYLIST_ID.test(value.slice(ALBUM_REF_PREFIX.length))
-    : PLAYLIST_ID.test(value);
+  return PLAYLIST_ID.test(value.slice(prefixOf(value).length));
+}
+
+/** True for an artist's ref — what the setup page's status line under the field reads. */
+export function isArtistRef(value: unknown): boolean {
+  return typeof value === "string" && value.startsWith(ARTIST_REF_PREFIX) && isPlayableRef(value);
 }
 
 /** The canonical address a ref names — the inverse of `playableRefOf`. */
 export function playableUrlOf(ref: string): string {
-  return ref.startsWith(ALBUM_REF_PREFIX)
-    ? albumUrlFromId(ref.slice(ALBUM_REF_PREFIX.length))
-    : playlistUrlFromId(ref);
+  if (ref.startsWith(ALBUM_REF_PREFIX)) return albumUrlFromId(ref.slice(ALBUM_REF_PREFIX.length));
+  if (ref.startsWith(ARTIST_REF_PREFIX)) return artistUrlFromId(ref.slice(ARTIST_REF_PREFIX.length));
+  return playlistUrlFromId(ref);
 }

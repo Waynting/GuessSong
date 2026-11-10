@@ -26,9 +26,17 @@ describe("/share/unsupported", () => {
 
   it("has an entry to read", () => {
     expect(table).not.toBe("");
-    for (const type of ["track", "artist", "unknown"]) {
+    for (const type of ["track", "unknown"]) {
       expect(table, type).toMatch(new RegExp(`\\b${type}: \\{`));
     }
+  });
+
+  it("has nothing to say about an artist either, since 2026-11-10", () => {
+    // A shared artist page lands on the setup page and plays as the
+    // artist's top ten; a sentence here would be a refusal the server no
+    // longer makes.
+    expect(table).not.toMatch(/\bartist: \{/);
+    expect(isSubmittablePlaylistLink(`https://open.spotify.com/artist/${ID}`)).toBe(true);
   });
 
   it("has nothing to say about an album, because an album plays", () => {
@@ -48,7 +56,7 @@ describe("/share/unsupported", () => {
     expect(table).not.toMatch(/lives? in/i);
     expect(table).not.toMatch(/any playlist you like/i);
     expect(table).not.toMatch(/artist's playlists|one of the artist/i);
-    expect(table).toMatch(/playlist of your own/);
+    expect(table).toMatch(/playlist (of your own|you made yourself)/);
   });
 
   it("says in the tip which playlists cannot be loaded", () => {
@@ -77,10 +85,14 @@ describe("the guide", () => {
     expect(failing).not.toMatch(/intl-/);
   });
 
-  it("still lists what the classifier refuses", () => {
+  it("still lists what the classifier refuses, and no longer an artist", () => {
     expect(isSubmittablePlaylistLink(`https://open.spotify.com/track/${ID}`)).toBe(false);
-    expect(isSubmittablePlaylistLink(`https://open.spotify.com/artist/${ID}`)).toBe(false);
-    expect(failing).toMatch(/artist or track/i);
+    expect(failing).toMatch(/track link/i);
+    expect(isSubmittablePlaylistLink(`https://open.spotify.com/artist/${ID}`)).toBe(true);
+    expect(failing).not.toMatch(/<strong>An artist/i);
+    const works = section.match(/spellings that look wrong and are not[\s\S]*?<ul>([\s\S]*?)<\/ul>/)?.[1] ?? "";
+    expect(works).toMatch(/artist/i);
+    expect(works).toMatch(/top ten|ten\s+most popular/i);
   });
 
   it("lists an album among the links that work, now that it does", () => {
