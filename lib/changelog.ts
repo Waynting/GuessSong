@@ -54,6 +54,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.24.0",
+    date: "2026-11-10",
+    headline: "Artist links play: paste an artist's page and the game is their ten biggest songs.",
+    headlineZh: "歌手連結可以玩了：貼上歌手頁面，就用他們最紅的十首歌來玩。",
+    changes: [
+      {
+        kind: "new",
+        text: "Paste a Spotify artist link and the game is built from the artist's ten most popular songs where you are. Works on every form, including Mixed Playlist Mode and the Taste Quiz.",
+        textZh: "貼 Spotify 歌手連結也可以玩了：遊戲會用這位歌手在你所在地區最紅的十首歌。每個表單都收，混合歌單模式和品味鑒定也可以。",
+      },
+      {
+        kind: "better",
+        text: "Under the playlist field, an artist link gets a note saying it plays their top 10 songs, and the message for a link that is none of playlist, album or artist says so.",
+        textZh: "歌單欄位下面，貼歌手連結時會提示「會玩他們最熱門的 10 首歌」；不是歌單、專輯或歌手的連結，訊息也會寫明。",
+      },
+    ],
+  },
+  {
     version: "1.23.0",
     date: "2026-11-10",
     headline: "Playing alone gets its own playlist and a first round that shows you the move; wrong links say what they are.",
