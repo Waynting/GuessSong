@@ -49,3 +49,21 @@ body {
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
+
+/* The order game's first-round cue (app/order/page.tsx and
+   components/order-phone.tsx, through showDragCue in lib/order-game.ts): the
+   last card lifts toward the top twice and settles — the gesture the host is
+   asked to make. Declared here, outside @layer like the body rule above,
+   because the phone's card list is Tailwind with inline transforms and has no
+   <style> block to hold a keyframe, and the two screens must spell one class.
+   `:not(.lifted)` keeps the keyframe's transform from overriding the lifted
+   card's inline translateY before the drag has crossed a slot. Nothing moves
+   for a reader who asked for reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .beckon:not(.lifted) { animation: beckon 1.6s ease 0.8s 2; }
+  @keyframes beckon {
+    0%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-7px); }
+    60% { transform: translateY(2px); }
+  }
+}

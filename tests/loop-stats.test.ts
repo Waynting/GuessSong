@@ -6,6 +6,7 @@ import { LOOP_SURFACES } from "@/lib/loop-links";
 import { QUIZ_VERDICTS } from "@/lib/quiz";
 import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
 import { ARRIVALS } from "@/lib/arrival";
+import { STARTER_KEYS } from "@/lib/starter-playlists";
 
 const kv = vi.hoisted(() => ({
   incrs: [] as Array<{ key: string; ttl: number; by?: number }>,
@@ -115,26 +116,32 @@ describe("the key format is the contract between writer and reader", () => {
 
     for (const mixed of ["room", "phone"] as const) {
       kv.incrs = [];
-      await recordGameStart(1, mixed);
+      await recordGameStart(1, { mixed });
       expect(keysWritten()).toContain(expected.mixedPool[mixed]);
     }
 
     for (const source of SETUP_SOURCES) {
       kv.incrs = [];
-      await recordGameStart(1, undefined, source);
+      await recordGameStart(1, { source });
       expect(keysWritten()).toContain(expected.hostSetup[source]);
     }
 
     for (const mode of GAME_MODES) {
       kv.incrs = [];
-      await recordGameStart(1, undefined, undefined, mode);
+      await recordGameStart(1, { mode });
       expect(keysWritten()).toContain(expected.gameMode[mode]);
     }
 
     for (const from of ARRIVALS) {
       kv.incrs = [];
-      await recordGameStart(1, undefined, undefined, undefined, undefined, from);
+      await recordGameStart(1, { from });
       expect(keysWritten()).toContain(expected.newHostFrom[from]);
+    }
+
+    for (const starter of STARTER_KEYS) {
+      kv.incrs = [];
+      await recordGameStart(1, { starter });
+      expect(keysWritten()).toContain(expected.hostSetupStarter[starter]);
     }
 
     for (const verdict of ORDER_VERDICTS) {
@@ -592,7 +599,7 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
   });
 
   it("joins the mode to the start, the end and the leave, and refuses one it does not know", async () => {
-    await recordGameStart(2, undefined, "typed", "order");
+    await recordGameStart(2, { source: "typed", mode: "order" });
     expect(keysWritten()).toContain(keys.gameMode.order);
     expect(keysWritten()).toContain(keys.hostSetup.typed);
 
@@ -614,7 +621,7 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
     // `game_mode:${value}` is a key: an unknown mode writes no mode key and
     // costs the game nothing else.
     kv.incrs = [];
-    await recordGameStart(1, undefined, undefined, "timeline" as never);
+    await recordGameStart(1, { mode: "timeline" as never });
     expect(keysWritten()).toContain(keys.games);
     expect(keysWritten().some((k) => k.includes("game_mode:"))).toBe(false);
     kv.incrs = [];
@@ -628,7 +635,7 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
 
   it("crosses the mode with the player band on the start and both beacons, only when the page sent both", async () => {
     const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
-    await recordGameStart(1, undefined, "starter", "order", "p1");
+    await recordGameStart(1, { source: "starter", mode: "order", players: "p1" });
     expect(keysWritten()).toContain(keys.gameModePlayers.order.p1);
 
     kv.incrs = [];
@@ -646,7 +653,7 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
     // its own key for that one and nothing under the joined prefix.
     for (const half of [{ mode: "order" as const }, { players: "p2" as const }]) {
       kv.incrs = [];
-      await recordGameStart(1, undefined, undefined, half.mode, half.players);
+      await recordGameStart(1, { mode: half.mode, players: half.players });
       await recordGameEnd("played_out", 9, half);
       await recordGameLeft(3, undefined, undefined, half.mode, half.players);
       expect(keysWritten().some((k) => k.includes("_mode_players:"))).toBe(false);
@@ -840,10 +847,10 @@ describe("playlist refusals and quiz shares", () => {
   it("keys an arrival only on a device's first game, and only from the closed set", async () => {
     const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
     kv.incrs = [];
-    await recordGameStart(2, undefined, undefined, undefined, undefined, "google");
+    await recordGameStart(2, { from: "google" });
     expect(keysWritten()).not.toContain(keys.newHostFrom.google);
     kv.incrs = [];
-    await recordGameStart(1, undefined, undefined, undefined, undefined, "https://evil.example" as never);
+    await recordGameStart(1, { from: "https://evil.example" as never });
     expect(keysWritten().some((k) => k.includes("new_host_from"))).toBe(false);
   });
 
@@ -1180,7 +1187,7 @@ describe("the liveness marker", () => {
     // have carried its own liveness marker: eight commands for a repeat host's
     // mixed game where this costs five. Pinning the number is what stops that
     // creeping back in as "just one more counter".
-    await recordGameStart(2, "room");
+    await recordGameStart(2, { mixed: "room" });
     expect(kv.incrs).toHaveLength(5);
 
     // Reset the marker memo so the second call pays for it too, otherwise the
@@ -1252,7 +1259,7 @@ describe("how the playlist got into the field", () => {
   });
 
   it("adds exactly one command for a game that said, and keys nothing else differently", async () => {
-    await recordGameStart(3, undefined, "restored");
+    await recordGameStart(3, { source: "restored" });
     expect(setupKeys()).toEqual([keys.hostSetup.restored]);
     expect(kv.incrs).toHaveLength(5);
     expect(keysWritten()).toEqual([
@@ -1265,7 +1272,7 @@ describe("how the playlist got into the field", () => {
   });
 
   it("records a mixed game under both its pool and its source", async () => {
-    await recordGameStart(1, "phone", "mixed");
+    await recordGameStart(1, { mixed: "phone", source: "mixed" });
     expect(keysWritten()).toContain(keys.mixedPool.phone);
     expect(setupKeys()).toEqual([keys.hostSetup.mixed]);
   });
@@ -1276,22 +1283,57 @@ describe("how the playlist got into the field", () => {
     for (const bad of ["Typed", "pasted", "", "__proto__", "constructor", "typed ", "a".repeat(500)]) {
       kv.incrs = [];
       __resetLivenessForTests();
-      await recordGameStart(1, undefined, bad as never);
+      await recordGameStart(1, { source: bad as never });
       expect(setupKeys(), bad).toEqual([]);
       expect(keysWritten(), bad).toContain(keys.games);
     }
   });
 
   it("keeps the key space at the six declared sources", async () => {
-    for (const source of SETUP_SOURCES) await recordGameStart(1, undefined, source);
+    for (const source of SETUP_SOURCES) await recordGameStart(1, { source });
     expect(new Set(setupKeys()).size).toBe(SETUP_SOURCES.length);
     expect([...SETUP_SOURCES]).toEqual(["typed", "restored", "recent", "starter", "shared", "mixed"]);
   });
 
+  describe("which starter list was played (2026-11-10)", () => {
+    const starterKeys = () => keysWritten().filter((k) => k.includes(":host_setup_starter:"));
+
+    it("writes host_setup_starter:<key> for any source, and for none — by any route is the definition", async () => {
+      // A recent chip or a restored link whose id is one of ours is still our
+      // list being played; the order game's chip is for those returning hosts.
+      await recordGameStart(2, { source: "restored", mode: "order", players: "p1", starter: "decades" });
+      expect(starterKeys()).toEqual([keys.hostSetupStarter.decades]);
+      kv.incrs = [];
+      await recordGameStart(1, { starter: "party_hits" });
+      expect(starterKeys()).toEqual([keys.hostSetupStarter.party_hits]);
+      kv.incrs = [];
+      await recordGameStart(1, { source: "starter" });
+      expect(starterKeys()).toEqual([]);
+    });
+
+    it("refuses a key outside the set, and still counts the game", async () => {
+      for (const bad of ["Decades", "28f48HyPfD0fPEGuCBD0kr", "", "__proto__", "constructor", "a".repeat(500)]) {
+        kv.incrs = [];
+        __resetLivenessForTests();
+        await recordGameStart(1, { starter: bad as never });
+        expect(starterKeys(), bad).toEqual([]);
+        expect(keysWritten(), bad).toContain(keys.games);
+      }
+    });
+
+    it("keys every declared starter and nothing else", () => {
+      expect(Object.keys(keys.hostSetupStarter)).toEqual([...STARTER_KEYS]);
+      expect([...STARTER_KEYS]).toEqual(["party_hits", "reggaeton", "decades"]);
+      for (const k of STARTER_KEYS) {
+        expect(keys.hostSetupStarter[k]).toBe(`loop:stats:2026-08-09:host_setup_starter:${k}`);
+      }
+    });
+  });
+
   it("is swallowed with the rest when KV is down", async () => {
     kv.failWrites = true;
-    await expect(recordGameStart(2, "room", "mixed")).resolves.toBeUndefined();
-    await expect(recordGameStart(2, undefined, "recent")).resolves.toBeUndefined();
+    await expect(recordGameStart(2, { mixed: "room", source: "mixed" })).resolves.toBeUndefined();
+    await expect(recordGameStart(2, { source: "recent" })).resolves.toBeUndefined();
   });
 });
 
@@ -1570,6 +1612,7 @@ describe("the digest prints what the recorders write", () => {
       "first_clip:",
       "game_over_tap:",
       "game_over_tap_screen:",
+      "host_setup_starter:",
       "order_bounce:",
       "game_mode_players:",
       "game_end_mode_players:",
@@ -1588,6 +1631,12 @@ describe("the digest prints what the recorders write", () => {
     // "Other counters" for their 30 days, which means the prefix is not claimed.
     expect(rendered).not.toContain('"mixed_nudge:"');
     expect(script).not.toMatch(/mixed_nudge/);
+    // The starter line reads every key by name through one template, in the
+    // order the writer declares; a key it does not know still prints after.
+    expect(script).toMatch(/get\(`host_setup_starter:\$\{k\}`\)/);
+    expect(script).toMatch(/starter chips picked/);
+    const starterOrder = script.match(/const STARTER_KEY_ORDER = \[([^\]]*)\]/)?.[1] ?? "";
+    for (const k of STARTER_KEYS) expect(starterOrder, k).toContain(`"${k}"`);
     // Reader and writer checked over the same two lists: a target the recorder
     // keys by screen and the script does not read is a counter printed nowhere.
     for (const target of GAME_OVER_TAPS) {
@@ -1673,7 +1722,7 @@ describe("players on the scoreboard, and whether anyone scored", () => {
   it("writes exactly the keys the reader reads, on start, end and leave", async () => {
     for (const band of PLAYER_BANDS) {
       kv.incrs = [];
-      await recordGameStart(1, undefined, undefined, "party", band);
+      await recordGameStart(1, { mode: "party", players: band });
       expect(keysWritten()).toContain(expected.gamePlayers[band]);
       for (const end of ["played_out", "ended_early"] as const) {
         kv.incrs = [];
@@ -1699,7 +1748,7 @@ describe("players on the scoreboard, and whether anyone scored", () => {
   });
 
   it("writes nothing for a page that sent neither, or sent junk", async () => {
-    await recordGameStart(1, undefined, undefined, "party", "p9" as never);
+    await recordGameStart(1, { mode: "party", players: "p9" as never });
     await recordGameEnd("played_out", 3, { players: "__proto__" as never, scored: "yes" as never });
     await recordGameLeft(1, "first", undefined, undefined, undefined, undefined);
     expect(keysWritten().filter((k) => /_players:|_scored:/.test(k))).toEqual([]);

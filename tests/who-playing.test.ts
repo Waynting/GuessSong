@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { SOLO_DEFAULT_NAME, setupForWho, soloRoster, whoFromSetup } from "@/lib/who-playing";
+import { ORDER_BLURB } from "@/lib/order-game";
 
 const read = (p: string) => readFileSync(p, "utf8");
 
@@ -68,5 +69,20 @@ describe("the setup page wiring", () => {
   it("links the quiz as its own card, not a line under Start", () => {
     expect(page).toMatch(/className="quiz-card"/);
     expect(page).not.toMatch(/className="mode-links"/);
+  });
+});
+
+describe("the order game is described once on the setup page", () => {
+  it("renders ORDER_BLURB on the Just me tile and on the fold's pill, and says the silence as a benefit", () => {
+    // 82% of order games over before their first reveal had moved nothing;
+    // a tile that read as "a music game" had promised a clip. One constant
+    // for both sites (lib/order-game.ts), so the game is described once.
+    const page = read("app/page.tsx");
+    expect(page).toMatch(/sub: ORDER_BLURB,/);
+    expect(page).toMatch(/\? ORDER_BLURB\s*: "Play a clip, everyone shouts the title, you award the points\."/);
+    expect(page).not.toMatch(/Order four songs by release year|No audio, so it works anywhere/);
+    expect(ORDER_BLURB).toBe("Four songs, oldest to newest. No sound — it scores itself.");
+    expect(ORDER_BLURB).toMatch(/No sound/);
+    expect(ORDER_BLURB.length).toBeLessThan(70); // two lines at 390px, under the title
   });
 });

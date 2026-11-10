@@ -41,6 +41,7 @@ import type { PreviewStatus } from "@/types/preview";
 import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
 import { isPlaylistHelpTopic, PLAYLIST_HELP_TOPIC_NAMES, type PlaylistHelpTopic } from "@/lib/playlist-help";
 import { UNPLAYABLE_KINDS, type UnplayableKind } from "@/lib/spotify-link";
+import { STARTER_KEYS, isStarterKey, type StarterKey } from "@/lib/starter-playlists";
 import { RECOVERY_STAGES, type RecoveryStage } from "@/lib/refusal-recovery";
 import { SETUP_SOURCES, isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { GAME_MODES, isGameMode, type GameMode } from "@/lib/game-session";
@@ -828,6 +829,8 @@ export function loopStatsKeys(
   hostIndex: string[];
   mixedPool: Record<MixedSubMode, string>;
   hostSetup: Record<SetupSource, string>;
+  /** Which starter list was played — `host_setup_starter:<key>`, for any source. */
+  hostSetupStarter: Record<StarterKey, string>;
   quiz: Record<QuizStage, string>;
   quizOwner: Record<QuizOwnerStage, string>;
   quizVerdict: Record<QuizVerdict, string>;
@@ -1045,6 +1048,9 @@ export function loopStatsKeys(
     hostSetup: Object.fromEntries(
       SETUP_SOURCES.map((s) => [s, key(day, `host_setup:${s}`)])
     ) as Record<SetupSource, string>,
+    hostSetupStarter: Object.fromEntries(
+      STARTER_KEYS.map((k) => [k, key(day, `host_setup_starter:${k}`)])
+    ) as Record<StarterKey, string>,
     quiz: {
       created: key(day, "quiz:created"),
       opened: key(day, "quiz:opened"),
@@ -1200,13 +1206,18 @@ export function recordLoopThrottled(): Promise<void> {
  * without interaction, which is exactly the gap between two parties, so a host
  * on a monthly rhythm reads as first-time forever.
  */
+export interface GameStartDetails {
+  mixed?: MixedSubMode;
+  source?: SetupSource;
+  mode?: GameMode;
+  players?: PlayerBand;
+  from?: Arrival;
+  starter?: StarterKey;
+}
+
 export async function recordGameStart(
   hostGameIndex: number,
-  mixed?: MixedSubMode,
-  source?: SetupSource,
-  mode?: GameMode,
-  players?: PlayerBand,
-  from?: Arrival
+  { mixed, source, mode, players, from, starter }: GameStartDetails = {}
 ): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
@@ -1239,6 +1250,13 @@ export async function recordGameStart(
   // Where a first-time host came from (lib/arrival.ts). A first game only —
   // one command on ~40% of starts — because the question is who is arriving.
   if (index === 1 && isArrival(from)) await bump(`new_host_from:${from}`);
+  // Which starter list the game was played from (lib/starter-playlists.ts),
+  // whatever route put the link in the field: a recent chip or a restored
+  // link whose id is one of ours is still our list being played, and the
+  // chip the order game got on 2026-11-10 is for exactly those returning
+  // hosts. One command on the ~20% of starts that are a starter's; the key
+  // tail is a closed set and an unknown value writes nothing.
+  if (isStarterKey(starter)) await bump(`host_setup_starter:${starter}`);
 }
 
 /**

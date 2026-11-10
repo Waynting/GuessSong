@@ -9,6 +9,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The order game has its own starter list, and the chip reaches the host
+  it is for** (`startersFor`, `starterKey`, `starterKeyForId`, `fieldChipRow`
+  in `lib/starter-playlists.ts`; `host_setup_starter:<key>`). The starter row
+  went from 8 to ~130 round-zero order bounces a day across the 2026-10-26
+  picker: the two guess-game lists ("Party Hits 2010–2026", "Reggaetón
+  Viejo") were landing in a game where four songs from one decade are not
+  orderable by a stranger. Each starter now names its game, the order style
+  offers only "Hits from every decade" (375 dated songs, 62 distinct years,
+  1961–2026), and three placement rules change for that style only: the
+  chip is offered whenever the form is on a single playlist and no refusal
+  is up — filled field or not, recent chips or not, because the host it is
+  for (`restored`, ~145 round-zero leaves/day) has a filled field — it sits
+  in the same sideways row as the recent chips, deduped on id with the
+  recent entry winning, and it answers `order_too_few_dated` under the box
+  ("pick one that spans a few years": this is the list that does). The guess
+  style's rule is byte-for-byte what it was. Which list a game was played
+  from is counted as `host_setup_starter:<key>` on the `game_started` pulse
+  (a field on the start pulse, never a new kind — the 2026-08-15 rule), for
+  **any** source: a recent chip or a restored link whose id is one of ours
+  is still our list being played, which is what keeps the chip's read from
+  undercounting the returning hosts it is for. Derived once, at the start,
+  from the field (`starterKeyForId(currentPlaylistId)`), and only on a
+  single-playlist start — a Mixed room's start can still see a starter id in
+  the single form. `reportGameStart` / `recordGameStart` take one options
+  object instead of a seventh positional optional. GA4 `game_started` gains
+  `starter_key` — **register it as a custom dimension (Event scope) on
+  release; registration is not retroactive.** `npm run stats` prints `starter
+  chips picked` under "Playlist came from". Read a week on: `decades` beside
+  `game_left_source:starter:r0` (~130/day) and `order_bounce:*:untouched`
+  (~315/day).
+- **The order game's first screen says "drag"** (`showDragCue` in
+  `lib/order-game.ts`, `components/card-grip.tsx`, `.beckon` in
+  `app/globals.css`). 82% of order games over before their first reveal had
+  moved nothing, and the only sentence that said "drag" was 13px uppercase
+  `#555` on the card (2.3:1) under a full-width green Reveal — the screen
+  advertised the button. Four changes, each derived from state and never
+  from a timer: the face-down prompt is sentence case at `#9a9a9a` (the
+  revealed state keeps its green uppercase: a result, not an instruction); a
+  shared six-dot grip sits at the trailing edge of every face-down card,
+  where the year goes at the reveal, so the card is the same width face
+  down and up (`#666`, green while lifted, `aria-hidden`; an inline SVG, not
+  a glyph that falls back to a system font); on round one the **last** card
+  lifts toward the top twice and settles — the gesture asked for, never the
+  top card, which under "Oldest on top" reads as a hint — until a card
+  moves, an arrow key moves one, or (on a phone) an answer is locked
+  (`.beckon:not(.lifted)`, once in `app/globals.css` under
+  `prefers-reduced-motion: no-preference`, because the phone's list is
+  Tailwind with no `<style>` block and the two screens must spell one
+  class); and Reveal on round one is a green-bordered ghost with the
+  primary's box until the first move, then primary, never disabled. After a
+  reveal with nothing moved and nothing scored, one `#888` line: "Left as
+  dealt — drag the cards next round to score." — never beside an award,
+  because an untouched deal is still graded and the top card is the oldest
+  one time in four. The phone (`components/order-phone.tsx`) draws the same
+  grip and runs the same cue for its own first round. No new counter: the
+  read is `order_bounce:left:untouched` and `order_bounce:ended:untouched`.
+- **The "Just me" tile says there is no clip** (`ORDER_BLURB` in
+  `lib/order-game.ts`): "Four songs, oldest to newest. No sound — it scores
+  itself." — the same fact as a benefit, rendered by the tile and by the
+  settings fold's "Game" pill, so the game is described once. The hero
+  `<h2>` is untouched. **Pre-registered read for item 1**, a week after
+  deploy, per day against the 11-01→09 baseline: `game_mode_players:order:p1`
+  starts (~2,020/day) and `order_bounce:*:untouched` (~315/day). Starts
+  within ±10% and bounces down → fixed. Starts down >10% with bounces down →
+  the copy pushed lookers away at the tile, where no counter sees them →
+  revert this copy first. Bounces unchanged → the first screen was not the
+  cause; E4 in TODOS.md is next. `host_setup_starter:decades` beside
+  `game_left_source:starter:r0` says whether the chip did its part;
+  `order_round`'s nobody share says whether the year gap did.
 - **"Not a playlist URL" refusals say what the paste was**
   (`unplayableKind`, `UNPLAYABLE_KINDS` in `lib/spotify-link.ts`).
   `playlist_invalid:other` read ~104 a day in the ten days to 2026-11-10,

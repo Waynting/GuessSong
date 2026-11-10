@@ -83,8 +83,10 @@ import {
   type OrderPhoneCoverage,
   type OrderRound,
   hostArranged,
+  showDragCue,
 } from "@/lib/order-game";
 import { displayTitle } from "@/lib/quiz";
+import { CardGrip } from "@/components/card-grip";
 
 /**
  * "Put them in order": four songs face up, the room argues about which came
@@ -663,6 +665,12 @@ export default function OrderPage() {
   const onward = gameOverOnward(screen, players.length);
   const lastRound = currentIndex + 1 >= rounds.length;
   const hostMoved = hostArranged(arrangement, currentIndex);
+  // The first screen's two cues, both derived from state and never from a
+  // timer: the last card beckons until something moves (lib/order-game.ts),
+  // and Reveal stays a green-bordered ghost on round one until it does. A
+  // room's phones arrange for themselves, so neither runs with one in play.
+  const beckon = phase === "showing" && showDragCue({ round: currentIndex, moved: hostMoved, phones: Boolean(buzzerRoom) });
+  const revealUntouched = currentIndex === 0 && !hostMoved && !buzzerRoom;
   // The one drag, shared with the phones (lib/use-card-drag.ts). Live only
   // while the cards are face down.
   const cardDrag = useCardDrag(arrangedIds, phase === "showing", setIds);
@@ -786,15 +794,18 @@ export default function OrderPage() {
         /* The four cards. One column: a row is a title, a credit and a
            cover, and four of them read top to bottom as "a list to put in
            order" where a grid reads as four unrelated tiles. */
+        /* Face down it is an instruction — the only sentence on the screen
+           that says "drag" — so it reads as one: sentence case, and a grey
+           that passes AA on the card (#555 was 2.3:1, under a full-width
+           green button the screen advertised "press" over "drag"). Revealed
+           it is a result, and keeps the green uppercase. */
         .order-prompt {
           text-align: center;
-          color: #555;
+          color: #9a9a9a;
           font-size: 13px;
-          letter-spacing: 0.06em;
-          text-transform: uppercase;
           margin-bottom: 14px;
         }
-        .order-prompt.revealed { color: #1DB954; }
+        .order-prompt.revealed { color: #1DB954; letter-spacing: 0.06em; text-transform: uppercase; }
         .order-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
         .order-card {
           display: flex;
@@ -840,6 +851,11 @@ export default function OrderPage() {
           box-shadow: 0 10px 28px rgba(0,0,0,0.55);
         }
         .order-card.missed { border-color: rgba(239,68,68,0.35); }
+        /* The grip (components/card-grip.tsx), at the trailing edge where
+           the year goes at the reveal: the card is the same width face
+           down and face up. Green while the card is in hand. */
+        .card-grip { color: #666; flex-shrink: 0; }
+        .order-card.lifted .card-grip { color: #1DB954; }
         .order-mark { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; }
         .order-was { font-size: 11px; color: #f87171; white-space: nowrap; }
         .order-result {
@@ -849,6 +865,11 @@ export default function OrderPage() {
           margin-bottom: 12px;
         }
         .order-result.exact { color: #1DB954; font-weight: 600; }
+        /* Under the verdict when the deal was revealed untouched and scored
+           nothing: the host otherwise loses without being told what they
+           did not do. Never beside a score — an untouched deal is still
+           graded, and the top card is the oldest one time in four. */
+        .order-untouched { margin: -4px 0 12px; font-size: 12.5px; line-height: 1.4; color: #888; text-align: center; }
         .score-row-done.missed { color: #666; }
         .order-art {
           width: 56px;
@@ -977,6 +998,23 @@ export default function OrderPage() {
         @media (hover: hover) { .btn-ghost:hover { border-color: #444; color: #999; } }
         .btn-ghost:active { border-color: #444; color: #999; background: rgba(255,255,255,0.06); transform: scale(0.98); transition: none; }
         .btn-ghost.compact { padding: 9px 14px; min-height: 36px; font-size: 12.5px; font-weight: 500; color: #777; }
+        /* Reveal on the first round, until a card has moved: the primary's
+           box with a green border instead of a green fill, so the screen
+           stops shouting "reveal" over "drag" without the button reading as
+           disabled (a grey ghost does, on this theme). Same height as
+           .btn-primary — the border is taken out of the padding — so the
+           swap on the first move changes colour and nothing else. */
+        .btn-ghost.btn-ghost-accent {
+          display: block;
+          width: 100%;
+          padding: 10.5px 12px;
+          border: 1.5px solid #1DB954;
+          color: #1DB954;
+          font-size: 15px;
+          font-weight: 700;
+        }
+        @media (hover: hover) { .btn-ghost.btn-ghost-accent:hover { border-color: #1ed760; color: #1ed760; background: rgba(29,185,84,0.06); } }
+        .btn-ghost.btn-ghost-accent:active { border-color: #1DB954; color: #1DB954; background: rgba(29,185,84,0.12); transform: scale(0.98); transition: none; }
 
         .end-game-btn {
           background: none;
@@ -1302,6 +1340,7 @@ export default function OrderPage() {
              round; the bonus chips are tapped less and read as secondary. */
           .btn-primary { min-height: 48px; font-size: 16px; }
           .btn-ghost { min-height: 44px; }
+          .btn-ghost.btn-ghost-accent { min-height: 48px; font-size: 16px; }
           .btn-ghost.compact { min-height: 40px; }
           .player-pick-btn { min-height: 44px; padding: 9px 16px; font-size: 15px; }
           .player-pick-btn.compact { min-height: 36px; }
@@ -1364,6 +1403,7 @@ export default function OrderPage() {
             .player-pick-btn { min-height: 44px; padding: 8px 14px; }
             .score-row-compact { margin-bottom: 8px; }
             .btn-primary { min-height: 46px; }
+            .btn-ghost.btn-ghost-accent { min-height: 46px; }
             /* Four players' names wrap the picker to two rows and the reveal
                ran ~60px past the fold. Rather than shrink the scoring rows
                further, Next Round rides the bottom edge until its own slot
@@ -1422,12 +1462,18 @@ export default function OrderPage() {
                 const inPlace = isRevealed && marked && slot === i;
                 const missed = isRevealed && marked && slot !== i;
                 const lifted = drag?.id === t.id;
+                // The last card, by the arranged order: the move asked for
+                // is toward the top, and the top card lifting would read as
+                // a hint about the answer. `.beckon:not(.lifted)` in
+                // app/globals.css, so the keyframe never fights the drag's
+                // inline transform.
+                const beckoning = beckon && i === cards.length - 1;
                 return (
                   <div
                     key={t.id}
                     className={`order-card${inPlace ? " in-place" : ""}${missed ? " missed" : ""}${
                       isRevealed ? "" : " movable"
-                    }${lifted ? " lifted" : ""}`}
+                    }${lifted ? " lifted" : ""}${beckoning ? " beckon" : ""}`}
                     style={lifted ? { transform: `translateY(${drag.dy}px)` } : undefined}
                     {...(isRevealed
                       ? {}
@@ -1467,6 +1513,7 @@ export default function OrderPage() {
                         </p>
                       )}
                     </div>
+                    {!isRevealed && <CardGrip />}
                     {isRevealed && (
                       <span className="order-mark">
                         <span className="order-year">{releaseYear(t)}</span>
@@ -1515,7 +1562,7 @@ export default function OrderPage() {
 
             {phase === "showing" && (
               <div>
-                <button className="btn-primary" onClick={reveal}>
+                <button className={revealUntouched ? "btn-ghost btn-ghost-accent" : "btn-primary"} onClick={reveal}>
                   Reveal the Years →
                 </button>
                 {leftoverLine && <p className="order-note">{leftoverLine}</p>}
@@ -1565,6 +1612,13 @@ export default function OrderPage() {
                           result.oldest ? "✓" : "✗"
                         }`}
                   </p>
+                )}
+                {/* Revealed untouched and nothing scored: say what was not
+                    done. Not beside an award — a deal left alone is still
+                    graded, and a line that contradicts a scoreboard that
+                    just moved is worse than none. */}
+                {!hostMoved && !buzzerRoom && exactWinner === null && oldestWinner === null && (
+                  <p className="order-untouched">Left as dealt — drag the cards next round to score.</p>
                 )}
                 {/* The whole order, the round's question. One award. A
                     one-player game was scored from the screen at the reveal,

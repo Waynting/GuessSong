@@ -37,6 +37,7 @@ import type { GameMode } from "@/lib/game-session";
 import type { OrderPhoneCoverage, OrderPhoneVerdict, OrderVerdict } from "@/lib/order-game";
 import type { GameScored, PlayerBand } from "@/lib/game-players";
 import type { Arrival } from "@/lib/arrival";
+import type { StarterKey } from "@/lib/starter-playlists";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
 
@@ -107,14 +108,23 @@ export function reportLoopClick(surface: LoopSurface): void {
  * first-clip line's denominator — "games in which Play could be pressed" —
  * needs the order games taken out of it.
  */
-export function reportGameStart(
-  hostGameIndex: number,
-  mixed?: MixedSubMode,
-  source?: SetupSource,
-  mode?: GameMode,
-  players?: PlayerBand,
-  from?: Arrival
-): void {
+export interface GameStartDetails {
+  mixed?: MixedSubMode;
+  source?: SetupSource;
+  mode?: GameMode;
+  players?: PlayerBand;
+  from?: Arrival;
+  /** Which starter list the game was played from, if the link in the field was one of ours. */
+  starter?: StarterKey;
+}
+
+/**
+ * One options object rather than a seventh positional optional: the single
+ * caller is `recordHostedStart` on the setup page, and a run of `undefined`s
+ * to reach the field you mean is how the wrong one gets filed.
+ */
+export function reportGameStart(hostGameIndex: number, details: GameStartDetails = {}): void {
+  const { mixed, source, mode, players, from, starter } = details;
   sendPulse({
     kind: "game_started",
     hostGameIndex,
@@ -125,6 +135,7 @@ export function reportGameStart(
     // A first game only: the server keys nothing else, so a returning host's
     // beacon carries no referrer-derived field at all.
     ...(from && hostGameIndex === 1 ? { from } : {}),
+    ...(starter ? { starter } : {}),
   });
 }
 

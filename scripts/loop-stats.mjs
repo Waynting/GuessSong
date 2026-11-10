@@ -366,6 +366,29 @@ if (setupSaid > 0) {
 }
 
 /**
+ * Which starter list a game was played from: `host_setup_starter:<key>` on
+ * the start pulse since 2026-11-10 (STARTER_KEYS in lib/starter-playlists.ts),
+ * for any source — a recent chip or a restored link whose id is one of ours
+ * is still our list being played, so this does not undercount the returning
+ * hosts the order game's chip is for. `decades` is that chip; read it beside
+ * `game_left_source:starter:r0` (~130/day before it) and the untouched
+ * round-zero bounces. The order mirrors STARTER_KEYS, newest first; a key
+ * this list does not know still prints, after the ones it does.
+ */
+const STARTER_KEY_ORDER = ["decades", "party_hits", "reggaeton"];
+const starterKeys = [...totals.keys()]
+  .filter((m) => m.startsWith("host_setup_starter:"))
+  .map((m) => m.slice("host_setup_starter:".length))
+  .sort((a, b) => {
+    const [ia, ib] = [STARTER_KEY_ORDER.indexOf(a), STARTER_KEY_ORDER.indexOf(b)];
+    return (ia === -1 ? Infinity : ia) - (ib === -1 ? Infinity : ib) || a.localeCompare(b);
+  });
+if (starterKeys.some((k) => get(`host_setup_starter:${k}`) > 0)) {
+  const parts = starterKeys.map((k) => `${k} ${get(`host_setup_starter:${k}`)}`).join(" · ");
+  console.log(`starter chips picked  ${parts}   (by any route — a recent or restored link that is one of ours counts)`);
+}
+
+/**
  * Where the games went. `Games started` is a beacon from the setup page;
  * these two are beacons from the Game Over screen, so the difference is the
  * tab that closed mid-party — and the Game Over screen is where every
@@ -1330,6 +1353,7 @@ const RENDERED_PREFIXES = [
   "click:",
   "host_index:",
   "host_setup:",
+  "host_setup_starter:",
   "game_end:",
   "game_end_round:",
   "game_end_host:",

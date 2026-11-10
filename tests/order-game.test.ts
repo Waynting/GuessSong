@@ -19,6 +19,7 @@ import {
   orderSummary,
   orderVerdict,
   releaseYear,
+  showDragCue,
   trueOrder,
   usableOrderTracks,
 } from "@/lib/order-game";
@@ -383,6 +384,15 @@ describe("the drag: an arrangement, and how it reads at the reveal", async () =>
     expect(readArrangement(["A", "B", "C", "D"], round)).toEqual({ inPlace: 4, exact: true, oldest: true });
     expect(readArrangement(["A", "C", "B", "D"], round)).toEqual({ inPlace: 2, exact: false, oldest: true });
     expect(readArrangement(["C", "A", "D", "B"], round)).toEqual({ inPlace: 0, exact: false, oldest: false });
+  });
+});
+
+describe("showDragCue", () => {
+  it("runs on round zero, before anything moved, on the screen that arranges — and nowhere else", () => {
+    expect(showDragCue({ round: 0, moved: false, phones: false })).toBe(true);
+    expect(showDragCue({ round: 0, moved: true, phones: false })).toBe(false);
+    expect(showDragCue({ round: 0, moved: false, phones: true })).toBe(false);
+    expect(showDragCue({ round: 1, moved: false, phones: false })).toBe(false);
   });
 });
 

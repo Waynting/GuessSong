@@ -70,7 +70,14 @@ export async function POST(req: NextRequest) {
       await recordLoopImpression(event.surface);
       break;
     case "game_started":
-      await recordGameStart(event.hostGameIndex, event.mixed, event.source, event.mode, event.players, event.from);
+      await recordGameStart(event.hostGameIndex, {
+        mixed: event.mixed,
+        source: event.source,
+        mode: event.mode,
+        players: event.players,
+        from: event.from,
+        starter: event.starter,
+      });
       break;
     case "game_finished":
       await recordGameEnd(event.end, event.roundsPlayed, {

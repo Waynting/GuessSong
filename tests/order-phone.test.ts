@@ -173,3 +173,24 @@ describe("the order page's half", () => {
     expect(page).toMatch(/const points = earned\.get\(nameKey\(p\.name\)\) \?\? 0;/);
   });
 });
+
+describe("the phone's first round (2026-11-10)", () => {
+  const phone = readFileSync(join(process.cwd(), "components/order-phone.tsx"), "utf8");
+
+  it("runs the host's cue with itself as the player: a move here or a lock ends it", () => {
+    expect(phone).toMatch(
+      /const beckon = !revealed && showDragCue\(\{ round: view\.round, moved: local\?\.key === dealKey \|\| view\.mine !== null, phones: false \}\);/
+    );
+    expect(phone).toMatch(/const beckoning = beckon && i === shown\.length - 1;/);
+    expect(phone).toMatch(/\$\{beckoning \? " beckon" : ""\}/);
+    // The same class the host's list applies; the keyframe is app/globals.css's.
+    const host = readFileSync(join(process.cwd(), "app/order/page.tsx"), "utf8");
+    expect(host).toMatch(/\$\{beckoning \? " beckon" : ""\}/);
+    expect(phone).not.toMatch(/@keyframes|animation:/);
+  });
+
+  it("draws the shared grip on every face-down card, green while lifted", () => {
+    expect(phone).toMatch(/import \{ CardGrip \} from "@\/components\/card-grip";/);
+    expect(phone).toMatch(/\{!revealed && <CardGrip className=\{lifted \? "text-\[#1DB954\]" : "text-\[#666\]"\} \/>\}/);
+  });
+});

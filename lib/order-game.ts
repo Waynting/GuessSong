@@ -76,6 +76,28 @@ export function isPlayStyle(value: unknown): value is PlayStyle {
 }
 
 /**
+ * What the setup page says this game is — on the "Just me" tile and on the
+ * "Game" pill inside the settings fold, so the game is described once. The
+ * silence is said as a benefit: a desk or a commute is where a solo Google
+ * looker is, and 82% of order games over before their first reveal had moved
+ * nothing — a tile that read as "a music game" had promised a clip.
+ */
+export const ORDER_BLURB = "Four songs, oldest to newest. No sound — it scores itself.";
+
+/**
+ * Whether the first-round drag cue runs: round zero, nothing moved yet, and
+ * this screen is the one that arranges. On the host's page `phones` is a
+ * buzzer room in play (the phones arrange there), and `moved` is
+ * `hostArranged`; on a phone `phones` is false — the phone *is* the player —
+ * and `moved` is its own local arrangement or lock. The cue is the last card
+ * lifting toward the top, twice (`.beckon` in app/globals.css): the gesture
+ * asked for, on the card whose move gives nothing away.
+ */
+export function showDragCue({ round, moved, phones }: { round: number; moved: boolean; phones: boolean }): boolean {
+  return round === 0 && !moved && !phones;
+}
+
+/**
  * Cards per round. Four: three is a coin flip with an extra card, five does
  * not fit a phone with the picker under it. Fixed until `order_round:*`
  * says whether four is too easy.

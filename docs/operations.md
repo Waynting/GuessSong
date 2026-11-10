@@ -552,6 +552,28 @@ which is the upstream stampede the module exists to prevent.
 
 ---
 
+### Verifying a phone layout locally
+
+`npm run dev` is unreliable here (the Tailwind config kills the dev server),
+so a layout is checked on the production build with KV and GA4 blanked.
+`NEXT_PUBLIC_*` is inlined at build time, so GA4 is blanked on the build and
+KV on the start:
+
+```bash
+UPSTASH_REDIS_REST_URL= UPSTASH_REDIS_REST_TOKEN= NEXT_PUBLIC_GA_MEASUREMENT_ID= npm run build \
+  && UPSTASH_REDIS_REST_URL= UPSTASH_REDIS_REST_TOKEN= npm run start
+```
+
+Two caveats: the AdSense loader still renders under `NODE_ENV=production`,
+and a `/quiz` check spends one real Spotify load. Then drive headless Chrome
+over CDP at 390×844 (`--window-size=390,844` and
+`Emulation.setDeviceMetricsOverride` with `mobile: true`, `deviceScaleFactor: 3`)
+against `http://127.0.0.1:3000`. The pages worth a look after a setup or
+order change: `/` as "Just me" (chip row, tile sub-line, Start's position),
+`/` as "A group" with three names (the buzzer row), `/order` round one (the
+cue runs twice and stops on the first move; Reveal turns primary on it), and
+`/quiz` asking 50 on a short playlist (the built-shorter note).
+
 ## 6. Release
 
 Both changelogs, always. `tests/changelog.test.ts` fails if `package.json`'s
