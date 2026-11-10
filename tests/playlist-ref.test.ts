@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import {
+  isArtistRef,
   EDITORIAL_ID_PREFIX,
   isEditorialId,
   isEditorialLink,
@@ -187,12 +188,28 @@ describe("a playable ref — a playlist's bare id, or album:<id>", () => {
     }
     for (const text of [
       `https://open.spotify.com/track/${OWN}`,
-      `https://open.spotify.com/artist/${OWN}`,
       "https://spotify.link/abcDEF123",
       "https://open.spotify.com/album/short",
       "",
     ]) {
       expect(playableRefOf(text), text).toBeNull();
+    }
+  });
+
+  it("prefixes an artist (2026-11-10), reads it back to the artist's page, and says so", () => {
+    const ref = playableRefOf(`https://open.spotify.com/intl-ja/artist/${OWN}?si=x`);
+    expect(ref).toBe(`artist:${OWN}`);
+    expect(isPlayableRef(ref)).toBe(true);
+    expect(isArtistRef(ref)).toBe(true);
+    expect(isArtistRef(`album:${OWN}`)).toBe(false);
+    expect(isArtistRef(OWN)).toBe(false);
+    expect(isArtistRef("artist:short")).toBe(false);
+    expect(playableUrlOf(ref as string)).toBe(`https://open.spotify.com/artist/${OWN}`);
+    expect(playableRefOf(playableUrlOf(ref as string))).toBe(ref);
+    expect(playableRefOf(`spotify:artist:${OWN}`)).toBe(ref);
+    expect(isEditorialId(playableRefOf(`https://open.spotify.com/artist/${EDITORIAL}`) as string)).toBe(false);
+    for (const bad of ["artist:", `artist:${OWN}x`, `ARTIST:${OWN}`, ` artist:${OWN}`]) {
+      expect(isPlayableRef(bad), bad).toBe(false);
     }
   });
 

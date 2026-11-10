@@ -25,7 +25,7 @@ export type PlaylistSource = "own" | "mixed";
  * album began to land on the setup page like a playlist; the old value stays
  * in GA4's history, not in the union.
  */
-export type ShareType = "track" | "artist" | "unknown";
+export type ShareType = "track" | "unknown";
 /**
  * Why a round had no audio. `absent` is a property of the recording, which is
  * ours to curate around; `unavailable` is a property of our own throttled
@@ -470,7 +470,8 @@ export type AnalyticsEvent =
       name: "playlist_link_named";
       params: {
         surface: "join" | "buzz" | "collector" | "room_panel";
-        link_kind: "track" | "artist";
+        /** `track` only since 2026-11-10: an artist page plays, so it is no longer named. */
+        link_kind: "track";
       };
     }
   | {

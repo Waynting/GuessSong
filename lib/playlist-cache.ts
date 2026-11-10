@@ -39,10 +39,12 @@
 import { dayBucket, getKvStore, hourBucket } from "@/lib/kv";
 import {
   getAlbumWithTracks,
+  getArtistTopTracks,
   getPlaylistWithTracks,
   isSpotifyEditorial,
   SpotifyApiError,
 } from "@/lib/spotify";
+import { defaultMarket, type Market } from "@/lib/market";
 import {
   classifySpotifyLink,
   isNamedLinkKind,
@@ -59,7 +61,8 @@ import { stripTrackForStorage } from "@/lib/game-session";
 import type { AppErrorCode } from "@/lib/error-messages";
 import {
   isPlaylistRefusalCode,
-  recordPlaylistAlbum,
+  recordPlaylistArtist,
+  recordPlaylistKindLoaded,
   recordPlaylistInvalid,
   recordPlaylistRecheck,
   recordPlaylistRefused,
@@ -312,8 +315,9 @@ const COUNTDOWN_MAX_SECONDS = 10 * 60;
 export interface LoadedPlaylist {
   /**
    * What the link was. Derived from the link, never stored: the cache entry
-   * is the same shape under either key. An album is counted on the way out
-   * (`playlist_album:loaded`), and the game page hides its album award.
+   * is the same shape under any key. An album or an artist is counted on the
+   * way out (`playlist_album:loaded`, `playlist_artist:loaded`), and the
+   * game page hides its album award for an album.
    */
   kind: PlayableKind;
   name: string;
@@ -321,7 +325,17 @@ export interface LoadedPlaylist {
   totalTracks: number;
   /** True when the playlist is longer than MAX_PLAYLIST_TRACKS. */
   truncated: boolean;
+  /** An artist's top tracks only: the market they were read in, which is part of the key. */
+  market?: Market;
 }
+
+/**
+ * A playable link with what the cache keys it by. An artist's top ten differ
+ * by market, so the market is part of an artist's key (`artist:v1:<id>:<XX>`)
+ * and of nothing else — the `fold()` rule: one spelling of how a link becomes
+ * a key, and two id spaces never share one.
+ */
+type KeyedLink = PlayableLink & { market?: Market };
 
 /**
  * Which caller a load came from, named in the miss log.
@@ -394,6 +408,13 @@ export interface LoadOptions {
    * 404 instead of asking (`replayed`), and only `recheck` lets it past.
    */
   automatic?: boolean;
+  /**
+   * The market an artist's top tracks are read in (`lib/market.ts`): the
+   * request's country, resolved by the route. Ignored for a playlist or an
+   * album. Absent — an older caller, a test — it is `SPOTIFY_DEFAULT_MARKET`
+   * or `US`, never a guess at the host.
+   */
+  market?: Market;
 }
 
 /**
@@ -417,11 +438,12 @@ export function isReplayedRecheck(err: unknown): boolean {
  * and one key holding two answers is the bug every `fold()` in this codebase
  * exists to prevent.
  */
-function cacheKey(link: PlayableLink): string {
-  return `${link.kind}:${CACHE_VERSION}:${link.id}`;
+function cacheKey(link: KeyedLink): string {
+  const base = `${link.kind}:${CACHE_VERSION}:${link.id}`;
+  return link.kind === "artist" ? `${base}:${link.market ?? defaultMarket()}` : base;
 }
 
-async function readCache(link: PlayableLink): Promise<CacheEntry | null> {
+async function readCache(link: KeyedLink): Promise<CacheEntry | null> {
   try {
     const store = await getKvStore();
     return await store.get<CacheEntry>(cacheKey(link));
@@ -431,7 +453,7 @@ async function readCache(link: PlayableLink): Promise<CacheEntry | null> {
 }
 
 async function writeCache(
-  link: PlayableLink,
+  link: KeyedLink,
   entry: CacheEntry,
   ttlSeconds: number
 ): Promise<void> {
@@ -688,17 +710,21 @@ async function recordStale(kind: "stale" | "refreshed"): Promise<void> {
  * project has decided numbers are read.
  */
 async function recordMiss(
-  link: PlayableLink,
+  link: KeyedLink,
   source: PlaylistLoadSource
 ): Promise<void> {
   try {
     const store = await getKvStore();
     const misses = await store.incr(statsKey("miss"), STATS_TTL_SECONDS);
-    // A playlist's id prints bare, as it always has; an album's is prefixed
-    // so the two cannot be read as one series.
-    const id = link.kind === "album" ? `album:${link.id}` : link.id;
+    // A playlist's id prints bare, as it always has; an album's and an
+    // artist's are prefixed so the three cannot be read as one series. The
+    // kind is named outright too, and an artist's market beside it, so a
+    // `playlist_artist:empty` spike can be told from a header that never
+    // arrived without a counter.
+    const id = link.kind === "playlist" ? link.id : `${link.kind}:${link.id}`;
+    const market = link.kind === "artist" ? ` market=${link.market ?? defaultMarket()}` : "";
     console.log(
-      `[playlist-cache] miss id=${id} source=${source} misses=${misses}`
+      `[playlist-cache] miss id=${id} kind=${link.kind}${market} source=${source} misses=${misses}`
     );
   } catch {
     // Instrumentation must never be able to fail a request.
@@ -896,7 +922,7 @@ const inFlight = new Map<string, Promise<LoadedPlaylist>>();
 
 function toLoaded(
   entry: Extract<CacheEntry, { kind: "hit" }>,
-  link: PlayableLink
+  link: KeyedLink
 ): LoadedPlaylist {
   return {
     kind: link.kind,
@@ -904,20 +930,29 @@ function toLoaded(
     tracks: entry.tracks,
     totalTracks: entry.tracks.length,
     truncated: entry.truncated,
+    ...(link.kind === "artist" ? { market: link.market ?? defaultMarket() } : {}),
   };
 }
 
 /**
- * The one upstream read, by kind. Both answer in the same shape so that
+ * The one upstream read, by kind. All three answer in the same shape so that
  * everything after this line — the strip, the TTLs, the cache write — is one
- * path, and an album cannot be cached by a rule a playlist is not.
+ * path, and an album or an artist cannot be cached by a rule a playlist is
+ * not.
  */
 async function fetchUpstream(
-  link: PlayableLink
+  link: KeyedLink
 ): Promise<{ name: string; tracks: Track[]; truncated: boolean }> {
   if (link.kind === "album") {
     const { album, tracks, truncated } = await getAlbumWithTracks(link.id);
     return { name: album.name, tracks, truncated };
+  }
+  if (link.kind === "artist") {
+    // One call; the market is the key's. The loaded name is what the game
+    // header and the recent chip show — "<Artist> · Top Songs" — because
+    // Spotify's answer carries no name of its own.
+    const { name, tracks } = await getArtistTopTracks(link.id, link.market ?? defaultMarket(), defaultMarket());
+    return { name: name ? `${name} · Top Songs` : "Top Songs", tracks, truncated: false };
   }
   // By the address built from the id, not by what was pasted. The paste may
   // be a short link, which lib/spotify.ts cannot read and must not follow —
@@ -928,11 +963,13 @@ async function fetchUpstream(
 
 /** What a cached 404 replays as when the entry predates `code`. */
 function notFoundCode(link: PlayableLink): AppErrorCode {
-  return link.kind === "album" ? "album_not_found" : "playlist_not_found";
+  if (link.kind === "album") return "album_not_found";
+  if (link.kind === "artist") return "artist_not_found";
+  return "playlist_not_found";
 }
 
 async function fetchAndCache(
-  link: PlayableLink,
+  link: KeyedLink,
   source: PlaylistLoadSource
 ): Promise<LoadedPlaylist> {
   const cooldownUntil = await readCooldownUntil();
@@ -998,6 +1035,7 @@ async function fetchAndCache(
       tracks: stripped,
       totalTracks: stripped.length,
       truncated,
+      ...(link.kind === "artist" ? { market: link.market ?? defaultMarket() } : {}),
     };
   } catch (err) {
     if (err instanceof SpotifyApiError && err.status === 429) {
@@ -1072,12 +1110,19 @@ export async function loadPlaylist(
   // recheck that loads one counts `other`, and the page's own is never a
   // `playlist_refused` (see the catch above).
   const empty = loaded.tracks.length === 0;
-  if (empty && options.automatic !== true) await recordPlaylistRefused("playlist_empty");
-  // An album that played, hit or miss — the number that replaced
-  // `playlist_invalid:album`, which counted the same links being turned away.
-  // Not for the page's own recheck, for the reason the refusals above are not.
-  if (!empty && loaded.kind === "album" && options.automatic !== true) {
-    await recordPlaylistAlbum("loaded");
+  if (empty && options.automatic !== true) {
+    await recordPlaylistRefused("playlist_empty");
+    // An artist with nothing listed in this market: counted under the
+    // refusal above like any empty load, and once more under the artist
+    // line so that line sums like the album's.
+    if (loaded.kind === "artist") await recordPlaylistArtist("empty");
+  }
+  // An album or an artist that played, hit or miss — the numbers that
+  // replaced `playlist_invalid:album` and `:artist`, which counted the same
+  // links being turned away. Not for the page's own recheck, for the reason
+  // the refusals above are not.
+  if (!empty && (loaded.kind === "album" || loaded.kind === "artist") && options.automatic !== true) {
+    await recordPlaylistKindLoaded(loaded.kind);
   }
   if (options.recheck) await recordPlaylistRecheck(empty ? "other" : "found", options.automatic === true);
   return loaded;
@@ -1180,7 +1225,10 @@ async function loadPlaylistUncounted(
   source: PlaylistLoadSource,
   options: LoadOptions
 ): Promise<LoadedPlaylist> {
-  const link = await playableFor(playlistUrl);
+  const found = await playableFor(playlistUrl);
+  // An artist's key carries the market; nothing else's does.
+  const link: KeyedLink =
+    found.kind === "artist" ? { ...found, market: options.market ?? defaultMarket() } : found;
 
   // Checked here as well as inside getPlaylistWithTracks so it stays true
   // during a cooldown: an editorial playlist is permanently unsupported, and
@@ -1253,11 +1301,12 @@ async function loadPlaylistUncounted(
 }
 
 function fetchCoalesced(
-  link: PlayableLink,
+  link: KeyedLink,
   source: PlaylistLoadSource
 ): Promise<LoadedPlaylist> {
   // Keyed like the cache, so an album and a playlist that share an id (they
-  // are Spotify's two id spaces, not one) cannot join each other's fetch.
+  // are Spotify's id spaces, not one) cannot join each other's fetch, and
+  // an artist's fetch in one market never answers another's.
   const key = cacheKey(link);
   const existing = inFlight.get(key);
   if (existing) return existing;

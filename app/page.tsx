@@ -52,6 +52,7 @@ import {
   shouldRememberRejection,
 } from "@/lib/error-messages";
 import {
+  artistLinkNotice,
   editorialWarning,
   failureFor,
   failureOf,
@@ -61,7 +62,7 @@ import {
   type RecheckNote,
   type SetupFailure,
 } from "@/lib/playlist-help";
-import { isEditorialLink, playableRefOf, playableUrlOf } from "@/lib/playlist-ref";
+import { isArtistRef, isEditorialLink, playableRefOf, playableUrlOf } from "@/lib/playlist-ref";
 import { isSubmittablePlaylistLink } from "@/lib/spotify-link";
 import {
   CLIP_DURATIONS,
@@ -97,7 +98,7 @@ import {
 } from "@/components/setup-assist";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { ServiceNotice } from "@/components/service-notice";
-import { buildGamePayload, findDuplicateName, type GameMode } from "@/lib/game-session";
+import { buildGamePayload, findDuplicateName, isPlaylistKind, type GameMode, type PlaylistKind } from "@/lib/game-session";
 import {
   DEFAULT_PLAY_STYLE,
   ORDER_BLURB,
@@ -733,7 +734,13 @@ export default function SetupPage() {
    * `playerCount` is the same figure GA4's `player_count` gets, passed by each
    * caller beside it so the two cannot disagree; it goes out as a band.
    */
-  function recordHostedStart(mixed: MixedSubMode | undefined, mode: GameMode, playerCount: number) {
+  function recordHostedStart(
+    mixed: MixedSubMode | undefined,
+    mode: GameMode,
+    playerCount: number,
+    /** What the single link was (the response's `playlistKind`); a Mixed pool has none. */
+    playlistKind?: PlaylistKind
+  ) {
     const hostGameIndex = bumpHostGameCount();
     const setupSource = setupSourceFor(Boolean(mixed));
     // Which starter list, if the link in the field is one of ours — by any
@@ -748,6 +755,7 @@ export default function SetupPage() {
       players: playerBand(playerCount),
       from: currentArrival(),
       ...(starter ? { starter } : {}),
+      ...(playlistKind ? { playlistKind } : {}),
     });
     const recovery = noteStart(recoveryRef.current, setupSource);
     if (recovery.state !== recoveryRef.current) setRecovery(recovery.state);
@@ -770,6 +778,8 @@ export default function SetupPage() {
   const isEditorial = isEditorialLink(playlistUrl);
   // Which playlist (or album) the field holds, for the chip that names it.
   const currentPlaylistId = playableRefOf(playlistUrl);
+  // An artist page in the field: the status line under it says what will play.
+  const isArtist = isArtistRef(currentPlaylistId);
 
   function addPlayer() {
     setPlayers((p) => [...p, ""]);
@@ -865,6 +875,9 @@ export default function SetupPage() {
         throw apiError(data, "playlist_load_failed");
       }
 
+      // What the link was, from the response: a playlist, an album or an
+      // artist's top ten. Carried to the payload and the start beacon.
+      const playlistKind = isPlaylistKind(data.playlistKind) ? data.playlistKind : undefined;
       const shuffled = shuffle(data.tracks as Track[]);
       // The order game deals only songs with a release year, so the count is
       // taken from those — and a playlist without enough of them across
@@ -900,6 +913,7 @@ export default function SetupPage() {
         playlistSource: "own",
         mode: gameMode(Boolean(room)),
         setupSource: setupSourceFor(false),
+        ...(playlistKind ? { playlistKind } : {}),
         ...(room ? { buzzerRoom: room } : {}),
       });
       // A browser that refuses to store this has not refused the playlist, and
@@ -917,7 +931,8 @@ export default function SetupPage() {
         ...recordHostedStart(
           undefined,
           gameMode(Boolean(room)),
-          room ? buzzerPlayerCount + 1 : validPlayers.length
+          room ? buzzerPlayerCount + 1 : validPlayers.length,
+          playlistKind
         ),
       });
       // Remembered here — once the playlist has loaded and the game is stored
@@ -1412,13 +1427,13 @@ export default function SetupPage() {
 
             {setupMode === "single" && (
               <div>
-                <p className="section-label">Spotify Playlist or Album</p>
+                <p className="section-label">Spotify Playlist, Album or Artist</p>
                 <div style={{ position: "relative" }}>
                   <input
                     ref={firstInputRef}
                     type="url"
                     className={`url-input${isValidSpotifyUrl ? " valid" : ""}`}
-                    placeholder="https://open.spotify.com/playlist/... or /album/..."
+                    placeholder="https://open.spotify.com/playlist/... or /album/... or /artist/..."
                     value={playlistUrl}
                     onChange={(e) => {
                       setPlaylistUrl(e.target.value);
@@ -1444,6 +1459,15 @@ export default function SetupPage() {
                     it says so, and says what to do instead — before the host
                     has spent a Start finding out. */}
                 {isEditorial && <EditorialWarning warning={editorialWarning(locale)} />}
+                {/* An artist page plays as the artist's top ten (2026-11-10).
+                    A status line, not a warning — nothing is wrong — and green
+                    where the editorial slot is amber: the host learned "10
+                    songs" only from the round badge before this. */}
+                {isArtist && (
+                  <p role="status" style={{ marginTop: "8px", fontSize: "12px", color: "#1DB954" }}>
+                    {artistLinkNotice(locale)}
+                  </p>
+                )}
 
                 {/* The playlists this device has played, newest first; the
                     one in the field is lit, which is the only place on the

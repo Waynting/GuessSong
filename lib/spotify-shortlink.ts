@@ -130,14 +130,15 @@ function settled(value: unknown): SettledResolution | null {
   if (entry.status !== "resolved" || !entry.link || typeof entry.link !== "object") return null;
 
   const link = entry.link as { kind?: unknown; id?: unknown };
-  if (link.kind === "track" || link.kind === "artist") {
+  if (link.kind === "track") {
     return { status: "resolved", link: { kind: link.kind } };
   }
-  // A playlist or an album is nothing without its id. An album entry written
-  // before 2026-10-25 carried none — albums were refused, so the id was not
-  // kept — and reads as uncached here: one more follow, for a day at most.
+  // A playlist, an album or an artist is nothing without its id. An album
+  // entry written before 2026-10-25, or an artist entry before 2026-11-10,
+  // carried none — both were refused then, so the id was not kept — and
+  // reads as uncached here: one more follow, for a day at most.
   if (
-    (link.kind === "playlist" || link.kind === "album") &&
+    (link.kind === "playlist" || link.kind === "album" || link.kind === "artist") &&
     typeof link.id === "string" &&
     /^[A-Za-z0-9]{22}$/.test(link.id)
   ) {

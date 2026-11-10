@@ -162,6 +162,7 @@ describe("the setup page's wiring", () => {
 
   it("credits a recovery where every hosted start is counted", () => {
     const start = body.slice(body.indexOf("function recordHostedStart("));
-    expect(start.slice(0, 600)).toMatch(/noteStart\(recoveryRef\.current, setupSource\)/);
+    // The head of the function, past its signature and the start beacon.
+    expect(start.slice(0, 1400)).toMatch(/noteStart\(recoveryRef\.current, setupSource\)/);
   });
 });

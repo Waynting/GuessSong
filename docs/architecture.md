@@ -58,7 +58,9 @@ SETUP  app/page.tsx
   │  paste playlist URL, add players, pick clip length
   ▼
   POST /api/playlist ──▶ lib/playlist-cache.ts ──▶ lib/spotify.ts ──▶ Spotify
-  │                       cache → coalesce → budget → cooldown
+  │                       cache → coalesce → budget → cooldown      (a playlist, an album,
+  │                                                                   or an artist's top ten
+  │                                                                   in the request's market)
   │                       (§3 — all four exist to protect one shared quota)
   ▼
   shuffle, write the whole payload to sessionStorage under `guesssong_game`

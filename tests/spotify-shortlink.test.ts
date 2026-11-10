@@ -167,15 +167,20 @@ describe("following a short link", () => {
     expect(init?.cache).toBe("no-store");
   });
 
-  it("names a track and an artist for what they are, and an album by its id", async () => {
-    for (const kind of ["track", "artist"] as const) {
-      kv.mem.clear();
-      stubFetch({ status: 302, location: `https://open.spotify.com/intl-ja/${kind}/${ID}?si=x` });
-      await expect(resolveShortlink(SHORT)).resolves.toEqual({
-        status: "resolved",
-        link: { kind },
-      });
-    }
+  it("names a track for what it is, and an album or an artist by its id", async () => {
+    kv.mem.clear();
+    stubFetch({ status: 302, location: `https://open.spotify.com/intl-ja/track/${ID}?si=x` });
+    await expect(resolveShortlink(SHORT)).resolves.toEqual({
+      status: "resolved",
+      link: { kind: "track" },
+    });
+    // An artist page plays since 2026-11-10, so its id is kept like an album's.
+    kv.mem.clear();
+    stubFetch({ status: 302, location: `https://open.spotify.com/intl-ja/artist/${ID}?si=x` });
+    await expect(resolveShortlink(SHORT)).resolves.toEqual({
+      status: "resolved",
+      link: { kind: "artist", id: ID },
+    });
     kv.mem.clear();
     stubFetch({ status: 302, location: `https://open.spotify.com/intl-ja/album/${ID}?si=x` });
     await expect(resolveShortlink(SHORT)).resolves.toEqual({
@@ -527,12 +532,15 @@ describe("where a share lands", () => {
 
   it("says what was shared when it was not a playlist", async () => {
     const net = stubFetch();
-    for (const type of ["track", "artist"] as const) {
-      await expect(shareDestination(`https://open.spotify.com/${type}/${ID}`)).resolves.toEqual({
-        to: "unsupported",
-        type,
-      });
-    }
+    await expect(shareDestination(`https://open.spotify.com/track/${ID}`)).resolves.toEqual({
+      to: "unsupported",
+      type: "track",
+    });
+    // A shared artist page lands on the setup page like an album (2026-11-10).
+    await expect(shareDestination(`https://open.spotify.com/artist/${ID}?si=x`)).resolves.toEqual({
+      to: "setup",
+      playlistUrl: `https://open.spotify.com/artist/${ID}`,
+    });
     await expect(shareDestination("just some words")).resolves.toEqual({
       to: "unsupported",
       type: "unknown",

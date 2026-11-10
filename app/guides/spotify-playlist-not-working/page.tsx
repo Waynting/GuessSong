@@ -80,10 +80,10 @@ export default function Page() {
       </p>
       <ul>
         <li>
-          <strong>An artist or track link.</strong> <code>/artist/…</code> and{" "}
-          <code>/track/…</code> are not <code>/playlist/…</code> — check the path segment.
-          GuessSong tells you which of the two you pasted rather than only that the link
-          is wrong. Add the songs to a playlist of your own and use that.
+          <strong>A track link.</strong> <code>/track/…</code> is one song, not a{" "}
+          <code>/playlist/…</code> — check the path segment. GuessSong says so rather than
+          only that the link is wrong. Add the song to a playlist of your own and use that,
+          or paste the artist&rsquo;s page instead, which plays their top ten.
         </li>
         <li>
           <strong>A folder.</strong> Folders group playlists in the desktop app and are not
@@ -107,9 +107,14 @@ export default function Page() {
         outside the United States.
       </p>
       <p>
-        Three spellings that look wrong and are not, at least here:
+        Four spellings that look wrong and are not, at least here:
       </p>
       <ul>
+        <li>
+          <strong>An artist link.</strong> <code>/artist/…</code> plays the artist&rsquo;s ten
+          most popular songs where you are — one short game, or a round of the order game
+          if their years are spread out. It used to be refused; since November 2026 it loads.
+        </li>
         <li>
           <strong>An album link.</strong> <code>/album/…</code> plays like a playlist: paste
           it and the game is built from the album&rsquo;s tracks. (It used to be refused —
@@ -216,8 +221,8 @@ export default function Page() {
           </tr>
           <tr>
             <td>Rejected immediately as invalid</td>
-            <td>Album, track or artist link, or a link cut short</td>
-            <td>Use a <code>/playlist/</code> URL</td>
+            <td>Track link, or a link cut short</td>
+            <td>Use a <code>/playlist/</code>, <code>/album/</code> or <code>/artist/</code> URL</td>
           </tr>
           <tr>
             <td>Worked earlier, fails now</td>

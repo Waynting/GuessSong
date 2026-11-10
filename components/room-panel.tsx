@@ -523,7 +523,7 @@ export function RoomPanel({
                 className="player-input"
                 value={hostPlaylistUrl}
                 onChange={(e) => setHostPlaylistUrl(e.target.value)}
-                placeholder="https://open.spotify.com/playlist/..."
+                placeholder="https://open.spotify.com/playlist/... or /album/... or /artist/..."
                 spellCheck={false}
                 style={{ width: "100%", marginBottom: "8px" }}
               />

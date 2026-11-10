@@ -41,7 +41,8 @@
 
 import { randomUUID } from "node:crypto";
 import { timingSafeEqualStrings } from "@/lib/timing-safe";
-import { loadPlaylist } from "@/lib/playlist-cache";
+import { loadPlaylist, type LoadedPlaylist } from "@/lib/playlist-cache";
+import type { Market } from "@/lib/market";
 import { poolContributions } from "@/lib/mixed-playlist";
 import { getKvStore } from "@/lib/kv";
 import { stripTrackForStorage } from "@/lib/game-session";
@@ -322,7 +323,9 @@ function assertCanJoin(room: LoadedRoom, trimmedName: string): void {
 export async function submitToRoom(
   code: string,
   playerName: string,
-  playlistUrl: string
+  playlistUrl: string,
+  /** The request's country, for an artist link's top ten (lib/market.ts). */
+  market?: Market
 ): Promise<{ trackCount: number }> {
   // Validate the room is currently open before doing the slow network work
   // below, so a request against a dead room fails fast.
@@ -339,9 +342,9 @@ export async function submitToRoom(
   // with a 409.
   assertCanJoin(openRecord, trimmedName);
 
-  let tracks: Track[];
+  let loaded: LoadedPlaylist;
   try {
-    ({ tracks } = await loadPlaylist(playlistUrl, "room-submit"));
+    loaded = await loadPlaylist(playlistUrl, "room-submit", { market });
   } catch (err) {
     // Carry the upstream code through rather than flattening it. A player
     // whose submission lands during a Spotify cooldown is not holding a broken
@@ -357,7 +360,13 @@ export async function submitToRoom(
     }
     throw new RoomError("playlist_load_failed", 422);
   }
+  const { tracks } = loaded;
   if (tracks.length < 1) {
+    // An artist with nothing listed in this market has its own sentence,
+    // carrying the market so the phone can say which was resolved.
+    if (loaded.kind === "artist") {
+      throw new RoomError("artist_empty", 422, { params: { market: loaded.market ?? market ?? "US" } });
+    }
     throw new RoomError("playlist_empty", 422);
   }
   const strippedTracks = tracks.map(stripTrackForStorage);

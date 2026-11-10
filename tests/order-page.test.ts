@@ -167,7 +167,7 @@ describe("the order page's beacons", () => {
     expect(leave).toMatch(
       /const arranged = buzzerRoomRef\.current\s*\?\s*undefined\s*:\s*hostArranged\(arrangementRef\.current, currentIndexRef\.current\);/
     );
-    expect(leave).toMatch(/gameScored\(playersRef\.current\),\s*arranged\s*\);/);
+    expect(leave).toMatch(/gameScored\(playersRef\.current\),\s*arranged,\s*playlistKindRef\.current\s*\);/);
     // One predicate, in lib/: the page never spells "moved" itself.
     expect(leave).not.toMatch(/\.moved\b/);
     expect(body.match(/hostArranged\(/g) ?? []).toHaveLength(4);

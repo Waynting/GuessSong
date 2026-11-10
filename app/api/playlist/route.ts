@@ -3,6 +3,7 @@ import { isReplayedRecheck, loadPlaylist } from "@/lib/playlist-cache";
 import { SpotifyApiError } from "@/lib/spotify";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
+import { marketFromHeaders } from "@/lib/market";
 
 // Still the most expensive route we have, but no longer unbounded: loads go
 // through lib/playlist-cache.ts, so a repeat of the same playlist costs zero
@@ -54,17 +55,27 @@ export async function POST(req: NextRequest) {
     // (`LoadOptions.automatic`). Any other truthy value must not be a way past
     // the negative cache.
     const automatic = recheck === "auto";
-    const { name, tracks, totalTracks, truncated } = await loadPlaylist(
+    // The market an artist link is read in — the request's country, else the
+    // deploy's default (lib/market.ts). A playlist or an album ignores it.
+    const market = marketFromHeaders(req.headers);
+    const { kind, name, tracks, totalTracks, truncated, market: loadedMarket } = await loadPlaylist(
       url,
       "playlist-api",
-      { recheck: recheck === true || automatic, automatic }
+      { recheck: recheck === true || automatic, automatic, market }
     );
 
     if (tracks.length < 1) {
+      // An artist Spotify lists nothing for where the host is: its own
+      // sentence, with the market the device can say back.
+      if (kind === "artist") {
+        return errorResponse("artist_empty", 400, { params: { market: loadedMarket ?? market } });
+      }
       return errorResponse("playlist_empty", 400);
     }
 
-    return NextResponse.json({ name, tracks, totalTracks, truncated });
+    // `playlistKind` rides to the stored payload and its beacons, so the
+    // album and artist lifts can be read by how their games end.
+    return NextResponse.json({ name, tracks, totalTracks, truncated, playlistKind: kind });
   } catch (err: unknown) {
     const status = statusFor(err);
     // English, from the code — this line is a server log, and the sentence the

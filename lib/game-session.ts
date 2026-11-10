@@ -71,6 +71,28 @@ export interface GamePayload {
    * counted as a real one, and a game stored before it existed has none.
    */
   setupSource?: SetupSource;
+  /**
+   * What the link was — a playlist, an album or an artist's top ten — carried
+   * so the end and leave beacons can be read by it (`game_end_kind:*`). Absent
+   * on a payload stored before 2026-11-10 and on a Mixed pool; readers treat
+   * absent as `playlist`, the baseline the crosses are read against.
+   */
+  playlistKind?: PlaylistKind;
+}
+
+/**
+ * What a loaded link was. The album lift (2026-10-25) had no outcome read —
+ * 93 plays a day and nothing to say whether those games were any good — so
+ * the artist lift (2026-11-10) carries the kind onto the payload and the
+ * beacons. A closed set with an allow-list, like `GAME_MODES`, and for the
+ * same reason: it becomes a key tail.
+ */
+export type PlaylistKind = "playlist" | "album" | "artist";
+
+export const PLAYLIST_KINDS: readonly PlaylistKind[] = ["playlist", "album", "artist"];
+
+export function isPlaylistKind(value: unknown): value is PlaylistKind {
+  return typeof value === "string" && (PLAYLIST_KINDS as readonly string[]).includes(value);
 }
 
 const PLAYLIST_SOURCES: PlaylistSource[] = ["own", "mixed"];
@@ -117,6 +139,7 @@ export interface BuildGamePayloadInput {
   mixedPlaylistMeta?: MixedPlaylistMeta;
   buzzerRoom?: BuzzerRoomHandle;
   setupSource?: SetupSource;
+  playlistKind?: PlaylistKind;
 }
 
 export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
@@ -131,6 +154,7 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
     ...(input.mixedPlaylistMeta ? { mixedPlaylistMeta: input.mixedPlaylistMeta } : {}),
     ...(input.buzzerRoom ? { buzzerRoom: input.buzzerRoom } : {}),
     ...(input.setupSource ? { setupSource: input.setupSource } : {}),
+    ...(input.playlistKind ? { playlistKind: input.playlistKind } : {}),
   };
 }
 
@@ -356,5 +380,8 @@ export function parseGamePayload(raw: string): GamePayload | null {
     ...(mixedPlaylistMeta ? { mixedPlaylistMeta } : {}),
     ...(buzzerRoom ? { buzzerRoom } : {}),
     ...(isSetupSource(d.setupSource) ? { setupSource: d.setupSource } : {}),
+    // Absent rather than defaulted, like the source: a stored game from
+    // before the field reads as a playlist by every reader's fallback.
+    ...(isPlaylistKind(d.playlistKind) ? { playlistKind: d.playlistKind } : {}),
   };
 }

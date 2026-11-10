@@ -51,9 +51,10 @@ describe("parseSharedText", () => {
     ).toEqual({ kind: "album", id: ID });
   });
 
-  it("classifies artist links", () => {
+  it("classifies artist links, with their id — they play since 2026-11-10", () => {
     expect(parseSharedText(`https://open.spotify.com/artist/${ID}`)).toEqual({
       kind: "artist",
+      id: ID,
     });
   });
 

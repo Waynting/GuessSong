@@ -117,6 +117,40 @@ describe("parsePulse — the mixed sub-mode", () => {
   });
 });
 
+describe("parsePulse — what the link was (2026-11-10)", () => {
+  it("carries a known playlist kind on the start, the end and the leave, and drops an unknown one", () => {
+    for (const playlistKind of ["playlist", "album", "artist"] as const) {
+      expect(parsePulse({ kind: "game_started", hostGameIndex: 1, playlistKind })).toEqual({
+        kind: "game_started",
+        hostGameIndex: 1,
+        playlistKind,
+      });
+      expect(parsePulse({ kind: "game_finished", end: "played_out", roundsPlayed: 3, playlistKind })).toEqual({
+        kind: "game_finished",
+        end: "played_out",
+        roundsPlayed: 3,
+        playlistKind,
+      });
+      expect(parsePulse({ kind: "game_left", roundsPlayed: 1, playlistKind })).toEqual({
+        kind: "game_left",
+        roundsPlayed: 1,
+        playlistKind,
+      });
+    }
+    // `game_kind:${value}` is a key; an older page sends none.
+    for (const bad of ["Album", "show", "", 1, null, {}]) {
+      expect(parsePulse({ kind: "game_started", hostGameIndex: 1, playlistKind: bad }), String(bad)).toEqual({
+        kind: "game_started",
+        hostGameIndex: 1,
+      });
+      expect(parsePulse({ kind: "game_left", roundsPlayed: 1, playlistKind: bad }), String(bad)).toEqual({
+        kind: "game_left",
+        roundsPlayed: 1,
+      });
+    }
+  });
+});
+
 describe("parsePulse — which starter list (2026-11-10)", () => {
   it("keeps a declared key, drops an undeclared one, and leaves a body without one unchanged", () => {
     for (const starter of ["party_hits", "reggaeton", "decades"] as const) {
@@ -677,13 +711,13 @@ describe("the route records every kind the parser accepts", () => {
     // The mode rides to all three game recorders, or the KV rows read as
     // "no mode was ever sent".
     expect(route).toMatch(
-      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,\s*players: event\.players,\s*from: event\.from,\s*starter: event\.starter,\s*\}\)/
+      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,\s*players: event\.players,\s*from: event\.from,\s*starter: event\.starter,\s*playlistKind: event\.playlistKind,\s*\}\)/
     );
     expect(route).toMatch(
-      /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored, event\.arranged\)/
+      /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored, event\.arranged, event\.playlistKind\)/
     );
     expect(route).toMatch(
-      /mode: event\.mode,\s*players: event\.players,\s*scored: event\.scored,\s*arranged: event\.arranged,\s*linkDrawn: event\.linkDrawn,\s*\}\);/
+      /mode: event\.mode,\s*players: event\.players,\s*scored: event\.scored,\s*arranged: event\.arranged,\s*linkDrawn: event\.linkDrawn,\s*playlistKind: event\.playlistKind,\s*\}\);/
     );
   });
 

@@ -77,7 +77,7 @@ import { QUIZ_COPY_OUTCOMES, type QuizCopyOutcome } from "@/lib/loop-stats";
 import { isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { isSocialPlatform, type SocialPlatform } from "@/lib/social-share";
 import { isPlaylistHelpTopic, type PlaylistHelpTopic } from "@/lib/playlist-help";
-import { isGameMode, type GameMode } from "@/lib/game-session";
+import { isGameMode, isPlaylistKind, type GameMode, type PlaylistKind } from "@/lib/game-session";
 import { isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
 import { isOrderPhoneCoverage, type OrderPhoneCoverage } from "@/lib/order-game";
 import { BUZZER_MAX_PLAYERS } from "@/lib/buzzer-protocol";
@@ -166,6 +166,8 @@ export type PulseEvent =
       from?: Arrival;
       /** Which starter list was played, when the link in the field was one of ours. */
       starter?: StarterKey;
+      /** What the link was; the server crosses an album's or an artist's games only. */
+      playlistKind?: PlaylistKind;
     }
   | {
       kind: "game_finished";
@@ -181,6 +183,7 @@ export type PulseEvent =
       arranged?: boolean;
       /** Whether this Game Over drew the Mixed link — its denominator. */
       linkDrawn?: boolean;
+      playlistKind?: PlaylistKind;
     }
   | { kind: "first_clip"; path: FirstClipPath; outcome: FirstClipOutcome }
   | {
@@ -192,6 +195,7 @@ export type PulseEvent =
       players?: PlayerBand;
       scored?: GameScored;
       arranged?: boolean;
+      playlistKind?: PlaylistKind;
     }
   | { kind: "order_round"; verdict: OrderVerdict; arranged?: boolean }
   | { kind: "order_phone"; locked: OrderPhoneCoverage; exact: number; oldest: number; none: number }
@@ -256,7 +260,10 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // And which starter list it was, once more under the same trade:
     // `host_setup_starter:${value}` is a key, most games have none, and an
     // unknown value is dropped rather than the game.
-    return isStarterKey(raw.starter) ? { ...arrived, starter: raw.starter } : arrived;
+    const withStarter = isStarterKey(raw.starter) ? { ...arrived, starter: raw.starter } : arrived;
+    // And what the link was: `game_kind:${value}` is a key, a page from
+    // before 2026-11-10 sends none, and a game with an unknown kind is a game.
+    return isPlaylistKind(raw.playlistKind) ? { ...withStarter, playlistKind: raw.playlistKind } : withStarter;
   }
 
   if (raw.kind === "game_finished") {
@@ -290,6 +297,8 @@ export function parsePulse(body: unknown): PulseEvent | null {
       ...(typeof raw.arranged === "boolean" ? { arranged: raw.arranged } : {}),
       // Whether the Mixed link was drawn (`game_end_link`). A real boolean only.
       ...(typeof raw.linkDrawn === "boolean" ? { linkDrawn: raw.linkDrawn } : {}),
+      // What the link was. `game_end_kind:${value}:${end}` is a key.
+      ...(isPlaylistKind(raw.playlistKind) ? { playlistKind: raw.playlistKind } : {}),
     };
   }
 
@@ -313,6 +322,7 @@ export function parsePulse(body: unknown): PulseEvent | null {
       ...(isPlayerBand(raw.players) ? { players: raw.players } : {}),
       ...(isGameScored(raw.scored) ? { scored: raw.scored } : {}),
       ...(typeof raw.arranged === "boolean" ? { arranged: raw.arranged } : {}),
+      ...(isPlaylistKind(raw.playlistKind) ? { playlistKind: raw.playlistKind } : {}),
     };
   }
 

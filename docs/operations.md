@@ -69,6 +69,7 @@ Full annotated list in `.env.example`. What actually breaks without each:
 | `SPOTIFY_MAX_LOADS_PER_DAY` | defaults to 2000 |
 | `SPOTIFY_BUDGET_WARN_RATIO` | defaults to 0.8 |
 | `PREVIEW_MAX_LOOKUPS_PER_MINUTE` | defaults to 120 |
+| `SPOTIFY_DEFAULT_MARKET` | defaults to US — the market an artist link's top ten is read in without a country header, and the fallback when Spotify rejects the request's country |
 
 ---
 
@@ -280,6 +281,19 @@ var. Watch the hit-rate log for a week and tune.
 to tell "your playlist is wrong" from "we are throttled"; an earlier version
 told throttled hosts to check their URL was public, which sent them straight
 back into retrying against a spent quota.
+
+### "Every artist link says the artist is not on Spotify"
+
+`playlist_refused:artist_not_found` jumping across many different ids on one
+day is the top-tracks endpoint, not the links: a 404 from
+`GET /artists/{id}/top-tracks` is cached as deterministic for
+`NOT_FOUND_TTL_SECONDS` like a dead album, so an endpoint-wide outage looks
+like a wave of dead links for ten minutes after it ends. Check one known
+artist by hand (`curl` with a client-credentials token) before telling anyone
+their link is wrong. A jump in `playlist_artist:empty` instead, with
+`market=` on the `[playlist-cache] miss` lines all reading `US`, is the
+country header not arriving — the market fell back — not Spotify listing
+nothing.
 
 ### "The buzzer room will not connect"
 

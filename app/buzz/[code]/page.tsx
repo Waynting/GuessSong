@@ -217,7 +217,7 @@ export default function BuzzPlayerPage() {
               <Input
                 id="playlist"
                 type="url"
-                placeholder="https://open.spotify.com/playlist/..."
+                placeholder="https://open.spotify.com/playlist/... or /album/... or /artist/..."
                 value={playlistUrl}
                 onChange={(e) => setPlaylistUrl(e.target.value)}
                 spellCheck={false}

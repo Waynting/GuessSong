@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { submitToRoom, RoomError } from "@/lib/room";
+import { marketFromHeaders } from "@/lib/market";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
 
@@ -31,7 +32,7 @@ export async function POST(
 
   try {
     const body = SubmitSchema.parse(await req.json());
-    const { trackCount } = await submitToRoom(code, body.playerName, body.playlistUrl);
+    const { trackCount } = await submitToRoom(code, body.playerName, body.playlistUrl, marketFromHeaders(req.headers));
     return NextResponse.json({ ok: true, trackCount });
   } catch (err: unknown) {
     if (err instanceof z.ZodError) {

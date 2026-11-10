@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { loadPlaylist } from "@/lib/playlist-cache";
+import { marketFromHeaders } from "@/lib/market";
 import { SpotifyApiError } from "@/lib/spotify";
 import { createQuiz, QuizError } from "@/lib/quiz-store";
 import { QUIZ_DECOY_POOL } from "@/lib/quiz-decoys";
@@ -66,7 +67,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const playlist = await loadPlaylist(body.url, "quiz-create");
+    // An artist link plays as a top ten; the market is the request's country.
+    const playlist = await loadPlaylist(body.url, "quiz-create", { market: marketFromHeaders(req.headers) });
     const created = await createQuiz({
       tracks: playlist.tracks,
       questionCount: body.questionCount,

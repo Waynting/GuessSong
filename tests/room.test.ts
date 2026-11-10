@@ -146,9 +146,11 @@ describe("room lifecycle", () => {
     expect(result.trackCount).toBe(2);
     // Named, so the cache's miss log identifies this path even when the log
     // viewer attributes the line to an unrelated concurrent request.
+    // The market rides along for an artist link (2026-11-10); a playlist ignores it.
     expect(playlistCache.loadPlaylist).toHaveBeenCalledWith(
       "https://open.spotify.com/playlist/abc",
-      "room-submit"
+      "room-submit",
+      { market: undefined }
     );
   });
 

@@ -2,6 +2,7 @@ import { Track } from "@/types";
 import { shuffle } from "@/lib/shuffle";
 import { errorMessage, type AppErrorCode } from "@/lib/error-messages";
 import { isEditorialPlaylistId, playlistIdFromLink } from "@/lib/spotify-link";
+import type { Market } from "@/lib/market";
 
 const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
@@ -162,7 +163,8 @@ async function getClientAccessToken(): Promise<string> {
 export interface SpotifyTrack {
   id: string;
   name: string;
-  artists: Array<{ name: string }>;
+  /** `id` is read off a top-tracks answer to name the artist without a second call. */
+  artists: Array<{ name: string; id?: string }>;
   duration_ms: number;
   // No preview_url. Spotify deprecated it in Nov 2024 and it comes back null
   // for every track on Client Credentials — measured 0/20 across four markets.
@@ -704,8 +706,19 @@ export async function getPlaylistWithTracks(
  * is its own code: an album cannot be made private, so "check that it's
  * public" would send the host to a setting that does not exist.
  */
-function albumError(response: Response, errorData: { error?: { message?: string } }, what: string) {
-  if (response.status === 404) return new SpotifyApiError("album_not_found", 404);
+/**
+ * The error for an album or an artist call: a 404 is the entity's own
+ * not-found code (an album cannot be private, so it is a dead link; an
+ * artist likewise), a 429 is the shared cooldown path, anything else is a
+ * load failure with the detail for the log.
+ */
+function entityError(
+  response: Response,
+  errorData: { error?: { message?: string } },
+  what: string,
+  notFound: "album_not_found" | "artist_not_found"
+) {
+  if (response.status === 404) return new SpotifyApiError(notFound, 404);
   if (response.status === 429) {
     return new SpotifyApiError(RATE_LIMITED_CODE, 429, {
       retryAfterSeconds: parseRetryAfter(response),
@@ -714,6 +727,10 @@ function albumError(response: Response, errorData: { error?: { message?: string 
   return new SpotifyApiError("playlist_load_failed", response.status, {
     detail: `${what}: ${response.status} ${errorData.error?.message || response.statusText}`,
   });
+}
+
+function albumError(response: Response, errorData: { error?: { message?: string } }, what: string) {
+  return entityError(response, errorData, what, "album_not_found");
 }
 
 interface AlbumTrackPage {
@@ -806,4 +823,82 @@ export async function getAlbumWithTracks(
   });
 }
 
+/** What `getArtistTopTracks` hands back: the credited name, the ten, and the market they were read in. */
+export interface ArtistTopTracks {
+  /** The artist's name as credited on the first track that names the id, or null for an empty answer. */
+  name: string | null;
+  tracks: Track[];
+  /** The market the answer came from — the requested one, or the fallback after a 400. */
+  market: Market;
+}
 
+/**
+ * One call to `GET /artists/{id}/top-tracks?market=XX`. A 400 is Spotify
+ * rejecting the market — Vercel's country header can carry codes such as
+ * `XK` or `T1` that pass a two-letter check — and is handed back as a value,
+ * so the caller can ask once more with the fallback; every other failure is
+ * the entity error path.
+ */
+async function fetchArtistTopTracks(
+  artistId: string,
+  market: Market,
+  accessToken: string
+): Promise<{ tracks: SpotifyTrack[] } | "bad_market"> {
+  const url = `${SPOTIFY_API_BASE}/artists/${artistId}/top-tracks?market=${encodeURIComponent(market)}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (response.status === 400) return "bad_market";
+  if (!response.ok) {
+    const errorData = await response
+      .json()
+      .catch(() => ({ error: { message: response.statusText } }));
+    console.error("Spotify artist top-tracks fetch error:", response.status, errorData, "URL:", url);
+    throw entityError(response, errorData, "artist top-tracks", "artist_not_found");
+  }
+  const body = (await response.json()) as { tracks?: unknown };
+  return { tracks: Array.isArray(body.tracks) ? (body.tracks as SpotifyTrack[]) : [] };
+}
+
+/**
+ * An artist's ten most popular songs in `market`, using Client Credentials.
+ *
+ * One call for the ordinary artist. The endpoint requires a market on
+ * Client Credentials and answers differently by it, which is why the market
+ * is part of the cache key in lib/playlist-cache.ts. A 400 — Spotify
+ * rejecting the market — is retried once with `fallback` and logged, so no
+ * country is pinned to a generic error that spends quota on every retry; a
+ * second 400 is `playlist_load_failed`, not cached. The artist's name is read
+ * off the credits of the first track that names the id, so there is no
+ * second call to `/artists/{id}`; an empty answer has no name and no
+ * tracks, and the callers raise `artist_empty` for it.
+ */
+export async function getArtistTopTracks(
+  artistId: string,
+  market: Market,
+  fallback: Market
+): Promise<ArtistTopTracks> {
+  return withSpotifyToken(async (token) => {
+    let used = market;
+    let page = await fetchArtistTopTracks(artistId, used, token);
+    if (page === "bad_market" && used !== fallback) {
+      console.warn(`[spotify] artist top-tracks market=${used} fallback=${fallback}`);
+      used = fallback;
+      page = await fetchArtistTopTracks(artistId, used, token);
+    }
+    if (page === "bad_market") {
+      throw new SpotifyApiError("playlist_load_failed", 400, {
+        detail: `artist top-tracks: 400 market=${used}`,
+      });
+    }
+    const raw = page.tracks.filter(
+      (track) => track != null && typeof track.id === "string" && track.id !== "" && Array.isArray(track.artists)
+    );
+    const tracks = raw.map(convertSpotifyTrack);
+    const credited =
+      raw.flatMap((track) => track.artists).find((artist) => artist.id === artistId)?.name ??
+      raw[0]?.artists[0]?.name ??
+      null;
+    return { name: credited, tracks, market: used };
+  });
+}

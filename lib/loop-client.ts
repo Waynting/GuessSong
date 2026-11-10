@@ -33,7 +33,7 @@ import type {
 } from "@/lib/loop-stats";
 import { sendPulse } from "@/lib/pulse-client";
 import type { PlaylistHelpTopic } from "@/lib/playlist-help";
-import type { GameMode } from "@/lib/game-session";
+import type { GameMode, PlaylistKind } from "@/lib/game-session";
 import type { OrderPhoneCoverage, OrderPhoneVerdict, OrderVerdict } from "@/lib/order-game";
 import type { GameScored, PlayerBand } from "@/lib/game-players";
 import type { Arrival } from "@/lib/arrival";
@@ -116,6 +116,8 @@ export interface GameStartDetails {
   from?: Arrival;
   /** Which starter list the game was played from, if the link in the field was one of ours. */
   starter?: StarterKey;
+  /** What the link was — the stored payload's `playlistKind`; the server crosses album and artist games only. */
+  playlistKind?: PlaylistKind;
 }
 
 /**
@@ -124,7 +126,7 @@ export interface GameStartDetails {
  * to reach the field you mean is how the wrong one gets filed.
  */
 export function reportGameStart(hostGameIndex: number, details: GameStartDetails = {}): void {
-  const { mixed, source, mode, players, from, starter } = details;
+  const { mixed, source, mode, players, from, starter, playlistKind } = details;
   sendPulse({
     kind: "game_started",
     hostGameIndex,
@@ -136,6 +138,7 @@ export function reportGameStart(hostGameIndex: number, details: GameStartDetails
     // beacon carries no referrer-derived field at all.
     ...(from && hostGameIndex === 1 ? { from } : {}),
     ...(starter ? { starter } : {}),
+    ...(playlistKind ? { playlistKind } : {}),
   });
 }
 
@@ -166,6 +169,8 @@ export function reportGameEnd(
     arranged?: boolean;
     /** Whether this Game Over drew the Mixed link (`gameOverOnward`). */
     linkDrawn?: boolean;
+    /** The stored payload's `playlistKind`, so an album's or artist's games can be read by their end. */
+    playlistKind?: PlaylistKind;
   } = {}
 ): void {
   sendPulse({
@@ -180,6 +185,7 @@ export function reportGameEnd(
     ...(details.scored ? { scored: details.scored } : {}),
     ...(typeof details.arranged === "boolean" ? { arranged: details.arranged } : {}),
     ...(typeof details.linkDrawn === "boolean" ? { linkDrawn: details.linkDrawn } : {}),
+    ...(details.playlistKind ? { playlistKind: details.playlistKind } : {}),
   });
 }
 
@@ -211,7 +217,8 @@ export function reportGameLeft(
   mode?: GameMode,
   players?: PlayerBand,
   scored?: GameScored,
-  arranged?: boolean
+  arranged?: boolean,
+  playlistKind?: PlaylistKind
 ): void {
   trackEvent("game_left", {
     rounds_played: roundsPlayed,
@@ -228,6 +235,7 @@ export function reportGameLeft(
     ...(players ? { players } : {}),
     ...(scored ? { scored } : {}),
     ...(typeof arranged === "boolean" ? { arranged } : {}),
+    ...(playlistKind ? { playlistKind } : {}),
   });
 }
 

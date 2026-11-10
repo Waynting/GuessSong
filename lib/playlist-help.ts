@@ -117,11 +117,12 @@ export const PLAYLIST_HELP_TOPICS: Record<PlaylistHelpTopic, PlaylistHelpCopy> =
   },
   wrong_link: {
     anchor: null,
-    // "Or the album": albums load since 2026-10-25, and the step is also what
-    // `album_not_found` shows, where "open the playlist" would be odd advice.
+    // "Or the album, or the artist": albums load since 2026-10-25 and artist
+    // pages since 2026-11-10, and the step is also what `album_not_found`
+    // and `artist_not_found` show, where "open the playlist" would be odd.
     step: {
-      en: "Open the playlist itself (or the album) in Spotify, choose Share → Copy link, and paste that.",
-      zh: "在 Spotify 打開歌單本身（或專輯），按「分享」→「複製連結」，再貼到這裡。",
+      en: "Open the playlist itself (or the album, or the artist's page) in Spotify, choose Share → Copy link, and paste that.",
+      zh: "在 Spotify 打開歌單本身（或專輯、歌手頁面），按「分享」→「複製連結」，再貼到這裡。",
     },
     label: {
       en: "What a playlist link looks like",
@@ -158,10 +159,12 @@ export const PLAYLIST_HELP_BY_CODE: Partial<Record<AppErrorCode, PlaylistHelpTop
   playlist_not_found: "private",
   invalid_playlist_url: "wrong_link",
   playlist_link_track: "wrong_link",
-  playlist_link_artist: "wrong_link",
   playlist_link_spotify_other: "wrong_link",
   // An album Spotify has not got. Not `private`: an album has no such setting.
   album_not_found: "wrong_link",
+  // An artist Spotify has not got, or has no songs for here. Same reasoning.
+  artist_not_found: "wrong_link",
+  artist_empty: "wrong_link",
   playlist_empty: "empty",
 };
 
@@ -325,6 +328,16 @@ export function recheckOffer(
  * rather than reworded, so the warning and the error a host gets for ignoring
  * it cannot come to say different things; what is added is the way out.
  */
+/**
+ * Under the field when the link in it is an artist's page: what will play.
+ * A status line, not a warning — nothing is wrong — and green, because the
+ * amber slot beside it is the editorial refusal. The host learned "10 songs"
+ * only from the round badge before this.
+ */
+export function artistLinkNotice(locale: ErrorLocale): string {
+  return locale === "zh" ? "歌手連結會玩他們最熱門的 10 首歌。" : "An artist link plays their top 10 songs.";
+}
+
 export function editorialWarning(locale: ErrorLocale): { notice: string } & PlaylistHelp {
   return {
     notice: errorMessage("playlist_editorial", locale),
