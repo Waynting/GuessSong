@@ -328,6 +328,26 @@ describe("the message table", () => {
   });
 });
 
+describe("playlist_link_spotify_other", () => {
+  it("says it is a Spotify link, says what to paste instead, and names no playlist Spotify refuses", () => {
+    // Raised for a profile, Liked Songs, a podcast and any other Spotify
+    // page alike (SPOTIFY_OTHER_KINDS in lib/spotify-link.ts), so it is
+    // bucket-neutral: no "open the playlist itself", which has no referent
+    // for Liked Songs or a podcast.
+    const { en, zh } = ERROR_MESSAGES.playlist_link_spotify_other;
+    expect(en).toMatch(/Spotify link/);
+    expect(en).toMatch(/not a playlist or album/i);
+    expect(en).toMatch(/paste/i);
+    expect(zh).toMatch(/Spotify/);
+    expect(zh).toMatch(/歌單/);
+    for (const text of [en, zh]) {
+      expect(text).not.toMatch(/This Is|artist's|one of the artist|歌手的歌單|the playlist itself/i);
+      expect(placeholders(text)).toEqual([]);
+    }
+    expect(isDeterministicPlaylistFailure("playlist_link_spotify_other")).toBe(true);
+  });
+});
+
 describe("isDeterministicPlaylistFailure", () => {
   it("suppresses a retry only for failures the URL itself decides", () => {
     // The whole set, not a sample. A member dropped from it silently restores
@@ -338,6 +358,7 @@ describe("isDeterministicPlaylistFailure", () => {
       "invalid_playlist_url",
       "playlist_link_track",
       "playlist_link_artist",
+      "playlist_link_spotify_other",
       "playlist_not_found",
       "album_not_found",
       "playlist_editorial",
@@ -357,6 +378,7 @@ describe("isDeterministicPlaylistFailure", () => {
       "invalid_playlist_url",
       "playlist_link_track",
       "playlist_link_artist",
+      "playlist_link_spotify_other",
       "playlist_not_found",
       "album_not_found",
       "playlist_editorial",

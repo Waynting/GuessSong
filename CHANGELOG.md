@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **"Not a playlist URL" refusals say what the paste was**
+  (`unplayableKind`, `UNPLAYABLE_KINDS` in `lib/spotify-link.ts`).
+  `playlist_invalid:other` read ~104 a day in the ten days to 2026-11-10,
+  three times the artist row, and nothing could say what those pastes were.
+  Every refusal the classifier calls `unknown` is now one of ten buckets: a
+  cut-off playlist or album link (a `/playlist/` or `/album/` segment with no
+  valid 22-character id after it, matched first so a nearly-right link is
+  never filed as "another Spotify page"), Liked Songs (`/collection/`, which
+  wins over `/user/`), a profile, a podcast, any other Spotify page,
+  YouTube, Apple Music, another site, or text with no link in it. Written
+  as `playlist_invalid:<kind>` by `playableFor` in `lib/playlist-cache.ts`,
+  in the same call as the `invalid_playlist_url` total, so the parts still
+  sum to it. One ordered matcher table walked by one loop, exported so
+  `tests/spotify-link.test.ts` iterates it: a sample per bucket, table
+  exclusivity, a 16k-space timing case, and the contract that only an
+  `unknown` ever reaches it. `npm run stats` labels every bucket; `other`
+  before this date holds everything that was not a Spotify link, from this
+  date only text with no link.
+- **One honest sentence for a Spotify link that is not a playlist or album**
+  (`playlist_link_spotify_other` in `lib/error-messages.ts`). A host who
+  copied Liked Songs, their profile or a podcast from Spotify's own share
+  menu was told it "doesn't look like a Spotify playlist or album link". The
+  new sentence says it is a Spotify link, says what to paste instead and
+  names no referent, because it is raised for Liked Songs and podcasts too;
+  per-bucket sentences wait for the split's read (TODOS.md, E3). Mapped to
+  the `wrong_link` help and in `DETERMINISTIC_PLAYLIST_CODES` (recovery and
+  the setup memo read it), **not** in `PLAYLIST_REFUSAL_CODES`: the refusal
+  is counted as `invalid_playlist_url` + `playlist_invalid:<kind>` like a
+  track link, and a key there would be a permanent zero.
+  `unplayableLinkCode` is the one place the code is chosen, for the server
+  and for `checkPlaylistLink`, so the four room forms — which gate in the
+  browser and never send the paste — show the same sentence. The response
+  carries `params: { kind }`, so a per-bucket sentence or a GA4 dimension can
+  read the bucket later without a server change.
+- **The quiz panel says when the quiz was built shorter than asked**
+  (`builtShorterNote` / `panelBuiltShorter` in `lib/quiz-copy.ts`,
+  `requestedCount` on `QuizPanel`). 28 of 251 quizzes in the ten days to
+  2026-11-10 were clamped (`quiz_clamped`) and the panel said nothing: the
+  maker read "10 questions" where they chose 20 and could not tell why. One
+  line under the playlist name — 12px `#888`, informational, not the amber
+  of the share-failed line — with the reason and the remedy in both
+  languages; the count pills keep the host's chosen value. A quiz recalled
+  from an earlier visit has no requested count and gets no line. No new
+  counter: `quiz_clamped` is the denominator.
 - **An order game over before its first reveal is counted by whether a card
   was moved** (`order_bounce:<left|ended>:<moved|untouched>`, `OrderBounceEnd`
   in `lib/loop-stats.ts`). The 2026-10-31 read of "Who's playing?" found
@@ -75,6 +119,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The Mixed nudge** (`lib/mixed-nudge.ts`, `mixed_nudge:*`, the
+  `mixed_nudge` GA4 event and pulse kind, its block in `npm run stats`).
+  Shown 1,172 · tapped 14 (1.2%) · started 3 in the ten days to 2026-11-10:
+  the "Everyone's playlists" tile made it redundant, exactly as "Just me"
+  made the solo nudge redundant. It also held the slot the buzzer row
+  yielded to at three names, and a buzzer room of two or more plays out
+  53.9%, the best cell in the mode × players table — so the row now shows
+  under every roster size, on `isBuzzerConfigured()` alone. The CSS block
+  the two shared stays as `.buzzer-nudge`'s own, and
+  `tests/order-page.test.ts` pins its base rule, not only its hover. Keys
+  already in KV print under "Other counters" until they expire. **Expect
+  `400`s in the function log for a day or two**: a page cached before the
+  deploy still sends `mixed_nudge` beacons, `parsePulse` answers null and
+  the route 400 with an empty body — harmless to the host, one log row per
+  old page load, the `solo_nudge` removal's precedent.
 - **The solo nudge** (`lib/solo-nudge.ts`, `solo_nudge:*`, the `solo_nudge`
   GA4 event and pulse kind). "Who's playing? → Just me" does its job: after
   2026-10-26 the nudge was drawn only for hosts who had chosen "A group" and

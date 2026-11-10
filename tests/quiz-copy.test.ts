@@ -1,7 +1,10 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   QUIZ_COPY,
+  builtShorterNote,
   fillCopy,
   ownerClipboardText,
   ownerShareText,
@@ -127,6 +130,43 @@ describe("panelCaption", () => {
       expectClean(unknown, locale);
       expect(unknown, locale).not.toMatch(/\d/);
     }
+  });
+});
+
+describe("builtShorterNote", () => {
+  it("says what was asked and what the playlist allowed, in both languages", () => {
+    for (const locale of LOCALES) {
+      const copy = QUIZ_COPY[locale];
+      const note = builtShorterNote(copy, 12, 50);
+      expect(note, locale).toBe(fillCopy(copy.panelBuiltShorter, { count: 12, requested: 50 }));
+      expect(note, locale).toContain("12");
+      expect(note, locale).toContain("50");
+      expectClean(note ?? "", locale);
+    }
+  });
+
+  it("says nothing when the quiz is as long as asked, longer, or the request is unknown", () => {
+    for (const locale of LOCALES) {
+      const copy = QUIZ_COPY[locale];
+      expect(builtShorterNote(copy, 20, 20), locale).toBeNull();
+      expect(builtShorterNote(copy, 20, 10), locale).toBeNull();
+      // A quiz recalled from an earlier visit: no requested count was kept.
+      expect(builtShorterNote(copy, 10, null), locale).toBeNull();
+      expect(builtShorterNote(copy, null, 20), locale).toBeNull();
+    }
+  });
+
+  it("is what the panel renders, from the count the create page submitted", () => {
+    const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
+    const panel = read("components/quiz-panel.tsx");
+    expect(panel).toMatch(/builtShorterNote\(copy, questionCount, requestedCount\)/);
+    expect(panel).toMatch(/className="quiz-panel-note"/);
+    // Caption, then the name, then the note — the note explains the caption.
+    expect(panel.indexOf("panelCaption(copy, questionCount)")).toBeLessThan(panel.indexOf("{playlistName}"));
+    expect(panel.indexOf("{playlistName}")).toBeLessThan(panel.indexOf('className="quiz-panel-note"'));
+    const create = read("app/quiz/quiz-create.tsx");
+    expect(create).toMatch(/requestedCount: questionCount/);
+    expect(create).toMatch(/requestedCount=\{createdQuiz\?\.requestedCount \?\? null\}/);
   });
 });
 

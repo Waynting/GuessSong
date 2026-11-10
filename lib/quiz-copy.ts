@@ -175,6 +175,8 @@ export interface QuizCopy {
   panelQuestionsFrom: string;
   /** The caption without a count, for a quiz this device remembers from before it kept one. */
   panelQuizFrom: string;
+  /** Under the name when the quiz was built shorter than asked: the reason and the remedy, both counts as placeholders. */
+  panelBuiltShorter: string;
   panelSend: string;
   panelCopyLink: string;
   panelCopied: string;
@@ -332,6 +334,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     createLinkFallback: "Your quiz link:",
     panelQuestionsFrom: "{count} questions from",
     panelQuizFrom: "Your quiz from",
+    panelBuiltShorter: "You picked {requested}. The playlist had enough different songs for {count} — add more and make another to get the full set.",
     panelSend: "Send to friends →",
     panelCopyLink: "Copy link",
     panelCopied: "✓ Copied",
@@ -468,6 +471,7 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     createLinkFallback: "你的測驗連結：",
     panelQuestionsFrom: "共 {count} 題，來自",
     panelQuizFrom: "你的測驗，來自",
+    panelBuiltShorter: "你選了 {requested} 題，這個歌單只夠出 {count} 題。加幾首歌再建一次就能出滿。",
     panelSend: "傳給朋友 →",
     panelCopyLink: "複製連結",
     panelCopied: "✓ 已複製",
@@ -601,6 +605,26 @@ export function panelCaption(copy: QuizCopy, questionCount: number | null): stri
   return questionCount === null
     ? copy.panelQuizFrom
     : fillCopy(copy.panelQuestionsFrom, { count: questionCount });
+}
+
+/**
+ * Under the caption, when the quiz was built shorter than the host asked.
+ *
+ * 28 of 251 quizzes in the ten days to 2026-11-10 were clamped
+ * (`quiz_clamped`), and the panel said nothing: the maker read "10
+ * questions" where they chose 20 and could not tell why. The caption already
+ * carries the built count, so this line carries the reason and the remedy.
+ * Null unless both counts are numbers and the built one is smaller — a quiz
+ * recalled from an earlier visit has no requested count and gets no line.
+ */
+export function builtShorterNote(
+  copy: QuizCopy,
+  questionCount: number | null,
+  requestedCount: number | null
+): string | null {
+  if (questionCount === null || requestedCount === null) return null;
+  if (!(questionCount < requestedCount)) return null;
+  return fillCopy(copy.panelBuiltShorter, { count: questionCount, requested: requestedCount });
 }
 
 /** The sentence a taker sends with their score. */

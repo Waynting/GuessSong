@@ -30,7 +30,6 @@ const {
   GAME_ENDS,
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
-  MIXED_NUDGE_STAGES,
   ORDER_ARRANGED,
   ORDER_BOUNCE_ENDS,
   GAME_ROUND_CEILING,
@@ -43,7 +42,6 @@ const {
   GAME_MODES,
   ORDER_VERDICTS,
   recordGameOverTap,
-  recordMixedNudge,
   HOST_INDEX_CEILING,
   LOOP_STATS_TTL_SECONDS,
   MIXED_SUB_MODES,
@@ -259,12 +257,6 @@ describe("the key format is the contract between writer and reader", () => {
       kv.incrs = [];
       await recordGameOverTap(target);
       expect(keysWritten()).toContain(expected.gameOverTap[target]);
-    }
-
-    for (const stage of MIXED_NUDGE_STAGES) {
-      kv.incrs = [];
-      await recordMixedNudge(stage);
-      expect(keysWritten()).toContain(expected.mixedNudge[stage]);
     }
 
     // One write per tap: the screen-keyed one when the page could say its
@@ -528,10 +520,6 @@ describe("the first clip, a game left, and a tap on Game Over", () => {
       expect(keys.gameOverTap[target]).toBe(`loop:stats:2026-08-09:game_over_tap:${target}`);
     }
     expect(Object.keys(keys.gameOverTap)).toHaveLength(GAME_OVER_TAPS.length);
-    for (const stage of MIXED_NUDGE_STAGES) {
-      expect(keys.mixedNudge[stage]).toBe(`loop:stats:2026-08-09:mixed_nudge:${stage}`);
-    }
-    expect(Object.keys(keys.mixedNudge)).toHaveLength(MIXED_NUDGE_STAGES.length);
     for (const target of GAME_OVER_TAPS) {
       for (const screen of GAME_SCREENS) {
         expect(keys.gameOverTapScreen[target][screen]).toBe(
@@ -783,7 +771,22 @@ describe("playlist refusals and quiz shares", () => {
     // read 748 before the split keeps counting exactly what it counted.
     // `album` left the split on 2026-10-25, when albums began to load.
     const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
-    expect(PLAYLIST_INVALID_KINDS).toEqual(["track", "artist", "shortlink", "other"]);
+    expect(PLAYLIST_INVALID_KINDS).toEqual([
+      "track",
+      "artist",
+      "shortlink",
+      // The classifier's `unknown`, split since 2026-11-10 (lib/spotify-link.ts).
+      "spotify_playlist_malformed",
+      "spotify_album_malformed",
+      "spotify_collection",
+      "spotify_user",
+      "spotify_show",
+      "spotify_other",
+      "youtube",
+      "apple_music",
+      "other_url",
+      "other",
+    ]);
     expect(Object.keys(keys.playlistInvalid)).toHaveLength(PLAYLIST_INVALID_KINDS.length);
     expect(PLAYLIST_REFUSAL_CODES).toEqual([
       "playlist_not_found",
@@ -1567,7 +1570,6 @@ describe("the digest prints what the recorders write", () => {
       "first_clip:",
       "game_over_tap:",
       "game_over_tap_screen:",
-      "mixed_nudge:",
       "order_bounce:",
       "game_mode_players:",
       "game_end_mode_players:",
@@ -1582,9 +1584,10 @@ describe("the digest prints what the recorders write", () => {
     for (const target of GAME_OVER_TAPS) {
       expect(script, `${target} is never read`).toMatch(new RegExp(`get\\("game_over_tap:${target}"\\)`));
     }
-    for (const stage of MIXED_NUDGE_STAGES) {
-      expect(script, `${stage} is never read`).toMatch(new RegExp(`get\\("mixed_nudge:${stage}"\\)`));
-    }
+    // The Mixed nudge's keys came off on 2026-11-10 and must print under
+    // "Other counters" for their 30 days, which means the prefix is not claimed.
+    expect(rendered).not.toContain('"mixed_nudge:"');
+    expect(script).not.toMatch(/mixed_nudge/);
     // Reader and writer checked over the same two lists: a target the recorder
     // keys by screen and the script does not read is a counter printed nowhere.
     for (const target of GAME_OVER_TAPS) {

@@ -50,6 +50,8 @@ export type AppErrorCode =
   // A real Spotify link to the wrong thing — named, see their entries
   | "playlist_link_track"
   | "playlist_link_artist"
+  // A real Spotify link to anything else — a profile, Liked Songs, a podcast
+  | "playlist_link_spotify_other"
   // A short link we could not follow *this time* — retryable, see its entry
   | "playlist_shortlink_unavailable"
   | "playlist_not_found"
@@ -190,6 +192,24 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   playlist_link_artist: {
     en: "That's a link to an artist's page, and GuessSong plays playlists. Add the artist's songs to a playlist of your own, make it public, and paste that playlist's link instead.",
     zh: "這是歌手頁面的連結，GuessSong 玩的是歌單。請把這位歌手的歌加進你自己建立的歌單、設成公開，再貼上那個歌單的連結。",
+  },
+  /**
+   * A real Spotify link to something that is neither a playlist nor an
+   * album — a profile, Liked Songs, a podcast, the home page. About 104 a
+   * day were told "that doesn't look like a Spotify playlist or album link"
+   * about a link Spotify's own share sheet had just handed them. One
+   * sentence for all four buckets (`SPOTIFY_OTHER_KINDS` in
+   * lib/spotify-link.ts), deliberately: it is raised for Liked Songs, which
+   * needs the host's login and cannot be loaded, and for a podcast as much
+   * as for a profile, so it says what to paste instead and names no
+   * referent — "open the playlist itself" would have none. Per-bucket
+   * sentences wait for `playlist_invalid:<kind>` to say which bucket is
+   * large (TODOS.md, E3). The playlist it sends people to is one of their
+   * own or any public one, never an artist's — see above.
+   */
+  playlist_link_spotify_other: {
+    en: "That's a Spotify link, but not a playlist or album. Open a playlist — one of yours, or any public one — tap Share → Copy link, and paste that.",
+    zh: "這是 Spotify 的連結，但不是歌單或專輯。請打開一個歌單（你自己的或任何公開的），按「分享」→「複製連結」再貼上。",
   },
   /**
    * A short link is followed on the server, and this is the following
@@ -811,6 +831,8 @@ const DETERMINISTIC_PLAYLIST_CODES = new Set<AppErrorCode>([
   // A track does not become a playlist on the second press.
   "playlist_link_track",
   "playlist_link_artist",
+  // A profile stays a profile, Liked Songs stay behind a login.
+  "playlist_link_spotify_other",
   "playlist_not_found",
   // An album Spotify has not got: nothing the host does to the link changes it.
   "album_not_found",

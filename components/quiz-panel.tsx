@@ -41,6 +41,15 @@
  * (`recallLastQuiz`), which is why `questionCount` can be null: an entry
  * written before the count was kept has none, and the caption and the share
  * sentence both say less rather than print one.
+ *
+ * ## It says when the quiz came out shorter
+ *
+ * `/api/quiz` builds as many questions as the playlist has different songs
+ * for, which can be fewer than the host picked (`quiz_clamped`, 28 of 251 in
+ * the ten days to 2026-11-10). The pills keep the host's choice and the
+ * caption says what was built; `builtShorterNote` is the line between them
+ * that explains the gap. Only for a quiz made this visit — a recalled one has
+ * no requested count.
  */
 
 import { useEffect, useState } from "react";
@@ -50,6 +59,7 @@ import { reportQuizCopy, reportQuizShare } from "@/lib/loop-client";
 import type { ErrorLocale } from "@/lib/error-messages";
 import {
   QUIZ_COPY,
+  builtShorterNote,
   fillCopy,
   formatQuizDate,
   ownerClipboardText,
@@ -96,6 +106,7 @@ export function QuizPanel({
   ownerName,
   playlistName,
   questionCount,
+  requestedCount,
   expiresAt,
   locale,
 }: {
@@ -104,6 +115,8 @@ export function QuizPanel({
   playlistName: string;
   /** Null for a remembered quiz whose count this device did not keep. */
   questionCount: number | null;
+  /** What the host asked for, on a quiz made this visit; null for a remembered one, which gets no note. */
+  requestedCount: number | null;
   expiresAt: number;
   locale: ErrorLocale;
 }) {
@@ -116,6 +129,7 @@ export function QuizPanel({
   const [feedback, setFeedback] = useState<"copied" | "failed" | null>(null);
   const url = quizUrl(code);
   const quiz = { ownerName, playlistName, questionCount };
+  const note = builtShorterNote(copy, questionCount, requestedCount);
 
   useEffect(() => {
     QRCode.toDataURL(url, { margin: 1, width: 240 })
@@ -171,9 +185,20 @@ export function QuizPanel({
           <p style={{ fontSize: "12px", color: "#666", marginBottom: "6px" }}>
             {panelCaption(copy, questionCount)}
           </p>
-          <p style={{ fontSize: "15px", fontWeight: 500, marginBottom: "16px", color: "#f0f0f0" }}>
+          <p style={{ fontSize: "15px", fontWeight: 500, marginBottom: note ? 0 : "16px", color: "#f0f0f0" }}>
             {playlistName}
           </p>
+          {/* Why the count above is not the one the host picked. Informational,
+              so #888 and not the amber of the share-failed line: nothing is
+              broken, the playlist just ran out of different songs. */}
+          {note && (
+            <p
+              className="quiz-panel-note"
+              style={{ fontSize: "12px", color: "#888", marginTop: "8px", marginBottom: "16px", lineHeight: 1.5 }}
+            >
+              {note}
+            </p>
+          )}
         </>
       )}
       {qr && (

@@ -8,7 +8,6 @@ import {
   GAME_ENDS,
   GAME_HOST_KINDS,
   GAME_OVER_TAPS,
-  MIXED_NUDGE_STAGES,
   GAME_ROUND_CEILING,
   GAME_SCREENS,
   HOST_INDEX_CEILING,
@@ -453,12 +452,12 @@ describe("parsePulse — a game left", () => {
   });
 });
 
-describe("parsePulse — the setup page's Mixed nudge", () => {
-  it("accepts the three stages and nothing else", () => {
-    for (const stage of MIXED_NUDGE_STAGES) {
-      expect(parsePulse({ kind: "mixed_nudge", stage })).toEqual({ kind: "mixed_nudge", stage });
-    }
-    for (const stage of ["clicked", "", "SHOWN", "__proto__", 1, null, undefined]) {
+describe("parsePulse — the retired Mixed nudge", () => {
+  it("parses a stale mixed_nudge beacon to null (a cached page's 400, not a counter)", () => {
+    // The nudge came off on 2026-11-10 (shown 1,172 · tapped 14 · started 3
+    // in ten days). A page cached before the deploy still sends it; the
+    // route answers 400 and writes nothing, the solo_nudge precedent.
+    for (const stage of ["shown", "tapped", "started", "", null]) {
       expect(parsePulse({ kind: "mixed_nudge", stage })).toBeNull();
     }
   });

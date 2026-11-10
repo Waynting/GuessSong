@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   NAMED_LINK_CODES,
+  SPOTIFY_OTHER_KINDS,
   SPOTIFY_SHORTLINK_HOSTS,
+  UNPLAYABLE_KINDS,
+  UNPLAYABLE_MATCHERS,
   albumUrlFromId,
   checkPlaylistLink,
   classifySpotifyLink,
@@ -15,6 +18,9 @@ import {
   playableUrl,
   playlistIdFromLink,
   playlistUrlFromId,
+  unplayableKind,
+  unplayableLinkCode,
+  type UnplayableKind,
 } from "@/lib/spotify-link";
 import { isSpotifyEditorial, parsePlaylistUrl } from "@/lib/spotify";
 import { parseSharedText } from "@/lib/share-target";
@@ -429,6 +435,145 @@ describe("there is one reading, and everything else is a name for it", () => {
       expect(source, file).not.toMatch(/\/[^/\n]*playlist[^/\n]*\\\/[^/\n]*\//);
       expect(source, file).not.toMatch(/new RegExp\(/);
       expect(source, file).toMatch(/from "@\/lib\/spotify-link"/);
+    }
+  });
+});
+
+describe("what an unplayable paste was", () => {
+  // One sample per bucket, and more where a spelling has tripped a matcher
+  // before: the URI form, the `intl-` prefix, the old `/user/<name>/` path.
+  const samples: Record<UnplayableKind, string[]> = {
+    spotify_playlist_malformed: [
+      "https://open.spotify.com/playlist/3cEYpjA9oz9GiPac4AsH4", // 21 characters: cut off in a chat
+      `https://open.spotify.com/playlist/${ID}x`, // a character glued to the id
+      `https://open.spotify.com/user/u/playlist/${ID}abc`,
+      "spotify:playlist:",
+    ],
+    spotify_album_malformed: ["https://open.spotify.com/album/abc", "spotify:album:short"],
+    spotify_collection: [
+      "https://open.spotify.com/collection/tracks",
+      "https://open.spotify.com/user/someone/collection",
+      "https://open.spotify.com/intl-ja/collection/tracks",
+      "spotify:user:someone:collection",
+    ],
+    spotify_user: [
+      "https://open.spotify.com/user/someone",
+      "https://open.spotify.com/user/someone?si=x",
+      "spotify:user:someone",
+    ],
+    spotify_show: [
+      `https://open.spotify.com/show/${ID}`,
+      `https://open.spotify.com/episode/${ID}`,
+      `spotify:show:${ID}`,
+      `spotify:episode:${ID}`,
+    ],
+    spotify_other: [
+      "https://open.spotify.com/",
+      "https://open.spotify.com/search/hits",
+      "https://www.spotify.com/download",
+      "https://support.spotify.com/article",
+      "open.spotify.com",
+      "spotify:",
+    ],
+    youtube: [
+      "https://www.youtube.com/playlist?list=PL123",
+      "https://youtu.be/abc",
+      "https://music.youtube.com/playlist?list=xyz",
+    ],
+    apple_music: ["https://music.apple.com/us/playlist/x/pl.u-123"],
+    other_url: ["https://example.com", "http://tidal.com/playlist/abc", "https://"],
+    other: ["just some words", "", "   ", "my party mix", "spotify.community"],
+  };
+
+  it("has a matcher for every kind but the last, in the table's order", () => {
+    expect(UNPLAYABLE_MATCHERS.map(([kind]) => kind)).toEqual(UNPLAYABLE_KINDS.filter((k) => k !== "other"));
+    expect(UNPLAYABLE_KINDS[UNPLAYABLE_KINDS.length - 1]).toBe("other");
+    expect(new Set(UNPLAYABLE_KINDS).size).toBe(UNPLAYABLE_KINDS.length);
+  });
+
+  for (const kind of UNPLAYABLE_KINDS) {
+    it(`files each ${kind} sample under ${kind}`, () => {
+      for (const pasted of samples[kind]) {
+        expect(unplayableKind(pasted), pasted).toBe(kind);
+      }
+    });
+  }
+
+  it("only ever sees what the classifier called unknown", () => {
+    // The contract: a track, an artist page and a short link have their own
+    // names and never reach this function. Every sample here is `unknown`.
+    for (const kind of UNPLAYABLE_KINDS) {
+      for (const pasted of samples[kind]) {
+        expect(classifySpotifyLink(pasted), pasted).toEqual({ kind: "unknown" });
+      }
+    }
+  });
+
+  it("is exclusive: no sample matches a matcher earlier in the table than its own", () => {
+    // The order is a decision — malformed before "another Spotify page",
+    // `/collection/` before `/user/` — and a sample that also matched an
+    // earlier row would be filed there silently.
+    UNPLAYABLE_MATCHERS.forEach(([kind], index) => {
+      for (const pasted of samples[kind]) {
+        for (const [earlier, re] of UNPLAYABLE_MATCHERS.slice(0, index)) {
+          expect(re.test(pasted), `${pasted} also matches ${earlier}`).toBe(false);
+        }
+      }
+    });
+    for (const pasted of samples.other) {
+      for (const [kind, re] of UNPLAYABLE_MATCHERS) {
+        expect(re.test(pasted), `${JSON.stringify(pasted)} matches ${kind}`).toBe(false);
+      }
+    }
+  });
+
+  it("calls anything that is not a string text", () => {
+    for (const value of [undefined, null, 42, {}, ["https://open.spotify.com/collection/tracks"]]) {
+      expect(unplayableKind(value)).toBe("other");
+    }
+  });
+
+  it("stays linear on a paste built to be slow", () => {
+    // The same cap and the same bounded quantifiers as the classifier; the
+    // credit split in lib/preview-cache.ts has the same test for the same
+    // reason. A generous ceiling: the failure this guards is seconds.
+    const hostile = [
+      " ".repeat(16_000) + "https://open.spotify.com/collection/tracks",
+      "open.spotify.com/user/" + "a".repeat(200_000),
+      "a".repeat(200_000) + ".spotify.com",
+      ("x.".repeat(1_000) + "spotify.com ").repeat(50),
+      "spotify:user:" + ":".repeat(200_000),
+    ];
+    for (const pasted of hostile) {
+      const started = performance.now();
+      unplayableKind(pasted);
+      expect(performance.now() - started, pasted.slice(0, 40)).toBeLessThan(50);
+    }
+  });
+
+  it("gives the four Spotify kinds the one coarse sentence and everything else today's", () => {
+    for (const kind of UNPLAYABLE_KINDS) {
+      const expected = SPOTIFY_OTHER_KINDS.includes(kind) ? "playlist_link_spotify_other" : "invalid_playlist_url";
+      expect(unplayableLinkCode(kind), kind).toBe(expected);
+    }
+    // The malformed kinds are not Spotify-other: a cut-off link is told the
+    // truth about itself, not sent for a different link.
+    expect(SPOTIFY_OTHER_KINDS).toEqual(["spotify_collection", "spotify_user", "spotify_show", "spotify_other"]);
+    expect(isAppErrorCode("playlist_link_spotify_other")).toBe(true);
+    expect(isDeterministicPlaylistFailure("playlist_link_spotify_other")).toBe(true);
+    expect(ERROR_MESSAGES.playlist_link_spotify_other.en).not.toBe(ERROR_MESSAGES.playlist_link_spotify_other.zh);
+  });
+
+  it("is what a form's field says, so a room form shows the server's sentence", () => {
+    for (const kind of UNPLAYABLE_KINDS) {
+      for (const pasted of samples[kind]) {
+        if (pasted.trim() === "") continue; // blank is silent, see above
+        expect(checkPlaylistLink(pasted), pasted).toEqual({
+          submittable: false,
+          problem: unplayableLinkCode(kind),
+          named: null,
+        });
+      }
     }
   });
 });
