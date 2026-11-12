@@ -69,14 +69,17 @@ vi.mock("@/lib/kv", () => ({
     async del(key: string) {
       kv.mem.delete(key);
     },
-    async incr(key: string, ttlSeconds: number) {
+    // `by`, as lib/kv.ts's two backends take it: the request meter records a
+    // whole load's cost in one command, and a mock that ignored it read every
+    // load as one request — the exact misreading the meter exists to end.
+    async incr(key: string, ttlSeconds: number, by = 1) {
       const entry = kv.mem.get(key);
       const now = Date.now();
       if (!entry || now > entry.expiresAt) {
-        kv.mem.set(key, { value: 1, expiresAt: now + ttlSeconds * 1000 });
-        return 1;
+        kv.mem.set(key, { value: by, expiresAt: now + ttlSeconds * 1000 });
+        return by;
       }
-      const next = (entry.value as number) + 1;
+      const next = (entry.value as number) + by;
       kv.mem.set(key, { value: next, expiresAt: entry.expiresAt });
       return next;
     },
@@ -113,11 +116,12 @@ function makeTrack(id: string): Track {
   };
 }
 
-function upstreamResult(ids: string[], truncated = false) {
+function upstreamResult(ids: string[], truncated = false, requests = 1) {
   return {
     playlist: { id: "p", name: "My Playlist", tracks: { items: [], total: ids.length } },
     tracks: ids.map(makeTrack),
     truncated,
+    requests,
   };
 }
 
@@ -125,11 +129,12 @@ const upstream = () => vi.mocked(spotify.getPlaylistWithTracks);
 const upstreamCalls = () => upstream().mock.calls.length;
 
 /** `GET /albums/{id}` as lib/spotify.ts hands it back. */
-function albumResult(ids: string[], truncated = false) {
+function albumResult(ids: string[], truncated = false, requests = 1) {
   return {
     album: { id: "x", name: "My Album", images: [], tracks: { items: [], total: ids.length } },
     tracks: ids.map(makeTrack),
     truncated,
+    requests,
   };
 }
 
@@ -138,8 +143,8 @@ const albumUpstreamCalls = () => albumUpstream().mock.calls.length;
 const albumUrlFor = (seed: string) => `https://open.spotify.com/album/${playlistId(seed)}`;
 
 /** `GET /artists/{id}/top-tracks` as lib/spotify.ts hands it back. */
-function artistResult(ids: string[], market = "US") {
-  return { name: "The Band", tracks: ids.map(makeTrack), market: market as never };
+function artistResult(ids: string[], market = "US", requests = 1) {
+  return { name: "The Band", tracks: ids.map(makeTrack), market: market as never, requests };
 }
 
 const artistUpstream = () => vi.mocked(spotify.getArtistTopTracks);
@@ -1288,6 +1293,35 @@ describe("rolling 24h upstream budget", () => {
       status: 429,
     });
     expect(upstreamCalls()).toBe(3);
+  });
+
+  it("meters what each load cost Spotify beside the load it claimed", async () => {
+    // The gate admits loads; Spotify meters requests; a 500-track playlist is
+    // one of the first and five of the second. The ceiling was reasoned from
+    // the wrong unit for three months, which is what this key exists to end.
+    upstream().mockResolvedValue(upstreamResult(["a"], false, 3));
+    await loadPlaylist(uniqueUrl(0));
+    albumUpstream().mockResolvedValue(albumResult(["x"], false, 2));
+    await loadPlaylist(albumUrlFor("meter"));
+    // A refusal is a request Spotify answered, counted as one — a floor.
+    upstream().mockRejectedValue(new spotify.SpotifyApiError("playlist_not_found", 404));
+    await expect(loadPlaylist(uniqueUrl(1))).rejects.toMatchObject({ code: "playlist_not_found" });
+
+    const status = await getDailyBudgetStatus();
+    expect(status).toMatchObject({ used: 3, requests: 6 });
+    expect(status.byHour.at(-1)).toMatchObject({ used: 3, requests: 6 });
+  });
+
+  it("meters nothing for a cached playlist, and a failed meter write costs the host nothing", async () => {
+    upstream().mockResolvedValue(upstreamResult(["a"], false, 4));
+    await loadPlaylist(URL_A);
+    await loadPlaylist(URL_A);
+    await expect(getDailyBudgetStatus()).resolves.toMatchObject({ used: 1, requests: 4 });
+
+    // The meter must never become a gate: a load whose reading cannot be
+    // written is still a load the host gets.
+    kv.flags.failWrites = true;
+    await expect(loadPlaylist(uniqueUrl(2))).resolves.toMatchObject({ totalTracks: 1 });
   });
 
   it("does not spend the day's budget on cached playlists", async () => {

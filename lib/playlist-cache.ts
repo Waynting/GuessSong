@@ -204,6 +204,21 @@ const DAILY_WINDOW_HOURS = 24;
 const HOUR_BUCKET_TTL_SECONDS = (DAILY_WINDOW_HOURS + 1) * 60 * 60;
 const HOUR_BUDGET_PREFIX = "spotify:budget:h";
 const HOUR_REFUSED_PREFIX = "spotify:budget:refused";
+/**
+ * What the admitted loads actually cost Spotify, in requests, per hour.
+ *
+ * The gate counts *loads* because a load has to be admitted before anyone
+ * knows how many pages it will turn out to be; Spotify meters *requests*, and
+ * the two drifted apart unnoticed for three months. The ceiling below was
+ * reasoned from ~1.2 requests a load; a sample of the production cache on
+ * 2026-11-12 read 2.36, because one loaded playlist in seven was over 500
+ * tracks and cost five. This key is the instrument that stops that happening
+ * again: `getDailyBudgetStatus` sums it beside the loads, `npm run stats`
+ * prints the ratio, and the ceiling is set against that line rather than
+ * against a guess. One `incr` per cold load, after the fetch — a meter, never
+ * a gate, so it fails quiet.
+ */
+const HOUR_REQUESTS_PREFIX = "spotify:budget:req";
 
 /**
  * Written when the window is spent, read by `getSpotifyServiceStatus`.
@@ -236,10 +251,10 @@ const DAILY_NEAR_KEY = "spotify:budget:near";
 /**
  * How much of the day's allowance has to be gone before hosts are warned.
  *
- * 0.8 of 2,000 is 1,600 loads. Against a normal day's ~2,152 cold loads that
- * trips most evenings, which is deliberate: the warning is only worth anything
- * on the days the limit is actually in play, and those are most of them. Set it
- * higher to warn later and less often.
+ * 0.8 of 2,500 is 2,000 loads. Against a normal day's ~1,050 cold loads
+ * (2026-11) that trips only on a busy one, which is where the warning is
+ * worth anything; the 6,646-game day of 2026-11-11 crossed it in the
+ * evening. Set it higher to warn later and less often.
  */
 const DEFAULT_BUDGET_WARN_RATIO = 0.8;
 
@@ -255,20 +270,27 @@ function budgetWarnRatio(): number {
  * Spotify's behalf.
  *
  * Every input to this number is an inference, so it is env-overridable and
- * deliberately easy to find. What is known: Spotify does not publish a figure;
- * the developer dashboard showed ~3,850 requests on the day the quota died;
- * and since 1.7.1 a cold load costs ~1.2 requests rather than ~2.2. 2,000
- * loads is therefore ~2,400 requests — under the wall by a margin, and just
- * under a normal day's 2,152 cold loads, so it will occasionally refuse at the
- * margin.
+ * deliberately easy to find. Spotify publishes no figure (its 2026-07-23
+ * notice only moved the quota from per-app to per-developer-account). What is
+ * known, in the unit Spotify meters: the August 2026 cut-off came with ~2,628
+ * loads in the window at ~2.2 requests each, so the wall is somewhere above
+ * ~5,800 requests; 2026-11-11 ran 1,894 cold loads in a UTC day without a
+ * refusal. 2,000 was chosen on the belief that a load was ~1.2 requests; a
+ * sample of the cache on 2026-11-12 read 2.36 — see `HOUR_REQUESTS_PREFIX` —
+ * which is why the sampled pages were cut to `SAMPLED_TRACK_PAGES` the same
+ * day (≈2.1 after it), and why 2,500 loads is ≈5,200 requests rather than the
+ * 3,000 the old arithmetic would say. It was raised 2,000 → 2,500 on
+ * 2026-11-12 after the first evening since October to spend the window:
+ * 621 loads refused between 01:00 and 07:00 UTC, a Brazilian evening.
  *
- * That last part is the trade, stated plainly: refusing perhaps a hundred
- * loads at the edge of a busy day is chosen over Spotify refusing *every*
- * uncached load for 13.4 unconditional hours, which is what it did. Ours is a
- * counter that rolls forward hour by hour; theirs is a penalty box with a
- * fixed sentence.
+ * The trade, stated plainly: refusing loads at the edge of a busy day is
+ * chosen over Spotify refusing *every* uncached load for 13.4 unconditional
+ * hours, which is what it did. Ours is a counter that rolls forward hour by
+ * hour; theirs is a penalty box with a fixed sentence. Move this number
+ * against the requests line in `npm run stats`, in steps, and only while no
+ * `spotify_quota_exhausted` has been seen at the current one.
  */
-const DEFAULT_DAILY_LOAD_LIMIT = 2000;
+const DEFAULT_DAILY_LOAD_LIMIT = 2500;
 
 /**
  * Spotify's Retry-After on QUOTA_EXCEEDED is sometimes enormous and sometimes
@@ -615,35 +637,66 @@ async function claimDailyBudget(now: Date): Promise<boolean> {
 }
 
 /**
+ * Records what an admitted load cost Spotify, once the fetch has said. See
+ * `HOUR_REQUESTS_PREFIX`. Never throws: a reading lost is a floor, a load
+ * refused for its meter would be a gate this was never meant to be.
+ */
+async function recordUpstreamRequests(now: Date, requests: number): Promise<void> {
+  if (!Number.isFinite(requests) || requests <= 0) return;
+  try {
+    const store = await getKvStore();
+    await store.incr(
+      `${HOUR_REQUESTS_PREFIX}:${hourBucket(now)}`,
+      HOUR_BUCKET_TTL_SECONDS,
+      Math.round(requests)
+    );
+  } catch {
+    // Fail quiet, like every other counter on this path.
+  }
+}
+
+/**
  * The rolling window as `npm run stats` reads it: the totals, and the shape
  * of the day that produced them.
  *
  * `byHour` is oldest first. It answers the question the limit has to be tuned
  * against and that nothing else in this repo can — not "how many loads did we
  * spend" (`playlist:stats:*:miss` has that) but *when*, and therefore whether
- * a cap is starving the evening to feed the afternoon.
+ * a cap is starving the evening to feed the afternoon. `requests` is the
+ * same window in the unit Spotify meters (`HOUR_REQUESTS_PREFIX`); zero
+ * before the first deploy that wrote it.
  */
 export async function getDailyBudgetStatus(now: Date = new Date()): Promise<{
   used: number;
   refused: number;
+  requests: number;
   limit: number;
-  byHour: Array<{ hour: string; used: number; refused: number }>;
+  byHour: Array<{ hour: string; used: number; refused: number; requests: number }>;
 }> {
   const store = await getKvStore();
   const usedKeys = windowKeys(HOUR_BUDGET_PREFIX, now);
   const refusedKeys = windowKeys(HOUR_REFUSED_PREFIX, now);
-  const [used, refused] = await Promise.all([
+  const requestKeys = windowKeys(HOUR_REQUESTS_PREFIX, now);
+  const [used, refused, requests] = await Promise.all([
     store.mget<number>(usedKeys),
     store.mget<number>(refusedKeys),
+    store.mget<number>(requestKeys),
   ]);
   const byHour = usedKeys
     .map((key, i) => ({
       hour: key.slice(HOUR_BUDGET_PREFIX.length + 1),
       used: sum([used[i]]),
       refused: sum([refused[i]]),
+      requests: sum([requests[i]]),
     }))
     .reverse();
-  return { used: sum(used), refused: sum(refused), limit: dailyLoadLimit(), byHour };
+  return {
+    used: sum(used),
+    refused: sum(refused),
+    requests: sum(requests),
+    limit: dailyLoadLimit(),
+    byHour,
+  };
 }
 
 /**
@@ -942,23 +995,23 @@ function toLoaded(
  */
 async function fetchUpstream(
   link: KeyedLink
-): Promise<{ name: string; tracks: Track[]; truncated: boolean }> {
+): Promise<{ name: string; tracks: Track[]; truncated: boolean; requests: number }> {
   if (link.kind === "album") {
-    const { album, tracks, truncated } = await getAlbumWithTracks(link.id);
-    return { name: album.name, tracks, truncated };
+    const { album, tracks, truncated, requests } = await getAlbumWithTracks(link.id);
+    return { name: album.name, tracks, truncated, requests };
   }
   if (link.kind === "artist") {
     // One call; the market is the key's. The loaded name is what the game
     // header and the recent chip show — "<Artist> · Top Songs" — because
     // Spotify's answer carries no name of its own.
-    const { name, tracks } = await getArtistTopTracks(link.id, link.market ?? defaultMarket(), defaultMarket());
-    return { name: name ? `${name} · Top Songs` : "Top Songs", tracks, truncated: false };
+    const { name, tracks, requests } = await getArtistTopTracks(link.id, link.market ?? defaultMarket(), defaultMarket());
+    return { name: name ? `${name} · Top Songs` : "Top Songs", tracks, truncated: false, requests };
   }
   // By the address built from the id, not by what was pasted. The paste may
   // be a short link, which lib/spotify.ts cannot read and must not follow —
   // and the id is the thing this function was already keyed on.
-  const { playlist, tracks, truncated } = await getPlaylistWithTracks(playableUrl(link));
-  return { name: playlist.name, tracks, truncated };
+  const { playlist, tracks, truncated, requests } = await getPlaylistWithTracks(playableUrl(link));
+  return { name: playlist.name, tracks, truncated, requests };
 }
 
 /** What a cached 404 replays as when the entry predates `code`. */
@@ -997,7 +1050,8 @@ async function fetchAndCache(
   await recordMiss(link, source);
 
   try {
-    const { name, tracks, truncated } = await fetchUpstream(link);
+    const { name, tracks, truncated, requests } = await fetchUpstream(link);
+    await recordUpstreamRequests(now, requests);
 
     // rawJson is the entire Spotify track object and nothing reads it — every
     // consumer runs it through stripTrackForStorage before use. Dropping it
@@ -1038,6 +1092,11 @@ async function fetchAndCache(
       ...(link.kind === "artist" ? { market: link.market ?? defaultMarket() } : {}),
     };
   } catch (err) {
+    // A refusal is a request Spotify answered — a 404, a 429, a 5xx all count
+    // against the meter it keeps. One is a floor: a failure mid-pagination
+    // spent more, and nothing here can say how many.
+    if (err instanceof SpotifyApiError) await recordUpstreamRequests(now, 1);
+
     if (err instanceof SpotifyApiError && err.status === 429) {
       const seconds = await startCooldown(err.retryAfterSeconds);
       throw cooldownError(seconds);

@@ -109,7 +109,7 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_BASE_URL` | Optional | Defaults to `https://www.guessong.app`. |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | Optional | Injects GA4 when set. Events no-op outside production regardless. |
 | `SPOTIFY_MAX_LOADS_PER_MINUTE` | Optional | Global ceiling on uncached Spotify playlist loads, per minute. Default `40`. |
-| `SPOTIFY_MAX_LOADS_PER_DAY` | Optional | Global ceiling per rolling 24h, counted in hourly buckets. Default `2000`. This is the one that stops Spotify's daily app quota being spent in an afternoon — see [Caching and admission control](#caching-and-admission-control). |
+| `SPOTIFY_MAX_LOADS_PER_DAY` | Optional | Global ceiling per rolling 24h, counted in hourly buckets, in *loads* — a load is ~2 Spotify requests, and `npm run stats` prints the measured ratio. Default `2500`. This is the one that stops Spotify's daily app quota being spent in an afternoon — see [Caching and admission control](#caching-and-admission-control). |
 | `SPOTIFY_BUDGET_WARN_RATIO` | Optional | How much of the daily ceiling has to be gone before hosts see the heads-up popup. Default `0.8`. Raise it to warn later and less often. |
 | `PREVIEW_MAX_LOOKUPS_PER_MINUTE` | Optional | Global ceiling on iTunes/Deezer lookups. Default `120`. |
 | `SPOTIFY_DEFAULT_MARKET` | Optional | The market an artist link's top ten is read in when the request carries no country header, and the fallback when Spotify rejects the request's country. Two letters. Default `US`. |

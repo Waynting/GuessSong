@@ -292,6 +292,23 @@ export const MAX_PLAYLIST_TRACKS = 500;
 const MAX_TRACK_PAGES = Math.ceil(MAX_PLAYLIST_TRACKS / TRACKS_PAGE_LIMIT);
 
 /**
+ * How many track pages are drawn from a playlist too big to read whole, on
+ * top of the head. Two, so a sampled playlist is ~300 songs for 3 requests
+ * rather than 500 for 5.
+ *
+ * It was `MAX_TRACK_PAGES - 1` — the full 500 — until 2026-11-12, when a
+ * sample of the production cache put one loaded playlist in seven over 500
+ * tracks, and the average cold load at 2.36 Spotify requests against the
+ * ~1.2 the daily ceiling in lib/playlist-cache.ts had been reasoned from.
+ * Those playlists were 14% of loads and about 30% of requests. A game plays
+ * at most 50 songs, so 300 is six games' worth, and the draw rotates every
+ * `SAMPLED_TTL_SECONDS` regardless. Exported for the test that pins the
+ * request count; raise it only with the requests line in `npm run stats`
+ * in hand.
+ */
+export const SAMPLED_TRACK_PAGES = 2;
+
+/**
  * `GET /albums/{id}/tracks` allows at most 50 per page, and the page embedded
  * in the album object is 50 too. An ordinary album fits in that first page;
  * a box set spends one more request per fifty, up to `MAX_ALBUM_TRACK_PAGES`.
@@ -522,7 +539,11 @@ export async function fetchPlaylistTracks(
   playlistId: string,
   accessToken: string,
   firstPage: TrackPage
-): Promise<{ tracks: SpotifyTrack[]; truncated: boolean }> {
+): Promise<{ tracks: SpotifyTrack[]; truncated: boolean; pages: number }> {
+  // `pages` is every track-page request this function makes beyond the head
+  // it was handed — what the caller adds to its own one to report what the
+  // load cost Spotify.
+  let pages = 0;
   // Insurance on the one thing this file cannot check for itself: that
   // PLAYLIST_FIELDS still names the embedded page the way Spotify expects. A
   // projection Spotify doesn't recognise doesn't error — it answers without
@@ -539,6 +560,7 @@ export async function fetchPlaylistTracks(
       "[spotify] playlist object carried no embedded track page — check PLAYLIST_FIELDS"
     );
     head = await fetchTrackPage(playlistId, accessToken, 0);
+    pages += 1;
   }
 
   if (head.total <= MAX_PLAYLIST_TRACKS) {
@@ -554,6 +576,7 @@ export async function fetchPlaylistTracks(
     let pagesLeft = MAX_TRACK_PAGES - 1;
     while (offset !== null && pagesLeft > 0 && tracks.length < MAX_PLAYLIST_TRACKS) {
       const page = await fetchTrackPage(playlistId, accessToken, offset);
+      pages += 1;
       tracks.push(...page.tracks);
       offset = page.nextOffset;
       pagesLeft -= 1;
@@ -562,11 +585,12 @@ export async function fetchPlaylistTracks(
     return {
       tracks: tracks.slice(0, MAX_PLAYLIST_TRACKS),
       truncated: tracks.length > MAX_PLAYLIST_TRACKS,
+      pages,
     };
   }
 
   const lastPageIndex = Math.ceil(head.total / TRACKS_PAGE_LIMIT) - 1;
-  const sampledPages = samplePageIndices(1, lastPageIndex, MAX_TRACK_PAGES - 1);
+  const sampledPages = samplePageIndices(1, lastPageIndex, SAMPLED_TRACK_PAGES);
 
   // Each of pages 1..last is drawn with probability sampled ÷ lastPageIndex,
   // so each head track is kept with the same probability.
@@ -578,12 +602,13 @@ export async function fetchPlaylistTracks(
       accessToken,
       pageIndex * TRACKS_PAGE_LIMIT
     );
+    pages += 1;
     tracks.push(...page.tracks);
   }
 
   // Shuffled before slicing so the cap doesn't systematically favour whichever
   // sampled page happened to be fetched first.
-  return { tracks: shuffle(tracks).slice(0, MAX_PLAYLIST_TRACKS), truncated: true };
+  return { tracks: shuffle(tracks).slice(0, MAX_PLAYLIST_TRACKS), truncated: true, pages };
 }
 
 /**
@@ -675,7 +700,7 @@ async function withSpotifyToken<T>(read: (token: string) => Promise<T>): Promise
  */
 export async function getPlaylistWithTracks(
   playlistUrl: string
-): Promise<{ playlist: SpotifyPlaylist; tracks: Track[]; truncated: boolean }> {
+): Promise<{ playlist: SpotifyPlaylist; tracks: Track[]; truncated: boolean; requests: number }> {
   const playlistId = parsePlaylistUrl(playlistUrl);
   if (!playlistId) {
     throw new SpotifyApiError("invalid_playlist_url", 400);
@@ -697,7 +722,9 @@ export async function getPlaylistWithTracks(
 
     const tracks = trackPage.tracks.map(convertSpotifyTrack);
 
-    return { playlist, tracks, truncated: trackPage.truncated };
+    // The head plus every page after it: what this load cost against the
+    // quota Spotify meters, reported so lib/playlist-cache.ts can count it.
+    return { playlist, tracks, truncated: trackPage.truncated, requests: 1 + trackPage.pages };
   });
 }
 
@@ -803,14 +830,16 @@ async function fetchAlbumTrackPage(
  */
 export async function getAlbumWithTracks(
   albumId: string
-): Promise<{ album: SpotifyAlbum; tracks: Track[]; truncated: boolean }> {
+): Promise<{ album: SpotifyAlbum; tracks: Track[]; truncated: boolean; requests: number }> {
   return withSpotifyToken(async (token) => {
     const album = await fetchAlbum(albumId, token);
+    let requests = 1;
     let page = readAlbumTrackPage(album.tracks, 0);
     const raw = [...page.tracks];
     let pagesLeft = MAX_ALBUM_TRACK_PAGES - 1;
     while (page.nextOffset !== null && pagesLeft > 0 && raw.length < MAX_PLAYLIST_TRACKS) {
       page = await fetchAlbumTrackPage(albumId, token, page.nextOffset);
+      requests += 1;
       raw.push(...page.tracks);
       pagesLeft -= 1;
     }
@@ -819,6 +848,7 @@ export async function getAlbumWithTracks(
       album,
       tracks,
       truncated: raw.length > MAX_PLAYLIST_TRACKS || page.nextOffset !== null,
+      requests,
     };
   });
 }
@@ -828,6 +858,8 @@ export interface ArtistTopTracks {
   /** The artist's name as credited on the first track that names the id, or null for an empty answer. */
   name: string | null;
   tracks: Track[];
+  /** Requests spent: one, or two when the market was refused and retried. */
+  requests: number;
   /** The market the answer came from — the requested one, or the fallback after a 400. */
   market: Market;
 }
@@ -880,11 +912,13 @@ export async function getArtistTopTracks(
 ): Promise<ArtistTopTracks> {
   return withSpotifyToken(async (token) => {
     let used = market;
+    let requests = 1;
     let page = await fetchArtistTopTracks(artistId, used, token);
     if (page === "bad_market" && used !== fallback) {
       console.warn(`[spotify] artist top-tracks market=${used} fallback=${fallback}`);
       used = fallback;
       page = await fetchArtistTopTracks(artistId, used, token);
+      requests += 1;
     }
     if (page === "bad_market") {
       throw new SpotifyApiError("playlist_load_failed", 400, {
@@ -899,6 +933,6 @@ export async function getArtistTopTracks(
       raw.flatMap((track) => track.artists).find((artist) => artist.id === artistId)?.name ??
       raw[0]?.artists[0]?.name ??
       null;
-    return { name: credited, tracks, market: used };
+    return { name: credited, tracks, market: used, requests };
   });
 }
