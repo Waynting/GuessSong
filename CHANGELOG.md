@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **An oversized playlist costs 3 Spotify requests, not 5** (`SAMPLED_TRACK_PAGES`
+  in `lib/spotify.ts`). A playlist over `MAX_PLAYLIST_TRACKS` used to be
+  sampled as the head plus four pages — the full 500 — and a sample of the
+  production cache on 2026-11-12 put one loaded playlist in seven over 500
+  tracks, which made the average cold load **2.36 requests** against the ~1.2
+  the daily ceiling had been reasoned from since 1.7.3. Two pages (~300
+  songs) is six games' worth for a game that plays at most 50, and the draw
+  already rotates every `SAMPLED_TTL_SECONDS`. Playlists under 500 tracks are
+  read whole exactly as before.
+- **`SPOTIFY_MAX_LOADS_PER_DAY` defaults to 2,500, from 2,000.** The window
+  was spent on the evening of 2026-11-12 UTC for the first time since
+  October — 621 loads refused between 01:00 and 07:00, a Brazilian evening,
+  after a 6,646-game day — and a first-time player wrote in reading the
+  notice as a personal daily limit. 2,500 loads at the new ratio is ≈5,200
+  requests, under the ~5,800 in the window when Spotify cut the site off in
+  August 2026, but not by much: move it in steps, against the requests line
+  below.
+- **The two quota notices lead with "this isn't about you or your link"**
+  (`spotify_quota_exhausted`, `spotify_daily_budget_spent`), in both
+  languages. The old first sentence, "today's allowance is gone", read as a
+  per-person limit to a Portuguese-speaking first-time player who had never
+  played; the sentences that said otherwise came later in the paragraph.
+
+### Added
+
+- **The budget meters requests beside loads** (`recordUpstreamRequests`,
+  `spotify:budget:req:<hour>`, in `lib/playlist-cache.ts`). The gate counts
+  loads because a load is admitted before its page count is known; Spotify
+  meters requests; the two drifted apart unnoticed for three months. Every
+  getter in `lib/spotify.ts` now reports the requests it spent, the cache
+  records them once per cold load (one `incr`, fail-quiet, a refusal counted
+  as one), `getDailyBudgetStatus` sums them, and `npm run stats` prints
+  "those loads were N Spotify requests — x.xx per load" under the budget
+  block. That ratio, not the load count, is what the ceiling is set against.
+
 ## [1.24.0] - 2026-11-10
 
 ### Added

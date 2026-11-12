@@ -1809,18 +1809,25 @@ if (shortlinkTotal > 0) {
  * whether: a day spent by lunchtime and a day spent at 11pm need opposite
  * changes.
  *
- * The keys are written by `claimDailyBudget` in lib/playlist-cache.ts.
+ * The keys are written by `claimDailyBudget` in lib/playlist-cache.ts; the
+ * requests line by `recordUpstreamRequests` beside it, since 2026-11-12. The
+ * ceiling counts loads and Spotify meters requests, and a load is not one
+ * request — a sample of the cache read 2.36 before the sampled pages were
+ * cut to two — so the ratio printed here is what SPOTIFY_MAX_LOADS_PER_DAY
+ * has to be set against.
  */
 const budgetHours = Array.from({ length: 24 }, (_, i) =>
   new Date(Date.now() - i * 60 * 60 * 1000).toISOString().slice(0, 13)
 ).reverse();
-const [budgetUsed, budgetRefused] = [
+const [budgetUsed, budgetRefused, budgetRequests] = [
   await mgetAll(budgetHours.map((h) => `spotify:budget:h:${h}`)),
   await mgetAll(budgetHours.map((h) => `spotify:budget:refused:${h}`)),
+  await mgetAll(budgetHours.map((h) => `spotify:budget:req:${h}`)),
 ];
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const usedTotal = budgetUsed.reduce((t, v) => t + num(v), 0);
 const refusedTotal = budgetRefused.reduce((t, v) => t + num(v), 0);
+const requestsTotal = budgetRequests.reduce((t, v) => t + num(v), 0);
 
 if (usedTotal + refusedTotal > 0) {
   const peak = Math.max(...budgetUsed.map(num), 1);
@@ -1828,6 +1835,17 @@ if (usedTotal + refusedTotal > 0) {
   console.log(
     `  ${usedTotal} loads sent upstream, ${refusedTotal} refused here before Spotify saw them`
   );
+  if (requestsTotal > 0 && usedTotal > 0) {
+    console.log(
+      `  those loads were ${requestsTotal} Spotify requests — ${(requestsTotal / usedTotal).toFixed(2)} per load`
+    );
+    console.log(
+      "  how to read it: the ceiling (SPOTIFY_MAX_LOADS_PER_DAY) counts loads; Spotify\n" +
+        "  meters requests. Multiply the ceiling by this ratio before comparing it with\n" +
+        "  the ~5,800 requests in the window when Spotify cut the site off in August 2026.\n" +
+        "  Hours with loads and no requests are from before the meter shipped."
+    );
+  }
   console.log("");
   for (const [i, hour] of budgetHours.entries()) {
     const used = num(budgetUsed[i]);

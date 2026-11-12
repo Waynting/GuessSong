@@ -66,7 +66,7 @@ Full annotated list in `.env.example`. What actually breaks without each:
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | no GA4. The KV loop counters still work |
 | `NEXT_PUBLIC_BASE_URL` | defaults to `https://www.guessong.app` |
 | `SPOTIFY_MAX_LOADS_PER_MINUTE` | defaults to 40 |
-| `SPOTIFY_MAX_LOADS_PER_DAY` | defaults to 2000 |
+| `SPOTIFY_MAX_LOADS_PER_DAY` | defaults to 2500 loads; a load is ~2 Spotify requests, see the requests line in `npm run stats` |
 | `SPOTIFY_BUDGET_WARN_RATIO` | defaults to 0.8 |
 | `PREVIEW_MAX_LOOKUPS_PER_MINUTE` | defaults to 120 |
 | `SPOTIFY_DEFAULT_MARKET` | defaults to US — the market an artist link's top ten is read in without a country header, and the fallback when Spotify rejects the request's country |

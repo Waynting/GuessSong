@@ -488,26 +488,37 @@ describe("playlist pagination cost", () => {
 
   it("stops at MAX_PLAYLIST_TRACKS instead of following `next` forever", async () => {
     const probe = installFetchMock({ totalTracks: 5000 });
-    const { getPlaylistWithTracks, MAX_PLAYLIST_TRACKS } = await freshSpotify();
+    const { getPlaylistWithTracks, MAX_PLAYLIST_TRACKS, SAMPLED_TRACK_PAGES } = await freshSpotify();
 
-    const { tracks, truncated } = await getPlaylistWithTracks(PLAYLIST_URL);
+    const { tracks, truncated, requests } = await getPlaylistWithTracks(PLAYLIST_URL);
 
-    // Four sampled pages plus the thinned head: never more than the cap, and
-    // never fewer than the four pages it paid for.
+    // The sampled pages plus the thinned head: never more than the cap, and
+    // never fewer than the pages it paid for.
     expect(tracks.length).toBeLessThanOrEqual(MAX_PLAYLIST_TRACKS);
-    expect(tracks.length).toBeGreaterThanOrEqual(MAX_PLAYLIST_TRACKS - 100);
+    expect(tracks.length).toBeGreaterThanOrEqual(SAMPLED_TRACK_PAGES * 100);
     expect(truncated).toBe(true);
     // Uncapped, a 5,000-track playlist was 50 requests against a quota shared
-    // by every user of the site. Counted end to end, head included, so the
-    // merge cannot quietly move a request out of this budget and into another.
-    expect(probe.upstreamRequests()).toBe(MAX_PLAYLIST_TRACKS / 100);
+    // by every user of the site; at the full 500 it was five, and one loaded
+    // playlist in seven is this big (2026-11-12). Counted end to end, head
+    // included, so the merge cannot quietly move a request out of this budget
+    // and into another — and reported, so lib/playlist-cache.ts can meter it.
+    expect(probe.upstreamRequests()).toBe(1 + SAMPLED_TRACK_PAGES);
+    expect(requests).toBe(probe.upstreamRequests());
+  });
+
+  it("spends two track pages on an oversized playlist, not four", async () => {
+    // The cut from 500 sampled tracks to ~300 is the single largest saving
+    // against Spotify's quota in the file: a game plays at most 50 songs, and
+    // the draw rotates every SAMPLED_TTL_SECONDS anyway.
+    const { SAMPLED_TRACK_PAGES } = await freshSpotify();
+    expect(SAMPLED_TRACK_PAGES).toBe(2);
   });
 
   it("gives the first page's tracks the same odds as everyone else's", async () => {
-    // 4,000 tracks is 40 pages; four are sampled from pages 1–39, so any track
-    // past the head is in the sample 4/39 of the time. The head used to be in
-    // it every time — the first 100 songs of a big playlist ten times as
-    // likely to be played as the rest.
+    // 4,000 tracks is 40 pages; SAMPLED_TRACK_PAGES are drawn from pages 1–39,
+    // so any track past the head is in the sample 2/39 of the time. The head
+    // used to be in it every time — the first 100 songs of a big playlist
+    // twenty times as likely to be played as the rest.
     const { getPlaylistWithTracks } = await freshSpotify();
     let head = 0;
     let rest = 0;
@@ -543,8 +554,8 @@ describe("playlist pagination cost", () => {
   it("draws a different sample on a later load of the same big playlist", async () => {
     const { getPlaylistWithTracks } = await freshSpotify();
 
-    // Ten draws of 4 pages from ~49 candidates. Identical results every time
-    // would mean the sampling is not actually random.
+    // Ten draws of SAMPLED_TRACK_PAGES pages from ~49 candidates. Identical
+    // results every time would mean the sampling is not actually random.
     const draws = new Set<string>();
     for (let i = 0; i < 10; i++) {
       const probe = installFetchMock({ totalTracks: 5000 });
@@ -559,7 +570,7 @@ describe("playlist pagination cost", () => {
     const probe = installFetchMock({ totalTracks: 250 });
     const { getPlaylistWithTracks } = await freshSpotify();
 
-    const { tracks, truncated } = await getPlaylistWithTracks(PLAYLIST_URL);
+    const { tracks, truncated, requests } = await getPlaylistWithTracks(PLAYLIST_URL);
 
     // Under the cap nothing is sampled or shuffled — the host's ordering is
     // preserved, and the game page does its own shuffling downstream.
@@ -568,9 +579,11 @@ describe("playlist pagination cost", () => {
     expect(tracks[0].id).toBe("track-0");
     expect(tracks[249].id).toBe("track-249");
     // Offset 0 is the embedded page, so three pages still cost three calls —
-    // the saving is the metadata call that used to sit on top of them.
+    // the saving is the metadata call that used to sit on top of them. The
+    // count is handed back, head included, for the meter in lib/playlist-cache.ts.
     expect(probe.offsetsSeen()).toEqual([0, 100, 200]);
     expect(probe.upstreamRequests()).toBe(3);
+    expect(requests).toBe(3);
   });
 
   it("reports truncated=false for a playlist that fits", async () => {

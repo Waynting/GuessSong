@@ -310,8 +310,8 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
    * most hosts want to play tonight, not deploy something.
    */
   spotify_quota_exhausted: {
-    en: "Sorry — Spotify has cut the whole site off for today. GuessSong is free, and every game here shares one Spotify quota; Spotify's policy gives a project like this no way to buy a bigger one, so there is nothing we can top up. Playlists that have already been loaded still work, and new ones come back once Spotify resets. GuessSong is also open source, so anyone who would rather not wait can run their own copy on their own quota. Your playlist URL is fine.",
-    zh: "抱歉 — Spotify 今天已經把整個網站擋下來了。GuessSong 是免費服務，這裡所有的遊戲共用同一份 Spotify 配額；而 Spotify 的政策不讓這樣的專案加購更多，所以我們沒有東西可以加。已經載入過的歌單還是可以玩，新的歌單要等 Spotify 重置後才會恢復。GuessSong 也是開源的，不想等的人可以用自己的配額架一站自己跑。你的歌單連結沒有問題。",
+    en: "Sorry — this isn't about you or your link: Spotify has cut the whole site off for today. GuessSong is free, and every game here shares one Spotify quota; Spotify's policy gives a project like this no way to buy a bigger one, so there is nothing we can top up. Playlists that have already been loaded still work, and new ones come back once Spotify resets. GuessSong is also open source, so anyone who would rather not wait can run their own copy on their own quota. Your playlist URL is fine.",
+    zh: "抱歉 — 這不是你或你的連結的問題：Spotify 今天已經把整個網站擋下來了。GuessSong 是免費服務，這裡所有的遊戲共用同一份 Spotify 配額；而 Spotify 的政策不讓這樣的專案加購更多，所以我們沒有東西可以加。已經載入過的歌單還是可以玩，新的歌單要等 Spotify 重置後才會恢復。GuessSong 也是開源的，不想等的人可以用自己的配額架一站自己跑。你的歌單連結沒有問題。",
   },
   /**
    * The self-imposed twin of `spotify_quota_exhausted`, and the distinction is
@@ -331,8 +331,8 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
    * Spotify.
    */
   spotify_daily_budget_spent: {
-    en: "Sorry — today's allowance is gone. GuessSong is free and every game here shares one Spotify quota, and Spotify's policy gives a project like this no way to buy a bigger one, so the site rations what it has: one busy afternoon must not leave the evening with nothing. Playlists that have already been loaded still work, and some allowance frees up every hour. GuessSong is also open source, so anyone who would rather not wait can run their own copy on their own quota. Your playlist URL is fine.",
-    zh: "抱歉 — 今天的額度已經用完了。GuessSong 是免費服務，所有的遊戲共用同一份 Spotify 配額，而 Spotify 的政策不讓這樣的專案加購更多，所以網站只能把手上的額度配給著用：不能讓一個下午就把整晚的份用光。已經載入過的歌單還是可以玩，每小時也會釋出一些額度。GuessSong 也是開源的，不想等的人可以用自己的配額架一站自己跑。你的歌單連結沒有問題。",
+    en: "Sorry — this isn't about you or your link: the whole site has used up today's Spotify allowance. GuessSong is free and every game here shares one Spotify quota, and Spotify's policy gives a project like this no way to buy a bigger one, so the site rations what it has: one busy afternoon must not leave the evening with nothing. Playlists that have already been loaded still work, and some allowance frees up every hour. GuessSong is also open source, so anyone who would rather not wait can run their own copy on their own quota. Your playlist URL is fine.",
+    zh: "抱歉 — 這不是你或你的連結的問題：是整個網站今天的 Spotify 額度用完了。GuessSong 是免費服務，所有的遊戲共用同一份 Spotify 配額，而 Spotify 的政策不讓這樣的專案加購更多，所以網站只能把手上的額度配給著用：不能讓一個下午就把整晚的份用光。已經載入過的歌單還是可以玩，每小時也會釋出一些額度。GuessSong 也是開源的，不想等的人可以用自己的配額架一站自己跑。你的歌單連結沒有問題。",
   },
   /*
    * The only code in this table that is not a refusal.
