@@ -42,7 +42,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { normalizeQuizCode, peekQuiz } from "@/lib/quiz-store";
-import { QUIZ_COPY, fillCopy, quizTitle } from "@/lib/quiz-copy";
+import { QUIZ_COPY, fillCopy, ogDescriptionFor, quizTitle } from "@/lib/quiz-copy";
 import { QuizClient } from "./quiz-client";
 
 type Params = { params: Promise<{ code: string }> };
@@ -68,7 +68,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   }
   const copy = QUIZ_COPY[peek.locale];
   const title = quizTitle(copy, peek.ownerName);
-  const description = fillCopy(copy.ogDescription, { count: peek.questionCount });
+  // The rule in the card follows the kind; the title (whose taste) does not.
+  const description = fillCopy(ogDescriptionFor(copy, peek.kind), { count: peek.questionCount });
   const url = `/q/${peek.code}`;
   return {
     title,

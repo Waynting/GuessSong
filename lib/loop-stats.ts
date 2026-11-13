@@ -38,7 +38,15 @@ import type { ShareLinkOutcome } from "@/lib/quiz-share";
 import { SOCIAL_PLATFORMS, isSocialPlatform, type SocialPlatform } from "@/lib/social-share";
 import { QUIZ_SOURCES, isQuizSource, type QuizSource } from "@/lib/quiz-source";
 import type { PreviewStatus } from "@/types/preview";
-import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
+import {
+  LYRIC_STATUSES,
+  QUIZ_KINDS,
+  QUIZ_MAX_QUESTIONS,
+  QUIZ_MIN_QUESTIONS,
+  isQuizKind,
+  type LyricStatus,
+  type QuizKind,
+} from "@/types/quiz";
 import { isPlaylistHelpTopic, PLAYLIST_HELP_TOPIC_NAMES, type PlaylistHelpTopic } from "@/lib/playlist-help";
 import { UNPLAYABLE_KINDS, type UnplayableKind } from "@/lib/spotify-link";
 import { STARTER_KEYS, isStarterKey, type StarterKey } from "@/lib/starter-playlists";
@@ -767,6 +775,31 @@ export type QuizLengthStage = "created" | "completed";
 export const QUIZ_LENGTH_STAGES: readonly QuizLengthStage[] = ["created", "completed"];
 
 /**
+ * The funnel split by what the questions ask (`quiz_kind:<stage>:<kind>`,
+ * since 2026-11-13). The `lyric` kind exists to test one hypothesis — that a
+ * line of a song is a better reason to open a friend's link than a duel of
+ * two titles — and the reading is `opened ÷ created` and `completed ÷
+ * created` per kind, set side by side. Written *instead of* nothing: these
+ * ride beside the plain stages, which stay the totals.
+ *
+ * `opened` is here where it is not in `QuizLengthStage`, because opens per
+ * quiz is the number the kind was built to move. It is the same ceiling the
+ * plain `opened` is (a reload is a second open), and the same floor on
+ * owners (a verified owner's open is counted in neither).
+ *
+ * Two siblings, both exact keys: `quiz_lyric_fallback` is a `lyric` request
+ * that came out as a `title` quiz because too few songs had lines — it is
+ * in `quiz_kind:created:title`, and this says how many of those were asked
+ * to be the other thing — and `quiz_lyric:<status>` counts each upstream
+ * lyrics lookup by how it came out (`lib/lyrics.ts`), which is what says
+ * whether a short lyric quiz is the database's coverage or a throttled
+ * minute.
+ */
+export type QuizKindStage = "created" | "opened" | "completed";
+
+export const QUIZ_KIND_STAGES: readonly QuizKindStage[] = ["created", "opened", "completed"];
+
+/**
  * How a hint request came out. The first three are `PreviewStatus` verbatim
  * — the same fact `lib/preview-cache.ts` records for the game — and mean the
  * same things: `found` is a clip the taker heard, `absent` is a recording
@@ -875,6 +908,12 @@ export function loopStatsKeys(
   quizVerdict: Record<QuizVerdict, string>;
   quizLength: Record<QuizLengthStage, Record<number, string>>;
   quizClamped: string;
+  /** The funnel by what the questions ask — see `QuizKindStage`. */
+  quizKind: Record<QuizKindStage, Record<QuizKind, string>>;
+  /** A `lyric` request built as the duel for want of lines. */
+  quizLyricFallback: string;
+  /** Each upstream lyrics lookup, by outcome. */
+  quizLyric: Record<LyricStatus, string>;
   quizLocale: Record<ErrorLocale, string>;
   quizFrom: Record<QuizSource, string>;
   quizHint: Record<QuizHintOutcome, string>;
@@ -1126,6 +1165,16 @@ export function loopStatsKeys(
       })
     ) as Record<QuizLengthStage, Record<number, string>>,
     quizClamped: key(day, "quiz_clamped"),
+    quizKind: Object.fromEntries(
+      QUIZ_KIND_STAGES.map((stage) => [
+        stage,
+        Object.fromEntries(QUIZ_KINDS.map((kind) => [kind, key(day, `quiz_kind:${stage}:${kind}`)])),
+      ])
+    ) as Record<QuizKindStage, Record<QuizKind, string>>,
+    quizLyricFallback: key(day, "quiz_lyric_fallback"),
+    quizLyric: Object.fromEntries(
+      LYRIC_STATUSES.map((s) => [s, key(day, `quiz_lyric:${s}`)])
+    ) as Record<LyricStatus, string>,
     quizLocale: Object.fromEntries(
       ERROR_LOCALES.map((l) => [l, key(day, `quiz_locale:${l}`)])
     ) as Record<ErrorLocale, string>,
@@ -1733,11 +1782,21 @@ export async function recordQuizCreated(details: {
   requestedCount: number;
   locale: ErrorLocale;
   from?: QuizSource;
+  /** The kind built. Absent records no kind — a caller from before the field. */
+  kind?: QuizKind;
+  /** The kind asked for; a `lyric` ask built as `title` is the fall back. */
+  requestedKind?: QuizKind;
 }): Promise<void> {
   const writes = [
     recordQuizStage("created"),
     recordQuizLength("created", details.questionCount),
   ];
+  if (isQuizKind(details.kind)) {
+    writes.push(recordQuizKindStage("created", details.kind));
+    if (details.requestedKind === "lyric" && details.kind === "title") {
+      writes.push(bump("quiz_lyric_fallback"));
+    }
+  }
   // Guarded like the verdict: the value becomes the tail of a key, and the
   // locale reached the route from a request body.
   if ((ERROR_LOCALES as readonly string[]).includes(details.locale)) {
@@ -1774,12 +1833,36 @@ export async function recordQuizCreated(details: {
 export async function recordQuizCompleted(result: {
   questionCount: number;
   verdict: QuizVerdict;
+  /** The quiz's kind, for the per-kind finish rate. Absent records none. */
+  kind?: QuizKind;
 }): Promise<void> {
-  await Promise.all([
+  const writes = [
     recordQuizStage("completed"),
     recordQuizVerdict(result.verdict),
     recordQuizLength("completed", result.questionCount),
-  ]);
+  ];
+  if (isQuizKind(result.kind)) writes.push(recordQuizKindStage("completed", result.kind));
+  await Promise.all(writes);
+}
+
+/**
+ * One stage of the funnel, for one kind of quiz — see `QuizKindStage`.
+ * Guarded on both halves: the kind reached the route from a request body
+ * once, and the stage is a string however it is typed.
+ */
+export function recordQuizKindStage(stage: QuizKindStage, kind: QuizKind): Promise<void> {
+  if (!QUIZ_KIND_STAGES.includes(stage) || !isQuizKind(kind)) return Promise.resolve();
+  return bump(`quiz_kind:${stage}:${kind}`);
+}
+
+/**
+ * One upstream lyrics lookup, by how it came out (`lib/lyrics.ts`). Cache
+ * hits are not counted — this is what the lyrics database was asked, so
+ * `unavailable` piling up is a throttled minute and `absent` is coverage.
+ */
+export function recordQuizLyricLookup(status: LyricStatus): Promise<void> {
+  if (!LYRIC_STATUSES.includes(status)) return Promise.resolve();
+  return bump(`quiz_lyric:${status}`);
 }
 
 /**

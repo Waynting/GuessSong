@@ -6,6 +6,12 @@ import {
   QUIZ_COPY,
   builtShorterNote,
   fillCopy,
+  hintPlayingFor,
+  introBodyFor,
+  lyricFallbackNote,
+  ogDescriptionFor,
+  promptFor,
+  quizCardCopy,
   ownerClipboardText,
   ownerShareText,
   panelCaption,
@@ -238,5 +244,53 @@ describe("the sentences that have one job each", () => {
       expect(copy.previewStart, locale).not.toBe(copy.startButton);
     });
     expect(QUIZ_COPY.en.panelPreviewLink).toBe("Preview your quiz →");
+  });
+});
+
+describe("a lyric quiz says so everywhere the duel's rule would be", () => {
+  it("picks the lyric sentence for a lyric quiz and the duel's otherwise, in both languages", () => {
+    for (const locale of LOCALES) {
+      const copy = QUIZ_COPY[locale];
+      expect(introBodyFor(copy, "lyric")).toBe(copy.introBodyLyric);
+      expect(introBodyFor(copy, "title")).toBe(copy.introBody);
+      expect(introBodyFor(copy, undefined)).toBe(copy.introBody);
+      expect(ogDescriptionFor(copy, "lyric")).toBe(copy.ogDescriptionLyric);
+      expect(ogDescriptionFor(copy, undefined)).toBe(copy.ogDescription);
+      expect(hintPlayingFor(copy, "lyric")).toBe(copy.hintPlayingLyric);
+      expect(hintPlayingFor(copy, "title")).toBe(copy.hintPlaying);
+      expectClean(promptFor(copy, "lyric", "Wayn"), `${locale} prompt owner`);
+      expect(promptFor(copy, "lyric", "Wayn")).toContain("Wayn");
+      expect(promptFor(copy, "lyric", null)).toBe(copy.promptLyricPlaylist);
+      expect(promptFor(copy, "title", null)).toBe(copy.promptPlaylist);
+      expect(panelCaption(copy, 10, "lyric")).toBe(fillCopy(copy.panelLyricQuestionsFrom, { count: 10 }));
+      expect(panelCaption(copy, 10, "title")).toBe(fillCopy(copy.panelQuestionsFrom, { count: 10 }));
+    }
+  });
+
+  it("never tells a lyric taker the right answer is 'the one in the playlist' — both are", () => {
+    for (const locale of LOCALES) {
+      const copy = QUIZ_COPY[locale];
+      for (const text of [copy.introBodyLyric, copy.ogDescriptionLyric, copy.ogRuleLyric, copy.hintPlayingLyric, copy.promptLyricPlaylist]) {
+        expect(text, text).not.toMatch(/in the playlist|在歌單裡/);
+      }
+    }
+  });
+
+  it("puts the lyric label and rule on the card, and keeps the title", () => {
+    const peek = { locale: "en" as const, ownerName: "Wayn", playlistName: "Late nights", questionCount: 10 };
+    const lyric = quizCardCopy({ ...peek, kind: "lyric" });
+    const duel = quizCardCopy(peek);
+    expect(lyric.label).toBe(QUIZ_COPY.en.ogQuizLabelLyric);
+    expect(lyric.pills).toEqual([QUIZ_COPY.en.ogRuleLyric]);
+    expect(lyric.title).toBe(duel.title);
+    expect(duel.pills).toEqual([QUIZ_COPY.en.ogRule]);
+  });
+
+  it("notes a fall back only when lyrics were asked for and the duel was built", () => {
+    const copy = QUIZ_COPY.zh;
+    expect(lyricFallbackNote(copy, "title", "lyric")).toBe(copy.panelLyricFallback);
+    expect(lyricFallbackNote(copy, "lyric", "lyric")).toBeNull();
+    expect(lyricFallbackNote(copy, "title", "title")).toBeNull();
+    expect(lyricFallbackNote(copy, "title", null)).toBeNull();
   });
 });

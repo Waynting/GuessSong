@@ -28,6 +28,8 @@ import {
   QUIZ_MAX_QUESTIONS,
   QUIZ_MIN_QUESTIONS,
   QUIZ_TTL_SECONDS,
+  isQuizKind,
+  type QuizKind,
 } from "@/types/quiz";
 
 const LAST_QUIZ_KEY = "guesssong_last_quiz";
@@ -52,6 +54,12 @@ export interface LastQuiz {
    * print a number nobody chose.
    */
   questionCount: number | null;
+  /**
+   * What the questions ask, for the panel's caption. Absent on an entry
+   * written before 2026-11-13 or holding a kind this build does not know —
+   * read back as the duel's caption, the way `questionCount` reads as none.
+   */
+  kind?: QuizKind;
   createdAt: number;
   expiresAt: number;
 }
@@ -98,6 +106,7 @@ export function parseLastQuiz(raw: string, now = Date.now()): LastQuiz | null {
       ownerName: typeof value.ownerName === "string" ? value.ownerName : null,
       playlistName: typeof value.playlistName === "string" ? value.playlistName : "",
       questionCount: readQuestionCount(value.questionCount),
+      ...(isQuizKind(value.kind) ? { kind: value.kind } : {}),
       createdAt: typeof value.createdAt === "number" ? value.createdAt : 0,
       expiresAt: value.expiresAt,
     };

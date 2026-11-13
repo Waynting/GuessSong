@@ -88,15 +88,16 @@ export async function POST(
       body.submissionId,
       token
     );
-    const { replayed, ...response } = result;
+    // `replayed` and `kind` are the store's word to this route, not the wire's.
+    const { replayed, kind, ...response } = result;
     if (response.preview) {
       // Instead of, not as well as: see `QuizOwnerStage`.
       await recordQuizOwnerStage("owner_completed");
     } else if (!replayed) {
-      // Three independent, fail-soft counters in one round trip, not in series
+      // Four independent, fail-soft counters in one round trip, not in series
       // on the response the taker is waiting for. Not for a replay: that is a
       // finish already counted, seen again (`SubmittedAnswers`).
-      await recordQuizCompleted({ questionCount: response.total, verdict: response.verdict });
+      await recordQuizCompleted({ questionCount: response.total, verdict: response.verdict, kind });
     }
     return NextResponse.json<AnswerQuizResponse>(response);
   } catch (err: unknown) {

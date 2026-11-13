@@ -11,6 +11,9 @@ import {
   peekQuiz,
   submitQuizAnswers,
   QuizError,
+  LYRIC_LOOKUP_MAX,
+  lyricLookupCount,
+  type LyricSource,
 } from "@/lib/quiz-store";
 import { QUIZ_DECOY_POOL } from "@/lib/quiz-decoys";
 import { PREVIEW_FIELD_MAX } from "@/types/preview";
@@ -218,6 +221,7 @@ describe("getQuizView", () => {
       playlistName: "Late nights",
       questionCount: 10,
       locale: "zh",
+      kind: "title",
     });
     // The code it hands back is the stored one, whatever the segment said:
     // the page's self-canonical and the card image's URL are built from it.
@@ -913,5 +917,77 @@ describe("getQuizHint", () => {
     await expect(getQuizHint(created.code, 1.5)).rejects.toMatchObject({ code: "preview_request_invalid" });
     await expect(getQuizHint("ZZZZZZ", 0)).rejects.toBeInstanceOf(QuizError);
     expect(previewCache.getPreview).not.toHaveBeenCalled();
+  });
+});
+
+describe("a lyric quiz", () => {
+  /** Three distinct lines per song, none naming any title on the playlist. */
+  const linesFor = (id: string) => [`a line that belongs to song ${id} only`, `another verse for number ${id}`, `the last words of ${id} tonight`];
+  const everyLine: LyricSource = async (tracks) =>
+    new Map(tracks.map((t) => [t.id, { status: "found" as const, lines: linesFor(t.id) }]));
+
+  it("builds from the lines, both options from the playlist, and stores the kind", async () => {
+    const created = await make({ kind: "lyric", lyricSource: everyLine });
+    expect(created.kind).toBe("lyric");
+    const view = await getQuizView(created.code);
+    expect(view.kind).toBe("lyric");
+    const titles = new Set(PLAYLIST.map((t) => t.name));
+    for (const q of view.questions) {
+      expect(q.lyric).toMatch(/^(a line that belongs|another verse|the last words)/);
+      for (const o of q.options) expect(titles.has(o.title), o.title).toBe(true);
+    }
+  });
+
+  it("quotes the line from the real option's song, and the key still never leaves", async () => {
+    const created = await make({ kind: "lyric", lyricSource: everyLine });
+    const view = await getQuizView(created.code);
+    const key = await keyFor(created.code);
+    expect(JSON.stringify(view)).not.toMatch(/"answer"/);
+    view.questions.forEach((q, i) => {
+      const real = PLAYLIST.find((t) => t.name === q.options[key[i]].title)!;
+      expect(linesFor(real.id)).toContain(q.lyric);
+    });
+  });
+
+  it("falls back to the duel when too few songs have lines, rather than refusing", async () => {
+    const few: LyricSource = async (tracks) =>
+      new Map(tracks.map((t, i) => [t.id, i < 3 ? { status: "found" as const, lines: linesFor(t.id) } : { status: "absent" as const, lines: [] }]));
+    const created = await make({ kind: "lyric", lyricSource: few });
+    expect(created.kind).toBe("title");
+    const view = await getQuizView(created.code);
+    expect(view.kind).toBe("title");
+    expect(view.questions.every((q) => q.lyric === undefined)).toBe(true);
+  });
+
+  it("is the duel when no source is given, and asks no source for a duel", async () => {
+    expect((await make({ kind: "lyric" })).kind).toBe("title");
+    const source = vi.fn(everyLine);
+    expect((await make({ lyricSource: source })).kind).toBe("title");
+    expect(source).not.toHaveBeenCalled();
+  });
+
+  it("asks about a bounded sample, never the whole playlist", () => {
+    expect(lyricLookupCount(10, 500)).toBe(20);
+    expect(lyricLookupCount(50, 500)).toBe(LYRIC_LOOKUP_MAX);
+    expect(lyricLookupCount(10, 12)).toBe(12);
+  });
+
+  it("reads a quiz stored before the field as the duel", async () => {
+    const created = await make();
+    const store = await getKvStore();
+    const raw = await store.hgetall<Record<string, unknown>>(`quiz:v1:${created.code}`);
+    const { kind: _kind, ...legacy } = raw.meta as Record<string, unknown>;
+    void _kind;
+    await store.hdel(`quiz:v1:${created.code}`, "meta");
+    await store.hsetnx(`quiz:v1:${created.code}`, "meta", legacy);
+    expect((await getQuizView(created.code)).kind).toBe("title");
+    expect((await peekQuiz(created.code))?.kind).toBe("title");
+  });
+
+  it("shows the owner which line each question quoted", async () => {
+    const created = await make({ kind: "lyric", lyricSource: everyLine });
+    const board = await getQuizBoard(created.code, created.hostToken);
+    expect(board.kind).toBe("lyric");
+    expect(board.questions.every((q) => typeof q.lyric === "string" && q.lyric.length > 0)).toBe(true);
   });
 });

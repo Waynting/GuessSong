@@ -909,6 +909,75 @@ describe("buildQuiz", () => {
   });
 });
 
+describe("buildQuiz, lyric kind", () => {
+  const playlist = [
+    track("1", "Die For You", ["The Weeknd"]),
+    track("2", "New Rules", ["Dua Lipa"]),
+    track("3", "Let Down", ["Radiohead"]),
+    track("4", "Come Together", ["The Beatles"]),
+    track("5", "Rolling in the Deep", ["Adele"]),
+    track("6", "Mojito", ["周杰倫"]),
+    track("7", "突然好想你", ["五月天"]),
+    track("8", "Levitating", ["Dua Lipa"]),
+    track("9", "Karma Police", ["Radiohead"]),
+    track("10", "Someone Like You", ["Adele"]),
+    track("11", "Blinding Lights", ["The Weeknd"]),
+    track("12", "小幸運", ["田馥甄"]),
+  ];
+  const lyrics = new Map(playlist.map((t) => [t.id, [`only song ${t.id} sings this line`, `second line for ${t.id} here`]]));
+  const build = (seed: number, l = lyrics) =>
+    buildQuiz({ tracks: playlist, questionCount: 10, pool: POOL, rng: seededRng(seed), kind: "lyric", lyrics: l });
+
+  it("is deterministic under a seed", () => {
+    expect(build(5)).toEqual(build(5));
+    expect(build(6)).not.toEqual(build(5));
+  });
+
+  it("asks each song once, with a decoy from the playlist and never the pool", () => {
+    const qs = build(5);
+    expect(qs).toHaveLength(10);
+    expect(new Set(qs.map((q) => q.track.id)).size).toBe(10);
+    const names = new Set(playlist.map((t) => t.name));
+    for (const q of qs) {
+      expect(q.options).toHaveLength(2);
+      for (const o of q.options) expect(names.has(o.title), o.title).toBe(true);
+      expect(q.options[q.answer].title).toBe(q.track.name);
+      expect(lyrics.get(q.track.id)).toContain(q.lyric);
+    }
+  });
+
+  it("prefers a decoy by the same artist", () => {
+    const q = build(5).find((x) => x.track.artist === "Dua Lipa")!;
+    expect(q.options.map((o) => o.artist)).toEqual(["Dua Lipa", "Dua Lipa"]);
+  });
+
+  it("skips a line that names the decoy, and a song with no lines at all", () => {
+    // Song 2's first line names Levitating, its only same-artist decoy.
+    const tricky = new Map(lyrics);
+    tricky.set("2", ["levitating is all I hear tonight", "a safe line for new rules"]);
+    tricky.delete("12");
+    const qs = build(5, tricky);
+    expect(qs.some((q) => q.track.id === "12")).toBe(false);
+    const q2 = qs.find((q) => q.track.id === "2");
+    if (q2 && q2.options.some((o) => o.title === "Levitating")) expect(q2.lyric).toBe("a safe line for new rules");
+  });
+
+  it("builds nothing below the minimum, so the caller can fall back", () => {
+    const few = new Map([...lyrics].slice(0, QUIZ_MIN_QUESTIONS - 1));
+    expect(build(5, few)).toEqual([]);
+    expect(buildQuiz({ tracks: playlist, questionCount: 10, pool: POOL, rng: seededRng(1), kind: "lyric" })).toEqual([]);
+  });
+
+  it("sends the line with the options and keeps the key behind", () => {
+    const views = stripAnswerKey(build(5));
+    for (const v of views) {
+      expect(Object.keys(v).sort()).toEqual(["lyric", "options"]);
+    }
+    const duel = stripAnswerKey(buildQuiz({ tracks: playlist, questionCount: 10, pool: POOL, rng: seededRng(1) }));
+    for (const v of duel) expect(Object.keys(v)).toEqual(["options"]);
+  });
+});
+
 describe("clampQuestionCount", () => {
   it("bounds the request and then the playlist", () => {
     expect(clampQuestionCount(10, 100)).toBe(10);

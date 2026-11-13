@@ -40,16 +40,23 @@
 
 import type { Track } from "@/types";
 import {
+  DEFAULT_QUIZ_KIND,
   QUIZ_DEFAULT_QUESTION_COUNT,
   QUIZ_MAX_QUESTIONS,
   QUIZ_MIN_QUESTIONS,
   QUIZ_OPTION_COUNT,
   QUIZ_QUESTION_COUNTS,
+  type QuizKind,
   type QuizOption,
   type QuizQuestionView,
   type QuizScore,
 } from "@/types/quiz";
 import type { CountControl, SongCountState } from "@/lib/song-count";
+// A cycle, deliberately shallow: lib/lyric-fragment.ts imports `titleKey` and
+// `displayTitle` from here so a title is keyed one way on both sides of a
+// lyric question, and this module calls `pickLyricLine` only inside
+// `buildQuiz`. Nothing on either side is read at module scope.
+import { pickLyricLine } from "@/lib/lyric-fragment";
 // A 20KB character table. It stays out of the browser bundle only because
 // nothing a client component imports from this module reaches it — the build
 // tree-shakes it away, not a module boundary. Never reference `titleKey`,
@@ -470,7 +477,7 @@ export function pickDecoys(
 /** What the server stores per question. The taker gets `stripAnswerKey` of it. */
 export interface QuizQuestion {
   options: QuizOption[];
-  /** Index into `options` of the song that is really in the playlist. */
+  /** Index into `options` of the song that is really in the playlist — or, on a `lyric` question, that the line is from. */
   answer: number;
   /**
    * The real track, for the hint. Full Spotify title rather than the display
@@ -478,6 +485,8 @@ export interface QuizQuestion {
    * a recording by.
    */
   track: { id: string; name: string; artist: string; durationMs: number };
+  /** The line quoted, on a `lyric` question. Shown to the taker; it is the question. */
+  lyric?: string;
 }
 
 /**
@@ -543,15 +552,24 @@ export interface BuildQuizInput {
   pool: readonly DecoyEntry[];
   /** Injected so a seed reproduces a quiz and a test can pin one. */
   rng: () => number;
+  /** What the questions ask. Absent is the duel, as every quiz was before. */
+  kind?: QuizKind;
+  /**
+   * For a `lyric` quiz: each track's candidate lines, best first, by track
+   * id (`lib/lyrics.ts`). A track with no entry, or an empty one, cannot be
+   * asked about and is left out. Ignored on a `title` quiz.
+   */
+  lyrics?: ReadonlyMap<string, readonly string[]>;
 }
 
 /**
  * Builds the questions. Returns fewer than asked when the playlist is short,
  * and none at all below `QUIZ_MIN_QUESTIONS` — the caller decides what to say
- * about that (`quiz_too_few_tracks`), this just does not build a two-question
- * quiz.
+ * about that (`quiz_too_few_tracks`, or for a `lyric` quiz the fall back to
+ * the duel), this just does not build a two-question quiz.
  */
 export function buildQuiz(input: BuildQuizInput): QuizQuestion[] {
+  if ((input.kind ?? DEFAULT_QUIZ_KIND) === "lyric") return buildLyricQuiz(input);
   const usable = usableQuizTracks(input.tracks);
   if (usable.length < QUIZ_MIN_QUESTIONS) return [];
   const count = clampQuestionCount(input.questionCount, usable.length);
@@ -590,9 +608,72 @@ export function buildQuiz(input: BuildQuizInput): QuizQuestion[] {
     });
 }
 
+/**
+ * A `lyric` quiz: one line of a song, two of the playlist's songs, which is
+ * it from. Both options are the owner's own songs — the decoy pool is for
+ * "is this in the playlist", and here the taker knows every song is — so the
+ * wrong answer comes from the playlist, another song by the same artist
+ * first (the hardest shape, as in `pickDecoys`), else any other song.
+ *
+ * Only tracks with candidate lines are asked about. The line is the first
+ * candidate that names neither option (`pickLyricLine`); a decoy whose
+ * title appears in every candidate is swapped for another before the track
+ * is given up on. Fewer than `QUIZ_MIN_QUESTIONS` buildable questions is
+ * `[]`, and `createQuiz` falls back to the duel: a playlist is never
+ * refused for its lyrics coverage.
+ */
+function buildLyricQuiz(input: BuildQuizInput): QuizQuestion[] {
+  const all = usableQuizTracks(input.tracks);
+  const lyrics = input.lyrics ?? new Map<string, readonly string[]>();
+  const withLines = all.filter((t) => (lyrics.get(t.id)?.length ?? 0) > 0);
+  if (withLines.length < QUIZ_MIN_QUESTIONS || all.length < 2) return [];
+  const count = clampQuestionCount(input.questionCount, withLines.length);
+
+  const questions: QuizQuestion[] = [];
+  const used = new Set<string>();
+  for (const track of shuffle(withLines, input.rng)) {
+    if (questions.length >= count) break;
+    const artist = primaryArtist(track);
+    const artistKey = foldText(artist);
+    const others = all.filter((t) => t.id !== track.id);
+    // Same artist first, then anyone; within a tier, a song not yet used as
+    // a decoy before one that was, so the wrong answers spread across the
+    // playlist rather than one song being the foil every time.
+    const tiers = [
+      others.filter((t) => foldText(primaryArtist(t)) === artistKey),
+      others.filter((t) => foldText(primaryArtist(t)) !== artistKey),
+    ].map((tier) => [...shuffle(tier, input.rng)].sort((a, b) => Number(used.has(a.id)) - Number(used.has(b.id))));
+    const realTitle = displayTitle(track.name);
+    let built: QuizQuestion | null = null;
+    for (const decoy of tiers.flat()) {
+      const decoyTitle = displayTitle(decoy.name);
+      if (titleKey(decoyTitle) === titleKey(realTitle)) continue;
+      const line = pickLyricLine(lyrics.get(track.id) ?? [], [track.name, realTitle, decoy.name, decoyTitle]);
+      if (!line) continue;
+      const real: QuizOption = { title: realTitle, artist };
+      const options = shuffle([real, { title: decoyTitle, artist: primaryArtist(decoy) }], input.rng);
+      used.add(decoy.id);
+      built = {
+        options,
+        answer: options.indexOf(real),
+        track: {
+          id: track.id,
+          name: track.name,
+          artist,
+          durationMs: typeof track.durationMs === "number" ? track.durationMs : 0,
+        },
+        lyric: line,
+      };
+      break;
+    }
+    if (built) questions.push(built);
+  }
+  return questions.length >= QUIZ_MIN_QUESTIONS ? questions : [];
+}
+
 /** What leaves the server. The key stays behind, or the board means nothing. */
 export function stripAnswerKey(questions: readonly QuizQuestion[]): QuizQuestionView[] {
-  return questions.map((q) => ({ options: q.options }));
+  return questions.map((q) => (q.lyric ? { options: q.options, lyric: q.lyric } : { options: q.options }));
 }
 
 /**

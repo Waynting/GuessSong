@@ -64,21 +64,26 @@ import {
   sortScoreboard,
   stripAnswerKey,
   summarizeBoard,
+  usableQuizTracks,
   verdictFor,
   type DecoyEntry,
   type QuizQuestion,
 } from "@/lib/quiz";
+import type { LyricResult } from "@/lib/lyrics";
 import { clampPreviewField, type PreviewResult } from "@/types/preview";
 import { CODE_CLAIM_ATTEMPTS, ROOM_CODE_ALPHABET } from "@/types/room";
 import {
+  DEFAULT_QUIZ_KIND,
   QUIZ_CODE_LENGTH,
   QUIZ_MAX_ENTRIES,
   QUIZ_MAX_QUESTIONS,
   QUIZ_MIN_QUESTIONS,
   QUIZ_TTL_SECONDS,
+  isQuizKind,
   type AnswerQuizResponse,
   type CheckQuizResponse,
   type QuizBoardResponse,
+  type QuizKind,
   type QuizMineEntry,
   type QuizMineItem,
   type QuizScore,
@@ -99,6 +104,13 @@ interface QuizMeta {
   createdAt: number;
   expiresAt: number;
   hostToken: string;
+  /** What the questions ask. Absent on every quiz from before 2026-11-13, which is the duel. */
+  kind?: QuizKind;
+}
+
+/** The stored kind, or the default for a record from before the field — the `GAME_MODES` rule. */
+function quizKindOf(meta: Pick<QuizMeta, "kind">): QuizKind {
+  return isQuizKind(meta.kind) ? meta.kind : DEFAULT_QUIZ_KIND;
 }
 
 /**
@@ -244,6 +256,15 @@ async function requireQuiz(code: string): Promise<LoadedQuiz> {
   return quiz;
 }
 
+/**
+ * Where a `lyric` quiz gets its lines: `lookupLyricCandidates` in
+ * lib/lyrics.ts in production, a map in the tests. Injected so this module
+ * never fetches, and so the fall-back rule below has a test.
+ */
+export type LyricSource = (
+  tracks: readonly Pick<Track, "id" | "name" | "artists" | "durationMs">[]
+) => Promise<ReadonlyMap<string, Pick<LyricResult, "status" | "lines">>>;
+
 export interface CreateQuizInput {
   tracks: readonly Track[];
   questionCount: number;
@@ -251,6 +272,10 @@ export interface CreateQuizInput {
   playlistName: string;
   locale: ErrorLocale;
   pool: readonly DecoyEntry[];
+  /** What the host asked the questions to be. Absent is the duel. */
+  kind?: QuizKind;
+  /** Required for a `lyric` request to be one; without it the quiz is built as the duel. */
+  lyricSource?: LyricSource;
   /** Test seam. Defaults to a random seed; a quiz only has to be stable once built. */
   seed?: number;
 }
@@ -259,7 +284,24 @@ export interface CreatedQuiz {
   code: string;
   expiresAt: number;
   questionCount: number;
+  /** The kind built, which is the kind asked for unless the lyrics ran short. */
+  kind: QuizKind;
   hostToken: string;
+}
+
+/**
+ * How many tracks a `lyric` creation asks the lyrics source about: the
+ * count plus headroom for the songs with nothing usable (measured 15 of 16
+ * found on 2026-11-13, but a playlist of instrumentals is a playlist), and
+ * never more than `LYRIC_LOOKUP_MAX` — one creation is one request, and a
+ * cold lookup is an upstream call each.
+ */
+export const LYRIC_LOOKUP_HEADROOM = 10;
+export const LYRIC_LOOKUP_MAX = 60;
+
+export function lyricLookupCount(questionCount: number, usable: number): number {
+  const wanted = Math.max(questionCount + LYRIC_LOOKUP_HEADROOM, Math.ceil(questionCount * 1.5));
+  return Math.min(usable, wanted, LYRIC_LOOKUP_MAX);
 }
 
 /**
@@ -270,17 +312,47 @@ export interface CreatedQuiz {
  * follow, and any failure after the claim deletes the key — a hash created by
  * HSETNX has no expiry of its own, and a quiz with no TTL would hold its code
  * forever.
+ *
+ * A `lyric` request looks up lines for a bounded sample of the playlist
+ * first, builds from the songs that have them, and **falls back to the duel**
+ * when fewer than `QUIZ_MIN_QUESTIONS` can be asked — the quiz the host gets
+ * is a quiz, `kind` on the result says which, and the route counts the fall
+ * back (`quiz_lyric_fallback`). Refusing instead would turn a lyrics-database
+ * gap into a dead link for a playlist the duel can always ask about.
  */
 export async function createQuiz(input: CreateQuizInput): Promise<CreatedQuiz> {
   const seed = input.seed ?? randomInt(0, 2 ** 31);
-  // buildQuiz dedupes and returns nothing below the minimum; that is the one
-  // "too few" decision, made where the dedupe rule lives.
-  const questions = buildQuiz({
-    tracks: input.tracks,
-    questionCount: input.questionCount,
-    pool: input.pool,
-    rng: seededRng(seed),
-  });
+  const rng = seededRng(seed);
+  const requested = isQuizKind(input.kind) ? input.kind : DEFAULT_QUIZ_KIND;
+  let kind: QuizKind = DEFAULT_QUIZ_KIND;
+  let questions: QuizQuestion[] = [];
+
+  if (requested === "lyric" && input.lyricSource) {
+    const usable = usableQuizTracks(input.tracks);
+    const sample = shuffleWith(usable, rng).slice(0, lyricLookupCount(input.questionCount, usable.length));
+    const results = await input.lyricSource(sample);
+    const lyrics = new Map<string, readonly string[]>();
+    for (const [id, r] of results) if (r.status === "found" && r.lines.length > 0) lyrics.set(id, r.lines);
+    questions = buildQuiz({
+      tracks: input.tracks,
+      questionCount: input.questionCount,
+      pool: input.pool,
+      rng,
+      kind: "lyric",
+      lyrics,
+    });
+    if (questions.length >= QUIZ_MIN_QUESTIONS) kind = "lyric";
+  }
+  if (kind !== "lyric") {
+    // buildQuiz dedupes and returns nothing below the minimum; that is the one
+    // "too few" decision, made where the dedupe rule lives.
+    questions = buildQuiz({
+      tracks: input.tracks,
+      questionCount: input.questionCount,
+      pool: input.pool,
+      rng,
+    });
+  }
   if (questions.length < QUIZ_MIN_QUESTIONS) {
     throw new QuizError("quiz_too_few_tracks", 422, { params: { count: QUIZ_MIN_QUESTIONS } });
   }
@@ -301,6 +373,7 @@ export async function createQuiz(input: CreateQuizInput): Promise<CreatedQuiz> {
       createdAt: now,
       expiresAt: now + QUIZ_TTL_SECONDS * 1000,
       hostToken: randomUUID(),
+      kind,
     };
     if (!(await store.hsetnx(key, META_FIELD, meta))) continue;
 
@@ -319,10 +392,21 @@ export async function createQuiz(input: CreateQuizInput): Promise<CreatedQuiz> {
       code,
       expiresAt: meta.expiresAt,
       questionCount: questions.length,
+      kind,
       hostToken: meta.hostToken,
     };
   }
   throw new QuizError("quiz_code_unavailable", 500);
+}
+
+/** Fisher–Yates over a copy, with the quiz's own rng, so the lookup sample is as reproducible as the questions. */
+function shuffleWith<T>(items: readonly T[], rng: () => number): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 function toView(quiz: LoadedQuiz): QuizView {
@@ -330,6 +414,7 @@ function toView(quiz: LoadedQuiz): QuizView {
     code: quiz.meta.code,
     ownerName: quiz.meta.ownerName ?? null,
     playlistName: quiz.meta.playlistName,
+    kind: quizKindOf(quiz.meta),
     questionCount: quiz.questions.length,
     hintAllowance: hintAllowance(quiz.questions.length),
     expiresAt: quiz.meta.expiresAt,
@@ -358,6 +443,8 @@ export interface QuizPeek {
   playlistName: string;
   questionCount: number;
   locale: ErrorLocale;
+  /** What the card says the rule is: the duel's, or the lyric line's. */
+  kind: QuizKind;
 }
 
 /**
@@ -377,6 +464,7 @@ export async function peekQuiz(code: string): Promise<QuizPeek | null> {
       playlistName: quiz.meta.playlistName,
       questionCount: quiz.questions.length,
       locale: quiz.meta.locale === "zh" ? "zh" : "en",
+      kind: quizKindOf(quiz.meta),
     };
   } catch {
     return null;
@@ -416,7 +504,11 @@ export async function peekQuiz(code: string): Promise<QuizPeek | null> {
  * again" or to a resend whose first reply was lost, and counting it again put
  * one finish into `quiz:completed` — and its verdict and length — once per tap.
  */
-export type SubmittedAnswers = AnswerQuizResponse & { replayed?: true };
+export type SubmittedAnswers = AnswerQuizResponse & {
+  replayed?: true;
+  /** The quiz's kind, for the route's `quiz_kind:completed:<kind>`; stripped before the reply like `replayed`. */
+  kind: QuizKind;
+};
 
 export async function submitQuizAnswers(
   code: string,
@@ -437,6 +529,7 @@ export async function submitQuizAnswers(
 
   const graded = gradeAnswers(quiz.questions, answers);
   const hints = clampHintsUsed(hintsUsed, quiz.questions.length);
+  const kind = quizKindOf(quiz.meta);
 
   if (owner) {
     return {
@@ -449,6 +542,7 @@ export async function submitQuizAnswers(
       rank: null,
       scoreboard: sortScoreboard(quiz.scores).map(publicScore),
       preview: true,
+      kind,
     };
   }
 
@@ -470,6 +564,7 @@ export async function submitQuizAnswers(
       rank: rankOf(scoreboard, trimmedName),
       scoreboard: scoreboard.map(publicScore),
       replayed: true,
+      kind,
     };
   };
 
@@ -512,6 +607,7 @@ export async function submitQuizAnswers(
     recorded,
     rank: recorded ? rankOf(scoreboard, trimmedName) : null,
     scoreboard: scoreboard.map(publicScore),
+    kind,
   };
 }
 
@@ -579,6 +675,7 @@ export async function getQuizBoard(code: string, hostToken: string): Promise<Qui
     code: quiz.meta.code,
     ownerName: quiz.meta.ownerName ?? null,
     playlistName: quiz.meta.playlistName,
+    kind: quizKindOf(quiz.meta),
     questionCount: quiz.questions.length,
     createdAt: quiz.meta.createdAt,
     expiresAt: quiz.meta.expiresAt,
@@ -594,6 +691,7 @@ export async function getQuizBoard(code: string, hostToken: string): Promise<Qui
       return {
         title: real?.title ?? q.track.name,
         artist: real?.artist ?? q.track.artist,
+        ...(q.lyric ? { lyric: q.lyric } : {}),
         answered: summary.perQuestion[i].answered,
         correct: summary.perQuestion[i].correct,
       };

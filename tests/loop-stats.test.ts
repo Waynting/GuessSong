@@ -78,6 +78,8 @@ const {
   recordQuizCompleted,
   recordQuizHint,
   recordQuizThrottled,
+  recordQuizKindStage,
+  recordQuizLyricLookup,
   recordLoopClick,
   recordLoopImpression,
   recordLoopThrottled,
@@ -1204,6 +1206,57 @@ describe("the quiz's length, hint and refusal counters", () => {
   it("refuses a throttled route it does not know", async () => {
     await recordQuizThrottled("pool" as never);
     expect(kv.incrs).toEqual([]);
+  });
+});
+
+describe("the quiz's kind counters", () => {
+  const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
+
+  it("records the kind built beside the creation, and a lyric ask built as the duel as a fall back", async () => {
+    await recordQuizCreated({ questionCount: 10, requestedCount: 10, locale: "en", kind: "lyric", requestedKind: "lyric" });
+    expect(keysWritten()).toContain(keys.quizKind.created.lyric);
+    expect(keysWritten()).not.toContain(keys.quizLyricFallback);
+
+    kv.incrs = [];
+    await recordQuizCreated({ questionCount: 10, requestedCount: 10, locale: "en", kind: "title", requestedKind: "lyric" });
+    expect(keysWritten()).toContain(keys.quizKind.created.title);
+    expect(keysWritten()).toContain(keys.quizLyricFallback);
+
+    kv.incrs = [];
+    await recordQuizCreated({ questionCount: 10, requestedCount: 10, locale: "en", kind: "title", requestedKind: "title" });
+    expect(keysWritten()).not.toContain(keys.quizLyricFallback);
+  });
+
+  it("records no kind for a caller that sent none, and refuses one it does not know", async () => {
+    await recordQuizCreated({ questionCount: 10, requestedCount: 10, locale: "en" });
+    expect(keysWritten().some((k) => k.includes("quiz_kind:"))).toBe(false);
+    kv.incrs = [];
+    await recordQuizCompleted({ questionCount: 10, verdict: "close", kind: "karaoke" as never });
+    expect(keysWritten().some((k) => k.includes("quiz_kind:"))).toBe(false);
+    await recordQuizKindStage("board" as never, "lyric");
+    await recordQuizLyricLookup("throttled" as never);
+    expect(keysWritten().some((k) => k.includes("quiz_kind:") || k.includes("quiz_lyric:"))).toBe(false);
+  });
+
+  it("records a finish and a lookup under the keys the digest reads", async () => {
+    await recordQuizCompleted({ questionCount: 10, verdict: "close", kind: "lyric" });
+    expect(keysWritten()).toContain(keys.quizKind.completed.lyric);
+    await recordQuizKindStage("opened", "title");
+    expect(keysWritten()).toContain(keys.quizKind.opened.title);
+    for (const status of ["found", "absent", "unavailable"] as const) {
+      await recordQuizLyricLookup(status);
+      expect(keysWritten()).toContain(keys.quizLyric[status]);
+    }
+  });
+
+  it("is printed by the digest, under prefixes it treats as rendered", () => {
+    const script = readFileSync(join(process.cwd(), "scripts/loop-stats.mjs"), "utf8");
+    const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
+    expect(rendered).toContain('"quiz_kind:"');
+    expect(rendered).toContain('"quiz_lyric:"');
+    expect(script).toMatch(/get\(`quiz_kind:created:\$\{k\}`\)/);
+    expect(script).toMatch(/get\("quiz_lyric_fallback"\)/);
+    for (const status of ["found", "absent", "unavailable"]) expect(script).toContain(`get("quiz_lyric:${status}")`);
   });
 });
 
