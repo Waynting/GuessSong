@@ -62,12 +62,14 @@ import {
   builtShorterNote,
   fillCopy,
   formatQuizDate,
+  lyricFallbackNote,
   ownerClipboardText,
   ownerShareText,
   panelCaption,
 } from "@/lib/quiz-copy";
 import { quizUrl } from "@/lib/quiz-session";
 import { COPIED_FLASH_MS, copyLink, shareLink, type ShareLinkOutcome } from "@/lib/quiz-share";
+import type { QuizKind } from "@/types/quiz";
 
 /**
  * The two send buttons. Send keeps `.start-btn`'s green; Copy is a solid
@@ -107,6 +109,8 @@ export function QuizPanel({
   playlistName,
   questionCount,
   requestedCount,
+  kind,
+  requestedKind,
   expiresAt,
   locale,
 }: {
@@ -117,6 +121,10 @@ export function QuizPanel({
   questionCount: number | null;
   /** What the host asked for, on a quiz made this visit; null for a remembered one, which gets no note. */
   requestedCount: number | null;
+  /** What the questions ask; null for a remembered quiz from before it was kept. */
+  kind: QuizKind | null;
+  /** What the host asked the questions to be, on a quiz made this visit; null for a remembered one. */
+  requestedKind: QuizKind | null;
   expiresAt: number;
   locale: ErrorLocale;
 }) {
@@ -129,7 +137,11 @@ export function QuizPanel({
   const [feedback, setFeedback] = useState<"copied" | "failed" | null>(null);
   const url = quizUrl(code);
   const quiz = { ownerName, playlistName, questionCount };
-  const note = builtShorterNote(copy, questionCount, requestedCount);
+  // The two ways the quiz can differ from what was asked: shorter, or the
+  // other kind. Both informational; both before the link goes anywhere.
+  const notes = [builtShorterNote(copy, questionCount, requestedCount), lyricFallbackNote(copy, kind, requestedKind)].filter(
+    (n): n is string => n !== null
+  );
 
   useEffect(() => {
     QRCode.toDataURL(url, { margin: 1, width: 240 })
@@ -183,22 +195,30 @@ export function QuizPanel({
       {playlistName && (
         <>
           <p style={{ fontSize: "12px", color: "#666", marginBottom: "6px" }}>
-            {panelCaption(copy, questionCount)}
+            {panelCaption(copy, questionCount, kind)}
           </p>
-          <p style={{ fontSize: "15px", fontWeight: 500, marginBottom: note ? 0 : "16px", color: "#f0f0f0" }}>
+          <p style={{ fontSize: "15px", fontWeight: 500, marginBottom: notes.length ? 0 : "16px", color: "#f0f0f0" }}>
             {playlistName}
           </p>
-          {/* Why the count above is not the one the host picked. Informational,
-              so #888 and not the amber of the share-failed line: nothing is
-              broken, the playlist just ran out of different songs. */}
-          {note && (
+          {/* Why the quiz above is not the one the host picked — shorter, or
+              the duel where lyrics were asked for. Informational, so #888 and
+              not the amber of the share-failed line: nothing is broken, the
+              playlist just ran out of different songs, or of lines. */}
+          {notes.map((note, i) => (
             <p
+              key={i}
               className="quiz-panel-note"
-              style={{ fontSize: "12px", color: "#888", marginTop: "8px", marginBottom: "16px", lineHeight: 1.5 }}
+              style={{
+                fontSize: "12px",
+                color: "#888",
+                marginTop: "8px",
+                marginBottom: i === notes.length - 1 ? "16px" : 0,
+                lineHeight: 1.5,
+              }}
             >
               {note}
             </p>
-          )}
+          ))}
         </>
       )}
       {qr && (

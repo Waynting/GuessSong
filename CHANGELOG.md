@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Lyric questions on the Taste Quiz** (`quiz_kind: lyric`). The create form
+  offers a second question type: one line of a song, two of the playlist's
+  own songs, which is it from. Lines come from LRCLIB (`lib/lyrics.ts`),
+  looked up once per creation for a bounded sample and cached per track
+  (30 days found, a week absent, 90s unavailable); `lib/lyric-fragment.ts`
+  picks lines that name neither option and keeps at most five per song, each
+  capped at 72 characters — never the full lyric. Too few songs with lines
+  builds the duel instead and the panel says so. New counters:
+  `quiz_kind:<created|opened|completed>:<kind>`, `quiz_lyric_fallback`,
+  `quiz_lyric:<status>`, printed as a per-kind table in `npm run stats`.
+  New env var `LYRICS_MAX_LOOKUPS_PER_MINUTE` (default 60).
+
 ### Changed
 
 - **An oversized playlist costs 3 Spotify requests, not 5** (`SAMPLED_TRACK_PAGES`

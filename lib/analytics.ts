@@ -18,6 +18,7 @@ import type { SetupSource } from "@/lib/loop-stats";
 import type { StarterKey } from "@/lib/starter-playlists";
 import type { QuizVerdict } from "@/lib/quiz";
 import type { QuizSource } from "@/lib/quiz-source";
+import type { QuizKind } from "@/types/quiz";
 
 export type PlaylistSource = "own" | "mixed";
 /**
@@ -554,6 +555,12 @@ export type AnalyticsEvent =
          * the referrer it was derived from never reaches a param.
          */
         quiz_from?: QuizSource;
+        /**
+         * What the questions ask — the kind *built*, so a lyric request
+         * that fell back to the duel is `title` here as it is in KV
+         * (`quiz_kind:created:<kind>`). Absent on events from before 2026-11-13.
+         */
+        quiz_kind?: QuizKind;
       };
     }
   | {

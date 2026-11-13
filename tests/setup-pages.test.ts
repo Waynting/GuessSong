@@ -229,9 +229,9 @@ describe("the quiz form on /quiz", () => {
   it("remembers a determinate refusal, keyed on what was submitted", () => {
     // Same reason as `/`: a refused playlist returns from the negative
     // cache faster than the button re-enables, and every extra tap was a
-    // billed invocation. Keyed on URL and count so changing either asks
+    // billed invocation. Keyed on URL, count and kind so changing any asks
     // again without an explicit reset.
-    expect(body).toMatch(/const submissionKey = `quiz:\$\{playlistUrl\}:\$\{questionCount\}`/);
+    expect(body).toMatch(/const submissionKey = `quiz:\$\{playlistUrl\}:\$\{questionCount\}:\$\{kind\}`/);
     expect(body).toMatch(/shouldRememberRejection\(e\)/);
     expect(body).toMatch(/role="alert"/);
   });

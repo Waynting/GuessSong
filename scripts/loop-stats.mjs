@@ -1337,6 +1337,59 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwn
     }
   }
 
+  // Kind: the duel against the lyric line (`quiz_kind:<stage>:<kind>`), the
+  // one table the lyric kind was built to be read in. Opens per quiz is the
+  // number — a line of a song as the reason to open a friend's link — and
+  // finishers per quiz is the check that the line did not make the quiz
+  // harder to finish. Kinds are discovered by key, so a third prints under
+  // its own name with no edit here; `created` is the denominator and a kind
+  // seen only on `opened` or `completed` is a quiz made before the window.
+  const kinds = [
+    ...new Set(
+      [...totals.keys()]
+        .filter((m) => m.startsWith("quiz_kind:"))
+        .map((m) => m.split(":")[2])
+        .filter(Boolean)
+    ),
+  ].sort();
+  if (kinds.length > 0) {
+    console.log("\n  kind         quizzes    opens  per quiz  finishers  per quiz");
+    for (const k of kinds) {
+      const madeOfKind = get(`quiz_kind:created:${k}`);
+      const openedOfKind = get(`quiz_kind:opened:${k}`);
+      const doneOfKind = get(`quiz_kind:completed:${k}`);
+      const per = (n) => (madeOfKind ? (n / madeOfKind).toFixed(1).padStart(10) : "         —");
+      console.log(
+        `  ${k.padEnd(10)}${String(madeOfKind).padStart(9)}${String(openedOfKind).padStart(9)}${per(openedOfKind)}` +
+          `${String(doneOfKind).padStart(11)}${per(doneOfKind)}`
+      );
+    }
+    console.log(
+      "  how to read it: the kind is the maker's choice, so lyric makers are the keener ones — read\n" +
+        "  its opens per quiz as a floor on the kind's pull, beside title's, and never as a share of\n" +
+        "  all quizzes. Both `opens` columns are ceilings (a reload is a second open), as above."
+    );
+    const fallback = get("quiz_lyric_fallback");
+    if (fallback > 0) {
+      console.log(
+        `  ${fallback} asked for lyric questions and got the duel — too few of the songs had a line to quote;\n` +
+          "  the panel says so before the link is sent"
+      );
+    }
+  }
+  // Each time the lyrics database was asked, by how it came out. Cache hits
+  // are not here: this is what was spent, and `could not ask` piling up is
+  // a throttled minute or a spent budget, not the database's coverage.
+  const lyricFound = get("quiz_lyric:found");
+  const lyricAbsent = get("quiz_lyric:absent");
+  const lyricUnavailable = get("quiz_lyric:unavailable");
+  if (lyricFound + lyricAbsent + lyricUnavailable > 0) {
+    console.log(
+      `  lyric lookups  found ${lyricFound} · nothing to quote ${lyricAbsent} · could not ask ${lyricUnavailable}` +
+        `   (${pct(lyricFound, lyricFound + lyricAbsent)} of the songs the database answered for had a line)`
+    );
+  }
+
   // Hints. `absent` costs nothing upstream (a cached fact about the
   // recording); `unavailable` is the quiz paying for a throttled minute.
   const hintFound = get("quiz_hint:found");
@@ -1390,7 +1443,7 @@ if (quizCreated + quizOpened + quizStarted + quizCompleted + quizBoard + quizOwn
  * A metric that deserves better framing than a raw count gets its own block
  * above and drops out of this one by being consumed.
  */
-const RENDERED_EXACT = new Set(["live", "games", "repeat_host", "throttled", "quiz_clamped"]);
+const RENDERED_EXACT = new Set(["live", "games", "repeat_host", "throttled", "quiz_clamped", "quiz_lyric_fallback"]);
 const RENDERED_PREFIXES = [
   "impression:",
   "click:",
@@ -1449,6 +1502,8 @@ const RENDERED_PREFIXES = [
   "quiz_locale:",
   "quiz_hint:",
   "quiz_throttled:",
+  "quiz_kind:",
+  "quiz_lyric:",
 ];
 
 const leftovers = [...totals.keys()]

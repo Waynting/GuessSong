@@ -137,8 +137,11 @@ import {
   QUIZ_COPY,
   fillCopy,
   formatQuizDate,
+  hintPlayingFor,
   hintWord,
+  introBodyFor,
   ownerShareText,
+  promptFor,
   quizTitle,
   takerShareText,
   type QuizCopy,
@@ -268,6 +271,26 @@ const DUEL_CSS = `
     animation: q-in-next ${FILL_MS}ms ease-out both;
   }
   .q-duel.from-back { animation-name: q-in-back; }
+  /* The line a lyric question quotes, over the two halves. Body face, not
+     the display one: Bebas Neue sets caps, and a lyric shouted in caps
+     reads as a slogan. Han text keeps its own fallback either way. */
+  .q-lyric {
+    width: 100%; max-width: 480px; margin: 0 auto;
+    padding: 16px 20px;
+    border-radius: 16px; border: 1px solid #262626; background: #161616;
+    animation: q-in-next ${FILL_MS}ms ease-out both;
+  }
+  .q-lyric.from-back { animation-name: q-in-back; }
+  .q-lyric-text {
+    margin: 0;
+    font-size: clamp(19px, 5.4vw, 26px); line-height: 1.4; color: #f0f0f0;
+    text-wrap: balance; overflow-wrap: anywhere;
+  }
+  /* With a line above them the halves give up some height and the titles
+     some size, so Next Track's rule holds here too: the whole question on a
+     390×844 screen without a scroll. */
+  .q-duel.has-lyric .q-half { min-height: 20vh; min-height: 20dvh; padding: 16px 56px 16px 20px; }
+  .q-duel.has-lyric .q-half-title { font-size: clamp(26px, 7vw, 44px); }
   .q-half {
     position: relative;
     display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
@@ -1162,7 +1185,7 @@ export function QuizClient({ code }: { code: string }) {
           <h1 className="q-display q-title">{title}</h1>
           {!view.ownerName && <p className="q-playlist">{view.playlistName}</p>}
           <p className="q-body">
-            {fillCopy(copy.introBody, {
+            {fillCopy(introBodyFor(copy, view.kind), {
               count: view.questionCount,
               hints: view.hintAllowance,
               hintWord: hintWord(locale, view.hintAllowance),
@@ -1244,9 +1267,8 @@ export function QuizClient({ code }: { code: string }) {
             ? fillCopy(copy.hintButton, { remaining: hintsLeft })
             : copy.hintsGone;
     const hintDisabled = busy || hint === "loading" || (hint !== "playing" && !canHear);
-    const prompt = view.ownerName
-      ? fillCopy(copy.promptOwner, { owner: view.ownerName })
-      : copy.promptPlaylist;
+    // Which song is in the playlist, or which song the line is from.
+    const prompt = promptFor(copy, view.kind, view.ownerName);
     // One ladder for the seam's words and its colour, so they cannot drift
     // apart: grading outranks the verdict, the verdict outranks "answered,
     // no verdict" (a parked question the check never came back for), which
@@ -1263,7 +1285,7 @@ export function QuizClient({ code }: { code: string }) {
           : hint === "loading"
           ? { text: copy.hintLoading, tone: "" }
           : hint === "playing"
-            ? { text: copy.hintPlaying, tone: " is-live" }
+            ? { text: hintPlayingFor(copy, view.kind), tone: " is-live" }
             : hint === "none"
               ? { text: copy.hintNone, tone: "" }
               : hint === "blocked"
@@ -1327,13 +1349,23 @@ export function QuizClient({ code }: { code: string }) {
           </p>
         </div>
 
+        {/* The question itself, on a lyric quiz: one line, quoted in the
+            reader's own marks. It is the question and not the key — which
+            song it belongs to is what the halves below ask — and it slides
+            in with them, keyed the same way. */}
+        {question.lyric && (
+          <blockquote key={`lyric-${index}`} className={`q-lyric${enterFrom === "back" ? " from-back" : ""}`}>
+            <p className="q-lyric-text">{locale === "zh" ? `「${question.lyric}」` : `“${question.lyric}”`}</p>
+          </blockquote>
+        )}
+
         {/* Keyed on the question so each one mounts fresh and slides in. The
             halves share the height; the seam takes only its own. Written as
             a template so a record built with more than two options (one from
             before this shape, inside its week) still lays out. */}
         <div
           key={index}
-          className={`q-duel${enterFrom === "back" ? " from-back" : ""}`}
+          className={`q-duel${enterFrom === "back" ? " from-back" : ""}${question.lyric ? " has-lyric" : ""}`}
           style={{
             gridTemplateRows: question.options.map((_, i) => (i === 0 ? "1fr auto" : "1fr")).join(" "),
           }}

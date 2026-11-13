@@ -318,6 +318,9 @@ export default function QuizBoardPage() {
                       </span>
                       <span className="font-medium text-[#f0f0f0]">{q.title}</span>
                       {q.artist && <span className="text-[#888]"> · {q.artist}</span>}
+                      {/* The line that was quoted, on a lyric quiz: the owner
+                          reads which song the room could not place *from*. */}
+                      {q.lyric && <span className="block truncate text-xs italic text-[#777]">{q.lyric}</span>}
                     </span>
                     <span
                       className={`shrink-0 text-sm tabular-nums ${rate === null ? "text-[#666]" : "text-[#f0f0f0]"}`}

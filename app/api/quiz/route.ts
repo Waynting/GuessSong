@@ -12,17 +12,20 @@ import { z } from "zod";
 import { loadPlaylist } from "@/lib/playlist-cache";
 import { marketFromHeaders } from "@/lib/market";
 import { SpotifyApiError } from "@/lib/spotify";
-import { createQuiz, QuizError } from "@/lib/quiz-store";
+import { createQuiz, QuizError, type LyricSource } from "@/lib/quiz-store";
 import { QUIZ_DECOY_POOL } from "@/lib/quiz-decoys";
-import { recordQuizCreated, recordQuizThrottled } from "@/lib/loop-stats";
+import { lookupLyricCandidates } from "@/lib/lyrics";
+import { recordQuizCreated, recordQuizLyricLookup, recordQuizThrottled } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
 import { ERROR_LOCALES } from "@/lib/error-messages";
 import { isQuizSource } from "@/lib/quiz-source";
 import {
+  DEFAULT_QUIZ_KIND,
   QUIZ_MAX_QUESTIONS,
   QUIZ_MIN_QUESTIONS,
   QUIZ_NAME_MAX,
+  isQuizKind,
   type CreateQuizResponse,
 } from "@/types/quiz";
 
@@ -44,7 +47,17 @@ const CreateQuizSchema = z.object({
   questionCount: z.number().int().min(QUIZ_MIN_QUESTIONS).max(QUIZ_MAX_QUESTIONS),
   locale: z.enum(ERROR_LOCALES).optional(),
   from: z.unknown().optional(),
+  // `unknown` for the reason `from` is: a kind this build does not know is
+  // the default kind, never a refused link.
+  kind: z.unknown().optional(),
 });
+
+/**
+ * The lyrics database, with each upstream lookup counted. Only handed to the
+ * store for a `lyric` request, so a duel never touches lib/lyrics.ts.
+ */
+const lyricSource: LyricSource = (tracks) =>
+  lookupLyricCandidates(tracks, (status) => void recordQuizLyricLookup(status));
 
 export async function POST(req: NextRequest) {
   const limited = await enforceRateLimit(
@@ -69,6 +82,7 @@ export async function POST(req: NextRequest) {
   try {
     // An artist link plays as a top ten; the market is the request's country.
     const playlist = await loadPlaylist(body.url, "quiz-create", { market: marketFromHeaders(req.headers) });
+    const kind = isQuizKind(body.kind) ? body.kind : DEFAULT_QUIZ_KIND;
     const created = await createQuiz({
       tracks: playlist.tracks,
       questionCount: body.questionCount,
@@ -76,20 +90,26 @@ export async function POST(req: NextRequest) {
       playlistName: playlist.name,
       locale: body.locale ?? "en",
       pool: QUIZ_DECOY_POOL,
+      kind,
+      ...(kind === "lyric" ? { lyricSource } : {}),
     });
     // The built count, not the requested one: `createQuiz` shortens a quiz to
     // the playlist's usable tracks, and the quiz that exists is the one to
-    // count. The gap between the two is `quiz_clamped`.
+    // count. The gap between the two is `quiz_clamped`. The kind likewise:
+    // the one built, with the one asked for beside it for `quiz_lyric_fallback`.
     await recordQuizCreated({
       questionCount: created.questionCount,
       requestedCount: body.questionCount,
       locale: body.locale ?? "en",
       from: isQuizSource(body.from) ? body.from : undefined,
+      kind: created.kind,
+      requestedKind: kind,
     });
     return NextResponse.json<CreateQuizResponse>({
       code: created.code,
       expiresAt: created.expiresAt,
       questionCount: created.questionCount,
+      kind: created.kind,
       playlistName: playlist.name,
       hostToken: created.hostToken,
     });

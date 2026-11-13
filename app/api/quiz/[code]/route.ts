@@ -26,7 +26,12 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getQuizView, QuizError } from "@/lib/quiz-store";
-import { recordQuizOwnerStage, recordQuizStage, recordQuizThrottled } from "@/lib/loop-stats";
+import {
+  recordQuizKindStage,
+  recordQuizOwnerStage,
+  recordQuizStage,
+  recordQuizThrottled,
+} from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
 import { QUIZ_HOST_TOKEN_HEADER, QUIZ_REFETCH_PARAM, type QuizView } from "@/types/quiz";
@@ -60,7 +65,12 @@ export async function GET(
   try {
     const view = await getQuizView(code, token);
     if (!refetch) {
-      await (view.owner ? recordQuizOwnerStage("owner_opened") : recordQuizStage("opened"));
+      // A friend's open is also an open of its kind (`quiz_kind:opened:<kind>`,
+      // the per-kind opens-per-quiz the lyric kind is read by); the owner's is
+      // neither, as before.
+      await (view.owner
+        ? recordQuizOwnerStage("owner_opened")
+        : Promise.all([recordQuizStage("opened"), recordQuizKindStage("opened", view.kind)]));
     }
     return NextResponse.json<QuizView>(view, {
       // A board that changes as friends finish must not be cached along the way.

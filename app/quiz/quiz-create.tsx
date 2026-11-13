@@ -21,12 +21,14 @@ import {
 import { currentQuizSource } from "@/lib/quiz-source";
 import { isEditorialPlaylistLink, isSubmittablePlaylistLink } from "@/lib/spotify-link";
 import {
+  DEFAULT_QUIZ_KIND,
   QUIZ_MAX_QUESTIONS,
   QUIZ_MIN_QUESTIONS,
   QUIZ_NAME_MAX,
   QUIZ_QUESTION_COUNTS,
   type CreateQuizRequest,
   type CreateQuizResponse,
+  type QuizKind,
 } from "@/types/quiz";
 import { DEFAULT_QUIZ_COUNT_STATE, QUIZ_COUNT_CONTROL, quizCountOf } from "@/lib/quiz";
 import { selectPreset, typeCustom, commitCustom, isCustomSelected } from "@/lib/song-count";
@@ -44,14 +46,16 @@ type CreatedQuiz = CreateQuizResponse & {
   ownerName: string | null;
   /** What the host asked for; the panel compares it with what was built. */
   requestedCount: number;
+  /** Likewise the kind: a `lyric` ask built as the duel gets a line saying so. */
+  requestedKind: QuizKind;
 };
 
 /**
  * What the panel is drawn from: a quiz made on this visit, or the one this
  * device remembers from an earlier one. The count is null only on the second
- * kind, and only for an entry written before it was kept.
+ * kind, and only for an entry written before it was kept; the kind likewise.
  */
-type PanelQuiz = Pick<LastQuiz, "code" | "ownerName" | "playlistName" | "questionCount" | "expiresAt">;
+type PanelQuiz = Pick<LastQuiz, "code" | "ownerName" | "playlistName" | "questionCount" | "expiresAt" | "kind">;
 
 /**
  * The panel — and the QR library it draws with — is only ever shown after
@@ -124,6 +128,9 @@ export function QuizCreate() {
   // (`QUIZ_COUNT_CONTROL`): the same two rules as "Number of Songs" on the
   // party form, so a half-typed "4" on the way to "45" never becomes the count.
   const [count, setCount] = useState(DEFAULT_QUIZ_COUNT_STATE);
+  // What the questions ask. The duel is the default and the control arm:
+  // everything the lyric kind is read against is what this was before it.
+  const [kind, setKind] = useState<QuizKind>(DEFAULT_QUIZ_KIND);
   const [createdQuiz, setCreatedQuiz] = useState<CreatedQuiz | null>(null);
   // What this device made last time, given back as the panel it was — see
   // lib/quiz-session.ts.
@@ -185,7 +192,7 @@ export function QuizCreate() {
       return;
     }
     const questionCount = quizCountOf(count);
-    const submissionKey = `quiz:${playlistUrl}:${questionCount}`;
+    const submissionKey = `quiz:${playlistUrl}:${questionCount}:${kind}`;
     const rejected = lastRejectedRef.current;
     if (rejected && rejected.key === submissionKey) {
       setError(rejected.message);
@@ -206,6 +213,7 @@ export function QuizCreate() {
       questionCount,
       locale,
       from,
+      kind,
     };
     try {
       const res = await fetch("/api/quiz", {
@@ -217,12 +225,15 @@ export function QuizCreate() {
       if (!res.ok) throw apiError(data, "quiz_create_failed");
       const created = data as CreateQuizResponse;
       const owner = ownerName.trim() || null;
-      setCreatedQuiz({ ...created, ownerName: owner, requestedCount: questionCount });
+      setCreatedQuiz({ ...created, ownerName: owner, requestedCount: questionCount, requestedKind: kind });
       const remembered: LastQuiz = {
         code: created.code,
         ownerName: owner,
         playlistName: created.playlistName,
         questionCount: created.questionCount,
+        // The kind built, not the one asked for: the panel describes the quiz
+        // that exists, and the fall-back line is the one place the ask is read.
+        kind: created.kind,
         createdAt: Date.now(),
         expiresAt: created.expiresAt,
       };
@@ -234,6 +245,7 @@ export function QuizCreate() {
         question_count: created.questionCount,
         arrived_from: arrivedFrom(loopRef),
         quiz_from: from,
+        quiz_kind: created.kind,
       });
     } catch (e: unknown) {
       const message = describeError(e, locale, "quiz_create_failed");
@@ -329,6 +341,35 @@ export function QuizCreate() {
         </div>
 
         <div>
+          <p className="section-label">{copy.createKindLabel}</p>
+          {/* Two pills, one choice: the duel the quiz shipped with, or a line
+              of a lyric. The duel stays the default so the numbers it has
+              always produced stay the baseline the lyric kind is read
+              against (`quiz_kind:*` in npm run stats). */}
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }} role="group" aria-label={copy.createKindLabel}>
+            {(["title", "lyric"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                className={`pill${kind === k ? " active" : ""}`}
+                aria-pressed={kind === k}
+                onClick={() => setKind(k)}
+              >
+                {k === "lyric" ? copy.createKindLyric : copy.createKindTitle}
+              </button>
+            ))}
+          </div>
+          {/* Where the lines come from and what happens when there are too
+              few — said before the link exists, not after a quiz that came
+              out as the other kind. */}
+          {kind === "lyric" && (
+            <p style={{ marginTop: "8px", fontSize: "12px", color: "#666", lineHeight: 1.5 }}>
+              {copy.createKindLyricNote}
+            </p>
+          )}
+        </div>
+
+        <div>
           <p className="section-label">{copy.createQuestionsLabel}</p>
           {/* The pills and the field are two ways to set one number. */}
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
@@ -388,6 +429,8 @@ export function QuizCreate() {
               playlistName={shown.playlistName}
               questionCount={shown.questionCount}
               requestedCount={createdQuiz?.requestedCount ?? null}
+              kind={shown.kind ?? null}
+              requestedKind={createdQuiz?.requestedKind ?? null}
               expiresAt={shown.expiresAt}
               locale={locale}
             />

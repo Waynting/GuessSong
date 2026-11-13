@@ -158,7 +158,7 @@ describe("the form and the route, as far as the suite can see them", () => {
   it("has the form send the source it worked out, and the same loop credit to both copies", () => {
     const form = code(read("app/quiz/quiz-create.tsx"));
     expect(form).toMatch(/const loopRef = recallLoopRef\(\);\s*const from = currentQuizSource\(loopRef\);/);
-    expect(form).toMatch(/const body: CreateQuizRequest = \{[\s\S]*?\bfrom,\s*\};/);
+    expect(form).toMatch(/const body: CreateQuizRequest = \{[\s\S]*?\bfrom,[\s\S]*?\};/);
     expect(form).toMatch(/arrived_from: arrivedFrom\(loopRef\),\s*quiz_from: from,/);
     // The referrer is read in lib/quiz-source.ts and nowhere on the page.
     expect(form).not.toMatch(/document\.referrer/);

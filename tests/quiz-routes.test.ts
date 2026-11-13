@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 import { NextRequest } from "next/server";
 import * as playlistCache from "@/lib/playlist-cache";
 import * as previewCache from "@/lib/preview-cache";
+import * as lyrics from "@/lib/lyrics";
 import { dayBucket, getKvStore } from "@/lib/kv";
 import { LOOP_SURFACES } from "@/lib/loop-links";
 import { loopStatsKeys } from "@/lib/loop-stats";
@@ -36,6 +37,8 @@ import type { Track } from "@/types";
 
 vi.mock("@/lib/playlist-cache", () => ({ loadPlaylist: vi.fn() }));
 vi.mock("@/lib/preview-cache", () => ({ getPreview: vi.fn() }));
+// The lyrics database is a network call; the route's job here is to count.
+vi.mock("@/lib/lyrics", () => ({ lookupLyricCandidates: vi.fn() }));
 
 /**
  * Pinned to the in-process Map whatever the shell holds. Every other KV test
@@ -503,7 +506,7 @@ describe("where the maker came from", () => {
         const body = (await res.json()) as CreateQuizResponse;
         expect(body.questionCount).toBe(10);
         expect(body.hostToken).toBeTruthy();
-        expect(Object.keys(body).sort()).toEqual(["code", "expiresAt", "hostToken", "playlistName", "questionCount"]);
+        expect(Object.keys(body).sort()).toEqual(["code", "expiresAt", "hostToken", "kind", "playlistName", "questionCount"]);
         const written = incr.mock.calls.map(([key]) => String(key));
         expect(written.filter((k) => k.includes("quiz_from")), JSON.stringify(from)).toEqual([]);
       } finally {
@@ -810,5 +813,69 @@ describe("POST /api/quiz/mine — the owner's dashboard", () => {
 
     const tooMany = Array.from({ length: 11 }, () => ({ code: "ZZZZZZ", token: "x" }));
     expect((await mine(tooMany)).status).toBe(400);
+  });
+});
+
+describe("the lyric kind, counted end to end", () => {
+  async function makeKind(kind: unknown): Promise<CreateQuizResponse> {
+    const res = await createQuiz(
+      request("/api/quiz", {
+        method: "POST",
+        body: JSON.stringify({ url: "https://open.spotify.com/playlist/x", questionCount: 10, kind }),
+      })
+    );
+    expect(res.status).toBe(200);
+    return (await res.json()) as CreateQuizResponse;
+  }
+
+  it("builds a lyric quiz, and counts its creation, its open and its finish by kind", async () => {
+    vi.mocked(lyrics.lookupLyricCandidates).mockImplementation(async (tracks, onLookup) => {
+      for (const _ of tracks) onLookup?.("found");
+      return new Map(tracks.map((t) => [t.id, { status: "found" as const, lines: [`a line only song ${t.id} has`] }]));
+    });
+    const before = {
+      created: await count(keys.quizKind.created.lyric),
+      opened: await count(keys.quizKind.opened.lyric),
+      completed: await count(keys.quizKind.completed.lyric),
+      found: await count(keys.quizLyric.found),
+    };
+    const quiz = await makeKind("lyric");
+    expect(quiz.kind).toBe("lyric");
+    expect(await count(keys.quizKind.created.lyric)).toBe(before.created + 1);
+    expect(await count(keys.quizLyric.found)).toBeGreaterThan(before.found);
+
+    const view = (await (await readQuiz(request(`/api/quiz/${quiz.code}`), params(quiz.code))).json()) as QuizView;
+    expect(view.kind).toBe("lyric");
+    expect(view.questions.every((q) => typeof q.lyric === "string")).toBe(true);
+    expect(await count(keys.quizKind.opened.lyric)).toBe(before.opened + 1);
+
+    const answers = await keyFor(quiz.code);
+    const res = await answerQuiz(
+      request(`/api/quiz/${quiz.code}/answer`, { method: "POST", body: JSON.stringify({ name: "Lyric Taker", answers }) }),
+      params(quiz.code)
+    );
+    expect(res.status).toBe(200);
+    // The store's `kind` is the route's, not the wire's.
+    expect(Object.keys((await res.json()) as AnswerQuizResponse)).not.toContain("kind");
+    expect(await count(keys.quizKind.completed.lyric)).toBe(before.completed + 1);
+  });
+
+  it("falls back to the duel and counts the fall back when the database has nothing", async () => {
+    vi.mocked(lyrics.lookupLyricCandidates).mockImplementation(
+      async (tracks) => new Map(tracks.map((t) => [t.id, { status: "absent" as const, lines: [] }]))
+    );
+    const before = { fallback: await count(keys.quizLyricFallback), title: await count(keys.quizKind.created.title) };
+    const quiz = await makeKind("lyric");
+    expect(quiz.kind).toBe("title");
+    expect(await count(keys.quizLyricFallback)).toBe(before.fallback + 1);
+    expect(await count(keys.quizKind.created.title)).toBe(before.title + 1);
+  });
+
+  it("never asks the lyrics database for a duel, or for a kind this build does not know", async () => {
+    vi.mocked(lyrics.lookupLyricCandidates).mockClear();
+    for (const kind of [undefined, "title", "karaoke", 7, null]) {
+      expect((await makeKind(kind)).kind).toBe("title");
+    }
+    expect(lyrics.lookupLyricCandidates).not.toHaveBeenCalled();
   });
 });

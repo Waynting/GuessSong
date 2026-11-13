@@ -16,6 +16,7 @@
 
 import type { ErrorLocale } from "@/lib/error-messages";
 import type { QuizVerdict } from "@/lib/quiz";
+import { DEFAULT_QUIZ_KIND, type QuizKind } from "@/types/quiz";
 
 export interface QuizCopy {
   /** With an owner name. */
@@ -23,16 +24,21 @@ export interface QuizCopy {
   /** Without one: the playlist stands in. */
   introTitlePlaylist: string;
   introBody: string;
+  /** The same, for a `lyric` quiz: one line, two songs. Chosen by `introBodyFor`. */
+  introBodyLyric: string;
   /** The link unfurl in the chat. No hint talk — that is for the page. */
   ogDescription: string;
+  ogDescriptionLyric: string;
   /** The card when the quiz cannot be read: gone, malformed, or KV blinked. */
   ogFallbackTitle: string;
   ogFallbackDescription: string;
   /* The card image (app/q/[code]/opengraph-image.tsx) */
   /** The pill naming what this is, beside the wordmark. */
   ogQuizLabel: string;
+  ogQuizLabelLyric: string;
   /** The rule of the game, in one pill. */
   ogRule: string;
+  ogRuleLyric: string;
   nameLabel: string;
   namePlaceholder: string;
   startButton: string;
@@ -42,9 +48,14 @@ export interface QuizCopy {
   progress: string;
   promptOwner: string;
   promptPlaylist: string;
+  /** The seam's question on a `lyric` quiz: whose line, or which song's. Chosen by `promptFor`. */
+  promptLyricOwner: string;
+  promptLyricPlaylist: string;
   hintButton: string;
   hintLoading: string;
   hintPlaying: string;
+  /** The same, on a `lyric` quiz, where both options are in the playlist. Chosen by `hintPlayingFor`. */
+  hintPlayingLyric: string;
   hintNone: string;
   /** The clip was found but the browser refused to start it; a second tap plays it. */
   hintBlocked: string;
@@ -156,6 +167,12 @@ export interface QuizCopy {
   /** Under the name box. `{title}` is the quiz's own title, filled from `introTitleOwner`. */
   createTitlePreview: string;
   createQuestionsLabel: string;
+  /** The two question kinds, as pills, and what the lyric one costs. */
+  createKindLabel: string;
+  createKindTitle: string;
+  createKindLyric: string;
+  /** Under the pills while `lyric` is picked: where the lines come from, and what happens when there are too few. */
+  createKindLyricNote: string;
   /** The typed field's accessible name. */
   createCustomCountLabel: string;
   /** Under the length picker: who answers, and which lengths get finished. */
@@ -173,10 +190,14 @@ export interface QuizCopy {
   createLinkFallback: string;
   /* The host's panel on the setup page, once the link exists */
   panelQuestionsFrom: string;
+  /** The caption for a `lyric` quiz with its count. */
+  panelLyricQuestionsFrom: string;
   /** The caption without a count, for a quiz this device remembers from before it kept one. */
   panelQuizFrom: string;
   /** Under the name when the quiz was built shorter than asked: the reason and the remedy, both counts as placeholders. */
   panelBuiltShorter: string;
+  /** Under the name when a `lyric` request came out as the duel: too few songs had lines. */
+  panelLyricFallback: string;
   panelSend: string;
   panelCopyLink: string;
   panelCopied: string;
@@ -227,13 +248,19 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     introTitlePlaylist: "How well do you know this playlist?",
     introBody:
       "{count} questions, two songs each — only one is really in the playlist. You get {hints} {hintWord} to hear the song if you're stuck.",
+    introBodyLyric:
+      "{count} questions, one line of a lyric each — two songs, which is it from? You get {hints} {hintWord} to hear the song if you're stuck.",
     ogDescription:
       "{count} questions. Two songs each, only one is really in the playlist. Can you tell which?",
+    ogDescriptionLyric:
+      "{count} questions. One line of a lyric each, two songs — can you tell which it's from?",
     ogFallbackTitle: "How well do you know your friend's music taste?",
     ogFallbackDescription:
       "Two songs a question, only one is really in the playlist. Can you tell which?",
     ogQuizLabel: "Music taste quiz",
+    ogQuizLabelLyric: "Lyric quiz",
     ogRule: "Two songs a question — only one is in the playlist",
+    ogRuleLyric: "One line of a lyric a question — which song is it from?",
     nameLabel: "Your name",
     namePlaceholder: "So they know who beat them",
     startButton: "Start →",
@@ -242,9 +269,12 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     progress: "Question {n} of {total}",
     promptOwner: "Which of these is in {owner}'s playlist?",
     promptPlaylist: "Which of these is in the playlist?",
+    promptLyricOwner: "Which of {owner}'s songs is this line from?",
+    promptLyricPlaylist: "Which song is this line from?",
     hintButton: "Hear a hint ({remaining} left)",
     hintLoading: "Finding a clip…",
     hintPlaying: "That's the song that's in the playlist",
+    hintPlayingLyric: "That's the song the line is from",
     hintNone: "No clip for this one — the hint wasn't spent",
     hintBlocked: "The clip couldn't start — tap the hint again",
     hintsGone: "No hints left",
@@ -323,6 +353,11 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     createNamePlaceholder: "Whose taste is this? (optional)",
     createTitlePreview: "Goes in the title: “{title}”",
     createQuestionsLabel: "Questions",
+    createKindLabel: "Question type",
+    createKindTitle: "Which song is in the playlist",
+    createKindLyric: "Which song is this lyric from",
+    createKindLyricNote:
+      "One line per question, from a public lyrics database. Songs it has no lyrics for are skipped; if too few do, you get the playlist quiz instead.",
     createCustomCountLabel: "Custom number of questions, {min} to {max}",
     createLengthNote: "Your friends answer these. Short quizzes are the ones that get finished.",
     createLastQuiz: "Your last quiz is still open",
@@ -333,8 +368,11 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     createMakingLink: "Getting your link ready…",
     createLinkFallback: "Your quiz link:",
     panelQuestionsFrom: "{count} questions from",
+    panelLyricQuestionsFrom: "{count} lyric questions from",
     panelQuizFrom: "Your quiz from",
     panelBuiltShorter: "You picked {requested}. The playlist had enough different songs for {count} — add more and make another to get the full set.",
+    panelLyricFallback:
+      "Too few of these songs have lyrics we can quote, so this is the playlist quiz instead — which song is in it.",
     panelSend: "Send to friends →",
     panelCopyLink: "Copy link",
     panelCopied: "✓ Copied",
@@ -368,11 +406,16 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     introTitlePlaylist: "你有多懂這份歌單？",
     introBody:
       "共 {count} 題，每題兩首歌，只有一首真的在歌單裡。卡住的話有 {hints} {hintWord}可以聽片段。",
+    introBodyLyric:
+      "共 {count} 題，每題一句歌詞、兩首歌，猜猜是哪一首的。卡住的話有 {hints} {hintWord}可以聽片段。",
     ogDescription: "共 {count} 題。每題兩首歌，只有一首真的在歌單裡，你分得出來嗎？",
+    ogDescriptionLyric: "共 {count} 題。每題一句歌詞、兩首歌，你分得出是哪一首嗎？",
     ogFallbackTitle: "你有多懂朋友的音樂品味？",
     ogFallbackDescription: "每題兩首歌，只有一首真的在歌單裡，你分得出來嗎？",
     ogQuizLabel: "音樂品味測驗",
+    ogQuizLabelLyric: "歌詞測驗",
     ogRule: "每題兩首歌，只有一首在歌單裡",
+    ogRuleLyric: "每題一句歌詞，猜是哪一首",
     nameLabel: "你的名字",
     namePlaceholder: "讓對方知道是誰贏了",
     startButton: "開始 →",
@@ -381,9 +424,12 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     progress: "第 {n} 題，共 {total} 題",
     promptOwner: "哪一首在 {owner} 的歌單裡？",
     promptPlaylist: "哪一首在歌單裡？",
+    promptLyricOwner: "這句是 {owner} 歌單裡哪一首的歌詞？",
+    promptLyricPlaylist: "這句是哪一首的歌詞？",
     hintButton: "聽提示（剩 {remaining} 次）",
     hintLoading: "找片段中…",
     hintPlaying: "這就是歌單裡的那一首",
+    hintPlayingLyric: "這就是這句歌詞的那一首",
     hintNone: "這首沒有片段 — 提示沒扣",
     hintBlocked: "片段沒播出來 — 再點一次提示",
     hintsGone: "提示用完了",
@@ -460,6 +506,10 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     createNamePlaceholder: "這是誰的品味？（可以不填）",
     createTitlePreview: "會出現在標題裡：「{title}」",
     createQuestionsLabel: "題數",
+    createKindLabel: "題型",
+    createKindTitle: "哪一首在歌單裡",
+    createKindLyric: "這句歌詞是哪首歌",
+    createKindLyricNote: "每題一句歌詞，來自公開的歌詞資料庫。查不到歌詞的歌會跳過；查到的太少，就會改出歌單題。",
     createCustomCountLabel: "自訂題數，{min} 到 {max} 題",
     createLengthNote: "這些題目是給朋友答的，題數少的比較多人做完。",
     createLastQuiz: "你上次做的測驗還能用",
@@ -470,8 +520,10 @@ export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
     createMakingLink: "連結準備中…",
     createLinkFallback: "你的測驗連結：",
     panelQuestionsFrom: "共 {count} 題，來自",
+    panelLyricQuestionsFrom: "共 {count} 題歌詞題，來自",
     panelQuizFrom: "你的測驗，來自",
     panelBuiltShorter: "你選了 {requested} 題，這個歌單只夠出 {count} 題。加幾首歌再建一次就能出滿。",
+    panelLyricFallback: "這份歌單查得到歌詞的歌太少，所以改成了歌單題：猜哪一首在歌單裡。",
     panelSend: "傳給朋友 →",
     panelCopyLink: "複製連結",
     panelCopied: "✓ 已複製",
@@ -533,21 +585,71 @@ export interface QuizCardCopy {
  * `null` is the card for a quiz that could not be read: gone, malformed, or
  * a KV blink; it stays quiz-shaped and says nothing about a party. Kept out
  * of the image file because the suite cannot import a `.tsx` module here.
+ * The label and the rule pill follow the quiz's kind; the title does not —
+ * whose taste it is, is the question either way.
  */
 export function quizCardCopy(
-  peek: { locale: ErrorLocale; ownerName: string | null; playlistName: string; questionCount: number } | null
+  peek: { locale: ErrorLocale; ownerName: string | null; playlistName: string; questionCount: number; kind?: QuizKind } | null
 ): QuizCardCopy {
   const copy = QUIZ_COPY[peek?.locale ?? "en"];
   if (!peek) {
     return { label: copy.ogQuizLabel, title: copy.ogFallbackTitle, subtitle: null, pills: [copy.ogRule] };
   }
+  const lyric = (peek.kind ?? DEFAULT_QUIZ_KIND) === "lyric";
   const count = fillCopy(copy.boardQuestionCount, { count: peek.questionCount });
   return {
-    label: copy.ogQuizLabel,
+    label: lyric ? copy.ogQuizLabelLyric : copy.ogQuizLabel,
     title: quizTitle(copy, peek.ownerName),
     subtitle: peek.ownerName ? count : `${peek.playlistName} · ${count}`,
-    pills: [copy.ogRule],
+    pills: [lyric ? copy.ogRuleLyric : copy.ogRule],
   };
+}
+
+/** The unfurl's description, by kind: the duel's rule or the lyric line's. */
+export function ogDescriptionFor(copy: QuizCopy, kind: QuizKind | undefined): string {
+  return (kind ?? DEFAULT_QUIZ_KIND) === "lyric" ? copy.ogDescriptionLyric : copy.ogDescription;
+}
+
+/** The intro's body, by kind. Both carry `{count}`, `{hints}` and `{hintWord}`. */
+export function introBodyFor(copy: QuizCopy, kind: QuizKind | undefined): string {
+  return (kind ?? DEFAULT_QUIZ_KIND) === "lyric" ? copy.introBodyLyric : copy.introBody;
+}
+
+/**
+ * The seam's question: which song is in the playlist, or which song the line
+ * is from — with the owner named where there is one. The one place the four
+ * prompts are chosen between, so the duel page cannot show a lyric quiz the
+ * duel's question.
+ */
+export function promptFor(copy: QuizCopy, kind: QuizKind | undefined, ownerName: string | null | undefined): string {
+  const lyric = (kind ?? DEFAULT_QUIZ_KIND) === "lyric";
+  if (ownerName) {
+    return fillCopy(lyric ? copy.promptLyricOwner : copy.promptOwner, { owner: ownerName });
+  }
+  return lyric ? copy.promptLyricPlaylist : copy.promptPlaylist;
+}
+
+/**
+ * What the seam says while a hint plays. On a `lyric` quiz both options are
+ * the owner's songs, so "the one in the playlist" names neither.
+ */
+export function hintPlayingFor(copy: QuizCopy, kind: QuizKind | undefined): string {
+  return (kind ?? DEFAULT_QUIZ_KIND) === "lyric" ? copy.hintPlayingLyric : copy.hintPlaying;
+}
+
+/**
+ * Under the panel's caption when the host asked for lyric questions and got
+ * the duel: `createQuiz` falls back rather than refusing, and the panel has
+ * to say so before the link is sent, or the owner tells their friends to
+ * expect lyrics. Null for every other pairing, and for a remembered quiz,
+ * which kept no request.
+ */
+export function lyricFallbackNote(
+  copy: QuizCopy,
+  kind: QuizKind | null,
+  requestedKind: QuizKind | null
+): string | null {
+  return requestedKind === "lyric" && kind === "title" ? copy.panelLyricFallback : null;
 }
 
 /** The card title: whose taste, or which playlist when no owner was named. */
@@ -600,11 +702,15 @@ export function ownerClipboardText(
   return `${ownerShareText(copy, quiz)} ${url}`;
 }
 
-/** The panel's caption over the playlist name: with the count, or without one to give. */
-export function panelCaption(copy: QuizCopy, questionCount: number | null): string {
-  return questionCount === null
-    ? copy.panelQuizFrom
-    : fillCopy(copy.panelQuestionsFrom, { count: questionCount });
+/**
+ * The panel's caption over the playlist name: with the count, or without one
+ * to give. A `lyric` quiz says so in the caption, since the link's card and
+ * the friends' intro will.
+ */
+export function panelCaption(copy: QuizCopy, questionCount: number | null, kind: QuizKind | null = null): string {
+  if (questionCount === null) return copy.panelQuizFrom;
+  const template = kind === "lyric" ? copy.panelLyricQuestionsFrom : copy.panelQuestionsFrom;
+  return fillCopy(template, { count: questionCount });
 }
 
 /**

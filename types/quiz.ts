@@ -103,6 +103,45 @@ export const QUIZ_HOST_TOKEN_HEADER = "x-host-token";
  */
 export const QUIZ_REFETCH_PARAM = "refetch";
 
+/**
+ * What a question asks. `title` is the duel as it shipped: two songs, which
+ * is really in the playlist. `lyric` (2026-11-13) shows one line of a song
+ * and asks which of two playlist songs it is from — both options are the
+ * owner's songs there, so the decoy pool is not involved.
+ *
+ * A closed set because the value is a key tail (`quiz_kind:<stage>:<kind>`)
+ * and rides in a request body. `DEFAULT_QUIZ_KIND` is what a quiz stored
+ * before the field existed reads as, and what a request that names no kind
+ * — or one this build does not know — gets: the duel, exactly as before.
+ */
+export type QuizKind = "title" | "lyric";
+export const QUIZ_KINDS: readonly QuizKind[] = ["title", "lyric"];
+export const DEFAULT_QUIZ_KIND: QuizKind = "title";
+
+export function isQuizKind(value: unknown): value is QuizKind {
+  return typeof value === "string" && (QUIZ_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * How a lyrics lookup came out (`lib/lyrics.ts`) — the preview cache's three
+ * outcomes, for the same reason: `absent` is a fact about the song (nothing
+ * to quote), `unavailable` a fact about us (throttled, out of budget, timed
+ * out), and only the first may be remembered for long. Declared here, beside
+ * the kind, so lib/loop-stats.ts can key `quiz_lyric:<status>` on it without
+ * reaching the module that fetches.
+ */
+export type LyricStatus = "found" | "absent" | "unavailable";
+export const LYRIC_STATUSES: readonly LyricStatus[] = ["found", "absent", "unavailable"];
+
+/**
+ * The most characters one lyric line may be shown at. One line, never a
+ * verse: the quiz quotes a fragment to identify a song, and the fragment is
+ * kept short enough that the page never reads as a lyrics page. A line over
+ * this is cut at a word boundary with an ellipsis (`lib/lyric-fragment.ts`).
+ * Shared with the client so the duel's layout can size for it.
+ */
+export const QUIZ_LYRIC_MAX_CHARS = 72;
+
 /** One answer option as the friend sees it. Never carries which one is right. */
 export interface QuizOption {
   title: string;
@@ -112,6 +151,12 @@ export interface QuizOption {
 /** A question with its answer key stripped — the only shape a taker receives. */
 export interface QuizQuestionView {
   options: QuizOption[];
+  /**
+   * The line the question quotes, on a `lyric` quiz. It is the question, not
+   * the key — the key is which option it belongs to — so it travels. Absent
+   * on a `title` question.
+   */
+  lyric?: string;
 }
 
 export interface QuizScore {
@@ -135,6 +180,8 @@ export interface QuizView {
   /** Null when the host gave no name; the copy falls back to the playlist. */
   ownerName: string | null;
   playlistName: string;
+  /** What the questions ask. `title` for every quiz made before the field. */
+  kind: QuizKind;
   questionCount: number;
   hintAllowance: number;
   expiresAt: number;
@@ -158,6 +205,12 @@ export interface CreateQuizRequest {
   questionCount: number;
   locale?: ErrorLocale;
   /**
+   * What the host asked the questions to be. Optional, and a value the server
+   * does not know is the default — never a refusal — for the reason `from`
+   * gives: a measurement-shaped field must not cost a host their link.
+   */
+  kind?: QuizKind;
+  /**
    * Where this visitor came from, for `quiz_from:<source>`. One of a closed
    * set (`lib/quiz-source.ts`) and never the referrer itself. Optional, and
    * the route creates the same quiz without it.
@@ -170,6 +223,12 @@ export interface CreateQuizResponse {
   expiresAt: number;
   /** The count actually built, after clamping to the playlist's size. */
   questionCount: number;
+  /**
+   * The kind actually built. A `lyric` request whose playlist had too few
+   * songs with lyrics comes back as `title` — a quiz, not a refusal — and
+   * the panel reads this, never the request, to say what it is.
+   */
+  kind: QuizKind;
   playlistName: string;
   /**
    * Held only by the creator: `lib/quiz-session.ts` keeps it per code in the
@@ -214,6 +273,8 @@ export interface CheckQuizResponse {
 export interface QuizBoardQuestion {
   title: string;
   artist: string;
+  /** The line the question quoted, on a `lyric` quiz. */
+  lyric?: string;
   /** Takers whose row records per-question results. */
   answered: number;
   correct: number;
@@ -224,6 +285,7 @@ export interface QuizBoardResponse {
   code: string;
   ownerName: string | null;
   playlistName: string;
+  kind: QuizKind;
   questionCount: number;
   createdAt: number;
   expiresAt: number;
