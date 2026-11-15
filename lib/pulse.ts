@@ -93,6 +93,8 @@ function parseSeatCount(value: unknown): number | null {
 }
 import { isGameScored, isPlayerBand, type GameScored, type PlayerBand } from "@/lib/game-players";
 import { isArrival, type Arrival } from "@/lib/arrival";
+import { isSoloStep, type SoloStep } from "@/lib/solo-party";
+import { SOLO_INVITE_OUTCOMES, type SoloInviteOutcome } from "@/lib/loop-stats";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
@@ -168,6 +170,8 @@ export type PulseEvent =
       starter?: StarterKey;
       /** What the link was; the server crosses an album's or an artist's games only. */
       playlistKind?: PlaylistKind;
+      /** A device's first solo game, or its first party after one (lib/solo-party.ts). */
+      soloStep?: SoloStep;
     }
   | {
       kind: "game_finished";
@@ -204,7 +208,8 @@ export type PulseEvent =
   | { kind: "refusal_recovery"; stage: "recovered"; topic: PlaylistHelpTopic; via: SetupSource }
   | { kind: "quiz_copied"; by: QuizShareBy; outcome: QuizCopyOutcome }
   | { kind: "quiz_shared"; by: QuizShareBy; outcome: QuizShareOutcome }
-  | { kind: "quiz_social"; by: QuizShareBy; platform: SocialPlatform };
+  | { kind: "quiz_social"; by: QuizShareBy; platform: SocialPlatform }
+  | { kind: "solo_invite"; outcome: SoloInviteOutcome };
 
 /**
  * Narrows an untrusted request body, or returns null.
@@ -263,7 +268,11 @@ export function parsePulse(body: unknown): PulseEvent | null {
     const withStarter = isStarterKey(raw.starter) ? { ...arrived, starter: raw.starter } : arrived;
     // And what the link was: `game_kind:${value}` is a key, a page from
     // before 2026-11-10 sends none, and a game with an unknown kind is a game.
-    return isPlaylistKind(raw.playlistKind) ? { ...withStarter, playlistKind: raw.playlistKind } : withStarter;
+    const kinded = isPlaylistKind(raw.playlistKind) ? { ...withStarter, playlistKind: raw.playlistKind } : withStarter;
+    // And the solo-to-party step: `solo_party:${value}` is a key, almost every
+    // start sends none, and an unknown value is dropped rather than the game.
+    // Whether it fits the band is the recorder's call, which owns the key.
+    return isSoloStep(raw.soloStep) ? { ...kinded, soloStep: raw.soloStep } : kinded;
   }
 
   if (raw.kind === "game_finished") {
@@ -391,6 +400,14 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // filed under a neighbour: a tap on a link nobody rendered is not data.
     if (!isQuizShareBy(raw.by) || !isSocialPlatform(raw.platform)) return null;
     return { kind: "quiz_social", by: raw.by, platform: raw.platform };
+  }
+
+  if (raw.kind === "solo_invite") {
+    // The outcome is the whole event and a key tail; an undeclared one is refused.
+    if (typeof raw.outcome !== "string" || !(SOLO_INVITE_OUTCOMES as readonly string[]).includes(raw.outcome)) {
+      return null;
+    }
+    return { kind: "solo_invite", outcome: raw.outcome as SoloInviteOutcome };
   }
 
   return null;

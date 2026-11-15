@@ -38,6 +38,8 @@ import type { OrderPhoneCoverage, OrderPhoneVerdict, OrderVerdict } from "@/lib/
 import type { GameScored, PlayerBand } from "@/lib/game-players";
 import type { Arrival } from "@/lib/arrival";
 import type { StarterKey } from "@/lib/starter-playlists";
+import type { SoloStep } from "@/lib/solo-party";
+import type { SoloInviteOutcome } from "@/lib/loop-stats";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
 
@@ -118,6 +120,8 @@ export interface GameStartDetails {
   starter?: StarterKey;
   /** What the link was — the stored payload's `playlistKind`; the server crosses album and artist games only. */
   playlistKind?: PlaylistKind;
+  /** A device's first solo game, or its first party after one — `takeSoloStep` in lib/solo-party.ts. */
+  soloStep?: SoloStep;
 }
 
 /**
@@ -126,7 +130,7 @@ export interface GameStartDetails {
  * to reach the field you mean is how the wrong one gets filed.
  */
 export function reportGameStart(hostGameIndex: number, details: GameStartDetails = {}): void {
-  const { mixed, source, mode, players, from, starter, playlistKind } = details;
+  const { mixed, source, mode, players, from, starter, playlistKind, soloStep } = details;
   sendPulse({
     kind: "game_started",
     hostGameIndex,
@@ -139,6 +143,7 @@ export function reportGameStart(hostGameIndex: number, details: GameStartDetails
     ...(from && hostGameIndex === 1 ? { from } : {}),
     ...(starter ? { starter } : {}),
     ...(playlistKind ? { playlistKind } : {}),
+    ...(soloStep ? { soloStep } : {}),
   });
 }
 
@@ -338,4 +343,15 @@ export function reportQuizCopy(by: QuizShareBy, outcome: QuizCopyOutcome): void 
 export function reportQuizSocial(by: QuizShareBy, platform: SocialPlatform): void {
   trackEvent("quiz_social_tapped", { by, platform });
   sendPulse({ kind: "quiz_social", by, platform });
+}
+
+/**
+ * The solo Game Over's invite card was tapped, and what the share sheet did
+ * (`components/solo-invite.tsx`). Its own pair rather than `reportQuizShare`
+ * with a new `by`: the quiz's share rows are read as a funnel of their own,
+ * and a party invite folded into them would be counted as a quiz nobody made.
+ */
+export function reportSoloInvite(outcome: SoloInviteOutcome): void {
+  trackEvent("solo_invite_tapped", { outcome });
+  sendPulse({ kind: "solo_invite", outcome });
 }

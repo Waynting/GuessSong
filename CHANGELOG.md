@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Does a solo try come back as a party?** Since 2026-11-11 most games are
+  one person alone from Google (30,701 one-player starts in a week against
+  4,435 with two or more), and nothing could say whether that is the step
+  before a party or someone looking. `lib/solo-party.ts` keeps two
+  `localStorage` marks and sends `soloStep` on the start beacon:
+  `solo_party:solo_first` once per device on its first solo game, and
+  `solo_party:party_<same_day|week|later>` once on its first game with two or
+  more after that. The recorder files a step only when it fits the band.
+  Printed as "Played alone, then as a party" in `npm run stats`.
+- **An invite card on the one-player Game Over** (`components/solo-invite.tsx`,
+  `/game` and `/order`): "Better with friends", one sentence of what the game
+  is with a room, and "Send it to the group chat" — the share sheet, or a copy,
+  of `/r/solo_invite`. A new loop surface (`solo_invite`, shown/followed)
+  plus `solo_invite:<shared|copied|dismissed|failed>` and GA4
+  `solo_invite_tapped`. Drawn beside the phone's Mixed link, not instead of it
+  — that link read 9.3% of the Game Overs that drew it. Bar: taps well above
+  the `game_over` QR's 0.3%, with `solo_party:party_*` moving.
+
 - **Lyric questions on the Taste Quiz** (`quiz_kind: lyric`). The create form
   offers a second question type: one line of a song, two of the playlist's
   own songs, which is it from. Lines come from LRCLIB (`lib/lyrics.ts`),

@@ -83,6 +83,17 @@ export function gameScreenFor(matchesPhoneQuery: boolean | null | undefined): Ga
 export interface GameOverOnward {
   qr: boolean;
   mixedLink: boolean;
+  /**
+   * The invite card (`components/solo-invite.tsx`), for a game of one only.
+   * Everything above is an offer to a room, and since 2026-11-11 most games
+   * have no room: 30,701 one-player starts in a week against 4,435 with two
+   * or more. The only "next" that person can act on is asking someone for
+   * next time. Drawn above the Mixed link and beside it, never instead: the
+   * phone link read 9.3% of the Game Overs that drew it, solo ones included,
+   * and taking it away would make the card's first read a comparison against
+   * a link removed the same day.
+   */
+  soloInvite: boolean;
 }
 
 /**
@@ -94,9 +105,10 @@ export interface GameOverOnward {
 export const MIXED_LINK_MIN_PLAYERS = 2;
 
 export function gameOverOnward(screen: GameScreen | null, players: number): GameOverOnward {
-  if (screen === null) return { qr: false, mixedLink: false };
-  if (screen === "phone") return { qr: false, mixedLink: true };
-  return { qr: true, mixedLink: players >= MIXED_LINK_MIN_PLAYERS };
+  if (screen === null) return { qr: false, mixedLink: false, soloInvite: false };
+  const soloInvite = players === 1;
+  if (screen === "phone") return { qr: false, mixedLink: true, soloInvite };
+  return { qr: true, mixedLink: players >= MIXED_LINK_MIN_PLAYERS, soloInvite };
 }
 
 /**

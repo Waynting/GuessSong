@@ -81,6 +81,14 @@ export const LOOP_SURFACES = [
    * (13% in its first full week); the QR out of an image never did.
    */
   "quiz_result",
+  /**
+   * The invite card on a one-player Game Over (`components/solo-invite.tsx`),
+   * since 2026-11-15: someone who just played alone sends the group chat a
+   * link to play it together next time. A warm sender and a cold recipient —
+   * the same carrier as `quiz_result`, a URL in a chat — so it is its own
+   * arm, never averaged with a QR. `followed` is a friend opening it.
+   */
+  "solo_invite",
 ] as const;
 
 export type LoopSurface = (typeof LOOP_SURFACES)[number];

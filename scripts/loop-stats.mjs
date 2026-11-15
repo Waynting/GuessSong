@@ -1069,6 +1069,47 @@ if (tapAgain + tapMixed > 0) {
 }
 
 /**
+ * Does a solo try come back as a party? (lib/solo-party.ts, since 2026-11-15.)
+ * `solo_first` is devices whose first one-player game this was; the three
+ * `party_*` are devices that later hosted two or more, once each, by the gap.
+ * A ratio of the two inside one window understates the later buckets — a
+ * device that tried alone on the window's last day has had no time — so read
+ * the same-day share early and the rest only after a few weeks. Floors: iOS
+ * evicts storage after seven idle days, exactly the `later` gap.
+ *
+ * The invite card is the `solo_invite` row of the surface table (shown /
+ * followed); the tap outcomes here are the step between.
+ */
+const soloFirst = get("solo_party:solo_first");
+const partySameDay = get("solo_party:party_same_day");
+const partyWeek = get("solo_party:party_week");
+const partyLater = get("solo_party:party_later");
+const partyAfterSolo = partySameDay + partyWeek + partyLater;
+const inviteOutcomes = ["shared", "copied", "dismissed", "failed"].map((o) => [o, get(`solo_invite:${o}`)]);
+const inviteTaps = inviteOutcomes.reduce((n, [, v]) => n + v, 0);
+if (soloFirst + partyAfterSolo + inviteTaps > 0) {
+  console.log(
+    `\nPlayed alone, then as a party  ${soloFirst} devices played alone for the first time · ` +
+      `${partyAfterSolo} devices hosted two or more after playing alone (${pct(partyAfterSolo, soloFirst).trim()})`
+  );
+  console.log(`  by the gap    same day ${partySameDay} · within a week ${partyWeek} · later ${partyLater}`);
+  const inviteShown = get("impression:solo_invite");
+  console.log(
+    `  invite card   tapped ${inviteTaps} (${pct(inviteTaps, inviteShown).trim()} of ${inviteShown} shown) — ` +
+      inviteOutcomes.map(([o, v]) => `${o} ${v}`).join(" · ") +
+      ` · opened by a friend ${get("click:solo_invite")}`
+  );
+  console.log(
+    "  how to read it: the parties sit in a later window than the solo games they follow,\n" +
+      "  so the share reads low in any short window — read `same day` first (the friends\n" +
+      "  turning up after the host tried it) and the week bucket only weeks after\n" +
+      "  2026-11-15. Near zero after that is someone looking, not a party on the way:\n" +
+      "  stop building the party pitch for them. The invite's bar: taps well above the\n" +
+      "  0.3% the game_over QR reads, and `party_*` moving with it."
+  );
+}
+
+/**
  * The playlist quiz funnel: created → opened → started → completed → board,
  * then the share surface's own row above. Each stage is a server-side count
  * (the route that did the thing bumps it), so unlike the surface table
@@ -1504,6 +1545,8 @@ const RENDERED_PREFIXES = [
   "quiz_throttled:",
   "quiz_kind:",
   "quiz_lyric:",
+  "solo_party:",
+  "solo_invite:",
 ];
 
 const leftovers = [...totals.keys()]
