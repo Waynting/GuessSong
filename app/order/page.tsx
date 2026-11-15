@@ -39,6 +39,7 @@ import { gameScored, playerBand } from "@/lib/game-players";
 import { loadGame } from "@/lib/game-storage";
 import { useScreenWakeLock } from "@/lib/wake-lock";
 import { LoopQr } from "@/components/loop-qr";
+import { SoloInvite } from "@/components/solo-invite";
 import { formatMixList } from "@/lib/mix-export";
 import {
   CARD_FOOTER_HEIGHT,
@@ -1742,6 +1743,9 @@ export default function OrderPage() {
                   desktop with a room of two or more. The QR is not rendered
                   on a phone, because rendering is what reports its
                   impression. lib/game-over.ts. */}
+              {/* A game of one: nobody here to scan or mix with, so the offer
+                  is to ask someone for next time. lib/game-over.ts. */}
+              {onward.soloInvite && <SoloInvite game="order" />}
               {onward.qr && <LoopQr />}
               {onward.mixedLink && (
                 <a className="next-game-link" href={MIXED_SETUP_HREF} onClick={openMixedSetup}>

@@ -648,6 +648,14 @@ export type AnalyticsEvent =
     }
   | {
       /**
+       * The invite card on a one-player Game Over (`components/solo-invite.tsx`)
+       * was tapped. KV's `solo_invite:<outcome>` is the authoritative copy.
+       */
+      name: "solo_invite_tapped";
+      params: { outcome: "shared" | "copied" | "dismissed" | "failed" };
+    }
+  | {
+      /**
        * The host's share button on the setup page, the taker's on the
        * result screen, or the owner's on their results page (`board`, which
        * was filed as `owner` until 2026-09-30). `outcome` follows

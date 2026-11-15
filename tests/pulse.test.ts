@@ -711,7 +711,7 @@ describe("the route records every kind the parser accepts", () => {
     // The mode rides to all three game recorders, or the KV rows read as
     // "no mode was ever sent".
     expect(route).toMatch(
-      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,\s*players: event\.players,\s*from: event\.from,\s*starter: event\.starter,\s*playlistKind: event\.playlistKind,\s*\}\)/
+      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,\s*players: event\.players,\s*from: event\.from,\s*starter: event\.starter,\s*playlistKind: event\.playlistKind,\s*soloStep: event\.soloStep,\s*\}\)/
     );
     expect(route).toMatch(
       /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored, event\.arranged, event\.playlistKind\)/

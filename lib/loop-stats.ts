@@ -55,6 +55,7 @@ import { SETUP_SOURCES, isSetupSource, type SetupSource } from "@/lib/setup-sour
 import { GAME_MODES, isGameMode, isPlaylistKind, type GameMode, type PlaylistKind } from "@/lib/game-session";
 import { ORDER_VERDICTS, isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
 import { ARRIVALS, isArrival, type Arrival } from "@/lib/arrival";
+import { isSoloStep, soloStepFitsBand, type SoloStep } from "@/lib/solo-party";
 import {
   ORDER_PHONE_COVERAGES,
   ORDER_PHONE_VERDICTS,
@@ -1316,11 +1317,13 @@ export interface GameStartDetails {
   starter?: StarterKey;
   /** What the link was; crossed only for an album or an artist (`CROSSED_PLAYLIST_KINDS`). */
   playlistKind?: PlaylistKind;
+  /** This device's first solo game, or its first party after one (lib/solo-party.ts). */
+  soloStep?: SoloStep;
 }
 
 export async function recordGameStart(
   hostGameIndex: number,
-  { mixed, source, mode, players, from, starter, playlistKind }: GameStartDetails = {}
+  { mixed, source, mode, players, from, starter, playlistKind, soloStep }: GameStartDetails = {}
 ): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
@@ -1364,6 +1367,12 @@ export async function recordGameStart(
   // tables above, so nothing is written for one (see CROSSED_PLAYLIST_KINDS).
   const crossed = crossedKind(playlistKind);
   if (crossed) await bump(`game_kind:${crossed}`);
+  // A device's first solo game, or its first party after one — once per
+  // device each, so one command on a few percent of starts (lib/solo-party.ts).
+  // Guarded against the band as well as the set: a `solo_first` on a game of
+  // four, or a party step on a game of one, is a page that got it wrong, and
+  // filing it would put devices in the wrong column of the only ratio read.
+  if (isSoloStep(soloStep) && soloStepFitsBand(soloStep, players)) await bump(`solo_party:${soloStep}`);
 }
 
 /**
@@ -1704,6 +1713,23 @@ export function recordQuizSocial(by: QuizShareBy, platform: QuizSocialPlatform):
     return Promise.resolve();
   }
   return bump(`quiz_social:${by}:${platform}`);
+}
+
+/**
+ * What the solo Game Over's invite card did when tapped
+ * (`components/solo-invite.tsx`): `solo_invite:<outcome>`. The card's shown
+ * and followed are the `solo_invite` loop surface; this is the step between
+ * them that neither can see — a tap that opened the share sheet and was
+ * dismissed is a person who considered it, and `followed` alone would read
+ * that the same as nobody tapping.
+ */
+export type SoloInviteOutcome = ShareLinkOutcome;
+
+export const SOLO_INVITE_OUTCOMES: readonly SoloInviteOutcome[] = ["shared", "copied", "dismissed", "failed"];
+
+export function recordSoloInvite(outcome: SoloInviteOutcome): Promise<void> {
+  if (!SOLO_INVITE_OUTCOMES.includes(outcome)) return Promise.resolve();
+  return bump(`solo_invite:${outcome}`);
 }
 
 /** One quiz moved a stage down its funnel. */

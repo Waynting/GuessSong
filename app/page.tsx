@@ -42,6 +42,7 @@ import {
   type RecoveryState,
 } from "@/lib/refusal-recovery";
 import { playerBand } from "@/lib/game-players";
+import { takeSoloStep } from "@/lib/solo-party";
 import { currentArrival } from "@/lib/arrival";
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
 import {
@@ -748,14 +749,20 @@ export default function SetupPage() {
     // start: a Mixed room's start can still see a starter id sitting in the
     // single form's field, and that game was not played from it.
     const starter = mixed === undefined ? starterKeyForId(currentPlaylistId) : null;
+    const players = playerBand(playerCount);
+    // This device's first solo game, or its first party after one — the
+    // question "does a solo try come back as a party" (lib/solo-party.ts).
+    // Never throws: its storage goes through lib/host-session.ts's guards.
+    const soloStep = takeSoloStep(players);
     reportGameStart(hostGameIndex, {
       mixed,
       source: setupSource,
       mode,
-      players: playerBand(playerCount),
+      players,
       from: currentArrival(),
       ...(starter ? { starter } : {}),
       ...(playlistKind ? { playlistKind } : {}),
+      ...(soloStep ? { soloStep } : {}),
     });
     const recovery = noteStart(recoveryRef.current, setupSource);
     if (recovery.state !== recoveryRef.current) setRecovery(recovery.state);

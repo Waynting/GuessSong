@@ -11,7 +11,7 @@ import {
   recordLoopImpression,
   recordQuizShare,
 } from "@/lib/loop-stats";
-import { recordQuizCopy, recordQuizSocial } from "@/lib/loop-stats";
+import { recordQuizCopy, recordQuizSocial, recordSoloInvite } from "@/lib/loop-stats";
 import { recordOrderPhone, recordOrderRound } from "@/lib/loop-stats";
 
 /**
@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
         from: event.from,
         starter: event.starter,
         playlistKind: event.playlistKind,
+        soloStep: event.soloStep,
       });
       break;
     case "game_finished":
@@ -122,6 +123,9 @@ export async function POST(req: NextRequest) {
       break;
     case "quiz_social":
       await recordQuizSocial(event.by, event.platform);
+      break;
+    case "solo_invite":
+      await recordSoloInvite(event.outcome);
       break;
   }
 
