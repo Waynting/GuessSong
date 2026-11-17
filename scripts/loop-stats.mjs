@@ -1083,6 +1083,26 @@ if (tapAgain + tapMixed > 0) {
 }
 
 /**
+ * The guess game's "Read a lyric instead" (GET /api/lyric). `lyric_line:` is
+ * every tap by outcome, written by the route, cache hits included — what the
+ * host was handed, not what LRCLIB was asked (that is `quiz_lyric:`, shared
+ * by both features). `lyric_line_round:played` is a page pulse at the reveal
+ * of a round a line was shown on, so it is a floor (an ad blocker does not
+ * stop it, a closed tab before the reveal does).
+ */
+const lyricLineFound = get("lyric_line:found");
+const lyricLineAbsent = get("lyric_line:absent");
+const lyricLineUnavailable = get("lyric_line:unavailable");
+const lyricLinePlayed = get("lyric_line_round:played");
+if (lyricLineFound + lyricLineAbsent + lyricLineUnavailable + lyricLinePlayed > 0) {
+  console.log(
+    `\nLyric lines (guess game)  tapped ${lyricLineFound + lyricLineAbsent + lyricLineUnavailable} · ` +
+      `a line ${lyricLineFound} · nothing to quote ${lyricLineAbsent} · could not ask ${lyricLineUnavailable} · ` +
+      `rounds revealed after a line ${lyricLinePlayed} (${pct(lyricLinePlayed, lyricLineFound).trim()} of lines)`
+  );
+}
+
+/**
  * Does a solo try come back as a party? (lib/solo-party.ts, since 2026-11-15.)
  * `solo_first` is devices whose first one-player game this was; the three
  * `party_*` are devices that later hosted two or more, once each, by the gap.
@@ -1647,6 +1667,8 @@ const RENDERED_PREFIXES = [
   "music_age:",
   "streak:",
   "personal_best:",
+  "lyric_line:",
+  "lyric_line_round:",
 ];
 
 const leftovers = [...totals.keys()]

@@ -13,6 +13,7 @@ import {
 } from "@/lib/loop-stats";
 import { recordDailyDoor, recordQuizCopy, recordQuizSocial, recordSoloInvite } from "@/lib/loop-stats";
 import { recordMusicAge } from "@/lib/loop-stats";
+import { recordLyricLineRound } from "@/lib/loop-stats";
 import { recordOrderPhone, recordOrderRound } from "@/lib/loop-stats";
 import { recordStarterThemeRow } from "@/lib/loop-stats";
 
@@ -139,6 +140,9 @@ export async function POST(req: NextRequest) {
       break;
     case "starter_theme_row":
       await recordStarterThemeRow(event.style);
+      break;
+    case "lyric_line_round":
+      await recordLyricLineRound(event.outcome);
       break;
   }
 

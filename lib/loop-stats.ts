@@ -917,6 +917,10 @@ export function loopStatsKeys(
   quizLyricFallback: string;
   /** Each upstream lyrics lookup, by outcome. */
   quizLyric: Record<LyricStatus, string>;
+  /** The guess game's "Read a lyric instead", per tap, by outcome (`GET /api/lyric`). */
+  lyricLine: Record<LyricStatus, string>;
+  /** A guess-game round revealed after a lyric line was shown. */
+  lyricLineRound: Record<LyricLineRoundOutcome, string>;
   quizLocale: Record<ErrorLocale, string>;
   quizFrom: Record<QuizSource, string>;
   quizHint: Record<QuizHintOutcome, string>;
@@ -1178,6 +1182,12 @@ export function loopStatsKeys(
     quizLyric: Object.fromEntries(
       LYRIC_STATUSES.map((s) => [s, key(day, `quiz_lyric:${s}`)])
     ) as Record<LyricStatus, string>,
+    lyricLine: Object.fromEntries(
+      LYRIC_STATUSES.map((s) => [s, key(day, `lyric_line:${s}`)])
+    ) as Record<LyricStatus, string>,
+    lyricLineRound: Object.fromEntries(
+      LYRIC_LINE_ROUND_OUTCOMES.map((o) => [o, key(day, `lyric_line_round:${o}`)])
+    ) as Record<LyricLineRoundOutcome, string>,
     quizLocale: Object.fromEntries(
       ERROR_LOCALES.map((l) => [l, key(day, `quiz_locale:${l}`)])
     ) as Record<ErrorLocale, string>,
@@ -1945,6 +1955,34 @@ export function recordQuizKindStage(stage: QuizKindStage, kind: QuizKind): Promi
 export function recordQuizLyricLookup(status: LyricStatus): Promise<void> {
   if (!LYRIC_STATUSES.includes(status)) return Promise.resolve();
   return bump(`quiz_lyric:${status}`);
+}
+
+/**
+ * One tap of the guess game's "Read a lyric instead", by how it came out
+ * (`GET /api/lyric`): `lyric_line:<status>`. Counted per request, cache hits
+ * included — unlike `quiz_lyric:`, which is what LRCLIB was asked, this is
+ * what the host was handed. The status is a key tail, so it is refused
+ * unless it is one of the three.
+ */
+export function recordLyricLine(status: LyricStatus): Promise<void> {
+  if (!LYRIC_STATUSES.includes(status)) return Promise.resolve();
+  return bump(`lyric_line:${status}`);
+}
+
+/**
+ * A guess-game round was revealed after a lyric line was shown on it —
+ * `lyric_line_round:played`, the numerator of "did a lyric become a round"
+ * over `lyric_line:found`. Sent by the page (`reportLyricLineRound` in
+ * `lib/loop-client.ts`) because only the page knows the reveal happened; a
+ * closed set of one so the pulse cannot open a key space.
+ */
+export type LyricLineRoundOutcome = "played";
+
+export const LYRIC_LINE_ROUND_OUTCOMES: readonly LyricLineRoundOutcome[] = ["played"];
+
+export function recordLyricLineRound(outcome: LyricLineRoundOutcome): Promise<void> {
+  if (!LYRIC_LINE_ROUND_OUTCOMES.includes(outcome)) return Promise.resolve();
+  return bump(`lyric_line_round:${outcome}`);
 }
 
 /**
