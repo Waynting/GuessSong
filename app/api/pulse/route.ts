@@ -12,6 +12,7 @@ import {
   recordQuizShare,
 } from "@/lib/loop-stats";
 import { recordDailyDoor, recordQuizCopy, recordQuizSocial, recordSoloInvite } from "@/lib/loop-stats";
+import { recordMusicAge } from "@/lib/loop-stats";
 import { recordOrderPhone, recordOrderRound } from "@/lib/loop-stats";
 
 /**
@@ -129,6 +130,9 @@ export async function POST(req: NextRequest) {
       break;
     case "daily_door":
       await recordDailyDoor(event.stage);
+      break;
+    case "music_age":
+      await recordMusicAge(event.outcome);
       break;
   }
 

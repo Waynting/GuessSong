@@ -661,6 +661,14 @@ export type AnalyticsEvent =
     }
   | {
       /**
+       * The music-age card on the order Game Over (`components/music-age.tsx`)
+       * was tapped. KV's `music_age:<outcome>` is the authoritative copy.
+       */
+      name: "music_age_shared";
+      params: { outcome: "shared" | "copied" | "dismissed" | "failed" };
+    }
+  | {
+      /**
        * The host's share button on the setup page, the taker's on the
        * result screen, or the owner's on their results page (`board`, which
        * was filed as `owner` until 2026-09-30). `outcome` follows

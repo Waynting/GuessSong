@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **"Your ears live in 1987" on the order game's Game Over**
+  (`components/music-age.tsx`, `lib/music-age.ts`). The solo invite card read
+  one real send in 2,089 views; people alone share results about themselves,
+  not invitations, so this is a result. The year is the mean release year
+  (`releaseYear`) of the cards in the rounds the room got right — a round
+  called in full at weight 1, oldest-only at 0.5, a missed round not at all —
+  with an early/mid/late decade label; no scored round is `null` and nothing
+  renders. The verdicts are the ones `closeRound` in `app/order/page.tsx`
+  already reports as `order_round:<verdict>`, kept in `closedRounds` state
+  (keyed by round index) — no second grading path. "Share my music age"
+  ("our" for a room of two or more) shares `/r/music_age` through
+  `shareLink`. New loop surface `music_age` (shown on mount, only when the
+  card renders; followed from the redirect), pulse kind `music_age` →
+  `recordMusicAge` → `music_age:<shared|copied|dismissed|failed>`, GA4
+  `music_age_shared`, and a "Music age" line in `npm run stats`. The year is
+  never a key tail. Bar: sends (shared + copied) well above the invite card's
+  ~0.05% of views, with friend opens following.
+
 - **"Today's challenge" fake door on `/`** (`lib/daily-door.ts`). A card under
   the form, shaped like the Taste Quiz card, offering a daily challenge that
   does not exist yet; tapped, it says so, says the tap was counted, and points

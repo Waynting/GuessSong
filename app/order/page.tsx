@@ -40,6 +40,8 @@ import { loadGame } from "@/lib/game-storage";
 import { useScreenWakeLock } from "@/lib/wake-lock";
 import { LoopQr } from "@/components/loop-qr";
 import { SoloInvite } from "@/components/solo-invite";
+import { MusicAgeCard } from "@/components/music-age";
+import { musicAge, type MusicAgeRound } from "@/lib/music-age";
 import { formatMixList } from "@/lib/mix-export";
 import {
   CARD_FOOTER_HEIGHT,
@@ -83,6 +85,7 @@ import {
   releaseYear,
   trueOrder,
   type OrderPhoneCoverage,
+  type OrderVerdict,
   type OrderRound,
   hostArranged,
   showDragCue,
@@ -176,6 +179,14 @@ export default function OrderPage() {
   // for the round it belongs to. A new round starts from its deal.
   const [arrangement, setArrangement] = useState<{ round: number; ids: string[]; moved: boolean } | null>(null);
   const [scorePulse, setScorePulse] = useState<string | null>(null);
+  /**
+   * Every revealed round as `closeRound` closed it — its cards and the
+   * verdict it already reported — for the music-age card at Game Over
+   * (lib/music-age.ts). Kept from the one place a round closes, so there is
+   * no second grading path; keyed by round index so a double entry cannot
+   * count a round twice.
+   */
+  const [closedRounds, setClosedRounds] = useState<(MusicAgeRound & { round: number })[]>([]);
   /**
    * The buzzer room, when the game was started with one: the round is on
    * every phone too. Null is the shared-screen game, exactly as it was.
@@ -481,11 +492,19 @@ export default function OrderPage() {
    */
   function closeRound() {
     if (phase !== "revealed") return;
+    const closing = currentIndex;
+    const cardsOf = rounds[closing]?.tracks ?? [];
+    const keep = (verdict: OrderVerdict) =>
+      setClosedRounds((prev) =>
+        prev.some((r) => r.round === closing) ? prev : [...prev, { round: closing, verdict, tracks: cardsOf }]
+      );
     // A round on the phones: `order_round` as the best answer in the room,
     // so that line still sums to rounds played, and `order_phone` for how
     // the phones did. No `arranged` — that is the shared screen's drag.
     if (phoneRound?.round === currentIndex) {
-      reportOrderRound(roomVerdict(phoneRound.reveal), currentIndex + 1);
+      const verdict = roomVerdict(phoneRound.reveal);
+      reportOrderRound(verdict, currentIndex + 1);
+      keep(verdict);
       if (phoneRound.coverage) {
         reportOrderPhoneRound(currentIndex + 1, phoneRound.coverage, phoneVerdictCounts(phoneRound.reveal));
       }
@@ -493,11 +512,9 @@ export default function OrderPage() {
     }
     // GA4's round_completed is the guess game's and carries no mode, so it
     // is not sent from here; order_round_resolved is this game's round.
-    reportOrderRound(
-      orderVerdict({ exact: exactWinner !== null, oldest: oldestWinner !== null }),
-      currentIndex + 1,
-      hostArranged(arrangement, currentIndex)
-    );
+    const verdict = orderVerdict({ exact: exactWinner !== null, oldest: oldestWinner !== null });
+    reportOrderRound(verdict, currentIndex + 1, hostArranged(arrangement, currentIndex));
+    keep(verdict);
   }
 
   /**
@@ -670,6 +687,9 @@ export default function OrderPage() {
   const maxScore = sortedPlayers[0]?.score ?? 0;
   const leftoverLine = orderLeftoverLine(leftover);
   const onward = gameOverOnward(screen, players.length);
+  // The year the rounds you got right sit in, or null when none scored — the
+  // card then renders nothing, and reports no impression (lib/music-age.ts).
+  const ears = phase === "finished" ? musicAge(closedRounds) : null;
   const lastRound = currentIndex + 1 >= rounds.length;
   const hostMoved = hostArranged(arrangement, currentIndex);
   // The first screen's two cues, both derived from state and never from a
@@ -1738,6 +1758,11 @@ export default function OrderPage() {
                 />
               )}
 
+              {/* A result about the player, above the offers to a room: the
+                  year the rounds they got right sit in. Rendered only behind
+                  a computed age, because mounting reports its impression.
+                  lib/music-age.ts. */}
+              {ears && <MusicAgeCard age={ears} room={!solo} />}
               {/* The QR for a room looking at a shared screen; a link for a
                   host holding the screen, and under the QR as well on a
                   desktop with a room of two or more. The QR is not rendered

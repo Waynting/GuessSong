@@ -40,6 +40,7 @@ codes, and last the one surface whose carrier is a URL rather than a QR.
 | `share` | **retired 2026-09-22** — was a QR drawn into the result card image (`lib/result-image.ts`'s `drawCardFooter`) | old cards only; the card prints the address as text now |
 | `quiz_result` | the result screen of a Taste Quiz (`app/q/[code]/quiz-client.tsx:1295`, `<LoopCtaButton surface="quiz_result">`) | after a taker has submitted their answers |
 | `solo_invite` | the invite card on a one-player Game Over (`components/solo-invite.tsx`, both `/game` and `/order`) | a game of one, at Game Over; `followed` is a friend opening the link sent to a chat. Tap outcomes are `solo_invite:<outcome>`, printed under "Played alone, then as a party" with `solo_party:*` (`lib/solo-party.ts`) |
+| `music_age` | "Your ears live in 1987" on the order game's Game Over (`components/music-age.tsx`, `/order` only) | when at least one round scored — the year is `lib/music-age.ts`'s weighted mean of the scored rounds' cards; `followed` is a friend opening the shared link. Tap outcomes are `music_age:<outcome>`, printed as the "Music age" line |
 
 `quiz_result` (1.9.0) is the first surface reached by tapping a URL in a group
 chat rather than by scanning a QR off a screen or out of an image. It is kept
