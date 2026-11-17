@@ -18,7 +18,7 @@ import { lookupLyricCandidates } from "@/lib/lyrics";
 import { recordQuizCreated, recordQuizLyricLookup, recordQuizThrottled } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
-import { ERROR_LOCALES } from "@/lib/error-messages";
+import { SITE_LOCALES } from "@/lib/error-messages";
 import { isQuizSource } from "@/lib/quiz-source";
 import {
   DEFAULT_QUIZ_KIND,
@@ -45,7 +45,7 @@ const CreateQuizSchema = z.object({
   url: z.string().trim().min(1),
   ownerName: z.string().trim().max(QUIZ_NAME_MAX).optional(),
   questionCount: z.number().int().min(QUIZ_MIN_QUESTIONS).max(QUIZ_MAX_QUESTIONS),
-  locale: z.enum(ERROR_LOCALES).optional(),
+  locale: z.enum(SITE_LOCALES).optional(),
   from: z.unknown().optional(),
   // `unknown` for the reason `from` is: a kind this build does not know is
   // the default kind, never a refused link.

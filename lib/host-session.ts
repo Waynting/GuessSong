@@ -36,7 +36,7 @@ export const LOOP_REF_TTL_MS = 60 * 24 * 60 * 60 * 1000;
 /**
  * Every read and write goes through here.
  *
- * `app/page.tsx` is statically prerendered, so this module is evaluated during
+ * `app/setup-page.tsx` is statically prerendered, so this module is evaluated during
  * the build where `window` does not exist — same guard, same reason, as
  * `getPersistentPlayerId` in `lib/use-buzzer-socket.ts`. Storage also throws
  * rather than returning null in a locked-down browser (Safari with cookies
@@ -117,7 +117,7 @@ export function getHostGameCount(): number {
  *
  * No idempotency token, on purpose. The two ways this could double-count are
  * both already closed: the Start button is disabled for the whole async
- * playlist load (`app/page.tsx`, `disabled={loading || roomStarting}`), and
+ * playlist load (`app/setup-page.tsx`, `disabled={loading || roomStarting}`), and
  * reloading `/game` cannot re-fire it because every `game_started` call site
  * lives on the setup page and runs immediately before the navigation. The one
  * path that *does* reach here twice — "Play again", which routes back through

@@ -21,7 +21,7 @@ const { reportGameStart } = await import("@/lib/loop-client");
  * page that wires them.
  *
  * The rules are in `lib/` and tested there (`setup-memory`, `playlist-help`,
- * `starter-playlists`, `playlist-ref`). What is left in `app/page.tsx` is
+ * `starter-playlists`, `playlist-ref`). What is left in `app/setup-page.tsx` is
  * wiring, and each line of it pinned here is one that fails silently if it is
  * undone: the form would still render, the build would still pass, and a
  * returning host would be back to an empty form, or a half-typed name would be
@@ -37,7 +37,7 @@ function code(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 }
 
-const HOME = "app/page.tsx";
+const HOME = "app/setup-page.tsx";
 const ASSIST = "components/setup-assist.tsx";
 
 /** Every index at which `needle` starts in `haystack`. */
@@ -225,7 +225,7 @@ describe("Start fresh", () => {
     // It can turn the buzzer off, and a room with phones in it is not
     // something a text link should be able to throw away.
     expect(body).toMatch(
-      /\{recalled && \(\s*<RecallNote onStartFresh=\{startFresh\} locked=\{openedRoom !== null \|\| startBusy\} \/>\s*\)\}/
+      /\{recalled && \(\s*<RecallNote onStartFresh=\{startFresh\} locked=\{openedRoom !== null \|\| startBusy\} copy=\{copy\.recall\} \/>\s*\)\}/
     );
     // Hidden in place rather than unmounted: taking the line away would move
     // the Start button by its height at the moment it is pressed.
@@ -375,7 +375,9 @@ describe("the chips", () => {
     );
     // One instance, fed by fieldChipRow: the recents, and in the order
     // style the order starter beside them (two instances were two rows).
-    expect(single).toMatch(/<PlaylistChips\s+label=\{fieldRow\.label\}\s+caption=\{fieldRow\.caption \?\? undefined\}\s+playlists=\{fieldRow\.playlists\}/);
+    // In the page's language (lib/setup-copy.ts): the head by `kind`, the
+    // caption only where the row has one, the starters' names and blurbs.
+    expect(single).toMatch(/<PlaylistChips\s+label=\{copy\.chipRow\[fieldRow\.kind\]\}\s+caption=\{fieldRow\.caption === null \? undefined : themeRow \? copy\.themeCaption : copy\.starterCaption\(styleStarters\.length\)\}\s+playlists=\{fieldRow\.playlists\.map\(inPageLanguage\)\}/);
     expect(single.indexOf("<PlaylistChips")).toBeGreaterThan(single.indexOf('className={`url-input'));
     // Two calls, one row: a theme row (lib/starter-playlists.ts, themeRowFor)
     // goes through the same fieldChipRow, and without one the call is the

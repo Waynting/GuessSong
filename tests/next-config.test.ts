@@ -4,7 +4,7 @@ import nextConfig from "../next.config.js";
 /**
  * The two spellings of the quiz link that predate `/quiz`. They are redirected
  * in Vercel's routing layer, before any HTML is served; the mount effect in
- * `app/page.tsx` is only the fallback. Pinned here because nothing else reads
+ * `app/setup-page.tsx` is only the fallback. Pinned here because nothing else reads
  * `next.config.js`, and a dropped entry would fail silently — the fallback
  * still works, it just costs a full load of `/` first.
  */

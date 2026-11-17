@@ -464,7 +464,7 @@ predate it and are still in group chats and cached pages: `/?mode=quiz` (the
 content pages' link) and `/?ref=quiz_result` (the loop's warm arm). Both are
 redirected to `/quiz` by `redirects()` in `next.config.js`, in Vercel's routing
 layer before any HTML is served, and the query rides along so the loop ref
-survives the hop. `app/page.tsx` keeps a mount-effect fallback
+survives the hop. `app/setup-page.tsx` keeps a mount-effect fallback
 (`requestedSetupMode` → `quizArrivalHref`, `lib/setup-arrival.ts`) that does
 the same one full page load later. So if the party form is what loads, the
 config entry is gone — `tests/next-config.test.ts` pins both rules — and if it

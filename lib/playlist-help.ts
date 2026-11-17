@@ -86,10 +86,12 @@ export const PLAYLIST_HELP_TOPICS: Record<PlaylistHelpTopic, PlaylistHelpCopy> =
     step: {
       en: "Copy the songs into a playlist of your own, make it public, and paste that link instead.",
       zh: "把裡面的歌加進你自己的歌單，設成公開，再貼上那個歌單的連結。",
+      pt: "Copie as músicas para uma playlist sua, deixe-a pública e cole o link dela.",
     },
     label: {
       en: "How to copy a Spotify playlist",
       zh: "怎麼複製官方歌單",
+      pt: "Como copiar uma playlist do Spotify (em inglês)",
     },
   },
   private: {
@@ -109,10 +111,12 @@ export const PLAYLIST_HELP_TOPICS: Record<PlaylistHelpTopic, PlaylistHelpCopy> =
     step: {
       en: "Just made it public? Spotify can take a minute to catch up. Otherwise open the playlist's ⋯ menu in Spotify and make it public.",
       zh: "剛設成公開嗎？Spotify 有時要一兩分鐘才會更新。還沒改的話，在 Spotify 打開這個歌單的「⋯」選單，把它設成公開。",
+      pt: "Acabou de deixar pública? O Spotify pode levar um minuto para atualizar. Se não, abra o menu ⋯ da playlist no Spotify e deixe-a pública.",
     },
     label: {
       en: "How to make a playlist public",
       zh: "怎麼把歌單設成公開",
+      pt: "Como deixar uma playlist pública (em inglês)",
     },
   },
   wrong_link: {
@@ -123,10 +127,12 @@ export const PLAYLIST_HELP_TOPICS: Record<PlaylistHelpTopic, PlaylistHelpCopy> =
     step: {
       en: "Open the playlist itself (or the album, or the artist's page) in Spotify, choose Share → Copy link, and paste that.",
       zh: "在 Spotify 打開歌單本身（或專輯、歌手頁面），按「分享」→「複製連結」，再貼到這裡。",
+      pt: "Abra a própria playlist (ou o álbum, ou a página do artista) no Spotify, toque em Compartilhar → Copiar link e cole aqui.",
     },
     label: {
       en: "What a playlist link looks like",
       zh: "歌單連結長什麼樣子",
+      pt: "Como é um link de playlist (em inglês)",
     },
   },
   empty: {
@@ -134,10 +140,12 @@ export const PLAYLIST_HELP_TOPICS: Record<PlaylistHelpTopic, PlaylistHelpCopy> =
     step: {
       en: "Add songs to it in Spotify first — files from your own device don't count — or paste a different playlist.",
       zh: "先在 Spotify 把歌加進去（自己裝置上的本機檔案不算），或是換一個歌單。",
+      pt: "Adicione músicas a ela no Spotify primeiro — arquivos do seu próprio aparelho não contam — ou cole outra playlist.",
     },
     label: {
       en: "Why a playlist can come back empty",
       zh: "為什麼歌單會是空的",
+      pt: "Por que uma playlist pode vir vazia (em inglês)",
     },
   },
 };
@@ -303,6 +311,22 @@ const RECHECK_COPY: Record<
     // The setup page's button reads "Start Game" in every language; name it as it reads.
     found: "現在是公開的了，按上面的「Start Game」開始吧。",
   },
+  // The pt setup page translates its Start button (lib/setup-copy.ts), so the
+  // found line names it as it reads there: "Começar o jogo".
+  pt: {
+    openLabel: "Abrir no Spotify",
+    recheckLabel: "Deixei pública — tentar de novo",
+    checkingLabel: "Verificando…",
+    notes: {
+      pending: "Vamos verificar de novo automaticamente em uns 30 segundos.",
+      auto_checking: "Verificando de novo…",
+      still_refused: "O Spotify ainda diz que ela é privada — tente de novo daqui a pouco.",
+      auto_still_refused:
+        "Verificamos de novo: o Spotify ainda diz que ela é privada. Toque em \"Deixei pública — tentar de novo\" depois de mudar.",
+      not_asked: "Dê mais alguns segundos ao Spotify e toque em \"Deixei pública — tentar de novo\".",
+    },
+    found: "Agora ela está pública — toque em Começar o jogo.",
+  },
 };
 
 /** The line that replaces a private refusal once a check found the playlist. */
@@ -335,7 +359,9 @@ export function recheckOffer(
  * only from the round badge before this.
  */
 export function artistLinkNotice(locale: ErrorLocale): string {
-  return locale === "zh" ? "歌手連結會玩他們最熱門的 10 首歌。" : "An artist link plays their top 10 songs.";
+  if (locale === "zh") return "歌手連結會玩他們最熱門的 10 首歌。";
+  if (locale === "pt") return "Um link de artista toca as 10 músicas mais populares dele.";
+  return "An artist link plays their top 10 songs.";
 }
 
 export function editorialWarning(locale: ErrorLocale): { notice: string } & PlaylistHelp {

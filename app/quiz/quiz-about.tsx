@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { SiteFooter } from "@/components/site-footer";
 import { QUIZ_ABOUT } from "@/lib/quiz-about";
+import { siteLocale } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 
 /**
@@ -44,7 +45,7 @@ const inlineLink = { color: "#1DB954", textDecoration: "underline", textUnderlin
 
 export function QuizAboutAndFooter() {
   const locale = useErrorLocale();
-  const about = QUIZ_ABOUT[locale];
+  const about = QUIZ_ABOUT[siteLocale(locale)];
 
   return (
     <div lang={locale === "zh" ? "zh-Hant-TW" : undefined}>
@@ -88,7 +89,7 @@ export function QuizAboutAndFooter() {
           {about.closing.after}
         </p>
       </section>
-      <SiteFooter locale={locale} />
+      <SiteFooter locale={siteLocale(locale)} />
     </div>
   );
 }

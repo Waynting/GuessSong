@@ -99,7 +99,7 @@ describe("the storage half", () => {
   });
 
   it("is called by the setup page's one start path, and the step rides on the start beacon", () => {
-    const page = read("app/page.tsx");
+    const page = read("app/setup-page.tsx");
     expect(page.match(/takeSoloStep\(/g)).toHaveLength(1);
     expect(page).toMatch(/const soloStep = takeSoloStep\(players\);/);
     expect(page).toMatch(/\.\.\.\(soloStep \? \{ soloStep \} : \{\}\),/);

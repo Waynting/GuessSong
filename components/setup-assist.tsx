@@ -6,7 +6,7 @@
  * link that was refused, and that the link they have just pasted is one of
  * Spotify's own.
  *
- * They live here rather than in `app/page.tsx` for the reason
+ * They live here rather than in `app/setup-page.tsx` for the reason
  * `components/setup-chrome.tsx` gives for itself — a class name a component
  * depends on should be declared in a file it imports — and they are kept to
  * markup: which chips, which help and which warning is decided in `lib/`
@@ -20,6 +20,7 @@
  */
 
 import type { PlaylistHelp, RecheckNote, RecheckOffer } from "@/lib/playlist-help";
+import { SETUP_COPY, type SetupCopy } from "@/lib/setup-copy";
 
 export function SetupAssistStyles() {
   return (
@@ -181,14 +182,17 @@ export function SetupAssistStyles() {
 export function RecallNote({
   onStartFresh,
   locked,
+  copy = SETUP_COPY.en.recall,
 }: {
   onStartFresh: () => void;
   /** A room is open or a start is in flight: the way out is withheld. */
   locked: boolean;
+  /** The page's language (lib/setup-copy.ts); English when omitted. */
+  copy?: SetupCopy["recall"];
 }) {
   return (
     <p className="recall-note fade-in fade-in-2">
-      <span>Filled in from your last game here.</span>
+      <span>{copy.line}</span>
       {/* Hidden, not removed, while it is locked. Taking the whole line away
           would move the card — and the Start button under the host's thumb —
           by its height at the moment Start is pressed, and back again if the
@@ -201,7 +205,7 @@ export function RecallNote({
         aria-hidden={locked}
         style={locked ? { visibility: "hidden" } : undefined}
       >
-        Start fresh
+        {copy.startFresh}
       </button>
     </p>
   );

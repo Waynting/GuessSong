@@ -150,11 +150,13 @@ describe("SERVICE_NOTICE_UI", () => {
   const LABELS = ["dismiss", "close", "repo"] as const;
   const STATES = ["blocked", "warning"] as const;
 
-  it("carries both languages, and they differ", () => {
+  it("carries every language, and they differ", () => {
     for (const key of LABELS) {
       expect(SERVICE_NOTICE_UI.en[key].trim()).not.toBe("");
       expect(SERVICE_NOTICE_UI.zh[key].trim()).not.toBe("");
       expect(SERVICE_NOTICE_UI.en[key]).not.toBe(SERVICE_NOTICE_UI.zh[key]);
+      expect(SERVICE_NOTICE_UI.pt[key].trim()).not.toBe("");
+      expect(SERVICE_NOTICE_UI.pt[key]).not.toBe(SERVICE_NOTICE_UI.en[key]);
     }
     for (const state of STATES) {
       expect(SERVICE_NOTICE_UI.en.title[state].trim()).not.toBe("");
@@ -162,6 +164,20 @@ describe("SERVICE_NOTICE_UI", () => {
       expect(SERVICE_NOTICE_UI.en.title[state]).not.toBe(
         SERVICE_NOTICE_UI.zh.title[state]
       );
+      expect(SERVICE_NOTICE_UI.pt.title[state].trim()).not.toBe("");
+      expect(SERVICE_NOTICE_UI.pt.title[state]).not.toBe(SERVICE_NOTICE_UI.en.title[state]);
+    }
+  });
+
+  /**
+   * Added with the Portuguese half because of the report that prompted it: a
+   * Brazilian first-timer read "today's allowance is gone" as a limit on
+   * them. Both Portuguese headlines name the site, so neither reads as
+   * personal.
+   */
+  it("says the site, not the reader, in both Portuguese headlines", () => {
+    for (const state of STATES) {
+      expect(SERVICE_NOTICE_UI.pt.title[state]).toMatch(/\bsite\b/);
     }
   });
 
@@ -172,7 +188,7 @@ describe("SERVICE_NOTICE_UI", () => {
    * away from a site that would have worked for them.
    */
   it("does not reuse the refusal headline for the warning", () => {
-    for (const locale of ["en", "zh"] as const) {
+    for (const locale of ["en", "zh", "pt"] as const) {
       expect(SERVICE_NOTICE_UI[locale].title.warning).not.toBe(
         SERVICE_NOTICE_UI[locale].title.blocked
       );

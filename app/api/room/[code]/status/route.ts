@@ -6,7 +6,7 @@ import { errorResponse } from "@/lib/api-error";
 // Room codes are only 4 chars (~1M combos) — without a limit here, an
 // unthrottled client could enumerate the whole code space and read every
 // active room's player names. The host's own page polls this every 4s
-// (ROOM_POLL_INTERVAL_MS in app/page.tsx), i.e. up to 150 requests per
+// (ROOM_POLL_INTERVAL_MS in app/setup-page.tsx), i.e. up to 150 requests per
 // 10-minute window on its own — keep the limit comfortably above that.
 const STATUS_LIMIT = 200;
 const STATUS_WINDOW_SECONDS = 10 * 60;

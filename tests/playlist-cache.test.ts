@@ -553,7 +553,7 @@ describe("short links on the paste path", () => {
 
   it("answers a short link it could not follow with a code the host may retry", async () => {
     // A timeout says nothing about the link. If this were deterministic,
-    // app/page.tsx would stop asking and strand a host whose link was fine.
+    // app/setup-page.tsx would stop asking and strand a host whose link was fine.
     const net = redirector(
       new DOMException("The operation timed out.", "TimeoutError"),
       { status: 307, location: URL_A }

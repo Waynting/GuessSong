@@ -2,7 +2,7 @@
  * How many tracks of a playlist a game plays.
  *
  * The presets and the custom field share one value: `songCount` in
- * `app/page.tsx` is either `"all"` or a number, and a typed count is just a
+ * `app/setup-page.tsx` is either `"all"` or a number, and a typed count is just a
  * number that happens not to be in `SONG_COUNTS`. Keeping it that way is why
  * the start path stays a single `slice` with nothing to reconcile.
  *

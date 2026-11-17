@@ -50,7 +50,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import { getKvStore } from "@/lib/kv";
 import { timingSafeEqualStrings } from "@/lib/timing-safe";
 import { getPreview } from "@/lib/preview-cache";
-import { errorMessage, type AppErrorCode, type ErrorLocale } from "@/lib/error-messages";
+import { errorMessage, type AppErrorCode, type SiteLocale } from "@/lib/error-messages";
 import {
   buildQuiz,
   clampHintsUsed,
@@ -100,7 +100,7 @@ interface QuizMeta {
   ownerName: string | null;
   playlistName: string;
   questionCount: number;
-  locale: ErrorLocale;
+  locale: SiteLocale;
   createdAt: number;
   expiresAt: number;
   hostToken: string;
@@ -270,7 +270,7 @@ export interface CreateQuizInput {
   questionCount: number;
   ownerName: string | null;
   playlistName: string;
-  locale: ErrorLocale;
+  locale: SiteLocale;
   pool: readonly DecoyEntry[];
   /** What the host asked the questions to be. Absent is the duel. */
   kind?: QuizKind;
@@ -442,7 +442,7 @@ export interface QuizPeek {
   ownerName: string | null;
   playlistName: string;
   questionCount: number;
-  locale: ErrorLocale;
+  locale: SiteLocale;
   /** What the card says the rule is: the duel's, or the lyric line's. */
   kind: QuizKind;
 }

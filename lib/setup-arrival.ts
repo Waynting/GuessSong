@@ -13,7 +13,7 @@
  * and redirects rather than opening on the party form with the quiz nowhere
  * in sight, which is the landing this file was first written to fix.
  *
- * Kept in `lib/` so the rule has a test — `app/page.tsx` reads the query off
+ * Kept in `lib/` so the rule has a test — `app/setup-page.tsx` reads the query off
  * `window.location` in an effect, which the suite cannot reach — and typed
  * against `LoopSurface` so a renamed surface is a compile error here rather
  * than a redirect that quietly lands on the wrong page again.

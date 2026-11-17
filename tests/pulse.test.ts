@@ -172,6 +172,22 @@ describe("parsePulse — which starter list (2026-11-10)", () => {
   });
 });
 
+describe("parsePulse — the setup page's language (2026-11-17)", () => {
+  it("keeps pt, drops everything else — en included, which is never sent — and keeps the game", () => {
+    expect(parsePulse({ kind: "game_started", hostGameIndex: 1, locale: "pt" })).toEqual({
+      kind: "game_started",
+      hostGameIndex: 1,
+      locale: "pt",
+    });
+    // `host_locale:${value}` is a key; only the Portuguese page sends one.
+    for (const bad of ["en", "zh", "pt-BR", "PT", "", "__proto__", 1, null, {}, ["pt"]]) {
+      const parsed = parsePulse({ kind: "game_started", hostGameIndex: 1, locale: bad });
+      expect(parsed, String(bad)).toEqual({ kind: "game_started", hostGameIndex: 1 });
+      expect(parsed && "locale" in parsed, String(bad)).toBe(false);
+    }
+  });
+});
+
 describe("parsePulse — the setup source", () => {
   it("accepts every declared source", () => {
     for (const source of SETUP_SOURCES) {
@@ -712,7 +728,7 @@ describe("the route records every kind the parser accepts", () => {
     // The mode rides to all three game recorders, or the KV rows read as
     // "no mode was ever sent".
     expect(route).toMatch(
-      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,\s*players: event\.players,\s*from: event\.from,\s*starter: event\.starter,\s*playlistKind: event\.playlistKind,\s*soloStep: event\.soloStep,\s*teams: event\.teams,\s*challenge: event\.challenge,\s*\}\)/
+      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,\s*players: event\.players,\s*from: event\.from,\s*starter: event\.starter,\s*playlistKind: event\.playlistKind,\s*soloStep: event\.soloStep,\s*teams: event\.teams,\s*challenge: event\.challenge,\s*locale: event\.locale,\s*\}\)/
     );
     expect(route).toMatch(
       /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored, event\.arranged, event\.playlistKind\)/

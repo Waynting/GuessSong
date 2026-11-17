@@ -53,7 +53,7 @@ keyed to a person. That is a product decision, not an omission — see
 ## 2. One game, start to finish
 
 ```
-SETUP  app/page.tsx
+SETUP  app/setup-page.tsx
   │
   │  paste playlist URL, add players, pick clip length
   ▼

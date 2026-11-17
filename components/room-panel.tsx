@@ -31,6 +31,7 @@ import { roomJobs, trackEvent } from "@/lib/analytics";
 import { DEFAULT_HOST_NAME } from "@/lib/game-session";
 import { apiError, buzzerErrorMessage, describeError, errorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
+import { SETUP_COPY, type SetupLocale } from "@/lib/setup-copy";
 import { usePlaylistLinkCheck } from "@/lib/use-playlist-link";
 import { readStored, writeStored } from "@/lib/host-session";
 import { canPollAgainAfter, pollIntervalMs, pollTickAction } from "@/lib/room-poll";
@@ -54,6 +55,8 @@ export interface RoomPanelProps {
    * a buzzer (lib/order-phone.ts). Changes what the panel says, nothing else.
    */
   orderGame?: boolean;
+  /** The setup page's language (lib/setup-copy.ts); English when omitted. */
+  locale?: SetupLocale;
 }
 
 export function RoomPanel({
@@ -64,7 +67,9 @@ export function RoomPanel({
   onPhoneCountChange,
   onSubmissionsChange,
   orderGame = false,
+  locale: pageLocale = "en",
 }: RoomPanelProps) {
+  const copy = SETUP_COPY[pageLocale].room;
   // The host buzzes like everyone else, so they need a name the scoreboard can
   // award points to. Persisted per browser so a host isn't retyping it every
   // party.
@@ -89,7 +94,10 @@ export function RoomPanel({
   const [hostTrackCount, setHostTrackCount] = useState<number | null>(null);
   const [hostSubmitError, setHostSubmitError] = useState<string | null>(null);
   const hostPlaylistLink = usePlaylistLinkCheck(hostPlaylistUrl, "room_panel");
-  const locale = useErrorLocale();
+  // The device's language for errors, except on the Portuguese page, whose
+  // reader is Portuguese whatever the device says.
+  const deviceLocale = useErrorLocale();
+  const locale = pageLocale === "pt" ? "pt" : deviceLocale;
 
   useEffect(() => {
     // Guarded: a locked-down browser throws on the property access, and this
@@ -342,7 +350,7 @@ export function RoomPanel({
     const url = roomJoinUrl(room);
     try {
       if (typeof navigator.share === "function") {
-        await navigator.share({ url, title: `Join room ${room.code} on GuessSong` });
+        await navigator.share({ url, title: copy.shareTitle(room.code) });
         return;
       }
       await navigator.clipboard.writeText(url);
@@ -358,7 +366,7 @@ export function RoomPanel({
     return (
       <div className="card" style={{ padding: "24px", textAlign: "center" }}>
         <p style={{ fontSize: "13px", color: "#777", marginBottom: "16px" }}>
-          {describeRoom(collectsPlaylists, buzzer, orderGame)}
+          {copy.describe(collectsPlaylists, buzzer, orderGame)}
         </p>
         {buzzer && (
           <>
@@ -366,24 +374,24 @@ export function RoomPanel({
               style={{ display: "block", fontSize: "12px", color: "#777", marginBottom: "6px" }}
               htmlFor="host-name"
             >
-              Your name
+              {copy.yourName}
             </label>
             <input
               id="host-name"
               className="player-input"
               value={hostName}
               onChange={(e) => setHostName(e.target.value)}
-              placeholder="Your name"
+              placeholder={copy.yourName}
               maxLength={24}
               style={{ marginBottom: "6px", textAlign: "center" }}
             />
             <p style={{ fontSize: "12px", color: "#777", marginBottom: "16px", textAlign: "center" }}>
-              {orderGame ? "You can play from this screen too." : "You can buzz from this screen too."}
+              {orderGame ? copy.hostCanPlay.order : copy.hostCanPlay.guess}
             </p>
           </>
         )}
         <button className="start-btn" onClick={handleOpen} disabled={opening}>
-          {opening ? "Opening Room..." : "Open Room"}
+          {opening ? copy.opening : copy.open}
         </button>
         {error && <p style={{ marginTop: "10px", fontSize: "12px", color: "#fca5a5" }}>{error}</p>}
       </div>
@@ -414,15 +422,15 @@ export function RoomPanel({
         // eslint-disable-next-line @next/next/no-img-element -- client-generated data: URI
         <img
           src={qr}
-          alt={`QR code to join room ${room.code}`}
+          alt={copy.qrAlt(room.code)}
           style={{ width: "180px", height: "180px", margin: "0 auto 12px", borderRadius: "8px" }}
         />
       )}
       <button className="add-player-btn" onClick={handleShare} style={{ marginBottom: "14px" }}>
-        {copied ? "✓ Link copied" : "Share Join Link"}
+        {copied ? copy.linkCopied : copy.shareLink}
       </button>
       <p style={{ fontSize: "12px", color: "#666", marginBottom: "14px" }}>
-        Or send the link.
+        {copy.orSendLink}
       </p>
 
       {/* The hook's refusal used to be discarded here, so a socket the
@@ -438,7 +446,7 @@ export function RoomPanel({
             onClick={reconnect}
             style={{ background: "none", border: 0, padding: 0, color: "#f0f0f0", textDecoration: "underline", cursor: "pointer", font: "inherit" }}
           >
-            Reconnect
+            {copy.reconnect}
           </button>
         </p>
       ) : (
@@ -446,8 +454,8 @@ export function RoomPanel({
           {/* "in the room", not "joined": once the host adds their own playlist
               they show up in this list too, and they didn't scan anything. */}
           {room.buzzer && !connected
-            ? "Connecting to room…"
-            : `${roster.length} in the room`}
+            ? copy.connecting
+            : copy.inTheRoom(roster.length)}
         </p>
       )}
 
@@ -468,11 +476,11 @@ export function RoomPanel({
               {room.collectsPlaylists && (
                 <span style={{ color: "#666" }}>
                   {r.trackCount === undefined
-                    ? " · no playlist yet"
-                    : ` · ${r.trackCount} tracks`}
+                    ? copy.noPlaylistYet
+                    : copy.tracks(r.trackCount)}
                 </span>
               )}
-              {r.live === false && " (away)"}
+              {r.live === false && copy.away}
             </span>
           ))}
         </div>
@@ -481,8 +489,8 @@ export function RoomPanel({
       {roster.length === 0 && (!room.buzzer || connected) && (
         <p style={{ fontSize: "12px", color: "#555", marginTop: "10px" }}>
           {room.buzzer
-            ? "Nobody yet — latecomers can join mid-game."
-            : "Nobody yet."}
+            ? copy.nobodyYetBuzzer
+            : copy.nobodyYet}
         </p>
       )}
 
@@ -500,20 +508,19 @@ export function RoomPanel({
         >
           {hostTrackCount !== null ? (
             <p style={{ fontSize: "13px", color: "#8fd6a5" }}>
-              ✓ Your playlist is in — {hostTrackCount} track
-              {hostTrackCount === 1 ? "" : "s"} from {hostLabel}
+              {copy.hostPlaylistIn(hostTrackCount, hostLabel)}
             </p>
           ) : (
             <>
               <p style={{ fontSize: "12px", color: "#777", marginBottom: "8px" }}>
-                Add your own playlist too.
+                {copy.addYourOwn}
               </p>
               {!buzzer && (
                 <input
                   className="player-input"
                   value={hostName}
                   onChange={(e) => setHostName(e.target.value)}
-                  placeholder="Your name"
+                  placeholder={copy.yourName}
                   maxLength={24}
                   style={{ width: "100%", marginBottom: "8px" }}
                 />
@@ -523,7 +530,7 @@ export function RoomPanel({
                 className="player-input"
                 value={hostPlaylistUrl}
                 onChange={(e) => setHostPlaylistUrl(e.target.value)}
-                placeholder="https://open.spotify.com/playlist/... or /album/... or /artist/..."
+                placeholder={SETUP_COPY[pageLocale].playlistPlaceholder}
                 spellCheck={false}
                 style={{ width: "100%", marginBottom: "8px" }}
               />
@@ -547,7 +554,7 @@ export function RoomPanel({
                 // with its reason rather than after a round trip.
                 disabled={hostSubmitting || !hostPlaylistLink.submittable}
               >
-                {hostSubmitting ? "Adding..." : "Add My Playlist"}
+                {hostSubmitting ? copy.adding : copy.addMine}
               </button>
               {hostSubmitError && !hostPlaylistLink.problem && (
                 <p style={{ marginTop: "8px", fontSize: "12px", color: "#fca5a5" }}>
@@ -563,20 +570,9 @@ export function RoomPanel({
           say so rather than letting a host wonder why one QR covers both. */}
       {room.buzzer && room.collectsPlaylists && (
         <p style={{ fontSize: "12px", color: "#555", marginTop: "12px", lineHeight: 1.5 }}>
-          One code does both — playlists close when the game starts, buzzers stay open.
+          {copy.oneCodeBoth}
         </p>
       )}
     </div>
   );
-}
-
-function describeRoom(collectsPlaylists: boolean, buzzer: boolean, orderGame: boolean): string {
-  const gets = orderGame ? "the cards" : "a buzzer";
-  if (collectsPlaylists && buzzer) {
-    return `One QR code does both — players scan it to add a playlist and get ${gets}.`;
-  }
-  if (collectsPlaylists) {
-    return "Players scan a QR code to add their own playlist.";
-  }
-  return `Players scan a QR code to get ${gets} on their phone.`;
 }

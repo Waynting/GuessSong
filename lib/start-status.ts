@@ -8,7 +8,7 @@
  * those the host is told — and which one when several hold at once — is the
  * rule this module is.
  *
- * It lives here rather than in `app/page.tsx` for the reason `lib/song-count.ts`
+ * It lives here rather than in `app/setup-page.tsx` for the reason `lib/song-count.ts`
  * and `lib/room-poll.ts` give: the test suite only reaches `lib/`, and vitest
  * cannot import a `.tsx` module here. Inside the button's render this was a
  * ladder of five branches with no test, and the strings on it are what a host
@@ -19,6 +19,7 @@
  */
 
 import type { MixedSubMode } from "@/lib/loop-stats";
+import { SETUP_COPY, type SetupLocale } from "@/lib/setup-copy";
 
 /**
  * The two ways to run a party from the setup page. The Taste Quiz used to be
@@ -43,7 +44,7 @@ export const SETUP_MODES: readonly SetupMode[] = ["single", "mixed"];
 /**
  * The fewest playlists a mix can be made from. Declared once, here, because
  * two things read it and must agree: the ladder below, which holds the button
- * until the roster reaches it, and `handleMixedStart` in `app/page.tsx`, which
+ * until the roster reaches it, and `handleMixedStart` in `app/setup-page.tsx`, which
  * refuses with `mixed_min_contributors` if a start gets through anyway.
  */
 export const MIXED_MIN_CONTRIBUTORS = 2;
@@ -70,6 +71,8 @@ export interface StartInputs {
   mixedContributions: number;
   /** QR room roster: playlists submitted from other phones. */
   roomSubmissions: number;
+  /** The page's language (lib/setup-copy.ts); English when omitted. */
+  locale?: SetupLocale;
 }
 
 export interface StartState {
@@ -100,7 +103,9 @@ export function startState({
   buzzerPlayerCount,
   mixedContributions,
   roomSubmissions,
+  locale = "en",
 }: StartInputs): StartState {
+  const lines = SETUP_COPY[locale].status;
   const isMixedPhone = setupMode === "mixed" && mixedSubMode === "phone";
   const isMixedRoom = setupMode === "mixed" && mixedSubMode === "room";
   const phoneShort = MIXED_MIN_CONTRIBUTORS - mixedContributions;
@@ -122,20 +127,17 @@ export function startState({
   if (busy) {
     // The spinner on the button says enough.
   } else if (isMixedPhone && phoneShort > 0) {
-    status = `Add ${phoneShort} more player${phoneShort === 1 ? "" : "s"} to start`;
+    status = lines.addPlayers(phoneShort);
   } else if (roomNotReady) {
-    status = "Open the room first";
+    status = lines.openRoom;
   } else if (isMixedRoom && roomShort > 0) {
     // Playlists, not players. The host is a player too but scans
     // nothing, so counting people here read as "wait for another
     // guest" when what was actually missing was the host's own
     // playlist — which they add from the room card.
-    status = `Waiting for ${roomShort} more playlist${roomShort === 1 ? "" : "s"}`;
+    status = lines.waitingPlaylists(roomShort);
   } else if (buzzerEnabled) {
-    status =
-      buzzerPlayerCount > 0
-        ? `${buzzerPlayerCount} phone${buzzerPlayerCount === 1 ? "" : "s"} ready`
-        : "Nobody has scanned yet — you can still start";
+    status = buzzerPlayerCount > 0 ? lines.phonesReady(buzzerPlayerCount) : lines.nobodyScanned;
   }
 
   return { disabled, status };

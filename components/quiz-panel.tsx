@@ -56,7 +56,7 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { QuizSocialLinks } from "@/components/quiz-social-links";
 import { reportQuizCopy, reportQuizShare } from "@/lib/loop-client";
-import type { ErrorLocale } from "@/lib/error-messages";
+import { siteLocale, type ErrorLocale } from "@/lib/error-messages";
 import {
   QUIZ_COPY,
   builtShorterNote,
@@ -128,7 +128,7 @@ export function QuizPanel({
   expiresAt: number;
   locale: ErrorLocale;
 }) {
-  const copy = QUIZ_COPY[locale];
+  const copy = QUIZ_COPY[siteLocale(locale)];
   const [qr, setQr] = useState<string | null>(null);
   // One slot, not two flags: "copied" flashes and clears, "failed" stays up
   // until the next attempt settles it. They cannot both be true, and the

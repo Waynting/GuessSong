@@ -5,7 +5,7 @@
  * Taste Quiz link). One stylesheet, one backdrop, the two icons both forms
  * draw.
  *
- * This used to be a 400-line `<style>` block inside `app/page.tsx` that
+ * This used to be a 400-line `<style>` block inside `app/setup-page.tsx` that
  * `RoomPanel`, `QuizPanel` and `MixedPlaylistCollector` all quietly depended
  * on for their class names — a component rendered anywhere else came out
  * unstyled, and nothing said why. Now the dependency is a named import: a

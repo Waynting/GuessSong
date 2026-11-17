@@ -261,6 +261,12 @@ export function starterCaption(count: number): string {
   return count === 1 ? "No playlist handy? Start with ours" : "No playlist handy? Try one of these";
 }
 
+/**
+ * Which of the four heads `label` is, for a page that renders the row in
+ * another language (lib/setup-copy.ts `chipRow`). `label` stays the English.
+ */
+export type ChipRowKind = "recent" | "starters" | "themes" | "playlists";
+
 export interface FieldChipRow<T extends { id: string }, S extends { id: string } = StarterPlaylist> {
   /** The one row under the field: the recent chips, then the starters not already among them. */
   playlists: ReadonlyArray<T | S>;
@@ -270,6 +276,8 @@ export interface FieldChipRow<T extends { id: string }, S extends { id: string }
   caption: string | null;
   /** The row's name for a screen reader, and its head when there is no caption. */
   label: string;
+  /** Which head `label` is. */
+  kind: ChipRowKind;
 }
 
 /**
@@ -293,7 +301,7 @@ export function fieldChipRow<T extends { id: string }, S extends { id: string } 
   { themed = false }: { themed?: boolean } = {}
 ): FieldChipRow<T, S> {
   if (place !== "field") {
-    return { playlists: recent, starterIds: new Set(), caption: null, label: "Recent" };
+    return { playlists: recent, starterIds: new Set(), caption: null, label: "Recent", kind: "recent" };
   }
   const recentIds = new Set(recent.map((r) => r.id));
   const added = starters.filter((s) => !recentIds.has(s.id));
@@ -302,6 +310,7 @@ export function fieldChipRow<T extends { id: string }, S extends { id: string } 
     starterIds: new Set(added.map((s) => s.id)),
     caption: recent.length === 0 ? (themed ? THEME_CAPTION : starterCaption(starters.length)) : null,
     label: recent.length === 0 ? (themed ? "Themes" : "Starter playlists") : "Playlists",
+    kind: recent.length === 0 ? (themed ? "themes" : "starters") : "playlists",
   };
 }
 

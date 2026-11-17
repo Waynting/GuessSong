@@ -117,7 +117,7 @@ import { QUIZ_SETUP_HREF } from "@/lib/setup-arrival";
 import { trackEvent } from "@/lib/analytics";
 import { reportQuizCopy, reportQuizShare } from "@/lib/loop-client";
 import { QuizSocialLinks } from "@/components/quiz-social-links";
-import { AppError, apiError, describeError, errorMessage, type AppErrorCode } from "@/lib/error-messages";
+import { AppError, apiError, describeError, errorMessage, siteLocale, type AppErrorCode } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { foldQuizName, hintCharge, rankOf, type QuizVerdict } from "@/lib/quiz";
 import {
@@ -424,7 +424,7 @@ const DUEL_CSS = `
 
 export function QuizClient({ code }: { code: string }) {
   const locale = useErrorLocale();
-  const copy = QUIZ_COPY[locale];
+  const copy = QUIZ_COPY[siteLocale(locale)];
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [view, setView] = useState<QuizView | null>(null);

@@ -26,7 +26,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { apiError, describeError } from "@/lib/error-messages";
+import { apiError, describeError, siteLocale } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { reportQuizCopy } from "@/lib/loop-client";
 import { QUIZ_COPY, fillCopy, quizTitle, relativeTime } from "@/lib/quiz-copy";
@@ -53,7 +53,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function QuizMine() {
   const locale = useErrorLocale();
-  const copy = QUIZ_COPY[locale];
+  const copy = QUIZ_COPY[siteLocale(locale)];
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [items, setItems] = useState<QuizMineItem[]>([]);

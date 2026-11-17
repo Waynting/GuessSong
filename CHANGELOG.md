@@ -160,6 +160,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built around. The friend's load spends Spotify quota only on a cache miss.
   A challenge arrival is filed under `host_setup:shared` (it is a
   `?playlist=` arrival); `challenge:started` is its own count.
+- **Brazilian Portuguese for the setup page and every error message.** Brazil
+  is the largest market in the wave since 2026-11-11 (loads peak 22:00–04:00
+  Brasília), and a Brazilian first-timer read the site-wide quota notice
+  ("today's allowance is gone") as a personal limit and wrote in Portuguese.
+  Two halves:
+  - *Errors.* `ErrorLocale` is `en | zh | pt`, and `ERROR_MESSAGES` carries a
+    `pt` line for every code (placeholders identical), so a missing one is a
+    compile error. `detectErrorLocale` / `useErrorLocale` resolve `pt` for any
+    `pt` / `pt-*` device. The buzzer sentences go through the same table.
+    The two quota codes and `spotify_budget_low` say in Portuguese that it is
+    the whole site's allowance, not the reader's ("não é culpa sua", "o site
+    inteiro"). Pages that are not translated (the quiz, the game pages) read
+    their copy through `siteLocale()`, which folds `pt` into `en`, and their
+    errors in Portuguese; `QUIZ_COPY`, `QUIZ_ABOUT`, the quiz's stored
+    `locale` and `quiz_locale:<l>` are typed by `SiteLocale` (`en | zh`) and
+    did not change. `lib/playlist-help.ts`, `SERVICE_NOTICE_UI` and
+    `CRASH_SCREEN_UI` gained their `pt` halves.
+  - *The setup page.* Every sentence on `/` (tiles, labels, buttons, helper
+    lines, roster placeholders, the status line under Start, the FAQ, the
+    room card and pass-the-phone) is in `lib/setup-copy.ts`,
+    `Record<SetupLocale, SetupCopy>`, with `en` byte-identical to what
+    `app/page.tsx` said. The form moved to `app/setup-page.tsx`
+    (`SetupPage({ locale })`); `app/page.tsx` renders it in English and the
+    new `app/pt/page.tsx` in Portuguese, both prerendered (○). `middleware.ts`
+    (matcher `["/"]` only) rewrites — never redirects — `/` to `/pt` when the
+    top Accept-Language preference is Portuguese (`lib/accept-language.ts`),
+    and sets `Vary: Accept-Language` on both branches; Googlebot and every
+    other reader get today's `/`. `/pt` is `noindex, follow` with its
+    canonical on `/`. The hero `<h2>` stays English on both pages and out of
+    the table. The footer's "What's new" overlay and `lib/changelog.ts` stay
+    en/zh; `/about`, `/guides`, `/zh`, the game pages and the quiz are not
+    translated.
+  - The setup surfaces that landed beside it carry Portuguese too: the
+    "Today's challenge" door (`DAILY_DOOR_COPY.pt`, shown on `/pt` only —
+    `/` keeps en/zh, because its note names the English tile), the theme
+    row's head and caption, "Split into two teams" with its chips and
+    "2 a side needed", and the challenge banner over Start. The lyric-line
+    codes (`lyric_absent`, `lyric_unavailable`, `rate_limited_lyric`) have
+    `pt` lines. The game and order pages stay English.
+  - *Counting.* No per-page-view counter (cost). The `game_started` pulse
+    carries `locale: "pt"` from the Portuguese page only, written as
+    `host_locale:pt` (closed set `COUNTED_SETUP_LOCALES`, guarded in
+    `parsePulse` and in `recordGameStart`); `npm run stats` prints it as
+    "setup page language" over `Games started`.
+  - This is the `docs/decisions.md` reopen condition for localisation being
+    met — the server-side `Accept-Language` hint, with no flash — for one
+    language and one page. Full-site localisation stays rejected; the row
+    says so.
+
 - **Does a solo try come back as a party?** Since 2026-11-11 most games are
   one person alone from Google (30,701 one-player starts in a week against
   4,435 with two or more), and nothing could say whether that is the step

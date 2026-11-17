@@ -3,6 +3,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PHONE_MEDIA_QUERY } from "@/lib/game-over";
+import { SETUP_COPY } from "@/lib/setup-copy";
+import { orderSummary } from "@/lib/order-game";
 
 /**
  * The order page's wiring, as far as the suite can see it.
@@ -42,7 +44,7 @@ function phoneBlock(css: string): string {
 }
 
 const ORDER = "app/order/page.tsx";
-const SETUP = "app/page.tsx";
+const SETUP = "app/setup-page.tsx";
 const source = read(ORDER);
 const body = code(source);
 
@@ -325,8 +327,12 @@ describe("the setup page starts an order game the same way on all three paths", 
   });
 
   it("hides the clip length in the order style, and offers the buzzer there as phones", () => {
-    expect(setup).toMatch(/\{!isOrder && \(\s*<div>\s*<p className="section-label">Clip Duration<\/p>/);
-    expect(setup).toMatch(/\{isBuzzerConfigured\(\) && who !== "solo" && \(\s*<div>\s*<p className="section-label">\{isOrder \? "Play on phones" : "Buzzer Mode"\}<\/p>/);
+    // The words are lib/setup-copy.ts's since the Portuguese page (2026-11-17);
+    // the English is pinned there, the wiring here.
+    expect(setup).toMatch(/\{!isOrder && \(\s*<div>\s*<p className="section-label">\{copy\.clipLabel\}<\/p>/);
+    expect(setup).toMatch(/\{isBuzzerConfigured\(\) && who !== "solo" && \(\s*<div>\s*<p className="section-label">\{isOrder \? copy\.buzzerLabel\.order : copy\.buzzerLabel\.guess\}<\/p>/);
+    expect(SETUP_COPY.en.clipLabel).toBe("Clip Duration");
+    expect(SETUP_COPY.en.buzzerLabel).toEqual({ guess: "Buzzer Mode", order: "Play on phones" });
     expect(setup).not.toMatch(/isBuzzerConfigured\(\) && !isOrder/);
     expect(setup).toMatch(/choosePlayStyle\("order"\)/);
     expect(setup).toMatch(/choosePlayStyle\("guess"\)/);
@@ -342,7 +348,9 @@ describe("the setup page starts an order game the same way on all three paths", 
     // best cell in the mode × players table at 2+ — shows under every roster.
     expect(roster).toMatch(/\{isBuzzerConfigured\(\) && \(\s*<button type="button" className="buzzer-nudge" onClick=\{offerBuzzer\}>/);
     expect(setup).not.toMatch(/mixed-nudge|showMixedNudge|reportMixedNudge|mixedNudge|takeMixedNudge/);
-    expect(roster).toMatch(/isOrder \? "Play on phones →" : "Turn on Buzzer Mode →"/);
+    expect(roster).toMatch(/isOrder \? copy\.buzzerNudge\.orderCta : copy\.buzzerNudge\.guessCta/);
+    expect(SETUP_COPY.en.buzzerNudge.orderCta).toBe("Play on phones →");
+    expect(SETUP_COPY.en.buzzerNudge.guessCta).toBe("Turn on Buzzer Mode →");
     expect(setup).toMatch(/function offerBuzzer\(\) \{\s*setBuzzerEnabled\(true\);\s*resetRoom\(\);\s*\}/);
     expect(setup.match(/className="buzzer-nudge"/g) ?? []).toHaveLength(1);
     // The solo nudge came off on 2026-11-01: "Just me" does its job.
@@ -360,9 +368,15 @@ describe("the setup page starts an order game the same way on all three paths", 
   it("says what the song count means in this style, and never a clip length", () => {
     // The summary names the game for a room ("Just me" is the order game
     // already) and gives a clip length only to the guess game.
-    expect(setup).toMatch(/who === "solo" \? \[\] : \[isOrder \? "Put them in order" : "Guess the song"\]/);
-    expect(setup).toMatch(/isOrder \? \[\] : \[`\$\{clipDuration\}s clips`\]/);
-    expect(setup).toMatch(/orderSummary\(songCount\.count\)/);
+    expect(setup).toMatch(/who === "solo" \? \[\] : \[isOrder \? copy\.summary\.order : copy\.summary\.guess\]/);
+    expect(setup).toMatch(/isOrder \? \[\] : \[copy\.summary\.clips\(clipDuration\)\]/);
+    expect(setup).toMatch(/copy\.summary\.orderSongs\(songCount\.count\)/);
+    expect(SETUP_COPY.en.summary.order).toBe("Put them in order");
+    expect(SETUP_COPY.en.summary.guess).toBe("Guess the song");
+    expect(SETUP_COPY.en.summary.clips(15)).toBe("15s clips");
+    for (const count of [10, 20, "all"] as const) {
+      expect(SETUP_COPY.en.summary.orderSongs(count)).toBe(orderSummary(count));
+    }
   });
 });
 

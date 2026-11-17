@@ -69,7 +69,7 @@ function tracks(n: number): Track[] {
   }));
 }
 
-/** The setup page's solo order start, step for step (app/page.tsx). */
+/** The setup page's solo order start, step for step (app/setup-page.tsx). */
 function dealFor(list: Track[], seed: number | undefined, count: number) {
   const random = seed === undefined ? undefined : seededRandom(seed);
   const shuffled = shuffle(list, random);
@@ -386,7 +386,7 @@ describe("scores and words", () => {
 
 describe("the pages, by reading the source", () => {
   it("the setup page seeds a solo order start only, and passes the stream to both shuffles", () => {
-    const page = code(read("app/page.tsx"));
+    const page = code(read("app/setup-page.tsx"));
     expect(page).toMatch(/const soloOrder = isOrder && who === "solo" && setupMode === "single";/);
     expect(page).toMatch(/const seed = soloOrder \? \(challengeFor \? challengeFor\.seed : freshSeed\(\)\) : undefined;/);
     expect(page).toMatch(/const random = seed === undefined \? undefined : seededRandom\(seed\);/);

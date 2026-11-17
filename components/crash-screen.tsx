@@ -22,7 +22,7 @@
  *    the render for the transient half (a chunk that failed to load once).
  *  - **Record it.** See the `client_error` event in lib/analytics.ts.
  *
- * Inline styles, matching app/page.tsx and app/game/page.tsx: `global-error`
+ * Inline styles, matching app/setup-page.tsx and app/game/page.tsx: `global-error`
  * replaces the root layout, so nothing here may depend on a stylesheet the
  * layout would have loaded.
  */

@@ -31,7 +31,7 @@
  */
 
 import { dayBucket, getKvStore } from "@/lib/kv";
-import { ERROR_LOCALES, type AppErrorCode, type ErrorLocale } from "@/lib/error-messages";
+import { SITE_LOCALES, type AppErrorCode, type SiteLocale } from "@/lib/error-messages";
 import type { LoopSurface } from "@/lib/loop-links";
 import { QUIZ_VERDICTS, isQuizVerdict, type QuizVerdict } from "@/lib/quiz";
 import type { ShareLinkOutcome } from "@/lib/quiz-share";
@@ -50,6 +50,7 @@ import {
 import { isPlaylistHelpTopic, PLAYLIST_HELP_TOPIC_NAMES, type PlaylistHelpTopic } from "@/lib/playlist-help";
 import { UNPLAYABLE_KINDS, type UnplayableKind } from "@/lib/spotify-link";
 import { STARTER_KEYS, isStarterKey, type StarterKey } from "@/lib/starter-playlists";
+import { COUNTED_SETUP_LOCALES, isCountedSetupLocale, type CountedSetupLocale } from "@/lib/setup-copy";
 import { RECOVERY_STAGES, type RecoveryStage } from "@/lib/refusal-recovery";
 import { SETUP_SOURCES, isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { GAME_MODES, isGameMode, isPlaylistKind, type GameMode, type PlaylistKind } from "@/lib/game-session";
@@ -598,7 +599,7 @@ export const PLAYLIST_RECHECK_OUTCOMES: readonly PlaylistRecheckOutcome[] = [
  * The sub-mode rides on `game_started` rather than arriving as an event of its
  * own, because it is a property of the game that started rather than a second
  * thing that happened. All three hosted-start paths already send that event
- * (`recordHostedStart` in `app/page.tsx`), so a separate event would have
+ * (`recordHostedStart` in `app/setup-page.tsx`), so a separate event would have
  * described one occurrence twice and doubled a mixed game's KV cost for no
  * extra fact.
  *
@@ -907,6 +908,8 @@ export function loopStatsKeys(
   hostSetup: Record<SetupSource, string>;
   /** Which starter list was played — `host_setup_starter:<key>`, for any source. */
   hostSetupStarter: Record<StarterKey, string>;
+  /** Games started from a translated setup page — `host_locale:<l>`, pt only. */
+  hostLocale: Record<CountedSetupLocale, string>;
   quiz: Record<QuizStage, string>;
   quizOwner: Record<QuizOwnerStage, string>;
   quizVerdict: Record<QuizVerdict, string>;
@@ -922,7 +925,7 @@ export function loopStatsKeys(
   lyricLine: Record<LyricStatus, string>;
   /** A guess-game round revealed after a lyric line was shown. */
   lyricLineRound: Record<LyricLineRoundOutcome, string>;
-  quizLocale: Record<ErrorLocale, string>;
+  quizLocale: Record<SiteLocale, string>;
   quizFrom: Record<QuizSource, string>;
   quizHint: Record<QuizHintOutcome, string>;
   quizThrottled: Record<QuizThrottledRoute, string>;
@@ -1157,6 +1160,9 @@ export function loopStatsKeys(
     hostSetupStarter: Object.fromEntries(
       STARTER_KEYS.map((k) => [k, key(day, `host_setup_starter:${k}`)])
     ) as Record<StarterKey, string>,
+    hostLocale: Object.fromEntries(
+      COUNTED_SETUP_LOCALES.map((l) => [l, key(day, `host_locale:${l}`)])
+    ) as Record<CountedSetupLocale, string>,
     quiz: {
       created: key(day, "quiz:created"),
       opened: key(day, "quiz:opened"),
@@ -1197,8 +1203,8 @@ export function loopStatsKeys(
       LYRIC_LINE_ROUND_OUTCOMES.map((o) => [o, key(day, `lyric_line_round:${o}`)])
     ) as Record<LyricLineRoundOutcome, string>,
     quizLocale: Object.fromEntries(
-      ERROR_LOCALES.map((l) => [l, key(day, `quiz_locale:${l}`)])
-    ) as Record<ErrorLocale, string>,
+      SITE_LOCALES.map((l) => [l, key(day, `quiz_locale:${l}`)])
+    ) as Record<SiteLocale, string>,
     quizFrom: Object.fromEntries(
       QUIZ_SOURCES.map((s) => [s, key(day, `quiz_from:${s}`)])
     ) as Record<QuizSource, string>,
@@ -1343,6 +1349,8 @@ export interface GameStartDetails {
   teams?: boolean;
   /** A friend's "beat my score" game (lib/challenge.ts). */
   challenge?: true;
+  /** The setup page's language, when it was a translated one (lib/setup-copy.ts). */
+  locale?: CountedSetupLocale;
 }
 
 /**
@@ -1357,7 +1365,7 @@ export function teamsFitBand(players: PlayerBand | undefined): boolean {
 
 export async function recordGameStart(
   hostGameIndex: number,
-  { mixed, source, mode, players, from, starter, playlistKind, soloStep, teams, challenge }: GameStartDetails = {}
+  { mixed, source, mode, players, from, starter, playlistKind, soloStep, teams, challenge, locale }: GameStartDetails = {}
 ): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
@@ -1415,6 +1423,12 @@ export async function recordGameStart(
   // what a challenge is — an order game of one — so a page that got it wrong
   // cannot put a party in the challenge funnel's denominator.
   if (challenge === true && mode === "order" && players === "p1") await bump("challenge:started");
+  // Which games the Portuguese setup page hosted (2026-11-17). One command on
+  // those starts and none on any other: English is every other game and is
+  // never sent, and a per-page-view counter was rejected for its cost. Read
+  // against `games` for the share, not against a pt page-view count — there
+  // is none. Closed set, guarded here whatever the parser did.
+  if (isCountedSetupLocale(locale)) await bump(`host_locale:${locale}`);
 }
 
 /**
@@ -1918,7 +1932,7 @@ export function recordQuizLength(stage: QuizLengthStage, questionCount: number):
 export async function recordQuizCreated(details: {
   questionCount: number;
   requestedCount: number;
-  locale: ErrorLocale;
+  locale: SiteLocale;
   from?: QuizSource;
   /** The kind built. Absent records no kind — a caller from before the field. */
   kind?: QuizKind;
@@ -1937,7 +1951,7 @@ export async function recordQuizCreated(details: {
   }
   // Guarded like the verdict: the value becomes the tail of a key, and the
   // locale reached the route from a request body.
-  if ((ERROR_LOCALES as readonly string[]).includes(details.locale)) {
+  if ((SITE_LOCALES as readonly string[]).includes(details.locale)) {
     writes.push(bump(`quiz_locale:${details.locale}`));
   }
   // The same guard, for the same reason, and it is the second one this value

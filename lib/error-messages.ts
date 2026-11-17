@@ -1,5 +1,12 @@
 /**
- * Every error a player can be shown, in both languages the site ships.
+ * Every error a player can be shown, in every language the site ships.
+ *
+ * English and Chinese from the start; Brazilian Portuguese since 2026-11-17,
+ * when Brazil became the largest market in the traffic wave and a Brazilian
+ * first-timer read the site-wide quota notice as a personal limit. `pt`
+ * covers this table (so every error, on every page) and the setup page's own
+ * copy (`lib/setup-copy.ts`), and nothing else: pages that are not translated
+ * read their copy through `siteLocale`, which folds `pt` into `en`.
  *
  * ## Why the server sends a code and not a sentence
  *
@@ -28,7 +35,7 @@
  * visible in one diff. `tests/error-messages.test.ts` enforces the rest.
  *
  * Placeholders are `{name}` and are filled by `errorMessage`'s `params`. Keep
- * the same set in both languages — the test checks that too.
+ * the same set in every language — the test checks that too.
  *
  * This file must stay dependency-free: it is imported by API routes, by client
  * components, and by plain `lib/` modules on both sides of the boundary.
@@ -36,8 +43,23 @@
 
 import type { BuzzerErrorCode } from "@/lib/buzzer-protocol";
 
-export const ERROR_LOCALES = ["en", "zh"] as const;
+export const ERROR_LOCALES = ["en", "zh", "pt"] as const;
 export type ErrorLocale = (typeof ERROR_LOCALES)[number];
+
+/**
+ * The languages the rest of the site's copy ships in — the quiz, `/zh`, the
+ * game pages — which `pt` is deliberately not one of. Kept apart from
+ * `ErrorLocale` so a `Record<SiteLocale, …>` copy table does not have to grow
+ * a Portuguese half to compile, and so a key tail like `quiz_locale:<l>`
+ * stays the closed set it always was.
+ */
+export const SITE_LOCALES = ["en", "zh"] as const;
+export type SiteLocale = (typeof SITE_LOCALES)[number];
+
+/** The copy language for an untranslated page: a Portuguese reader gets English. */
+export function siteLocale(locale: ErrorLocale): SiteLocale {
+  return locale === "zh" ? "zh" : "en";
+}
 
 export type AppErrorCode =
   // Generic
@@ -152,23 +174,28 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   unknown: {
     en: "Something went wrong. Please try again.",
     zh: "發生了一點問題，請再試一次。",
+    pt: "Algo deu errado. Tente de novo.",
   },
   server_error: {
     en: "Something went wrong on our end. Please try again.",
     zh: "我們這邊出了點狀況，請再試一次。",
+    pt: "Algo deu errado do nosso lado. Tente de novo.",
   },
 
   missing_playlist_url: {
     en: "No playlist link was sent.",
     zh: "沒有收到歌單連結。",
+    pt: "Nenhum link de playlist foi enviado.",
   },
   playlist_url_required: {
     en: "Please enter a Spotify playlist URL.",
     zh: "請貼上 Spotify 歌單連結。",
+    pt: "Cole o link de uma playlist do Spotify.",
   },
   invalid_playlist_url: {
     en: "That doesn't look like a Spotify playlist, album or artist link.",
     zh: "這個連結看起來不是 Spotify 歌單、專輯或歌手連結。",
+    pt: "Esse link não parece ser de uma playlist, álbum ou artista do Spotify.",
   },
   /*
    * The two links that are perfectly good Spotify links to something that
@@ -197,6 +224,7 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   playlist_link_track: {
     en: "That's a link to a single song, and GuessSong needs a whole playlist. Open a public playlist you made — or add this song to one — and paste that playlist's link instead.",
     zh: "這是單一首歌的連結，GuessSong 需要一整個歌單。請打開你自己建立的公開歌單（或把這首歌加進去），再貼上歌單的連結。",
+    pt: "Esse é o link de uma música só, e o GuessSong precisa de uma playlist inteira. Abra uma playlist pública que você criou — ou coloque essa música em uma — e cole o link dessa playlist.",
   },
   /**
    * A real Spotify link to something that is neither a playlist nor an
@@ -215,6 +243,7 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   playlist_link_spotify_other: {
     en: "That's a Spotify link, but not a playlist, album or artist. Open a playlist — one of yours, or any public one — tap Share → Copy link, and paste that.",
     zh: "這是 Spotify 的連結，但不是歌單、專輯或歌手。請打開一個歌單（你自己的或任何公開的），按「分享」→「複製連結」再貼上。",
+    pt: "Esse é um link do Spotify, mas não de uma playlist, álbum ou artista. Abra uma playlist — sua ou qualquer uma pública —, toque em Compartilhar → Copiar link e cole aqui.",
   },
   /**
    * A short link is followed on the server, and this is the following
@@ -232,10 +261,12 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   playlist_shortlink_unavailable: {
     en: "We couldn't open that short link just now. Try again in a moment, or paste the playlist's full link instead — in Spotify, Share, then Copy link.",
     zh: "這個短網址現在打不開。請稍後再試一次，或改貼歌單的完整連結：在 Spotify 裡按「分享」，再按「複製連結」。",
+    pt: "Não conseguimos abrir esse link curto agora. Tente de novo daqui a pouco, ou cole o link completo da playlist — no Spotify, toque em Compartilhar e depois em Copiar link.",
   },
   playlist_not_found: {
     en: "We couldn't open that playlist. Check that it's public, and that it's one you created yourself rather than a Spotify editorial playlist.",
     zh: "找不到這個歌單。請確認：1) 歌單是公開的 2) 歌單是你自己建立的，不是 Spotify 官方編輯歌單。",
+    pt: "Não conseguimos abrir essa playlist. Confira se ela é pública e se foi você quem a criou, e não uma playlist editorial do Spotify.",
   },
   /**
    * An album's 404, kept apart from a playlist's because the remedy differs:
@@ -246,6 +277,7 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   album_not_found: {
     en: "Spotify has no album at that link. Check the link, or paste a playlist instead.",
     zh: "Spotify 上找不到這張專輯。請檢查連結，或改貼一個歌單。",
+    pt: "O Spotify não tem nenhum álbum nesse link. Confira o link ou cole uma playlist.",
   },
   /**
    * An artist page, since 2026-11-10, plays as the artist's ten most popular
@@ -259,26 +291,32 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   artist_not_found: {
     en: "Spotify has no artist at that link. Check the link, or paste a playlist instead.",
     zh: "Spotify 上找不到這位歌手。請檢查連結，或改貼一個歌單。",
+    pt: "O Spotify não tem nenhum artista nesse link. Confira o link ou cole uma playlist.",
   },
   artist_empty: {
     en: "Spotify lists no songs for this artist where you are. Paste a playlist instead.",
     zh: "Spotify 在你所在的地區沒有這位歌手的歌。請改貼一個歌單。",
+    pt: "O Spotify não lista nenhuma música desse artista na sua região. Cole uma playlist.",
   },
   playlist_editorial: {
     en: "Spotify editorial and algorithmic playlists can't be used. Please use a public playlist you created.",
     zh: "Spotify 官方編輯和演算法歌單沒辦法用，請改用你自己建立的公開歌單。",
+    pt: "Playlists editoriais e algorítmicas do Spotify não funcionam aqui. Use uma playlist pública criada por você.",
   },
   playlist_empty: {
     en: "This playlist has no tracks.",
     zh: "這個歌單裡沒有歌曲。",
+    pt: "Essa playlist não tem nenhuma música.",
   },
   playlist_load_failed: {
     en: "Couldn't load that playlist.",
     zh: "讀不到這個歌單。",
+    pt: "Não conseguimos carregar essa playlist.",
   },
   mixed_playlists_failed: {
     en: "Couldn't load a playlist for: {names}. Remove or fix them and try again.",
     zh: "這些人的歌單讀不到：{names}。請移除或修正後再試一次。",
+    pt: "Não conseguimos carregar a playlist de: {names}. Remova ou corrija e tente de novo.",
   },
 
   /**
@@ -291,10 +329,12 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   spotify_rate_limited: {
     en: "Spotify is rate limiting us right now (too many playlist loads across the whole site). Please wait a minute and try again — your playlist URL is fine.",
     zh: "Spotify 目前正在限制我們的請求（全站同時載入的歌單太多了）。請等一分鐘再試一次 — 你的歌單連結沒有問題。",
+    pt: "O Spotify está limitando nossos pedidos agora (muitas playlists carregando ao mesmo tempo no site inteiro). Espere um minuto e tente de novo — o link da sua playlist está certo.",
   },
   spotify_cooldown: {
     en: "Spotify is rate limiting us right now. Try again in about {seconds}s — your playlist URL is fine.",
     zh: "Spotify 目前正在限制我們的請求。大約 {seconds} 秒後再試一次 — 你的歌單連結沒有問題。",
+    pt: "O Spotify está limitando nossos pedidos agora. Tente de novo em uns {seconds}s — o link da sua playlist está certo.",
   },
   /**
    * Deliberately carries no `{seconds}`. This is the code for a wait measured
@@ -316,6 +356,7 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   spotify_quota_exhausted: {
     en: "Sorry — this isn't about you or your link: Spotify has cut the whole site off for today. GuessSong is free, and every game here shares one Spotify quota; Spotify's policy gives a project like this no way to buy a bigger one, so there is nothing we can top up. Playlists that have already been loaded still work, and new ones come back once Spotify resets. GuessSong is also open source, so anyone who would rather not wait can run their own copy on their own quota. Your playlist URL is fine.",
     zh: "抱歉 — 這不是你或你的連結的問題：Spotify 今天已經把整個網站擋下來了。GuessSong 是免費服務，這裡所有的遊戲共用同一份 Spotify 配額；而 Spotify 的政策不讓這樣的專案加購更多，所以我們沒有東西可以加。已經載入過的歌單還是可以玩，新的歌單要等 Spotify 重置後才會恢復。GuessSong 也是開源的，不想等的人可以用自己的配額架一站自己跑。你的歌單連結沒有問題。",
+    pt: "Desculpe — não é culpa sua nem do seu link: o Spotify bloqueou o site inteiro por hoje, para todo mundo. O GuessSong é gratuito, e todos os jogos aqui dividem uma única cota do Spotify; a política do Spotify não deixa um projeto como este comprar uma cota maior, então não há nada que a gente possa recarregar. Playlists que já foram carregadas continuam funcionando, e as novas voltam quando o Spotify renovar a cota. O GuessSong também é open source (código aberto), então quem não quiser esperar pode rodar a própria cópia com a própria cota. O link da sua playlist está certo.",
   },
   /**
    * The self-imposed twin of `spotify_quota_exhausted`, and the distinction is
@@ -337,6 +378,7 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   spotify_daily_budget_spent: {
     en: "Sorry — this isn't about you or your link: the whole site has used up today's Spotify allowance. GuessSong is free and every game here shares one Spotify quota, and Spotify's policy gives a project like this no way to buy a bigger one, so the site rations what it has: one busy afternoon must not leave the evening with nothing. Playlists that have already been loaded still work, and some allowance frees up every hour. GuessSong is also open source, so anyone who would rather not wait can run their own copy on their own quota. Your playlist URL is fine.",
     zh: "抱歉 — 這不是你或你的連結的問題：是整個網站今天的 Spotify 額度用完了。GuessSong 是免費服務，所有的遊戲共用同一份 Spotify 配額，而 Spotify 的政策不讓這樣的專案加購更多，所以網站只能把手上的額度配給著用：不能讓一個下午就把整晚的份用光。已經載入過的歌單還是可以玩，每小時也會釋出一些額度。GuessSong 也是開源的，不想等的人可以用自己的配額架一站自己跑。你的歌單連結沒有問題。",
+    pt: "Desculpe — não é culpa sua nem do seu link: o site inteiro, somando todo mundo, já usou a cota de hoje do Spotify. O GuessSong é gratuito e todos os jogos aqui dividem uma única cota do Spotify, e a política do Spotify não deixa um projeto como este comprar uma cota maior, então o site raciona o que tem: uma tarde movimentada não pode deixar a noite sem nada. Playlists que já foram carregadas continuam funcionando, e um pouco da cota é liberado a cada hora. O GuessSong também é open source (código aberto), então quem não quiser esperar pode rodar a própria cópia com a própria cota. O link da sua playlist está certo.",
   },
   /*
    * The only code in this table that is not a refusal.
@@ -355,27 +397,33 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   spotify_budget_low: {
     en: "Heads up: the site is close to today's Spotify allowance. Everything still works right now, and playlists that have already been played are unaffected. If you're hosting tonight, it's worth loading your playlist soon — new ones may stop loading later this evening until some allowance frees up. GuessSong is free and open source, so you can also run your own copy on your own quota.",
     zh: "提醒一下：網站快要用完今天的 Spotify 額度了。現在一切都還正常，已經玩過的歌單也不受影響。如果你今晚要辦活動，建議早一點把歌單載入 — 晚一點新歌單可能會載入不了，要等額度釋出。GuessSong 是免費且開源的，你也可以用自己的配額架一站自己跑。",
+    pt: "Aviso: o site inteiro — todo mundo junto, não só você — está perto de usar a cota de hoje do Spotify. Por enquanto tudo continua funcionando, e playlists que já foram jogadas não são afetadas. Se você vai fazer uma festa hoje à noite, vale carregar sua playlist logo — mais tarde, playlists novas podem parar de carregar até que parte da cota seja liberada. O GuessSong é gratuito e open source, então você também pode rodar a sua própria cópia com a sua própria cota.",
   },
   spotify_busy: {
     en: "Too many new playlists are being loaded across the site right now. Please try again in a minute — your playlist URL is fine.",
     zh: "現在全站同時在載入太多新歌單。請一分鐘後再試一次 — 你的歌單連結沒有問題。",
+    pt: "Tem playlists novas demais carregando no site agora. Tente de novo em um minuto — o link da sua playlist está certo.",
   },
   spotify_not_configured: {
     en: "This deployment is missing its Spotify credentials.",
     zh: "這個網站的 Spotify 設定不完整。",
+    pt: "Este site está sem as credenciais do Spotify.",
   },
   spotify_auth_failed: {
     en: "Couldn't reach Spotify right now. Please try again.",
     zh: "現在連不上 Spotify，請再試一次。",
+    pt: "Não conseguimos falar com o Spotify agora. Tente de novo.",
   },
 
   rate_limited: {
     en: "Too many attempts, please slow down.",
     zh: "嘗試次數太多了，請慢一點。",
+    pt: "Tentativas demais em pouco tempo. Vá com calma.",
   },
   rate_limited_playlist: {
     en: "Too many playlist loads, please slow down.",
     zh: "載入歌單的次數太多了，請慢一點。",
+    pt: "Muitas playlists carregadas em pouco tempo. Vá com calma.",
   },
   /**
    * Never rendered today — the game page treats a preview it cannot fetch as a
@@ -385,10 +433,12 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   rate_limited_preview: {
     en: "Too many preview lookups, please slow down.",
     zh: "查詢試聽片段的次數太多了，請慢一點。",
+    pt: "Muitas buscas de trechos em pouco tempo. Vá com calma.",
   },
   rate_limited_room_create: {
     en: "Too many rooms created, please slow down.",
     zh: "開了太多房間，請慢一點。",
+    pt: "Muitas salas criadas em pouco tempo. Vá com calma.",
   },
 
   /**
@@ -400,6 +450,7 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   preview_request_invalid: {
     en: "That preview request wasn't valid.",
     zh: "這個試聽片段的請求格式不正確。",
+    pt: "Esse pedido de trecho não é válido.",
   },
 
   /**
@@ -410,6 +461,7 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   rate_limited_lyric: {
     en: "Too many lyric lookups, please slow down.",
     zh: "查詢歌詞的次數太多了，請慢一點。",
+    pt: "Muitas buscas de letras em pouco tempo. Vá com calma.",
   },
   /**
    * The two answers the game page shows under "Read a lyric instead" when it
@@ -419,27 +471,33 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   lyric_absent: {
     en: "No lyric line for this one — reveal it or skip.",
     zh: "這首找不到可以念的歌詞，直接揭曉或跳過吧。",
+    pt: "Não há um verso para esta — revele ou pule.",
   },
   lyric_unavailable: {
     en: "Couldn't fetch a lyric right now — reveal it or skip.",
     zh: "現在拿不到歌詞，直接揭曉或跳過吧。",
+    pt: "Não conseguimos buscar um verso agora — revele ou pule.",
   },
 
   room_code_invalid: {
     en: "That room code isn't valid.",
     zh: "房間代碼不正確。",
+    pt: "Esse código de sala não é válido.",
   },
   room_code_taken: {
     en: "That room code is already in use.",
     zh: "這個房間代碼已經有人在用了。",
+    pt: "Esse código de sala já está em uso.",
   },
   room_code_unavailable: {
     en: "Couldn't get a free room code, please try again.",
     zh: "找不到可用的房間代碼，請再試一次。",
+    pt: "Não conseguimos um código de sala livre. Tente de novo.",
   },
   room_not_found: {
     en: "This room doesn't exist any more. Check the code, or ask the host for a new one.",
     zh: "找不到這個房間，它可能已經過期了。請確認代碼，或請主持人重開一個。",
+    pt: "Essa sala não existe mais. Confira o código ou peça um novo ao anfitrião.",
   },
   /**
    * Covers two arrivals at the same dead end: the Worker saying the room is
@@ -450,66 +508,82 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   room_expired: {
     en: "This room has ended, or the code is wrong. Ask the host for a new one.",
     zh: "這個房間已經結束了，或是代碼不對。請跟主持人拿新的代碼。",
+    pt: "Essa sala já acabou, ou o código está errado. Peça um novo ao anfitrião.",
   },
   room_already_started: {
     en: "The host has already started the game.",
     zh: "主持人已經開始遊戲了。",
+    pt: "O anfitrião já começou o jogo.",
   },
   room_name_taken: {
     en: "That name is already taken in this room.",
     zh: "這個房間裡已經有人用這個名字了。",
+    pt: "Esse nome já está sendo usado nesta sala.",
   },
   room_full: {
     en: "This room is full.",
     zh: "這個房間已經滿了。",
+    pt: "Esta sala está cheia.",
   },
   room_name_required: {
     en: "Please enter your name.",
     zh: "請輸入你的名字。",
+    pt: "Digite seu nome.",
   },
   room_missing_fields: {
     en: "Please enter your name and a playlist link.",
     zh: "請填寫名字和歌單連結。",
+    pt: "Digite seu nome e o link de uma playlist.",
   },
   room_busy: {
     en: "The room is busy right now, please try again.",
     zh: "房間現在有點忙，請再試一次。",
+    pt: "A sala está ocupada agora. Tente de novo.",
   },
   room_not_host: {
     en: "Only the room's host can start the game.",
     zh: "只有房間的主持人可以開始遊戲。",
+    pt: "Só o anfitrião da sala pode começar o jogo.",
   },
   room_no_submissions: {
     en: "Nobody has submitted a playlist yet.",
     zh: "還沒有人交出歌單。",
+    pt: "Ninguém enviou uma playlist ainda.",
   },
   room_invalid_sample_size: {
     en: "That number of songs per player isn't valid.",
     zh: "每個人要出的歌曲數量不正確。",
+    pt: "Esse número de músicas por jogador não é válido.",
   },
   room_needs_a_job: {
     en: "A room needs at least one job to do.",
     zh: "房間至少要有一項用途。",
+    pt: "Uma sala precisa ter pelo menos uma função.",
   },
   room_open_failed: {
     en: "Couldn't open the room.",
     zh: "開不了房間。",
+    pt: "Não conseguimos abrir a sala.",
   },
   room_submit_failed: {
     en: "Couldn't submit your playlist.",
     zh: "沒辦法送出你的歌單。",
+    pt: "Não conseguimos enviar sua playlist.",
   },
   room_host_submit_failed: {
     en: "Couldn't add your playlist.",
     zh: "沒辦法加入你的歌單。",
+    pt: "Não conseguimos adicionar sua playlist.",
   },
   room_status_failed: {
     en: "Couldn't load the room.",
     zh: "讀不到房間狀態。",
+    pt: "Não conseguimos carregar a sala.",
   },
   room_start_failed: {
     en: "Couldn't start the game.",
     zh: "沒辦法開始遊戲。",
+    pt: "Não conseguimos começar o jogo.",
   },
 
   /*
@@ -520,14 +594,17 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   quiz_not_found: {
     en: "This quiz doesn't exist any more — it may have expired. Ask whoever sent it to make a new one.",
     zh: "找不到這個測驗，它可能已經過期了。請出題的人重新做一個。",
+    pt: "Esse quiz não existe mais — talvez tenha expirado. Peça para quem mandou criar um novo.",
   },
   quiz_name_required: {
     en: "Please enter your name.",
     zh: "請輸入你的名字。",
+    pt: "Digite seu nome.",
   },
   quiz_name_taken: {
     en: "Someone has already taken this quiz under that name. Pick another.",
     zh: "已經有人用這個名字作答過了，換一個吧。",
+    pt: "Alguém já respondeu este quiz com esse nome. Escolha outro.",
   },
   /**
    * Carries `{count}` because the number is the whole message: a host who is
@@ -537,34 +614,42 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   quiz_too_few_tracks: {
     en: "That playlist is too short for a quiz — it needs at least {count} different songs.",
     zh: "這個歌單太短了，出題至少要 {count} 首不同的歌。",
+    pt: "Essa playlist é curta demais para um quiz — ela precisa de pelo menos {count} músicas diferentes.",
   },
   quiz_missing_fields: {
     en: "Please enter your name and answer every question.",
     zh: "請填寫名字並回答每一題。",
+    pt: "Digite seu nome e responda todas as perguntas.",
   },
   quiz_create_invalid: {
     en: "Check the playlist link and the number of questions, then try again.",
     zh: "請確認歌單連結和題數，然後再試一次。",
+    pt: "Confira o link da playlist e o número de perguntas, e tente de novo.",
   },
   quiz_invalid_answers: {
     en: "Those answers don't match this quiz. Reload the page and try again.",
     zh: "這些答案跟題目對不起來，請重新整理頁面再試一次。",
+    pt: "Essas respostas não batem com este quiz. Recarregue a página e tente de novo.",
   },
   quiz_code_unavailable: {
     en: "Couldn't get a free quiz link, please try again.",
     zh: "找不到可用的測驗連結，請再試一次。",
+    pt: "Não conseguimos um link de quiz livre. Tente de novo.",
   },
   quiz_create_failed: {
     en: "Couldn't create the quiz.",
     zh: "沒辦法建立測驗。",
+    pt: "Não conseguimos criar o quiz.",
   },
   quiz_load_failed: {
     en: "Couldn't load the quiz.",
     zh: "讀不到這個測驗。",
+    pt: "Não conseguimos carregar o quiz.",
   },
   quiz_answer_failed: {
     en: "Couldn't submit your answers.",
     zh: "沒辦法送出你的答案。",
+    pt: "Não conseguimos enviar suas respostas.",
   },
   /**
    * The results page names the answers, so it is for the person who already
@@ -574,28 +659,34 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   quiz_not_host: {
     en: "Only whoever made this quiz can see its results page — open it on the device you made it with. The quiz link itself still works.",
     zh: "只有出題的人可以看結果頁，請用建立測驗的那台裝置打開。測驗連結本身還是可以用的。",
+    pt: "Só quem criou este quiz pode ver a página de resultados — abra no aparelho em que você o criou. O link do quiz continua funcionando.",
   },
   quiz_board_failed: {
     en: "Couldn't load the results.",
     zh: "讀不到結果。",
+    pt: "Não conseguimos carregar os resultados.",
   },
   rate_limited_quiz_create: {
     en: "Too many quizzes created, please slow down.",
     zh: "建立了太多測驗，請慢一點。",
+    pt: "Muitos quizzes criados em pouco tempo. Vá com calma.",
   },
 
   players_required: {
     en: "Add at least one player.",
     zh: "至少要有一位玩家。",
+    pt: "Adicione pelo menos um jogador.",
   },
   // Scores are kept by name, so two rows that spell one name would score as one.
   players_duplicate_name: {
     en: "Two players have the same name. Give one of them a nickname.",
     zh: "有兩位玩家同名，幫其中一位換個暱稱吧。",
+    pt: "Dois jogadores têm o mesmo nome. Dê um apelido para um deles.",
   },
   mixed_min_contributors: {
     en: "Add at least {count} players' playlists to start.",
     zh: "至少要有 {count} 個人的歌單才能開始。",
+    pt: "Adicione as playlists de pelo menos {count} jogadores para começar.",
   },
   // "Put them in order" needs cards with different release years. Not a
   // playlist refusal — the same link plays the guess game fine — so it stays
@@ -604,6 +695,7 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   order_too_few_dated: {
     en: "This playlist doesn't have enough songs with different release years to put in order. Pick one that spans a few years, or switch back to Guess the song.",
     zh: "這份歌單裡發行年份不同的歌太少，排不出先後順序。換一份橫跨幾年的歌單，或改回「猜歌」玩法。",
+    pt: "Esta playlist não tem músicas suficientes com anos de lançamento diferentes para pôr em ordem. Escolha uma que cubra alguns anos, ou volte para Adivinhe a música.",
   },
   // Not the playlist at all: the copy we hold of it was saved before we
   // asked Spotify for release years, and refreshes within a day. Says so,
@@ -612,10 +704,12 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   order_count_too_small: {
     en: "That number of songs is too few to put in order. Raise Number of Songs in the settings, or pick All.",
     zh: "歌曲數太少，排不出順序。在設定裡把「歌曲數」調高，或選「全部」。",
+    pt: "Esse número de músicas é pouco para pôr em ordem. Aumente o Número de músicas nas configurações, ou escolha Todas.",
   },
   order_dates_pending: {
     en: "We don't have release years for this playlist yet — our saved copy is from before this mode existed and refreshes within a day. Play Guess the song for now, or try Put them in order again later.",
     zh: "這份歌單我們還沒有發行年份：我們存的那份是這個玩法推出前存的，一天內會更新。先玩「猜歌」，或晚點再試「排順序」。",
+    pt: "Ainda não temos os anos de lançamento desta playlist — nossa cópia salva é de antes deste modo existir e se atualiza em até um dia. Jogue Adivinhe a música por enquanto, ou tente Ponha em ordem de novo mais tarde.",
   },
 
   /*
@@ -633,47 +727,58 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   storage_blocked: {
     en: "Your browser is blocking this site from saving the game. Turn off private browsing, or allow site data for guessong.app, then try again.",
     zh: "你的瀏覽器不讓這個網站儲存遊戲資料。請關閉無痕模式，或允許 guessong.app 儲存網站資料，然後再試一次。",
+    pt: "Seu navegador está impedindo este site de salvar o jogo. Desative a navegação anônima, ou permita dados de site para guessong.app, e tente de novo.",
   },
   client_error: {
     en: "The game screen hit an error and stopped. Starting over usually clears it — nothing is lost, the playlist just loads again.",
     zh: "遊戲畫面出錯停住了。重新開始通常就會恢復，不會遺失任何東西，歌單會重新載入一次。",
+    pt: "A tela do jogo deu um erro e parou. Começar de novo costuma resolver — nada se perde, a playlist só carrega outra vez.",
   },
 
   buzzer_not_configured: {
     en: "Buzzer Mode isn't set up on this deployment.",
     zh: "這個網站沒有啟用搶答器模式。",
+    pt: "O Modo Campainha não está configurado neste site.",
   },
   buzzer_origin_blocked: {
     en: "The buzzer service refused this site.",
     zh: "搶答器服務不接受這個網站。",
+    pt: "O serviço da campainha recusou este site.",
   },
   buzzer_rate_limited: {
     en: "Too many rooms opened from this network — wait a minute and try again.",
     zh: "這個網路開了太多房間，請等一分鐘再試一次。",
+    pt: "Muitas salas abertas a partir desta rede — espere um minuto e tente de novo.",
   },
   buzzer_open_failed: {
     en: "Couldn't open a buzzer room, please try again.",
     zh: "開不了搶答器房間，請再試一次。",
+    pt: "Não conseguimos abrir uma sala de campainha. Tente de novo.",
   },
   buzzer_bad_response: {
     en: "The buzzer service returned something unexpected.",
     zh: "搶答器服務回傳了非預期的內容。",
+    pt: "O serviço da campainha respondeu algo inesperado.",
   },
   buzzer_bad_message: {
     en: "The buzzer didn't understand that. Try reloading the page.",
     zh: "搶答器看不懂這個指令，請重新整理頁面。",
+    pt: "A campainha não entendeu isso. Tente recarregar a página.",
   },
   buzzer_not_joined: {
     en: "You're not in this room yet.",
     zh: "你還沒有加入這個房間。",
+    pt: "Você ainda não entrou nesta sala.",
   },
   buzzer_unreachable: {
     en: "Your phone can't reach the buzzer. Shout your answers — the host still scores by hand.",
     zh: "你的手機連不上搶答器。用喊的吧，主持人一樣會計分。",
+    pt: "Seu celular não consegue se conectar à campainha. Gritem as respostas — o anfitrião continua marcando os pontos na mão.",
   },
   buzzer_no_answer: {
     en: "Couldn't reach the room. Check the code and your connection, then try again.",
     zh: "連不上房間。請確認代碼和網路，然後再試一次。",
+    pt: "Não conseguimos falar com a sala. Confira o código e sua conexão, e tente de novo.",
   },
   // Host-facing. The player's sentence for an ended room says "ask the host
   // for a new one", which on the host's own screen is nobody; these name the
@@ -681,22 +786,27 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   buzzer_host_unreachable: {
     en: "The buzzer can't be reached from this page — the site's buzzer address needs fixing. The game still plays without Buzzer Mode.",
     zh: "這個頁面連不上搶答器，網站的搶答器位址需要修正。沒有搶答模式，遊戲一樣可以玩。",
+    pt: "Esta página não consegue se conectar à campainha — o endereço da campainha do site precisa ser corrigido. O jogo funciona normalmente sem o Modo Campainha.",
   },
   buzzer_host_no_answer: {
     en: "Couldn't reach the room. It keeps trying — check the connection, or tap Reconnect.",
     zh: "連不上房間。會持續嘗試——請確認網路，或按「重新連線」。",
+    pt: "Não conseguimos falar com a sala. Continuamos tentando — confira a conexão ou toque em “Reconnect”.",
   },
   buzzer_host_room_expired: {
     en: "This room has ended. End the game and open a new room from setup.",
     zh: "這個房間已經結束。請結束遊戲，回到設定頁重新開一個房間。",
+    pt: "Esta sala já acabou. Encerre o jogo e abra uma sala nova na tela de configuração.",
   },
   buzzer_host_rejected: {
     en: "The room didn't recognise you as its host. Open a new room from setup.",
     zh: "房間認不出你是主持人。請回到設定頁重新開一個房間。",
+    pt: "A sala não reconheceu você como anfitrião. Abra uma sala nova na tela de configuração.",
   },
   buzzer_host_name_taken: {
     en: "A player took the host's name while you were reconnecting. Open a new room from setup.",
     zh: "重新連線時有玩家用了主持人的名字。請回到設定頁重新開一個房間。",
+    pt: "Um jogador pegou o nome do anfitrião enquanto você reconectava. Abra uma sala nova na tela de configuração.",
   },
 };
 
@@ -800,7 +910,12 @@ export function isAppErrorCode(value: unknown): value is AppErrorCode {
 export function detectErrorLocale(language?: string): ErrorLocale {
   const tag =
     language ?? (typeof navigator === "undefined" ? "" : navigator.language ?? "");
-  return tag.toLowerCase().startsWith("zh") ? "zh" : "en";
+  const lower = tag.toLowerCase();
+  if (lower.startsWith("zh")) return "zh";
+  // Any Portuguese: pt-BR is the market this was added for, and a pt-PT
+  // reader is far better served by Brazilian Portuguese than by English.
+  if (lower === "pt" || lower.startsWith("pt-")) return "pt";
+  return "en";
 }
 
 export interface ErrorMessageOptions {

@@ -48,6 +48,7 @@ import { isLoopSurface, type LoopSurface } from "@/lib/loop-links";
 // lib/order-game.ts. Nothing in it may grow an import of lib/kv.ts, or this
 // module and the client's beacon types would carry Upstash with them.
 import { isStarterKey, type StarterKey } from "@/lib/starter-playlists";
+import { isCountedSetupLocale, type CountedSetupLocale } from "@/lib/setup-copy";
 import {
   FIRST_CLIP_OUTCOMES,
   FIRST_CLIP_PATHS,
@@ -182,6 +183,8 @@ export type PulseEvent =
       teams?: true;
       /** A friend's "beat my score" game (lib/challenge.ts). Only ever `true`. */
       challenge?: true;
+      /** The setup page's language, from the Portuguese page only (`host_locale:pt`). */
+      locale?: CountedSetupLocale;
     }
   | {
       kind: "game_finished";
@@ -300,7 +303,11 @@ export function parsePulse(body: unknown): PulseEvent | null {
     const teamed = raw.teams === true ? { ...stepped, teams: true as const } : stepped;
     // And whether it is a friend's challenge: a literal `true` or nothing.
     // Whether it fits (an order game of one) is the recorder's call.
-    return raw.challenge === true ? { ...teamed, challenge: true as const } : teamed;
+    const challenged = raw.challenge === true ? { ...teamed, challenge: true as const } : teamed;
+    // And the setup page's language: `host_locale:${value}` is a key, only the
+    // Portuguese page sends one, and anything outside the closed set ("en"
+    // included — it is never sent) is dropped rather than the game.
+    return isCountedSetupLocale(raw.locale) ? { ...challenged, locale: raw.locale } : challenged;
   }
 
   if (raw.kind === "game_finished") {

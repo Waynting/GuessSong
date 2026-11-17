@@ -36,4 +36,12 @@ export const CRASH_SCREEN_UI: Record<
     restart: "重新開始",
     report: "回報問題",
   },
+  // The crash screen renders `client_error` from the error table, which has
+  // a Portuguese line, so its buttons have one too.
+  pt: {
+    title: "O jogo parou",
+    retry: "Tentar de novo",
+    restart: "Começar de novo",
+    report: "Relatar o problema",
+  },
 };
