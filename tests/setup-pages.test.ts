@@ -41,7 +41,7 @@ function sources(): string[] {
     .map((f) => f.slice(process.cwd().length + 1));
 }
 
-const HOME = "app/page.tsx";
+const HOME = "app/setup-page.tsx";
 const QUIZ_PAGE = "app/quiz/page.tsx";
 const QUIZ_FORM = "app/quiz/quiz-create.tsx";
 const GAME = "app/game/page.tsx";
@@ -83,7 +83,7 @@ describe("/quiz is a page of its own", () => {
     }
     // The footer is drawn by the explainer, in the device's language, so the
     // page is one language top to bottom (lib/quiz-about.ts).
-    expect(code(read("app/quiz/quiz-about.tsx"))).toContain("<SiteFooter locale={locale} />");
+    expect(code(read("app/quiz/quiz-about.tsx"))).toContain("<SiteFooter locale={siteLocale(locale)} />");
   });
 });
 
@@ -149,7 +149,7 @@ describe("the quiz form on /quiz", () => {
     // The form was hardcoded English around a panel that was not. Every
     // string a visitor reads is a `copy.*` lookup now; what is left as a
     // literal is an address or a number, neither of which is a sentence.
-    expect(body).toMatch(/const copy = QUIZ_COPY\[locale\];/);
+    expect(body).toMatch(/const copy = QUIZ_COPY\[siteLocale\(locale\)\];/);
     for (const literal of [
       "Taste Quiz",
       "A link your friends open",
@@ -181,7 +181,7 @@ describe("the quiz form on /quiz", () => {
       expect(prose).toEqual([]);
     }
     expect(body).toMatch(/\{copy\.createMakingLink\}/);
-    expect(body).toMatch(/\{QUIZ_COPY\[locale\]\.createLinkFallback\}/);
+    expect(body).toMatch(/\{QUIZ_COPY\[siteLocale\(locale\)\]\.createLinkFallback\}/);
     for (const attribute of ["placeholder", "aria-label", "alt", "title"]) {
       const quoted = [...body.matchAll(new RegExp(`${attribute}="([^"]*)"`, "g"))].map((m) => m[1]);
       // The playlist box's placeholder is an address, not a sentence.
@@ -297,7 +297,7 @@ describe("/ after the quiz left it", () => {
   });
 
   it("draws the class names from the shared stylesheet, declared once", () => {
-    // The 400-line <style> block lived in app/page.tsx and RoomPanel,
+    // The 400-line <style> block lived in app/setup-page.tsx and RoomPanel,
     // QuizPanel and MixedPlaylistCollector quietly depended on it. A page
     // that renders one of those panels renders <SetupStyles />, and neither
     // page declares the classes again.
@@ -319,17 +319,21 @@ describe("the FAQ on / is one list, rendered twice", () => {
   // and nothing on screen says when it has drifted: the page renders, the
   // JSON-LD validates, and the two quietly say different things. One array,
   // mapped in both places, is what makes drift impossible — so this pins that
-  // both renders read `FAQS` and nothing else, and that the array itself
-  // stays the size and shape a rich result is granted for.
-  const raw = read(HOME);
-  const body = code(raw);
+  // both renders read `copy.faqs` and nothing else, and that the array itself
+  // stays the size and shape a rich result is granted for. The array moved
+  // into lib/setup-copy.ts with the Portuguese page (2026-11-17), one per
+  // language; each page's JSON-LD and visible list read its own.
+  const raw = read("lib/setup-copy.ts");
+  const body = code(read(HOME));
 
-  /** The array literal as written, entry by entry, without executing the page. */
-  function faqs(): { q: string; a: string }[] {
-    const declaration = "const FAQS: { q: string; a: string }[] = [";
-    const start = raw.indexOf(declaration);
-    expect(start, "FAQS is declared with q and a").toBeGreaterThan(-1);
-    const end = raw.indexOf("\n];", start);
+  /** One language's array literal as written, entry by entry, without executing it. */
+  function faqs(locale: "en" | "pt" = "en"): { q: string; a: string }[] {
+    const localeStart = raw.indexOf(`\n  ${locale}: {`);
+    expect(localeStart, `${locale} block`).toBeGreaterThan(-1);
+    const declaration = "    faqs: [";
+    const start = raw.indexOf(declaration, localeStart);
+    expect(start, "faqs is declared").toBeGreaterThan(-1);
+    const end = raw.indexOf("\n    ],", start);
     // From the opening bracket, so the annotation's own `q:` is not an entry.
     const block = raw.slice(start + declaration.length, end);
     const entries = [...block.matchAll(/\{\s*q:\s*"((?:[^"\\]|\\.)*)",\s*a:\s*"((?:[^"\\]|\\.)*)",?\s*\}/g)];
@@ -339,30 +343,33 @@ describe("the FAQ on / is one list, rendered twice", () => {
     return entries.map(([, q, a]) => ({ q: JSON.parse(`"${q}"`), a: JSON.parse(`"${a}"`) }));
   }
 
-  it("emits FAQPage JSON-LD from FAQS, through JSON.stringify", () => {
+  it("emits FAQPage JSON-LD from copy.faqs, through JSON.stringify", () => {
     // Hand-written JSON in a template string is how a stray quote in an
     // answer breaks the schema silently; `JSON.stringify` escapes for us.
     expect(body).toMatch(
-      /dangerouslySetInnerHTML=\{\{\s*__html:\s*JSON\.stringify\(\{[\s\S]*?"@type":\s*"FAQPage",\s*mainEntity:\s*FAQS\.map\(\(faq\)\s*=>\s*\(\{\s*"@type":\s*"Question",\s*name:\s*faq\.q,\s*acceptedAnswer:\s*\{\s*"@type":\s*"Answer",\s*text:\s*faq\.a\s*\},?\s*\}\)\)/
+      /dangerouslySetInnerHTML=\{\{\s*__html:\s*JSON\.stringify\(\{[\s\S]*?"@type":\s*"FAQPage",\s*mainEntity:\s*copy\.faqs\.map\(\(faq\)\s*=>\s*\(\{\s*"@type":\s*"Question",\s*name:\s*faq\.q,\s*acceptedAnswer:\s*\{\s*"@type":\s*"Answer",\s*text:\s*faq\.a\s*\},?\s*\}\)\)/
     );
   });
 
-  it("renders the visible list from the same FAQS, question then answer", () => {
+  it("renders the visible list from the same copy.faqs, question then answer", () => {
     // Folded since 2026-10-26: the answer sits in the <details> under its
     // question, still in the HTML, so it still matches the JSON-LD.
     expect(body).toMatch(
-      /FAQS\.map\(\(faq\)\s*=>\s*\(\s*<details key=\{faq\.q\} className="faq-item">\s*<summary><h3 className="faq-q">\{faq\.q\}<\/h3><\/summary>\s*<p className="faq-a">\{faq\.a\}<\/p>\s*<\/details>\s*\)\)/
+      /copy\.faqs\.map\(\(faq\)\s*=>\s*\(\s*<details key=\{faq\.q\} className="faq-item">\s*<summary><h3 className="faq-q">\{faq\.q\}<\/h3><\/summary>\s*<p className="faq-a">\{faq\.a\}<\/p>\s*<\/details>\s*\)\)/
     );
   });
 
-  it("reads FAQS in exactly those two places, and retypes no question anywhere", () => {
-    expect(body.match(/FAQS\.map\(/g) ?? []).toHaveLength(2);
-    expect(body.match(/\bFAQS\b/g) ?? [], "declaration plus two reads").toHaveLength(3);
+  it("reads copy.faqs in exactly those two places, and retypes no question anywhere", () => {
+    expect(body.match(/copy\.faqs\.map\(/g) ?? []).toHaveLength(2);
+    expect(body.match(/\bfaqs\b/gi) ?? [], "the two reads and nothing else").toHaveLength(2);
     // No third FAQ hand-written beside the two renders.
     expect(body.match(/"@type":\s*"Question"/g) ?? []).toHaveLength(1);
     expect(body.match(/className="faq-q"/g) ?? []).toHaveLength(1);
-    for (const { q } of faqs()) {
-      expect(raw.split(`"${q}"`), `"${q}" appears once`).toHaveLength(2);
+    for (const locale of ["en", "pt"] as const) {
+      for (const { q } of faqs(locale)) {
+        expect(raw.split(`"${q}"`), `"${q}" appears once`).toHaveLength(2);
+        expect(read(HOME), `"${q}" is retyped in the page`).not.toContain(q);
+      }
     }
   });
 
@@ -371,14 +378,16 @@ describe("the FAQ on / is one list, rendered twice", () => {
     // than two sentences is an article, and belongs in /guides. The count is
     // conservative — a terminator is `. `, `? ` or `! ` followed by a capital,
     // so "Discover Weekly and the like) can't" and "3 points" do not split.
-    const list = faqs();
-    expect(list).toHaveLength(4);
-    for (const { q, a } of list) {
-      expect(q.trim().length, q).toBeGreaterThan(0);
-      expect(q.trim().endsWith("?"), `${q} asks`).toBe(true);
-      expect(a.trim().length, a).toBeGreaterThan(0);
-      const sentences = 1 + (a.match(/[.?!] (?=[A-Z])/g) ?? []).length;
-      expect(sentences, `${q} → ${a}`).toBeLessThanOrEqual(2);
+    for (const locale of ["en", "pt"] as const) {
+      const list = faqs(locale);
+      expect(list, locale).toHaveLength(4);
+      for (const { q, a } of list) {
+        expect(q.trim().length, q).toBeGreaterThan(0);
+        expect(q.trim().endsWith("?"), `${q} asks`).toBe(true);
+        expect(a.trim().length, a).toBeGreaterThan(0);
+        const sentences = 1 + (a.match(/[.?!] (?=[A-ZÀ-Ý])/g) ?? []).length;
+        expect(sentences, `${q} → ${a}`).toBeLessThanOrEqual(2);
+      }
     }
   });
 });

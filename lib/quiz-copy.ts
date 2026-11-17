@@ -6,7 +6,7 @@
  * the whole page is one fetch away from a blank card, so there is no server
  * render to disagree with. That is the one place the argument against
  * localising the site does not apply, and this table is the size of what it
- * buys: one `Record<ErrorLocale, …>` so a missing translation is a compile
+ * buys: one `Record<SiteLocale, …>` so a missing translation is a compile
  * error, the same trick `lib/error-messages.ts` and `lib/changelog.ts` use.
  * Errors themselves stay in that file; these are the sentences around them.
  *
@@ -14,7 +14,7 @@
  * that both languages carry the same set.
  */
 
-import type { ErrorLocale } from "@/lib/error-messages";
+import type { ErrorLocale, SiteLocale } from "@/lib/error-messages";
 import type { QuizVerdict } from "@/lib/quiz";
 import { DEFAULT_QUIZ_KIND, type QuizKind } from "@/types/quiz";
 
@@ -242,7 +242,7 @@ export interface QuizCopy {
   mineDeviceNote: string;
 }
 
-export const QUIZ_COPY: Record<ErrorLocale, QuizCopy> = {
+export const QUIZ_COPY: Record<SiteLocale, QuizCopy> = {
   en: {
     introTitleOwner: "How well do you know {owner}'s music taste?",
     introTitlePlaylist: "How well do you know this playlist?",
@@ -589,7 +589,7 @@ export interface QuizCardCopy {
  * whose taste it is, is the question either way.
  */
 export function quizCardCopy(
-  peek: { locale: ErrorLocale; ownerName: string | null; playlistName: string; questionCount: number; kind?: QuizKind } | null
+  peek: { locale: SiteLocale; ownerName: string | null; playlistName: string; questionCount: number; kind?: QuizKind } | null
 ): QuizCardCopy {
   const copy = QUIZ_COPY[peek?.locale ?? "en"];
   if (!peek) {

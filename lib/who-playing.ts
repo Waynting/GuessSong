@@ -13,7 +13,7 @@
  * The answer is not stored. It is derived from the form a restore puts on
  * screen (`whoFromSetup`), so a remembered setup, `?mode=mixed` and "Start
  * fresh" all land on the right row with no new field in lib/setup-memory.ts
- * and nothing to migrate. In `lib/` rather than `app/page.tsx` because the
+ * and nothing to migrate. In `lib/` rather than `app/setup-page.tsx` because the
  * suite reaches only `lib/`.
  */
 

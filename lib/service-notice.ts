@@ -117,4 +117,16 @@ export const SERVICE_NOTICE_UI: Record<
     close: "關閉公告",
     repo: "自己架一站",
   },
+  // Added for the reader who wrote in: a Brazilian first-timer who took
+  // "today's allowance is gone" for a limit on them. Both headlines say "the
+  // site" so neither can be read as personal.
+  pt: {
+    title: {
+      blocked: "Playlists novas não estão carregando no site agora",
+      warning: "O site está perto da cota de playlists de hoje",
+    },
+    dismiss: "Entendi",
+    close: "Fechar aviso",
+    repo: "Rodar sua própria cópia",
+  },
 };

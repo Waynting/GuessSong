@@ -3,7 +3,7 @@
  * languages the site ships.
  *
  * In `lib/` rather than beside the page for the reason `lib/song-count.ts`
- * gives — the suite reaches `lib/` — and as one `Record<ErrorLocale, …>` so a
+ * gives — the suite reaches `lib/` — and as one `Record<SiteLocale, …>` so a
  * missing translation is a compile error, the `lib/quiz-copy.ts` rule.
  *
  * The page is prerendered in English and switches after mount, the way the
@@ -18,7 +18,7 @@
  * the English half against those constants.
  */
 
-import type { ErrorLocale } from "@/lib/error-messages";
+import type { SiteLocale } from "@/lib/error-messages";
 
 export interface QuizAboutCopy {
   howTitle: string;
@@ -31,7 +31,7 @@ export interface QuizAboutCopy {
   partyHref: string;
 }
 
-export const QUIZ_ABOUT: Record<ErrorLocale, QuizAboutCopy> = {
+export const QUIZ_ABOUT: Record<SiteLocale, QuizAboutCopy> = {
   en: {
     howTitle: "How the taste quiz works",
     steps: [

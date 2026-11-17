@@ -250,8 +250,10 @@ describe("counting: game_teams:on and game_end_teams:<end>, closed sets", () => 
 
 describe("page wiring", () => {
   it("the setup page offers the switch from four names and stores sides on the roster", () => {
-    const page = read("app/page.tsx");
-    expect(page).toMatch(/Split into two teams/);
+    const page = read("app/setup-page.tsx");
+    // The words live in lib/setup-copy.ts since the Portuguese page.
+    expect(page).toMatch(/\{copy\.teams\.toggle\}/);
+    expect(read("lib/setup-copy.ts")).toMatch(/toggle: "Split into two teams"/);
     expect(page).toMatch(/teamsVisible = teamsOffered\(typedPlayerCount\)/);
     expect(page).toMatch(/teamsOn && teamsVisible && setupMode === "single" && !buzzerEnabled && who !== "solo"/);
     expect(page).toMatch(/normalizeTeams\(rosterWithTeams\(roster, rowTeams\)/);
@@ -259,7 +261,8 @@ describe("page wiring", () => {
     expect(page).toMatch(/\.\.\.\(teams \? \{ teams: true \} : \{\}\)/);
     expect(page).toMatch(/swapPlayerTeam\(idx\)/);
     // A lopsided split is played without teams, so the switch says so first.
-    expect(page).toMatch(/teamsHold \? "On" : "2 a side needed"/);
+    expect(page).toMatch(/teamsHold \? copy\.teams\.on : copy\.teams\.needTwo/);
+    expect(read("lib/setup-copy.ts")).toMatch(/needTwo: "2 a side needed"/);
   });
 
   it.each(["app/game/page.tsx", "app/order/page.tsx"])("%s draws team totals and sends the flag on the end", (file) => {

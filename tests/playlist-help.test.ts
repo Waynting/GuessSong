@@ -143,6 +143,7 @@ describe("what the help says", () => {
           expect(text[locale].trim().length, `${topic}.${locale}`).toBeGreaterThan(0);
         }
         expect(text.zh, `${topic} is untranslated`).not.toBe(text.en);
+        expect(text.pt, `${topic} has no Portuguese`).not.toBe(text.en);
         // Written natively: a Chinese line that is mostly Latin letters is an
         // English line that was left behind.
         expect(/[一-鿿]/.test(text.zh), `${topic}.zh has no Chinese in it`).toBe(true);

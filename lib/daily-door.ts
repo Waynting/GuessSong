@@ -51,4 +51,13 @@ export const DAILY_DOOR_COPY: Record<ErrorLocale, DailyDoorCopy> = {
       "每日挑戰還沒有做。你剛剛這一下已經記下來了，想要的人夠多，下一個就做它。" +
       "現在可以在上面選「Just me」，一個人玩排順序。",
   },
+  // Shown on the Portuguese setup page (lib/setup-copy.ts), where the tile
+  // the note points at reads "Só eu".
+  pt: {
+    title: "Desafio do dia",
+    sub: "Cinco músicas para pôr em ordem — as mesmas para todo mundo hoje →",
+    note:
+      "O desafio diário ainda não existe. Seu toque foi contado e, se muita gente pedir, " +
+      "é ele que construímos a seguir. Hoje, escolha \"Só eu\" lá em cima para jogar o Ponha em ordem sozinho.",
+  },
 };

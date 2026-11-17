@@ -35,7 +35,7 @@ describe("the scoreboard's band", () => {
 
 describe("the pages send both, on every path", () => {
   it("the setup page bands the same count GA4's player_count gets, on all three starts", () => {
-    const body = code(read("app/page.tsx"));
+    const body = code(read("app/setup-page.tsx"));
     expect(body).toMatch(
       /const players = playerBand\(playerCount\);[\s\S]*?reportGameStart\(hostGameIndex, \{\s*mixed,\s*source: setupSource,\s*mode,\s*players,\s*from: currentArrival\(\),/
     );

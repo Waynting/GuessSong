@@ -278,7 +278,7 @@ const TRACKS_PAGE_LIMIT = 100;
  * Hard stop on how deep we paginate. The loop used to follow Spotify's `next`
  * cursor with no bound at all, so one 4,000-track playlist was 40 upstream
  * requests — for a game that then shuffles and plays at most 50 of them
- * (SONG_COUNTS in app/page.tsx), or samples 8 per player in Mixed mode.
+ * (SONG_COUNTS in app/setup-page.tsx), or samples 8 per player in Mixed mode.
  *
  * 500 covers "All" for any playlist a party would realistically use while
  * bounding the worst case at 5 upstream calls — the merged head is one of

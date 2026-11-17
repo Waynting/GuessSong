@@ -101,7 +101,7 @@ describe("the page's own recheck of a private refusal", () => {
 });
 
 describe("the setup page's wiring", () => {
-  const body = code(read("app/page.tsx"));
+  const body = code(read("app/setup-page.tsx"));
 
   it("schedules from the refusal a request brought back, in the catch", () => {
     const start = body.slice(body.indexOf("async function handleStart("), body.indexOf("function scheduleAutoRecheck("));

@@ -27,7 +27,7 @@
  */
 
 import { useEffect, useState } from "react";
-import type { ErrorLocale } from "@/lib/error-messages";
+import { siteLocale, type ErrorLocale } from "@/lib/error-messages";
 import { reportQuizSocial } from "@/lib/loop-client";
 import type { QuizShareBy } from "@/lib/loop-stats";
 import { QUIZ_COPY } from "@/lib/quiz-copy";
@@ -104,7 +104,7 @@ export function QuizSocialLinks({
   return (
     <div className="quiz-social">
       <style>{SOCIAL_CSS}</style>
-      <p className="quiz-social-lead">{QUIZ_COPY[locale].socialLead}</p>
+      <p className="quiz-social-lead">{QUIZ_COPY[siteLocale(locale)].socialLead}</p>
       <ul className="quiz-social-row">
         {socialPlatformsFor(locale).map((platform) => (
           <li key={platform}>

@@ -12,11 +12,13 @@ import { ERROR_MESSAGES } from "@/lib/error-messages";
 describe("CRASH_SCREEN_UI", () => {
   const KEYS = ["title", "retry", "restart", "report"] as const;
 
-  it("carries both languages, and they differ", () => {
+  it("carries every language, and they differ", () => {
     for (const key of KEYS) {
       expect(CRASH_SCREEN_UI.en[key].trim()).not.toBe("");
       expect(CRASH_SCREEN_UI.zh[key].trim()).not.toBe("");
       expect(CRASH_SCREEN_UI.en[key]).not.toBe(CRASH_SCREEN_UI.zh[key]);
+      expect(CRASH_SCREEN_UI.pt[key].trim()).not.toBe("");
+      expect(CRASH_SCREEN_UI.pt[key]).not.toBe(CRASH_SCREEN_UI.en[key]);
     }
   });
 
@@ -37,7 +39,7 @@ describe("CRASH_SCREEN_UI", () => {
    * offer. A host who cannot tell them apart retries the broken thing forever.
    */
   it("does not let the two actions read as the same button", () => {
-    for (const locale of ["en", "zh"] as const) {
+    for (const locale of ["en", "zh", "pt"] as const) {
       expect(CRASH_SCREEN_UI[locale].restart).not.toBe(CRASH_SCREEN_UI[locale].retry);
     }
   });

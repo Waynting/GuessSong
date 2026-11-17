@@ -55,7 +55,7 @@ describe("soloRoster", () => {
 });
 
 describe("the setup page wiring", () => {
-  const page = read("app/page.tsx");
+  const page = read("app/setup-page.tsx");
 
   it("starts a solo game on soloRoster, never on the hidden roster", () => {
     expect(page).toMatch(/const roster = who === "solo" \? soloRoster\(players\) : players;/);
@@ -77,9 +77,15 @@ describe("the order game is described once on the setup page", () => {
     // 82% of order games over before their first reveal had moved nothing;
     // a tile that read as "a music game" had promised a clip. One constant
     // for both sites (lib/order-game.ts), so the game is described once.
-    const page = read("app/page.tsx");
-    expect(page).toMatch(/sub: ORDER_BLURB,/);
-    expect(page).toMatch(/\? ORDER_BLURB\s*: "Play a clip, everyone shouts the title, you award the points\."/);
+    // The English lives in lib/setup-copy.ts since the Portuguese page
+    // (2026-11-17): ORDER_BLURB on the tile and on the pill, by reference.
+    const page = read("app/setup-page.tsx");
+    const copy = read("lib/setup-copy.ts");
+    expect(copy).toMatch(/solo: \{ title: "Just me", sub: ORDER_BLURB \}/);
+    expect(copy).toMatch(/orderBlurb: ORDER_BLURB,/);
+    expect(copy).toMatch(/guessBlurb: "Play a clip, everyone shouts the title, you award the points\.",/);
+    expect(page).toMatch(/\{copy\.who\[who\]\.sub\}/);
+    expect(page).toMatch(/\{isOrder \? copy\.orderBlurb : copy\.guessBlurb\}/);
     expect(page).not.toMatch(/Order four songs by release year|No audio, so it works anywhere/);
     expect(ORDER_BLURB).toBe("Four songs, oldest to newest. No sound — it scores itself.");
     expect(ORDER_BLURB).toMatch(/No sound/);

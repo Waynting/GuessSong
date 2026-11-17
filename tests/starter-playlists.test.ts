@@ -451,18 +451,20 @@ describe("the single-starter path is what it was before themes", () => {
   });
 
   it("keeps the page's old render on the null branch: same chips, same sentence, same row", () => {
-    // app/page.tsx: the field row and the refusal row fall back to exactly
+    // app/setup-page.tsx: the field row and the refusal row fall back to exactly
     // the calls they made before themes, and only a theme row changes them.
-    const page = read("app/page.tsx");
+    const page = read("app/setup-page.tsx");
     expect(page).toMatch(/const themeRow = themeRowFor\(styleStarters, themeRegion\);/);
     expect(page).toMatch(
       /const fieldRow = themeRow\s*\?\s*fieldChipRow\(recentPlaylists, themeRow, starterPlace, \{ themed: true \}\)\s*:\s*fieldChipRow\(recentPlaylists, styleStarters, starterPlace\);/
     );
+    // The words come from lib/setup-copy.ts since the Portuguese page; the
+    // English there is the old literals (tests/setup-copy.test.ts).
     expect(page).toMatch(
-      /:\s*\(\s*<PlaylistChips\s+label="Starter playlists"\s+caption=\{starterCaption\(styleStarters\.length\)\}\s+playlists=\{styleStarters\}/
+      /:\s*\(\s*<PlaylistChips\s+label=\{copy\.chipRow\.starters\}\s+caption=\{copy\.starterCaption\(styleStarters\.length\)\}\s+playlists=\{styleStarters\.map\(inPageLanguage\)\}/
     );
     // One PlaylistChips in the field slot, never a second row for themes.
-    expect(page.match(/label=\{fieldRow\.label\}/g)).toHaveLength(1);
+    expect(page.match(/label=\{copy\.chipRow\[fieldRow\.kind\]\}/g)).toHaveLength(1);
     expect(page).not.toMatch(/useState[^;]*regionFromLanguages/);
     expect(page).not.toMatch(/marketFromHeaders/);
   });
@@ -489,7 +491,7 @@ describe("the theme row's one counter", () => {
   });
 
   it("is sent once per page per style, and printed by npm run stats", () => {
-    const page = read("app/page.tsx");
+    const page = read("app/setup-page.tsx");
     expect(page).toMatch(/themeRowReportedRef\.current\.has\(playStyle\)/);
     expect(page.match(/reportStarterThemeRow\(/g)).toHaveLength(1);
     const script = read("scripts/loop-stats.mjs");

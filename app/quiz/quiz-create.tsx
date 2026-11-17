@@ -5,7 +5,7 @@ import Link from "next/link";
 import { trackEvent } from "@/lib/analytics";
 import { recallLoopRef, rememberLoopRef } from "@/lib/host-session";
 import { arrivedFrom } from "@/lib/loop-links";
-import { apiError, describeError, errorMessage, shouldRememberRejection, type ErrorLocale } from "@/lib/error-messages";
+import { apiError, describeError, errorMessage, shouldRememberRejection, siteLocale, type ErrorLocale } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import dynamic from "next/dynamic";
 import { CheckIcon, SpotifyIcon } from "@/components/setup-chrome";
@@ -81,7 +81,7 @@ const QuizPanel = dynamic(
 
 /** Resolves its own language: `dynamic`'s `loading` slot is handed no props. */
 function QuizPanelPlaceholder() {
-  const copy = QUIZ_COPY[useErrorLocale()];
+  const copy = QUIZ_COPY[siteLocale(useErrorLocale())];
   return (
     <p style={{ fontSize: "13px", color: "#999", textAlign: "center", padding: "12px 0" }}>
       {copy.createMakingLink}
@@ -94,7 +94,7 @@ function QuizPanelFallback({ code, locale }: { code: string; locale: ErrorLocale
   const url = quizUrl(code);
   return (
     <p style={{ fontSize: "13px", color: "#ccc", textAlign: "center", lineHeight: 1.6 }}>
-      {QUIZ_COPY[locale].createLinkFallback}{" "}
+      {QUIZ_COPY[siteLocale(locale)].createLinkFallback}{" "}
       <a href={url} style={{ color: "#1DB954", wordBreak: "break-all" }}>
         {url}
       </a>
@@ -103,7 +103,7 @@ function QuizPanelFallback({ code, locale }: { code: string; locale: ErrorLocale
 }
 
 /**
- * The quiz form. Lifted out of `app/page.tsx`, where it was a mode of the
+ * The quiz form. Lifted out of `app/setup-page.tsx`, where it was a mode of the
  * party form sharing that page's URL box, Start button and error line.
  * Same `/api/*` conventions and the same rejection memo as a game start, but
  * deliberately never `recordHostedStart`: a quiz is one person making
@@ -142,7 +142,7 @@ export function QuizCreate() {
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const locale = useErrorLocale();
-  const copy = QUIZ_COPY[locale];
+  const copy = QUIZ_COPY[siteLocale(locale)];
 
   /**
    * The last submission that failed in a way the submission itself
@@ -159,7 +159,7 @@ export function QuizCreate() {
     // Attribution from /r/quiz_result. Stored rather than used immediately:
     // the person who just took a friend's quiz is not about to host a party
     // tonight, so the game this credits is weeks away. Read off
-    // `window.location` for the same reason `app/page.tsx` does — an
+    // `window.location` for the same reason `app/setup-page.tsx` does — an
     // unsuspended `useSearchParams` would opt the page out of prerendering.
     const ref = new URLSearchParams(window.location.search).get("ref");
     if (ref) rememberLoopRef(ref);
@@ -211,7 +211,7 @@ export function QuizCreate() {
       url: playlistUrl,
       ownerName: ownerName.trim() || undefined,
       questionCount,
-      locale,
+      locale: siteLocale(locale),
       from,
       kind,
     };

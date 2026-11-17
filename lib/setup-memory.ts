@@ -23,7 +23,7 @@
  *   - **recent playlists** — the last five that loaded, newest first.
  *
  * Written when a game actually starts — the three `recordHostedStart` call
- * sites in `app/page.tsx` — and never while typing. A link is only worth
+ * sites in `app/setup-page.tsx` — and never while typing. A link is only worth
  * remembering once it has loaded, which is also the only moment its *name* is
  * known; and a form that saved every keystroke would restore a half-typed
  * name as though it were a player.
@@ -74,7 +74,7 @@ export const RECENT_PLAYLISTS_KEY = "guesssong_recent_playlists";
 
 /**
  * The clip lengths the form offers, in the order the pills render. Declared
- * here rather than in `app/page.tsx` because the validator below has to agree
+ * here rather than in `app/setup-page.tsx` because the validator below has to agree
  * with the pills about what is on offer, and two lists would let a remembered
  * length select a pill that is not there.
  */

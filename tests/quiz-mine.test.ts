@@ -67,7 +67,7 @@ describe("/quiz carries words a search can land on", () => {
     expect(page).toMatch(/"@type":\s*"HowTo"[\s\S]*?step:\s*about\.steps\.map\(/);
     expect(page).toContain("JSON.stringify(ld)");
     // And the visible list reads the same table, by the device's language.
-    expect(about).toContain("const about = QUIZ_ABOUT[locale];");
+    expect(about).toContain("const about = QUIZ_ABOUT[siteLocale(locale)];");
     expect(about).toContain("about.faqs.map(");
     expect(about).toContain("about.steps.map(");
   });

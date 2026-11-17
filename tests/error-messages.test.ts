@@ -21,7 +21,7 @@ import {
 import { errorResponse } from "@/lib/api-error";
 
 const CODES = Object.keys(ERROR_MESSAGES) as AppErrorCode[];
-const LOCALES: ErrorLocale[] = ["en", "zh"];
+const LOCALES: ErrorLocale[] = ["en", "zh", "pt"];
 
 /** `{seconds}` etc., in the order they appear. */
 function placeholders(text: string): string[] {
@@ -50,13 +50,26 @@ describe("the message table", () => {
     }
   });
 
-  it("keeps the same placeholders in both languages", () => {
+  it("never ships the English string as the Portuguese one", () => {
+    // The same defect one language over: the pt setup page is the one a
+    // Brazilian host lands on, and an English sentence in its red box is the
+    // seam the translation was added to close.
+    for (const code of CODES) {
+      expect(ERROR_MESSAGES[code].pt, `${code} is not translated`).not.toBe(
+        ERROR_MESSAGES[code].en
+      );
+    }
+  });
+
+  it("keeps the same placeholders in every language", () => {
     // A translation that drops `{seconds}` loses the only number in the
     // sentence; one that invents `{minutes}` renders the braces literally.
     for (const code of CODES) {
-      expect(placeholders(ERROR_MESSAGES[code].zh), `${code}`).toEqual(
-        placeholders(ERROR_MESSAGES[code].en)
-      );
+      for (const locale of ["zh", "pt"] as const) {
+        expect(placeholders(ERROR_MESSAGES[code][locale]), `${code}.${locale}`).toEqual(
+          placeholders(ERROR_MESSAGES[code].en)
+        );
+      }
     }
   });
 
@@ -82,7 +95,7 @@ describe("the message table", () => {
       code: "quiz_too_few_tracks",
       params: { count: 5 },
     };
-    for (const locale of ["en", "zh"] as const) {
+    for (const locale of ["en", "zh", "pt"] as const) {
       const text = describeError(apiError(body, "quiz_create_failed"), locale);
       expect(text).toContain("5");
       expect(text).not.toContain("{");
@@ -110,6 +123,9 @@ describe("the message table", () => {
       expect(ERROR_MESSAGES[code].zh).not.toMatch(/公開/);
       expect(ERROR_MESSAGES[code].en).toMatch(/your playlist URL is fine/i);
       expect(ERROR_MESSAGES[code].zh).toMatch(/沒有問題/);
+      // Portuguese: no "pública"/"privada", and the same closing clearance.
+      expect(ERROR_MESSAGES[code].pt).not.toMatch(/p[úu]blic|privad/i);
+      expect(ERROR_MESSAGES[code].pt).toMatch(/o link da sua playlist está certo/i);
     }
   });
 
@@ -131,6 +147,13 @@ describe("the message table", () => {
 
       expect(ERROR_MESSAGES[code].en, `${code}.en offers no way out`).toMatch(/open source/i);
       expect(ERROR_MESSAGES[code].zh, `${code}.zh offers no way out`).toMatch(/開源/);
+
+      // The language this was added for, after a Brazilian first-timer read
+      // the quota notice as a limit on them personally.
+      expect(ERROR_MESSAGES[code].pt, `${code}.pt does not apologise`).toMatch(/desculp/i);
+      expect(ERROR_MESSAGES[code].pt, `${code}.pt does not say it is free`).toMatch(/gratuito|grátis/i);
+      expect(ERROR_MESSAGES[code].pt, `${code}.pt offers no way out`).toMatch(/open source|código aberto/i);
+      expect(ERROR_MESSAGES[code].pt, `${code}.pt does not say it is not the reader`).toMatch(/não é culpa sua/i);
     }
   });
 
@@ -151,6 +174,9 @@ describe("the message table", () => {
       );
       expect(ERROR_MESSAGES[code].zh, `${code}.zh blames the playlist`).not.toMatch(
         /公開|連結/
+      );
+      expect(ERROR_MESSAGES[code].pt, `${code}.pt blames the playlist`).not.toMatch(
+        /link|url|p[úu]blic|spotify/i
       );
     }
   });
@@ -192,6 +218,17 @@ describe("the message table", () => {
       expect(placeholders(en)).toEqual([]);
       expect(en).not.toMatch(/try again|wait/i);
       expect(zh).not.toMatch(/再試|稍後/);
+
+      // The same three rules in Portuguese.
+      const pt = ERROR_MESSAGES[code].pt;
+      expect(pt, `${code}.pt does not say what the link is`).toMatch(/música/i);
+      expect(pt, `${code}.pt offers nothing to paste`).toMatch(/playlist/i);
+      expect(pt, `${code}.pt`).toMatch(/você criou|sua/i);
+      expect(pt, `${code}.pt sends the reader to an editorial playlist`).not.toMatch(
+        /this is|playlist do artista|rádio|radio|editorial/i
+      );
+      expect(placeholders(pt)).toEqual([]);
+      expect(pt).not.toMatch(/tente de novo|espere/i);
     }
   });
 
@@ -208,10 +245,15 @@ describe("the message table", () => {
     // And what works: a playlist.
     expect(en).toMatch(/playlist/i);
     expect(zh).toMatch(/歌單/);
+    const pt = ERROR_MESSAGES.album_not_found.pt;
+    expect(pt).toMatch(/álbum/i);
+    expect(pt).not.toMatch(/p[úu]blic|privad/i);
+    expect(pt).toMatch(/playlist/i);
     expect(isDeterministicPlaylistFailure("album_not_found")).toBe(true);
     // The catch-all sentence names both kinds that work.
     expect(ERROR_MESSAGES.invalid_playlist_url.en).toMatch(/album/i);
     expect(ERROR_MESSAGES.invalid_playlist_url.zh).toMatch(/專輯/);
+    expect(ERROR_MESSAGES.invalid_playlist_url.pt).toMatch(/álbum/i);
   });
 
   /**
@@ -230,6 +272,10 @@ describe("the message table", () => {
     expect(en).toMatch(/full link/i);
     expect(zh).toMatch(/完整連結/);
     expect(placeholders(en)).toEqual([]);
+    const pt = ERROR_MESSAGES.playlist_shortlink_unavailable.pt;
+    expect(pt).not.toMatch(/não parece|não é uma playlist|inválid|errad|p[úu]blic|privad/i);
+    expect(pt).toMatch(/tente de novo/i);
+    expect(pt).toMatch(/link completo/i);
   });
 
   /**
@@ -242,8 +288,20 @@ describe("the message table", () => {
   it("makes the budget warning say nothing is broken yet", () => {
     expect(ERROR_MESSAGES.spotify_budget_low.en).toMatch(/still works/i);
     expect(ERROR_MESSAGES.spotify_budget_low.zh).toMatch(/都還正常/);
+    expect(ERROR_MESSAGES.spotify_budget_low.pt).toMatch(/continua funcionando/i);
+    // And, in the language of the reader who took the notice personally,
+    // that it is the whole site's allowance and not theirs.
+    expect(ERROR_MESSAGES.spotify_budget_low.pt).toMatch(/site inteiro/i);
     // A level, not a wait. See the {seconds} placeholder pin above.
     expect(placeholders(ERROR_MESSAGES.spotify_budget_low.en)).toEqual([]);
+  });
+
+  it("keeps the daily-quota refusal free of a countdown in every language", () => {
+    // A wait measured in hours is a promise the app cannot keep (see the
+    // entry's comment); a translation is as able to reintroduce it.
+    for (const locale of LOCALES) {
+      expect(ERROR_MESSAGES.spotify_quota_exhausted[locale], locale).not.toMatch(/\{seconds\}/);
+    }
   });
 
   it("covers every code the buzzer Worker can send", () => {
@@ -267,7 +325,7 @@ describe("the message table", () => {
     }
   });
 
-  it("never tells the host to ask the host, in either language", () => {
+  it("never tells the host to ask the host, in any language", () => {
     // The player's sentence for an ended room says "ask the host for a new
     // one"; on the host panel that used to be the sentence shown. Every code
     // the host's chair can render is checked, the pass-throughs included.
@@ -276,10 +334,11 @@ describe("the message table", () => {
       ...(Object.keys(BUZZER_CLIENT_ERROR_CODES) as (keyof typeof BUZZER_CLIENT_ERROR_CODES)[]),
     ].map((code) => buzzerErrorCode(code, "host"));
     for (const code of hostCodes) {
-      for (const locale of ["en", "zh"] as const) {
+      for (const locale of ["en", "zh", "pt"] as const) {
         const text = ERROR_MESSAGES[code][locale];
         expect(text, `${code}.${locale}`).not.toMatch(/ask the host|only the room's host/i);
         expect(text, `${code}.${locale}`).not.toMatch(/跟主持人|只有主持人/);
+        expect(text, `${code}.${locale}`).not.toMatch(/ao anfitrião|só o anfitrião/i);
       }
     }
   });
@@ -296,14 +355,14 @@ describe("the message table", () => {
     expect(buzzerErrorCode("no_answer", "player")).toBe("buzzer_no_answer");
     // The player is told to check the code; the host has no code to check.
     expect(buzzerErrorCode("no_answer", "host")).toBe("buzzer_host_no_answer");
-    for (const locale of ["en", "zh"] as const) {
-      expect(ERROR_MESSAGES.buzzer_host_no_answer[locale]).not.toMatch(/code|代碼/);
+    for (const locale of ["en", "zh", "pt"] as const) {
+      expect(ERROR_MESSAGES.buzzer_host_no_answer[locale]).not.toMatch(/code|代碼|código/);
     }
   });
 
   it("addresses the player's sentences to the player, never to whoever runs the site", () => {
-    for (const locale of ["en", "zh"] as const) {
-      expect(ERROR_MESSAGES.buzzer_unreachable[locale]).not.toMatch(/address|位址|needs fixing|修正/);
+    for (const locale of ["en", "zh", "pt"] as const) {
+      expect(ERROR_MESSAGES.buzzer_unreachable[locale]).not.toMatch(/address|位址|needs fixing|修正|endereço|corrigid/);
       expect(ERROR_MESSAGES.buzzer_host_rejected[locale]).not.toMatch(/token|憑證/);
     }
   });
@@ -327,6 +386,23 @@ describe("the message table", () => {
     expect(buzzerErrorMessage(future, "zh", "player")).toBe("Upstream said no");
     expect(buzzerErrorMessage({ ...future, message: "" }, "zh", "player")).toBe(ERROR_MESSAGES.unknown.zh);
   });
+
+  it("renders every buzzer sentence, on either chair, in Portuguese from the same table", () => {
+    // buzzerErrorMessage is the one render path for the phone and the host's
+    // panel; a pt device must read the Portuguese line on both, never the
+    // Worker's English.
+    const codes = [
+      ...(Object.keys(BUZZER_ERROR_CODES) as (keyof typeof BUZZER_ERROR_CODES)[]),
+      ...(Object.keys(BUZZER_CLIENT_ERROR_CODES) as (keyof typeof BUZZER_CLIENT_ERROR_CODES)[]),
+    ];
+    for (const code of codes) {
+      for (const audience of ["player", "host"] as const) {
+        const rendered = buzzerErrorMessage({ code, message: "Worker English" }, "pt", audience);
+        expect(rendered, `${code}/${audience}`).toBe(ERROR_MESSAGES[buzzerErrorCode(code, audience)].pt);
+        expect(rendered, `${code}/${audience}`).not.toBe(ERROR_MESSAGES[buzzerErrorCode(code, audience)].en);
+      }
+    }
+  });
 });
 
 describe("an artist link, since 2026-11-10", () => {
@@ -341,6 +417,11 @@ describe("an artist link, since 2026-11-10", () => {
       expect(zh, code).not.toMatch(/This Is|歌手的歌單|電台|官方/i);
       expect(placeholders(en), code).toEqual([]);
       expect(en, code).not.toMatch(/public|private|try again|wait/i);
+      const pt = ERROR_MESSAGES[code].pt;
+      expect(pt, code).toMatch(/artista/i);
+      expect(pt, code).toMatch(/playlist/i);
+      expect(pt, code).not.toMatch(/this is|playlist do artista|rádio|radio|editorial/i);
+      expect(pt, code).not.toMatch(/p[úu]blic|privad|tente de novo|espere/i);
       expect(isDeterministicPlaylistFailure(code), code).toBe(true);
     }
     // The old refusal is gone: the code no longer exists.
@@ -348,6 +429,7 @@ describe("an artist link, since 2026-11-10", () => {
     // And the generic sentence names all three playable kinds.
     expect(ERROR_MESSAGES.invalid_playlist_url.en).toMatch(/playlist, album or artist/);
     expect(ERROR_MESSAGES.invalid_playlist_url.zh).toMatch(/歌手/);
+    expect(ERROR_MESSAGES.invalid_playlist_url.pt).toMatch(/playlist, álbum ou artista/);
   });
 });
 
@@ -363,8 +445,12 @@ describe("playlist_link_spotify_other", () => {
     expect(en).toMatch(/paste/i);
     expect(zh).toMatch(/Spotify/);
     expect(zh).toMatch(/歌單/);
-    for (const text of [en, zh]) {
-      expect(text).not.toMatch(/This Is|artist's|one of the artist|歌手的歌單|the playlist itself/i);
+    const pt = ERROR_MESSAGES.playlist_link_spotify_other.pt;
+    expect(pt).toMatch(/link do Spotify/);
+    expect(pt).toMatch(/não de uma playlist, álbum ou artista/i);
+    expect(pt).toMatch(/cole/i);
+    for (const text of [en, zh, pt]) {
+      expect(text).not.toMatch(/This Is|artist's|one of the artist|歌手的歌單|the playlist itself|do artista|a própria playlist/i);
       expect(placeholders(text)).toEqual([]);
     }
     expect(isDeterministicPlaylistFailure("playlist_link_spotify_other")).toBe(true);
@@ -458,7 +544,7 @@ describe("isDeterministicPlaylistFailure", () => {
   });
 
   it("never suppresses a second 'Create quiz link' after a throttle or a transient failure", () => {
-    // app/page.tsx's handleCreateQuiz runs its refusal through the same
+    // app/setup-page.tsx's handleCreateQuiz runs its refusal through the same
     // shouldRememberRejection memo as a game start. The quiz added its own
     // throttling code and four "we don't know" codes; listing any of them as
     // deterministic would strand a host whose playlist was always fine behind
@@ -474,9 +560,10 @@ describe("isDeterministicPlaylistFailure", () => {
     ] as const) {
       expect(isDeterministicPlaylistFailure(code), code).toBe(false);
     }
-    // And the throttle itself must not read as a playlist problem, in either language.
+    // And the throttle itself must not read as a playlist problem, in any language.
     expect(ERROR_MESSAGES.rate_limited_quiz_create.en).not.toMatch(/playlist|public|url/i);
     expect(ERROR_MESSAGES.rate_limited_quiz_create.zh).not.toMatch(/歌單|公開|網址/);
+    expect(ERROR_MESSAGES.rate_limited_quiz_create.pt).not.toMatch(/playlist|p[úu]blic|url|link/i);
   });
 
   it("says no to anything that isn't a code at all", () => {
@@ -552,8 +639,15 @@ describe("detectErrorLocale", () => {
     }
   });
 
+  it("reads Portuguese from any pt tag, Brazilian or not", () => {
+    for (const tag of ["pt", "pt-BR", "pt-PT", "PT-br"]) {
+      expect(detectErrorLocale(tag), tag).toBe("pt");
+    }
+  });
+
   it("falls back to English for everything else, including no tag at all", () => {
-    for (const tag of ["en", "en-US", "ja", "", "not-a-tag"]) {
+    // "ptx" and "pta" are not Portuguese; only `pt` and `pt-*` are.
+    for (const tag of ["en", "en-US", "ja", "es-BR", "ptx", "", "not-a-tag"]) {
       expect(detectErrorLocale(tag), tag).toBe("en");
     }
     // Server render: `navigator` is undefined and this must not throw.
@@ -565,6 +659,7 @@ describe("errorMessage", () => {
   it("fills placeholders", () => {
     expect(errorMessage("spotify_cooldown", "en", { params: { seconds: 45 } })).toContain("45");
     expect(errorMessage("spotify_cooldown", "zh", { params: { seconds: 45 } })).toContain("45");
+    expect(errorMessage("spotify_cooldown", "pt", { params: { seconds: 45 } })).toContain("45");
   });
 
   it("leaves an unfilled placeholder visible rather than printing 'undefined'", () => {

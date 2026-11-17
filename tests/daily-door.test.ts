@@ -58,7 +58,7 @@ describe("the Today's challenge fake door", () => {
   });
 
   it("is drawn after mount, reports shown from an effect and tapped once, and starts nothing", () => {
-    const page = code(read("app/page.tsx"));
+    const page = code(read("app/setup-page.tsx"));
     expect(page).toMatch(/if \(mounted && !challenge\) reportDailyDoor\("shown"\);/);
     expect(page).toMatch(/if \(dailyDoorTappedRef\.current\) return;\s*dailyDoorTappedRef\.current = true;\s*reportDailyDoor\("tapped"\);/);
     // Hidden for a friend on a challenge link, in the render and the count alike.

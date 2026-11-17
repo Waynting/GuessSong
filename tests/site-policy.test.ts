@@ -103,7 +103,9 @@ describe("privacy policy", () => {
     expect(zh).toContain("不會傳給我們");
     expect(zh).toContain("Start fresh");
     // And the form does show that label, so the policy names a button that exists.
-    expect(read("components/setup-assist.tsx")).toMatch(/>\s*Start fresh\s*</);
+    // The label lives in the setup copy table now (lib/setup-copy.ts).
+    expect(read("lib/setup-copy.ts")).toMatch(/startFresh: "Start fresh"/);
+    expect(read("components/setup-assist.tsx")).toMatch(/>\s*\{copy\.startFresh\}\s*</);
     // Neither side says the names go anywhere, or promises they are gone on close
     // without also saying what is kept.
     for (const source of [en, zh]) {
@@ -157,7 +159,7 @@ describe("site footer", () => {
     // whole point of the shared one is that a page cannot lose the policy links
     // by being edited on its own.
     // /quiz draws it from its explainer, which knows the device's language.
-    for (const page of ["app/page.tsx", "app/about/page.tsx", "app/zh/page.tsx", "app/quiz/quiz-about.tsx"]) {
+    for (const page of ["app/setup-page.tsx", "app/about/page.tsx", "app/zh/page.tsx", "app/quiz/quiz-about.tsx"]) {
       expect(read(page), `${page} does not render SiteFooter`).toContain("SiteFooter");
     }
     expect(read("app/quiz/page.tsx")).toContain("<QuizAboutAndFooter />");

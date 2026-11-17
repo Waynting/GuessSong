@@ -94,7 +94,7 @@ cannot shove the buzz button down the screen under someone's thumb.
 ## 3. How a click is counted
 
 ```
-  player taps ──▶ GET /r/buzz_cta ──▶ 302 to /?ref=buzz_cta ──▶ app/page.tsx
+  player taps ──▶ GET /r/buzz_cta ──▶ 302 to /?ref=buzz_cta ──▶ app/setup-page.tsx
                         │                                            │
                         │ KV: click:buzz_cta ++                      │ remembers
                         │                                            │ the ref for
@@ -132,7 +132,7 @@ and the party form is not that; every other arm still lands on `/`. The quiz
 page remembers the ref the same way `/` does (`rememberLoopRef`, 60 days), so
 the conversion to read for this arm is `quiz_created.arrived_from` — a
 `game_started` carrying `quiz_result` is the same person weeks later. Before
-1.12.0 the redirect went to `/?ref=quiz_result` and `app/page.tsx` opened its
+1.12.0 the redirect went to `/?ref=quiz_result` and `app/setup-page.tsx` opened its
 form on the quiz pill — the party page doing two jobs, which is what `/quiz`
 ends. The old spelling is redirected by `next.config.js` (see
 [operations.md](operations.md#an-old-quiz-link-opens-the-party-form)).

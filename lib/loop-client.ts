@@ -38,6 +38,7 @@ import type { OrderPhoneCoverage, OrderPhoneVerdict, OrderVerdict, PlayStyle } f
 import type { GameScored, PlayerBand } from "@/lib/game-players";
 import type { Arrival } from "@/lib/arrival";
 import type { StarterKey } from "@/lib/starter-playlists";
+import type { CountedSetupLocale } from "@/lib/setup-copy";
 import type { SoloStep } from "@/lib/solo-party";
 import type { DailyDoorStage, MusicAgeOutcome, SoloInviteOutcome } from "@/lib/loop-stats";
 import type { BestOutcome, StreakBand } from "@/lib/streak";
@@ -129,6 +130,8 @@ export interface GameStartDetails {
   teams?: boolean;
   /** A friend's "beat my score" game (lib/challenge.ts). */
   challenge?: true;
+  /** The setup page's language, sent only from the Portuguese page (`host_locale:pt`). */
+  locale?: CountedSetupLocale;
 }
 
 /**
@@ -137,7 +140,7 @@ export interface GameStartDetails {
  * to reach the field you mean is how the wrong one gets filed.
  */
 export function reportGameStart(hostGameIndex: number, details: GameStartDetails = {}): void {
-  const { mixed, source, mode, players, from, starter, playlistKind, soloStep, teams, challenge } = details;
+  const { mixed, source, mode, players, from, starter, playlistKind, soloStep, teams, challenge, locale } = details;
   sendPulse({
     kind: "game_started",
     hostGameIndex,
@@ -153,6 +156,7 @@ export function reportGameStart(hostGameIndex: number, details: GameStartDetails
     ...(soloStep ? { soloStep } : {}),
     ...(teams === true ? { teams: true as const } : {}),
     ...(challenge ? { challenge } : {}),
+    ...(locale ? { locale } : {}),
   });
 }
 

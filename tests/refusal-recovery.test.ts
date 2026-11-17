@@ -146,7 +146,7 @@ describe("carried across a reload of the same tab", () => {
 });
 
 describe("the setup page's wiring", () => {
-  const body = code(read("app/page.tsx"));
+  const body = code(read("app/setup-page.tsx"));
 
   it("sends every caught failure through showFailure, which notes it", () => {
     expect(body).not.toMatch(/failureOf\([^)]*\);[\s\S]{0,400}?\n\s*setFailure\(failed\)/);

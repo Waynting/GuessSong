@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ERROR_LOCALES } from "@/lib/error-messages";
+import { SITE_LOCALES } from "@/lib/error-messages";
 import { LOOP_SURFACES } from "@/lib/loop-links";
 import { QUIZ_VERDICTS } from "@/lib/quiz";
 import { QUIZ_MAX_QUESTIONS, QUIZ_MIN_QUESTIONS } from "@/types/quiz";
@@ -176,7 +176,7 @@ describe("the key format is the contract between writer and reader", () => {
       }
     }
 
-    for (const locale of ERROR_LOCALES) {
+    for (const locale of SITE_LOCALES) {
       kv.incrs = [];
       await recordQuizCreated({ questionCount: 20, requestedCount: 20, locale });
       expect(keysWritten()).toContain(expected.quizLocale[locale]);
@@ -356,10 +356,10 @@ describe("the key format is the contract between writer and reader", () => {
       );
     }
     expect(keys.quizClamped).toBe("loop:stats:2026-08-09:quiz_clamped");
-    for (const locale of ERROR_LOCALES) {
+    for (const locale of SITE_LOCALES) {
       expect(keys.quizLocale[locale]).toBe(`loop:stats:2026-08-09:quiz_locale:${locale}`);
     }
-    expect(Object.keys(keys.quizLocale)).toHaveLength(ERROR_LOCALES.length);
+    expect(Object.keys(keys.quizLocale)).toHaveLength(SITE_LOCALES.length);
     for (const outcome of QUIZ_HINT_OUTCOMES) {
       expect(keys.quizHint[outcome]).toBe(`loop:stats:2026-08-09:quiz_hint:${outcome}`);
     }
@@ -1445,6 +1445,33 @@ describe("how the playlist got into the field", () => {
     });
   });
 
+  describe("which setup page language hosted the game (2026-11-17)", () => {
+    const localeKeys = () => keysWritten().filter((k) => k.includes(":host_locale:"));
+
+    it("writes host_locale:pt for a start from the Portuguese page, and nothing for any other", async () => {
+      await recordGameStart(1, { source: "typed", mode: "party", players: "p3_4", locale: "pt" });
+      expect(localeKeys()).toEqual([keys.hostLocale.pt]);
+      kv.incrs = [];
+      await recordGameStart(1, { source: "typed" });
+      expect(localeKeys()).toEqual([]);
+    });
+
+    it("refuses a key outside the closed set, and still counts the game", async () => {
+      for (const bad of ["en", "zh", "pt-BR", "", "__proto__", "a".repeat(500)]) {
+        kv.incrs = [];
+        __resetLivenessForTests();
+        await recordGameStart(1, { locale: bad as never });
+        expect(localeKeys(), bad).toEqual([]);
+        expect(keysWritten(), bad).toContain(keys.games);
+      }
+    });
+
+    it("keys pt and nothing else", () => {
+      expect(Object.keys(keys.hostLocale)).toEqual(["pt"]);
+      expect(keys.hostLocale.pt).toBe("loop:stats:2026-08-09:host_locale:pt");
+    });
+  });
+
   it("is swallowed with the rest when KV is down", async () => {
     kv.failWrites = true;
     await expect(recordGameStart(2, { mixed: "room", source: "mixed" })).resolves.toBeUndefined();
@@ -1742,6 +1769,7 @@ describe("the digest prints what the recorders write", () => {
       "game_over_tap:",
       "game_over_tap_screen:",
       "host_setup_starter:",
+      "host_locale:",
       "playlist_artist:",
       "game_kind:",
       "game_end_kind:",
@@ -1768,6 +1796,9 @@ describe("the digest prints what the recorders write", () => {
     // order the writer declares; a key it does not know still prints after.
     expect(script).toMatch(/get\(`host_setup_starter:\$\{k\}`\)/);
     expect(script).toMatch(/starter chips picked/);
+    // The pt setup page's games print on their own line, over `games`.
+    expect(script).toMatch(/get\(`host_locale:\$\{l\}`\)/);
+    expect(script).toMatch(/setup page language/);
     const starterOrder = script.match(/const STARTER_KEY_ORDER = \[([^\]]*)\]/)?.[1] ?? "";
     for (const k of STARTER_KEYS) expect(starterOrder, k).toContain(`"${k}"`);
     // Reader and writer checked over the same two lists: a target the recorder

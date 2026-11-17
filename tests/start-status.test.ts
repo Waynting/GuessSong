@@ -14,7 +14,7 @@ import { MIXED_MIN_CONTRIBUTORS, startState, type StartInputs } from "@/lib/star
  * A setup page with nothing waiting: single playlist, no buzzer, no room,
  * nothing in flight. Each scenario names only what it changes.
  *
- * `needsRoom` is derived the way `app/page.tsx` derives it, because the page
+ * `needsRoom` is derived the way `app/setup-page.tsx` derives it, because the page
  * is the only caller and never hands the ladder anything else; a test that
  * passed `needsRoom: false` for a QR mix would be describing a page that does
  * not exist.
@@ -229,7 +229,7 @@ describe("when several things hold at once, the host is told one, in the order t
 
 describe("MIXED_MIN_CONTRIBUTORS", () => {
   it("is two, and is the one number both the button and the refusal read", () => {
-    // `handleMixedStart` in app/page.tsx refuses below this with
+    // `handleMixedStart` in app/setup-page.tsx refuses below this with
     // `mixed_min_contributors`; the ladder holds the button until it is met.
     // The wording under the button is pinned above against this value, so a
     // change here fails there too, which is the point of pinning it.

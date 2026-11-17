@@ -403,6 +403,25 @@ if (themeRowShown.some(([, n]) => n > 0)) {
 }
 
 /**
+ * Games started from the Portuguese setup page: `host_locale:pt` on the start
+ * pulse since 2026-11-17 (COUNTED_SETUP_LOCALES in lib/setup-copy.ts). Sent
+ * only from `/pt`, which middleware.ts serves at `/` to a reader whose top
+ * Accept-Language is Portuguese; English sends nothing, so the share is over
+ * `Games started`. There is no pt page-view count — that was rejected for its
+ * cost — so this says how many games the translation hosted, not how many
+ * people saw it. Silent until the first one; a locale this script does not
+ * know still prints.
+ */
+const hostLocales = [...totals.keys()]
+  .filter((m) => m.startsWith("host_locale:"))
+  .map((m) => m.slice("host_locale:".length))
+  .sort();
+if (hostLocales.some((l) => get(`host_locale:${l}`) > 0)) {
+  const parts = hostLocales.map((l) => `${l} ${get(`host_locale:${l}`)} (${pct(get(`host_locale:${l}`), games).trim()})`).join(" · ");
+  console.log(`setup page language  ${parts} of ${games} games   (the rest are the English page)`);
+}
+
+/**
  * Where the games went. `Games started` is a beacon from the setup page;
  * these two are beacons from the Game Over screen, so the difference is the
  * tab that closed mid-party — and the Game Over screen is where every
@@ -1668,6 +1687,7 @@ const RENDERED_PREFIXES = [
   "host_setup:",
   "host_setup_starter:",
   "starter_theme_row:",
+  "host_locale:",
   "game_end:",
   "game_end_round:",
   "game_end_host:",

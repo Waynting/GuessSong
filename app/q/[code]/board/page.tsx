@@ -30,7 +30,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { trackEvent } from "@/lib/analytics";
 import { reportQuizCopy, reportQuizShare } from "@/lib/loop-client";
-import { apiError, describeError, errorMessage } from "@/lib/error-messages";
+import { apiError, describeError, errorMessage, siteLocale } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { pickBoardTiles } from "@/lib/quiz";
 import {
@@ -69,7 +69,7 @@ export default function QuizBoardPage() {
   const params = useParams<{ code: string }>();
   const code = (params.code ?? "").toUpperCase();
   const locale = useErrorLocale();
-  const copy = QUIZ_COPY[locale];
+  const copy = QUIZ_COPY[siteLocale(locale)];
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [board, setBoard] = useState<QuizBoardResponse | null>(null);

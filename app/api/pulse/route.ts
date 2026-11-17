@@ -85,6 +85,7 @@ export async function POST(req: NextRequest) {
         soloStep: event.soloStep,
         teams: event.teams,
         challenge: event.challenge,
+        locale: event.locale,
       });
       break;
     case "game_finished":

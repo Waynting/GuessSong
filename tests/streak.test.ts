@@ -266,7 +266,7 @@ describe("the payload carries the ref", () => {
   });
 
   it("is set by the single-link start only", () => {
-    const page = read("app/page.tsx");
+    const page = read("app/setup-page.tsx");
     expect(page.match(/playlistRef:/g)).toHaveLength(1);
     expect(page).toMatch(/\.\.\.\(currentPlaylistId \? \{ playlistRef: currentPlaylistId \} : \{\}\),/);
   });

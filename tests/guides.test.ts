@@ -116,18 +116,18 @@ describe("guides index", () => {
 });
 
 describe("homepage guide teaser", () => {
-  // app/page.tsx picks a few slugs by hand and resolves them through getGuide,
+  // app/setup-page.tsx picks a few slugs by hand and resolves them through getGuide,
   // filtering out anything that does not resolve. That filter is deliberate —
   // a retired guide should cost a card rather than crash the homepage — but it
   // makes a *typo* silent in exactly the same way, and the homepage is the one
   // inbound link that reliably gets a new guide crawled. Read as source text
   // because the suite cannot import a .tsx module here; same technique as
   // "wires each page to its own slug" above.
-  const source = readFileSync(join(process.cwd(), "app/page.tsx"), "utf8");
+  const source = readFileSync(join(process.cwd(), "app/setup-page.tsx"), "utf8");
 
   function homeGuideSlugs(): string[] {
     const match = source.match(/const HOME_GUIDES = \[([\s\S]*?)\]/);
-    expect(match, "HOME_GUIDES array not found in app/page.tsx").toBeTruthy();
+    expect(match, "HOME_GUIDES array not found in app/setup-page.tsx").toBeTruthy();
     return Array.from(match![1].matchAll(/"([^"]+)"/g)).map((m) => m[1]);
   }
 
@@ -137,7 +137,7 @@ describe("homepage guide teaser", () => {
 
   it("resolves every slug it names", () => {
     for (const slug of homeGuideSlugs()) {
-      expect(getGuide(slug), `app/page.tsx links to unknown guide "${slug}"`).toBeDefined();
+      expect(getGuide(slug), `app/setup-page.tsx links to unknown guide "${slug}"`).toBeDefined();
     }
   });
 
