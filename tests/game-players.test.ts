@@ -42,7 +42,7 @@ describe("the pages send both, on every path", () => {
     expect(body).toMatch(/recordHostedStart\("room", gameMode\(Boolean\(room\)\), data\.players\.length\)/);
     expect(body).toMatch(/recordHostedStart\("phone", gameMode\(Boolean\(room\)\), mixedContributions\.length\)/);
     expect(body).toMatch(
-      /recordHostedStart\(\s*undefined,\s*gameMode\(Boolean\(room\)\),\s*room \? buzzerPlayerCount \+ 1 : validPlayers\.length,\s*playlistKind,\s*hasTeams\(payload\.players\)\s*\)/
+      /recordHostedStart\(\s*undefined,\s*gameMode\(Boolean\(room\)\),\s*room \? buzzerPlayerCount \+ 1 : validPlayers\.length,\s*playlistKind,\s*hasTeams\(payload\.players\),\s*Boolean\(challengeFor\)\s*\)/
     );
     expect(body.match(/\.\.\.recordHostedStart\(/g)).toHaveLength(3);
   });

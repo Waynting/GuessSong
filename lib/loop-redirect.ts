@@ -26,6 +26,15 @@
 import { isLoopSurface, type LoopSurface } from "@/lib/loop-links";
 import { QUIZ_SETUP_HREF, isQuizSurface } from "@/lib/setup-arrival";
 import { recordLoopClick, recordLoopThrottled } from "@/lib/loop-stats";
+import { challengeLandingQuery } from "@/lib/challenge";
+
+/**
+ * The one surface whose redirect forwards more than `?ref=`. A challenge link
+ * (`lib/challenge.ts`) carries the deal and the score to beat, and the friend
+ * has to land on a form that already holds them. Every other surface's query
+ * is dropped, as it always was: nothing else in it was ever meant for the page.
+ */
+const FORWARDS_QUERY: ReadonlySet<LoopSurface> = new Set<LoopSurface>(["challenge"]);
 
 /** Where an unrecognised segment lands. Still the setup page, just unattributed. */
 export const LOOP_FALLBACK_DESTINATION = "/";
@@ -46,10 +55,16 @@ export interface LoopHitOutcome {
  * @param allowed    the limiter's verdict, resolved by the caller so this stays
  *                   free of `NextRequest`. Pass `true` when the limiter itself
  *                   failed — an unavailable limiter must not cost a count.
+ * @param query      the hit's own query string, entirely untrusted. Read only
+ *                   for a surface in `FORWARDS_QUERY`, and then only through
+ *                   `challengeLandingQuery`, which re-validates every field and
+ *                   rebuilds the string rather than passing any of it through.
+ *                   Junk is dropped: the visitor still lands, still counted.
  */
 export async function handleLoopHit(
   rawSurface: string,
-  allowed: boolean
+  allowed: boolean,
+  query: URLSearchParams = new URLSearchParams()
 ): Promise<LoopHitOutcome> {
   if (!isLoopSurface(rawSurface)) {
     // Not ours: a typo, a crawler, a hand-edited URL. Send them to the setup
@@ -70,7 +85,8 @@ export async function handleLoopHit(
   // on the quiz's own page: the person was just promised "make your own", and
   // the party form is not that.
   const landing = isQuizSurface(rawSurface) ? QUIZ_SETUP_HREF : LOOP_FALLBACK_DESTINATION;
-  const destination = `${landing}?ref=${rawSurface}`;
+  const forwarded = FORWARDS_QUERY.has(rawSurface) ? challengeLandingQuery(query) : null;
+  const destination = `${landing}?ref=${rawSurface}${forwarded ? `&${forwarded}` : ""}`;
 
   if (!allowed) {
     // A party is a dozen phones behind one NAT and the limiter is keyed by IP,

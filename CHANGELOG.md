@@ -129,6 +129,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beacon; printed as "Team games" in `npm run stats` beside the 5+ band's
   played-out rate. Bar: a team game plays out at least as often as the 5+
   band.
+
+- **"Beat my score" for the one-player order game** (`lib/challenge.ts`,
+  `components/order-challenge.tsx`). A plain invitation converted 1 send in
+  2,089; a score to beat might. Every solo order game started from a single
+  link now draws both shuffles (`shuffle`, `pickSpread`) from one seeded
+  mulberry32 stream (`seededRandom`) with a fresh seed, stored on the payload
+  as `seed` beside the link's `playlistRef`; every other game passes no
+  stream and shuffles exactly as before. The solo order Game Over offers
+  "Challenge a friend: beat my N", sharing `/r/challenge?p=<ref>&c=<seed>.<score>.<max>.<count>`
+  — no names. `lib/loop-redirect.ts` forwards a challenge for that surface
+  only, every field re-validated (the ref read back through the classifier,
+  the seed a uint32, score ≤ max ≤ 1000, count 1–500) and the query rebuilt;
+  junk is dropped and the click still redirects and counts. The setup page
+  reads `?playlist=&challenge=` (`parseChallengeArrival`), and `initialSetup`
+  lets it outrank the memory and the rest of the URL: the playlist in the
+  field, "Just me", the order game, the challenger's song count, and a banner
+  above Start ("Your friend scored 7 of 12 on this playlist — beat it"). The
+  friend's payload carries the seed and `challenge: {score, max}`, so
+  `/order` deals the identical rounds and its Game Over reads "You 9 · Your
+  friend 7 — you win!", with the button sending the new score back.
+  Counters: the `challenge` loop surface (shown/followed),
+  `challenge:share:<shared|copied|dismissed|failed>`, `challenge:started` (the
+  `game_started` pulse's `challenge: true`, written only for an order game of
+  one) and `challenge:<won|lost|tied>` once per friend's game; GA4
+  `challenge_shared` / `challenge_finished`. Printed as "Challenge links" in
+  `npm run stats`. **Known gap:** the friend's playlist load can differ from
+  the challenger's — the owner edited the playlist, or the playlist cache
+  refreshed — and then the same seed deals different cards; accepted, not
+  built around. The friend's load spends Spotify quota only on a cache miss.
+  A challenge arrival is filed under `host_setup:shared` (it is a
+  `?playlist=` arrival); `challenge:started` is its own count.
 - **Does a solo try come back as a party?** Since 2026-11-11 most games are
   one person alone from Google (30,701 one-player starts in a week against
   4,435 with two or more), and nothing could say whether that is the step

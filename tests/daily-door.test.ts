@@ -59,9 +59,10 @@ describe("the Today's challenge fake door", () => {
 
   it("is drawn after mount, reports shown from an effect and tapped once, and starts nothing", () => {
     const page = code(read("app/page.tsx"));
-    expect(page).toMatch(/if \(mounted\) reportDailyDoor\("shown"\);/);
+    expect(page).toMatch(/if \(mounted && !challenge\) reportDailyDoor\("shown"\);/);
     expect(page).toMatch(/if \(dailyDoorTappedRef\.current\) return;\s*dailyDoorTappedRef\.current = true;\s*reportDailyDoor\("tapped"\);/);
-    expect(page).toMatch(/\{mounted && \(\s*<div lang=/);
+    // Hidden for a friend on a challenge link, in the render and the count alike.
+    expect(page).toMatch(/\{mounted && !challenge && \(\s*<div lang=/);
     const opener = page.match(/function openDailyDoor\(\) \{[\s\S]*?\n {2}\}/)?.[0] ?? "";
     expect(opener).not.toMatch(/router|handleStart|saveGame|fetch\(/);
   });

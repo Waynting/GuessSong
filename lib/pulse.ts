@@ -100,6 +100,7 @@ import { SOLO_INVITE_OUTCOMES, type SoloInviteOutcome } from "@/lib/loop-stats";
 import { DAILY_DOOR_STAGES, type DailyDoorStage } from "@/lib/loop-stats";
 import { MUSIC_AGE_OUTCOMES, type MusicAgeOutcome } from "@/lib/loop-stats";
 import { LYRIC_LINE_ROUND_OUTCOMES, type LyricLineRoundOutcome } from "@/lib/loop-stats";
+import { isChallengeStep, type ChallengeStep } from "@/lib/challenge";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
@@ -179,6 +180,8 @@ export type PulseEvent =
       soloStep?: SoloStep;
       /** The host split the room into two teams (lib/teams.ts); present only when true. */
       teams?: true;
+      /** A friend's "beat my score" game (lib/challenge.ts). Only ever `true`. */
+      challenge?: true;
     }
   | {
       kind: "game_finished";
@@ -226,7 +229,8 @@ export type PulseEvent =
   | { kind: "daily_door"; stage: DailyDoorStage }
   | { kind: "music_age"; outcome: MusicAgeOutcome }
   | { kind: "starter_theme_row"; style: PlayStyle }
-  | { kind: "lyric_line_round"; outcome: LyricLineRoundOutcome };
+  | { kind: "lyric_line_round"; outcome: LyricLineRoundOutcome }
+  | { kind: "challenge"; step: ChallengeStep };
 
 /**
  * Narrows an untrusted request body, or returns null.
@@ -293,7 +297,10 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // And whether the room was split into teams: a literal `true` only —
     // anything else is dropped, never the game. It becomes `game_teams:on`,
     // and whether it fits the band is the recorder's call.
-    return raw.teams === true ? { ...stepped, teams: true as const } : stepped;
+    const teamed = raw.teams === true ? { ...stepped, teams: true as const } : stepped;
+    // And whether it is a friend's challenge: a literal `true` or nothing.
+    // Whether it fits (an order game of one) is the recorder's call.
+    return raw.challenge === true ? { ...teamed, challenge: true as const } : teamed;
   }
 
   if (raw.kind === "game_finished") {
@@ -465,6 +472,12 @@ export function parsePulse(body: unknown): PulseEvent | null {
       return null;
     }
     return { kind: "lyric_line_round", outcome: raw.outcome as LyricLineRoundOutcome };
+  }
+
+  if (raw.kind === "challenge") {
+    // The step is the whole event and a key tail; an undeclared one is refused.
+    if (!isChallengeStep(raw.step)) return null;
+    return { kind: "challenge", step: raw.step };
   }
 
   return null;

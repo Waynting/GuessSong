@@ -49,7 +49,7 @@ export async function GET(
     allowed = true;
   }
 
-  const outcome = await handleLoopHit(surface, allowed);
+  const outcome = await handleLoopHit(surface, allowed, req.nextUrl.searchParams);
 
   const res = NextResponse.redirect(new URL(outcome.destination, req.url), 302);
   // Without this an intermediary can cache the 302 and every later click from

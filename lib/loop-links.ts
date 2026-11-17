@@ -98,6 +98,14 @@ export const LOOP_SURFACES = [
    * opening the link.
    */
   "music_age",
+  /**
+   * "Beat my score" on a one-player order Game Over
+   * (`components/order-challenge.tsx`, `lib/challenge.ts`), since 2026-11-17:
+   * the link carries the deal and the score, and a friend who opens it plays
+   * the same cards. The only surface whose redirect forwards anything beyond
+   * `?ref=` — `lib/loop-redirect.ts` re-validates the challenge on the way.
+   */
+  "challenge",
 ] as const;
 
 export type LoopSurface = (typeof LOOP_SURFACES)[number];

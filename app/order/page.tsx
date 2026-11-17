@@ -45,6 +45,8 @@ import { SoloInvite } from "@/components/solo-invite";
 import { MusicAgeCard } from "@/components/music-age";
 import { musicAge, type MusicAgeRound } from "@/lib/music-age";
 import { streakLine, takeStreakResult, type StreakResult } from "@/lib/streak";
+import { OrderChallenge } from "@/components/order-challenge";
+import { challengeVerdict, isChallengeRef, soloOrderMaxScore, type ChallengeScore } from "@/lib/challenge";
 import { formatMixList } from "@/lib/mix-export";
 import {
   CARD_FOOTER_HEIGHT,
@@ -56,6 +58,7 @@ import {
 } from "@/lib/result-image";
 import {
   reportGameEnd,
+  reportChallengeResult,
   reportGameLeft,
   reportGameOverTap,
   reportOrderPhoneRound,
@@ -195,6 +198,14 @@ export default function OrderPage() {
    * every phone too. Null is the shared-screen game, exactly as it was.
    */
   const [buzzerRoom, setBuzzerRoom] = useState<BuzzerRoomHandle | null>(null);
+  /**
+   * What a "beat my score" link needs from the payload (lib/challenge.ts):
+   * the seed the deal was drawn from and the link's ref. Null for a game that
+   * cannot issue one — a room, a Mixed pool, a game stored before the seed.
+   */
+  const [dealSource, setDealSource] = useState<{ seed: number; ref: string } | null>(null);
+  /** The friend's score this game is played against, when it is a challenge. */
+  const [against, setAgainst] = useState<ChallengeScore | null>(null);
   /** The reveal this page graded and sent, for the round it belongs to. */
   const [phoneRound, setPhoneRound] = useState<PhoneRound | null>(null);
   /**
@@ -281,6 +292,9 @@ export default function OrderPage() {
     setPlaylistSource(data.playlistSource);
     setMixedMeta(data.mixedPlaylistMeta ?? null);
     setBuzzerRoom(data.buzzerRoom ?? null);
+    // The ref must be one a challenge link may carry (not editorial).
+    setDealSource(data.seed !== undefined && isChallengeRef(data.playlistRef) ? { seed: data.seed, ref: data.playlistRef } : null);
+    setAgainst(data.challenge ?? null);
     gameStartTimeRef.current = Date.now();
   }, [router]);
 
@@ -566,6 +580,12 @@ export default function OrderPage() {
       ...(soloStreak ? { streak: soloStreak.band } : {}),
       ...(soloStreak?.best ? { best: soloStreak.best.outcome } : {}),
     });
+    // A friend's challenge game: won, lost or tied against the score in the
+    // link, once — this function is the once (`finishedTrackedRef`). Scores
+    // are already on the board: a round is awarded at its reveal.
+    if (against && players.length === 1) {
+      reportChallengeResult(challengeVerdict(players[0].score, against.score));
+    }
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,
       // Rounds, for this game: a card is not a track that was played.
@@ -1819,6 +1839,21 @@ export default function OrderPage() {
                   desktop with a room of two or more. The QR is not rendered
                   on a phone, because rendering is what reports its
                   impression. lib/game-over.ts. */}
+              {/* "Beat my score": a game of one with a seed and a single link
+                  can send a friend the same deal; a friend's own challenge
+                  game leads with the two scores. lib/challenge.ts. */}
+              {solo && dealSource && players[0] && (
+                <OrderChallenge
+                  deal={{
+                    ref: dealSource.ref,
+                    seed: dealSource.seed,
+                    count: pool.length,
+                    score: players[0].score,
+                    max: soloOrderMaxScore(rounds.length),
+                  }}
+                  against={against}
+                />
+              )}
               {/* A game of one: nobody here to scan or mix with, so the offer
                   is to ask someone for next time. lib/game-over.ts. */}
               {onward.soloInvite && <SoloInvite game="order" />}

@@ -41,6 +41,8 @@ import type { StarterKey } from "@/lib/starter-playlists";
 import type { SoloStep } from "@/lib/solo-party";
 import type { DailyDoorStage, MusicAgeOutcome, SoloInviteOutcome } from "@/lib/loop-stats";
 import type { BestOutcome, StreakBand } from "@/lib/streak";
+import type { ChallengeVerdict } from "@/lib/challenge";
+import type { ShareLinkOutcome } from "@/lib/quiz-share";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
 
@@ -125,6 +127,8 @@ export interface GameStartDetails {
   soloStep?: SoloStep;
   /** The host split the room into two teams (lib/teams.ts). Sent only when true. */
   teams?: boolean;
+  /** A friend's "beat my score" game (lib/challenge.ts). */
+  challenge?: true;
 }
 
 /**
@@ -133,7 +137,7 @@ export interface GameStartDetails {
  * to reach the field you mean is how the wrong one gets filed.
  */
 export function reportGameStart(hostGameIndex: number, details: GameStartDetails = {}): void {
-  const { mixed, source, mode, players, from, starter, playlistKind, soloStep, teams } = details;
+  const { mixed, source, mode, players, from, starter, playlistKind, soloStep, teams, challenge } = details;
   sendPulse({
     kind: "game_started",
     hostGameIndex,
@@ -148,6 +152,7 @@ export function reportGameStart(hostGameIndex: number, details: GameStartDetails
     ...(playlistKind ? { playlistKind } : {}),
     ...(soloStep ? { soloStep } : {}),
     ...(teams === true ? { teams: true as const } : {}),
+    ...(challenge ? { challenge } : {}),
   });
 }
 
@@ -407,4 +412,21 @@ export function reportStarterThemeRow(style: PlayStyle): void {
  */
 export function reportLyricLineRound(): void {
   sendPulse({ kind: "lyric_line_round", outcome: "played" });
+}
+
+/**
+ * The order Game Over's "beat my score" button was tapped, and what the share
+ * sheet did (`components/order-challenge.tsx`). Its own pair, for
+ * `reportSoloInvite`'s reason: folded into another surface's rows it would be
+ * read as that surface.
+ */
+export function reportChallengeShare(outcome: ShareLinkOutcome): void {
+  trackEvent("challenge_shared", { outcome });
+  sendPulse({ kind: "challenge", step: `share:${outcome}` });
+}
+
+/** A friend's challenge game reached its Game Over: won, lost or tied. Once per game. */
+export function reportChallengeResult(verdict: ChallengeVerdict): void {
+  trackEvent("challenge_finished", { verdict });
+  sendPulse({ kind: "challenge", step: verdict });
 }

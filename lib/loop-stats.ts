@@ -58,6 +58,7 @@ import { isPlayStyle, type PlayStyle } from "@/lib/order-game";
 import { ARRIVALS, isArrival, type Arrival } from "@/lib/arrival";
 import { isSoloStep, soloStepFitsBand, type SoloStep } from "@/lib/solo-party";
 import { isBestOutcome, isStreakBand, type BestOutcome, type StreakBand } from "@/lib/streak";
+import { isChallengeStep, type ChallengeStep } from "@/lib/challenge";
 import {
   ORDER_PHONE_COVERAGES,
   ORDER_PHONE_VERDICTS,
@@ -1340,6 +1341,8 @@ export interface GameStartDetails {
   soloStep?: SoloStep;
   /** The host split the room into two teams (lib/teams.ts). Sent only when true. */
   teams?: boolean;
+  /** A friend's "beat my score" game (lib/challenge.ts). */
+  challenge?: true;
 }
 
 /**
@@ -1354,7 +1357,7 @@ export function teamsFitBand(players: PlayerBand | undefined): boolean {
 
 export async function recordGameStart(
   hostGameIndex: number,
-  { mixed, source, mode, players, from, starter, playlistKind, soloStep, teams }: GameStartDetails = {}
+  { mixed, source, mode, players, from, starter, playlistKind, soloStep, teams, challenge }: GameStartDetails = {}
 ): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
@@ -1408,6 +1411,10 @@ export async function recordGameStart(
   // room, none on any other. A literal `true` only, and only for a band
   // teams can be offered in — the denominator for `game_end_teams:<end>`.
   if (teams === true && teamsFitBand(players)) await bump("game_teams:on");
+  // A friend who opened a challenge link and started its game. Guarded to
+  // what a challenge is — an order game of one — so a page that got it wrong
+  // cannot put a party in the challenge funnel's denominator.
+  if (challenge === true && mode === "order" && players === "p1") await bump("challenge:started");
 }
 
 /**
@@ -1824,6 +1831,17 @@ export function recordMusicAge(outcome: MusicAgeOutcome): Promise<void> {
 export function recordStarterThemeRow(style: PlayStyle): Promise<void> {
   if (!isPlayStyle(style)) return Promise.resolve();
   return bump(`starter_theme_row:shown:${style}`);
+}
+
+/**
+ * A "beat my score" link (lib/challenge.ts): `challenge:share:<outcome>` when
+ * the challenger tapped the button, `challenge:<won|lost|tied>` when a friend's
+ * challenge game reached its Game Over. `challenge:started` is written by
+ * `recordGameStart`, never here. Closed set, refused rather than clamped.
+ */
+export function recordChallenge(step: ChallengeStep): Promise<void> {
+  if (!isChallengeStep(step)) return Promise.resolve();
+  return bump(`challenge:${step}`);
 }
 
 /** One quiz moved a stage down its funnel. */

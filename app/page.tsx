@@ -5,6 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Track } from "@/types";
 import { pickSpread, shuffle } from "@/lib/shuffle";
+import {
+  challengeBanner,
+  freshSeed,
+  parseChallengeArrival,
+  seededRandom,
+  type ChallengeDeal,
+} from "@/lib/challenge";
 import { DEFAULT_SAMPLED_PER_PLAYER, type RoomSubmissionSummary, type RoomPoolResponse } from "@/types/room";
 import { trackEvent } from "@/lib/analytics";
 import { arrivedFrom } from "@/lib/loop-links";
@@ -351,6 +358,10 @@ export default function SetupPage() {
   // prerendered, and the server has no idea what this device remembers.
   const [recentPlaylists, setRecentPlaylists] = useState<RecentPlaylist[]>([]);
   const [recalled, setRecalled] = useState(false);
+  // A friend's "beat my score" link, read off the URL on arrival
+  // (lib/challenge.ts). It applies only while the form still describes it —
+  // its playlist in the field, "Just me", the order game — see `challengeFor`.
+  const [challenge, setChallenge] = useState<ChallengeDeal | null>(null);
   /**
    * What the URL asked for on arrival. Kept because "Start fresh" means the
    * form this visit would have opened on had the device remembered nothing —
@@ -371,9 +382,13 @@ export default function SetupPage() {
   const [dailyDoorOpen, setDailyDoorOpen] = useState(false);
   // Drawn only once mounted, so the card is in the device's language from its
   // first paint rather than switching from English after hydration.
+  // Not drawn for a friend who arrived on a challenge link: "Today's
+  // challenge" beside "beat your friend's score" is two challenges on one
+  // screen, and those visits would inflate the door's taps. `challenge` is set
+  // in the same mount effect as `mounted`, so it is already known here.
   useEffect(() => {
-    if (mounted) reportDailyDoor("shown");
-  }, [mounted]);
+    if (mounted && !challenge) reportDailyDoor("shown");
+  }, [mounted, challenge]);
   function openDailyDoor() {
     setDailyDoorOpen(true);
     if (dailyDoorTappedRef.current) return;
@@ -742,9 +757,14 @@ export default function SetupPage() {
     // query is: this page is prerendered, the server knows none of it, and a
     // first render that differed from the server's is a hydration mismatch on
     // the page that takes nearly all of the site's traffic.
+    // A challenge link from /r/challenge: re-validated here as well as there,
+    // because `/?challenge=` is a public URL like `/?ref=` is.
+    const arrivedChallenge = parseChallengeArrival(query);
+    setChallenge(arrivedChallenge);
     const arrival: SetupArrival = {
       sharedUrl: query.get("playlist"),
       requestedMode: requestedSetupMode(query),
+      challenge: arrivedChallenge,
     };
     arrivalRef.current = arrival;
     const remembered = recallSetup();
@@ -802,7 +822,9 @@ export default function SetupPage() {
     /** What the single link was (the response's `playlistKind`); a Mixed pool has none. */
     playlistKind?: PlaylistKind,
     /** Whether the stored roster is split into two teams (`hasTeams` on the payload's players). */
-    teams?: boolean
+    teams?: boolean,
+    /** A friend's challenge game (lib/challenge.ts); the server checks it is an order game of one. */
+    challengeGame?: boolean
   ) {
     const hostGameIndex = bumpHostGameCount();
     const setupSource = setupSourceFor(Boolean(mixed));
@@ -826,6 +848,7 @@ export default function SetupPage() {
       ...(playlistKind ? { playlistKind } : {}),
       ...(soloStep ? { soloStep } : {}),
       ...(teams ? { teams: true } : {}),
+      ...(challengeGame ? { challenge: true as const } : {}),
     });
     const recovery = noteStart(recoveryRef.current, setupSource);
     if (recovery.state !== recoveryRef.current) setRecovery(recovery.state);
@@ -850,6 +873,12 @@ export default function SetupPage() {
   const currentPlaylistId = playableRefOf(playlistUrl);
   // An artist page in the field: the status line under it says what will play.
   const isArtist = isArtistRef(currentPlaylistId);
+  // A one-player order game from a single link: the game that draws a seed,
+  // and so the one that can issue or answer a challenge (lib/challenge.ts).
+  const soloOrder = isOrder && who === "solo" && setupMode === "single";
+  // The arrived challenge, while the form still describes it. A host who
+  // swapped the playlist or picked a room is playing something else.
+  const challengeFor = soloOrder && challenge && challenge.ref === currentPlaylistId ? challenge : null;
 
   function addPlayer() {
     setPlayers((p) => [...p, ""]);
@@ -985,7 +1014,15 @@ export default function SetupPage() {
       // What the link was, from the response: a playlist, an album or an
       // artist's top ten. Carried to the payload and the start beacon.
       const playlistKind = isPlaylistKind(data.playlistKind) ? data.playlistKind : undefined;
-      const shuffled = shuffle(data.tracks as Track[]);
+      // A solo order game draws both shuffles from one seed, so a finished
+      // game can send a friend the same deal; a challenge game draws from the
+      // challenger's. Every other game passes `undefined`, and `shuffle` /
+      // `pickSpread` fall back to `Math.random` exactly as before.
+      // The gap, accepted: the friend's playlist may load differently (the
+      // owner edited it, or the cache refreshed), and then so is the deal.
+      const seed = soloOrder ? (challengeFor ? challengeFor.seed : freshSeed()) : undefined;
+      const random = seed === undefined ? undefined : seededRandom(seed);
+      const shuffled = shuffle(data.tracks as Track[], random);
       // The order game deals only songs with a release year, so the count is
       // taken from those — and a playlist without enough of them across
       // different years is refused before anything is stored or counted.
@@ -994,9 +1031,12 @@ export default function SetupPage() {
       const eligible = isOrder ? usableOrderTracks(shuffled) : shuffled;
       // As few songs from one album as the playlist allows, and those few
       // spread apart rather than back to back. lib/shuffle.ts.
+      // A challenge plays the challenger's count, whatever the control says:
+      // the pick is part of the deal.
       const limited = pickSpread(
         eligible,
-        songCount.count === "all" ? eligible.length : songCount.count
+        challengeFor ? challengeFor.count : songCount.count === "all" ? eligible.length : songCount.count,
+        random
       );
       // The count can still cut a dealable list down to one that is not, and
       // then it is the count, not the playlist, that has to change.
@@ -1031,6 +1071,8 @@ export default function SetupPage() {
         // What a solo player's best is kept under (lib/streak.ts).
         ...(currentPlaylistId ? { playlistRef: currentPlaylistId } : {}),
         ...(room ? { buzzerRoom: room } : {}),
+        ...(seed !== undefined ? { seed } : {}),
+        ...(challengeFor ? { challenge: { score: challengeFor.score, max: challengeFor.max } } : {}),
       });
       // A browser that refuses to store this has not refused the playlist, and
       // must not be told it did. See lib/game-storage.ts.
@@ -1049,7 +1091,8 @@ export default function SetupPage() {
           gameMode(Boolean(room)),
           room ? buzzerPlayerCount + 1 : validPlayers.length,
           playlistKind,
-          hasTeams(payload.players)
+          hasTeams(payload.players),
+          Boolean(challengeFor)
         ),
       });
       // Remembered here — once the playlist has loaded and the game is stored
@@ -1975,6 +2018,26 @@ export default function SetupPage() {
                 button says what it does; what it is waiting for goes on the
                 line under it. */}
             <div>
+              {/* A friend's score to beat, while the form still describes
+                  their challenge. lib/challenge.ts. */}
+              {challengeFor && (
+                <p
+                  className="challenge-banner"
+                  style={{
+                    margin: "0 0 12px",
+                    padding: "12px 14px",
+                    borderRadius: "10px",
+                    border: "1px solid rgba(29,185,84,0.4)",
+                    background: "rgba(29,185,84,0.08)",
+                    color: "#1DB954",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {challengeBanner(challengeFor.score, challengeFor.max)}
+                </p>
+              )}
               <button className="start-btn" onClick={() => startClick()} disabled={startState_.disabled}>
                 {startBusy ? (
                   <>
@@ -2062,7 +2125,7 @@ export default function SetupPage() {
               tap is how we find out whether there should be. A card shaped
               like the quiz's below, because a card is what the real thing
               would be. lib/daily-door.ts. */}
-          {mounted && (
+          {mounted && !challenge && (
             <div lang={locale === "zh" ? "zh-TW" : "en"}>
               {dailyDoorOpen ? (
                 <p className="daily-door-note" role="status">{dailyDoor.note}</p>
