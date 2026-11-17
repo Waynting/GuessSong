@@ -1169,6 +1169,42 @@ if (ageShown + ageTaps > 0) {
 }
 
 /**
+ * The day streak and personal best on the one-player Game Over
+ * (lib/streak.ts, since 2026-11-17). Each is written by the end beacon of a
+ * game of one that played at least a round: `streak:<band>` is the device's
+ * run of consecutive local days including today, `personal_best:<outcome>`
+ * how the score sat against the best stored for that playlist (none for a
+ * Mixed pool or a short link, so it sums to at most the streak line). Floors:
+ * a device that keeps no storage reads day one and a first score every game,
+ * and iOS evicts storage after seven idle days.
+ */
+const streakBands = [
+  ["day 1", "streak:d1"],
+  ["day 2", "streak:d2"],
+  ["days 3–6", "streak:d3_6"],
+  ["7+", "streak:d7_plus"],
+].map(([label, key]) => [label, get(key)]);
+const streakTotal = streakBands.reduce((n, [, v]) => n + v, 0);
+const bestOutcomes = ["first", "new", "tied", "below"].map((o) => [o, get(`personal_best:${o}`)]);
+const bestTotal = bestOutcomes.reduce((n, [, v]) => n + v, 0);
+if (streakTotal + bestTotal > 0) {
+  const returning = streakTotal - streakBands[0][1];
+  console.log(
+    `\nStreaks (one-player Game Overs)  ${streakTotal} Game Overs · ${returning} on day 2 or later ` +
+      `(${pct(returning, streakTotal).trim()})`
+  );
+  console.log(`  by streak     ` + streakBands.map(([l, v]) => `${l} ${v} (${pct(v, streakTotal).trim()})`).join(" · "));
+  console.log(`  personal best ` + bestOutcomes.map(([o, v]) => `${o} ${v} (${pct(v, bestTotal).trim()})`).join(" · "));
+  console.log(
+    "  how to read it: a Game Over, not a device — a regular counts once per game. The\n" +
+      "  day 2+ share rising week over week is people coming back on consecutive days;\n" +
+      "  read it against the same window a week earlier, never one day's figure. `first`\n" +
+      "  is a playlist this device had not finished alone before; `new` + `tied` over\n" +
+      "  `below` says whether replaying a playlist is chasing a score or just replaying."
+  );
+}
+
+/**
  * The playlist quiz funnel: created → opened → started → completed → board,
  * then the share surface's own row above. Each stage is a server-side count
  * (the route that did the thing bumps it), so unlike the surface table
@@ -1609,6 +1645,8 @@ const RENDERED_PREFIXES = [
   "solo_invite:",
   "daily_door:",
   "music_age:",
+  "streak:",
+  "personal_best:",
 ];
 
 const leftovers = [...totals.keys()]

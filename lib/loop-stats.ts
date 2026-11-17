@@ -57,6 +57,7 @@ import { ORDER_VERDICTS, isOrderVerdict, type OrderVerdict } from "@/lib/order-g
 import { isPlayStyle, type PlayStyle } from "@/lib/order-game";
 import { ARRIVALS, isArrival, type Arrival } from "@/lib/arrival";
 import { isSoloStep, soloStepFitsBand, type SoloStep } from "@/lib/solo-party";
+import { isBestOutcome, isStreakBand, type BestOutcome, type StreakBand } from "@/lib/streak";
 import {
   ORDER_PHONE_COVERAGES,
   ORDER_PHONE_VERDICTS,
@@ -1415,6 +1416,10 @@ export async function recordGameEnd(
     linkDrawn?: boolean;
     /** What the link was; crossed only for an album or an artist. */
     playlistKind?: PlaylistKind;
+    /** A game of one: the device's day streak, banded (lib/streak.ts). */
+    streak?: StreakBand;
+    /** A game of one with a single playlist: its score against the stored best. */
+    best?: BestOutcome;
   } = {}
 ): Promise<void> {
   if (!GAME_ENDS.includes(end)) return;
@@ -1439,6 +1444,15 @@ export async function recordGameEnd(
   // How an album or artist game ended — `game_kind:*` is the denominator.
   const crossed = crossedKind(details.playlistKind);
   if (crossed) extras.push(bump(`game_end_kind:${crossed}:${end}`));
+  // The solo Game Over's streak and best (lib/streak.ts): `streak:<band>` and
+  // `personal_best:<outcome>`, one each per one-player Game Over that wrote
+  // them. Guarded against the band as well as the set, the `solo_party` rule:
+  // a streak on a game of four is a page that got it wrong, and a room's
+  // scoreboard is not anyone's personal best.
+  if (details.players === "p1") {
+    if (isStreakBand(details.streak)) extras.push(bump(`streak:${details.streak}`));
+    if (isBestOutcome(details.best)) extras.push(bump(`personal_best:${details.best}`));
+  }
   if (end !== "ended_early") {
     await Promise.all(extras);
     return;

@@ -717,7 +717,7 @@ describe("the route records every kind the parser accepts", () => {
       /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored, event\.arranged, event\.playlistKind\)/
     );
     expect(route).toMatch(
-      /mode: event\.mode,\s*players: event\.players,\s*scored: event\.scored,\s*arranged: event\.arranged,\s*linkDrawn: event\.linkDrawn,\s*playlistKind: event\.playlistKind,\s*\}\);/
+      /mode: event\.mode,\s*players: event\.players,\s*scored: event\.scored,\s*arranged: event\.arranged,\s*linkDrawn: event\.linkDrawn,\s*playlistKind: event\.playlistKind,\s*streak: event\.streak,\s*best: event\.best,\s*\}\);/
     );
   });
 

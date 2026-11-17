@@ -94,6 +94,8 @@ export async function POST(req: NextRequest) {
         arranged: event.arranged,
         linkDrawn: event.linkDrawn,
         playlistKind: event.playlistKind,
+        streak: event.streak,
+        best: event.best,
       });
       break;
     case "first_clip":

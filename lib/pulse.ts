@@ -95,6 +95,7 @@ function parseSeatCount(value: unknown): number | null {
 import { isGameScored, isPlayerBand, type GameScored, type PlayerBand } from "@/lib/game-players";
 import { isArrival, type Arrival } from "@/lib/arrival";
 import { isSoloStep, type SoloStep } from "@/lib/solo-party";
+import { isBestOutcome, isStreakBand, type BestOutcome, type StreakBand } from "@/lib/streak";
 import { SOLO_INVITE_OUTCOMES, type SoloInviteOutcome } from "@/lib/loop-stats";
 import { DAILY_DOOR_STAGES, type DailyDoorStage } from "@/lib/loop-stats";
 import { MUSIC_AGE_OUTCOMES, type MusicAgeOutcome } from "@/lib/loop-stats";
@@ -191,6 +192,10 @@ export type PulseEvent =
       /** Whether this Game Over drew the Mixed link — its denominator. */
       linkDrawn?: boolean;
       playlistKind?: PlaylistKind;
+      /** A game of one: the device's day streak, banded (lib/streak.ts). */
+      streak?: StreakBand;
+      /** A game of one with a single playlist: its score against the stored best. */
+      best?: BestOutcome;
     }
   | { kind: "first_clip"; path: FirstClipPath; outcome: FirstClipOutcome }
   | {
@@ -314,6 +319,11 @@ export function parsePulse(body: unknown): PulseEvent | null {
       ...(typeof raw.linkDrawn === "boolean" ? { linkDrawn: raw.linkDrawn } : {}),
       // What the link was. `game_end_kind:${value}:${end}` is a key.
       ...(isPlaylistKind(raw.playlistKind) ? { playlistKind: raw.playlistKind } : {}),
+      // The solo streak and best (lib/streak.ts). Both are key tails, both
+      // are dropped rather than the end when unknown, and whether they fit the
+      // band is the recorder's call, which owns the keys.
+      ...(isStreakBand(raw.streak) ? { streak: raw.streak } : {}),
+      ...(isBestOutcome(raw.best) ? { best: raw.best } : {}),
     };
   }
 

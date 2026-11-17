@@ -960,6 +960,8 @@ export default function SetupPage() {
         mode: gameMode(Boolean(room)),
         setupSource: setupSourceFor(false),
         ...(playlistKind ? { playlistKind } : {}),
+        // What a solo player's best is kept under (lib/streak.ts).
+        ...(currentPlaylistId ? { playlistRef: currentPlaylistId } : {}),
         ...(room ? { buzzerRoom: room } : {}),
       });
       // A browser that refuses to store this has not refused the playlist, and

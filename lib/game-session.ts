@@ -8,6 +8,7 @@ import type { Track } from "@/types";
 import type { PlaylistSource } from "@/lib/analytics";
 import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
 import { isSetupSource, type SetupSource } from "@/lib/setup-source";
+import { isPlayableRef } from "@/lib/playlist-ref";
 
 export const GAME_STORAGE_KEY = "guesssong_game";
 
@@ -78,6 +79,13 @@ export interface GamePayload {
    * absent as `playlist`, the baseline the crosses are read against.
    */
   playlistKind?: PlaylistKind;
+  /**
+   * The single link as `playableRefOf`'s ref — the key a solo player's best
+   * is stored under (`lib/streak.ts`). Absent on a Mixed pool, on a link the
+   * page could not read itself (a short link the server followed) and on a
+   * payload stored before 2026-11-17: no ref is no best, never a guessed one.
+   */
+  playlistRef?: string;
 }
 
 /**
@@ -140,6 +148,7 @@ export interface BuildGamePayloadInput {
   buzzerRoom?: BuzzerRoomHandle;
   setupSource?: SetupSource;
   playlistKind?: PlaylistKind;
+  playlistRef?: string;
 }
 
 export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
@@ -155,6 +164,7 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
     ...(input.buzzerRoom ? { buzzerRoom: input.buzzerRoom } : {}),
     ...(input.setupSource ? { setupSource: input.setupSource } : {}),
     ...(input.playlistKind ? { playlistKind: input.playlistKind } : {}),
+    ...(input.playlistRef ? { playlistRef: input.playlistRef } : {}),
   };
 }
 
@@ -383,5 +393,7 @@ export function parseGamePayload(raw: string): GamePayload | null {
     // Absent rather than defaulted, like the source: a stored game from
     // before the field reads as a playlist by every reader's fallback.
     ...(isPlaylistKind(d.playlistKind) ? { playlistKind: d.playlistKind } : {}),
+    // Absent when unreadable, the same trade: it keys a stored best.
+    ...(isPlayableRef(d.playlistRef) ? { playlistRef: d.playlistRef } : {}),
   };
 }

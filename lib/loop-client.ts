@@ -40,6 +40,7 @@ import type { Arrival } from "@/lib/arrival";
 import type { StarterKey } from "@/lib/starter-playlists";
 import type { SoloStep } from "@/lib/solo-party";
 import type { DailyDoorStage, MusicAgeOutcome, SoloInviteOutcome } from "@/lib/loop-stats";
+import type { BestOutcome, StreakBand } from "@/lib/streak";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
 
@@ -176,6 +177,10 @@ export function reportGameEnd(
     linkDrawn?: boolean;
     /** The stored payload's `playlistKind`, so an album's or artist's games can be read by their end. */
     playlistKind?: PlaylistKind;
+    /** A game of one only: this device's day streak, banded (`lib/streak.ts`). */
+    streak?: StreakBand;
+    /** A game of one with a single playlist only: how the score sat against its best. */
+    best?: BestOutcome;
   } = {}
 ): void {
   sendPulse({
@@ -191,6 +196,8 @@ export function reportGameEnd(
     ...(typeof details.arranged === "boolean" ? { arranged: details.arranged } : {}),
     ...(typeof details.linkDrawn === "boolean" ? { linkDrawn: details.linkDrawn } : {}),
     ...(details.playlistKind ? { playlistKind: details.playlistKind } : {}),
+    ...(details.streak ? { streak: details.streak } : {}),
+    ...(details.best ? { best: details.best } : {}),
   });
 }
 
