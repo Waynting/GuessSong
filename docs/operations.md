@@ -603,3 +603,34 @@ version moves without a matching entry in `lib/changelog.ts`.
 
 Purely internal changes — a script, a doc, a refactor with no user-visible
 effect — take no version bump and no `lib/changelog.ts` entry.
+
+### Adding a starter playlist or a theme pack
+
+A theme pack ("80s", "Movie soundtracks", "Sertanejo", …) is an ordinary
+starter with a `theme` on it. Adding one is one key and one entry in
+`lib/starter-playlists.ts`, once the owner has an id:
+
+1. The playlist is **public, on the site owner's own Spotify account** —
+   never a third party's (one deletion from a dead chip on the setup page),
+   never a `37i9…` one (Spotify refuses those to every app like this).
+2. Add its key to `STARTER_KEYS`, and the same key to `STARTER_KEY_ORDER` in
+   `scripts/loop-stats.mjs`. A key without an entry fails
+   `tests/starter-playlists.test.ts`.
+3. Add the entry to `STARTER_PLAYLISTS`: `id` (the 22 characters after
+   `/playlist/` in the link), `starterKey`, `game` (`"guess"` or `"order"` —
+   the one style that offers it), `name`, `blurb`, and
+   `theme: { label, emoji?, markets? }`. `label` is the chip's text (≤ 20
+   characters); `markets` is ISO country codes whose visitors see it first,
+   read from the browser's language region — it orders the row, it never
+   hides a theme from anyone.
+4. Load it once on the live site before shipping (Start with it in the
+   field), and for the order game check it deals: it needs years spread
+   across decades, every track dated.
+
+Once a style has two themed starters the setup page draws that style's
+starters as a "Pick a theme" row instead of the name-and-blurb chips; below
+two, nothing on the page changes. Read it in `npm run stats`: `starter chips
+picked` (`host_setup_starter:<key>`) over `theme row shown`
+(`starter_theme_row:shown:<style>`, one per page that drew the row). No
+version bump is needed for the data alone, but a new theme players can see
+deserves a `lib/changelog.ts` line in the next release.

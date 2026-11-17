@@ -14,6 +14,7 @@ import {
 import { recordDailyDoor, recordQuizCopy, recordQuizSocial, recordSoloInvite } from "@/lib/loop-stats";
 import { recordMusicAge } from "@/lib/loop-stats";
 import { recordOrderPhone, recordOrderRound } from "@/lib/loop-stats";
+import { recordStarterThemeRow } from "@/lib/loop-stats";
 
 /**
  * Fire-and-forget counters from the browser. See `lib/pulse.ts` for what the
@@ -133,6 +134,9 @@ export async function POST(req: NextRequest) {
       break;
     case "music_age":
       await recordMusicAge(event.outcome);
+      break;
+    case "starter_theme_row":
+      await recordStarterThemeRow(event.style);
       break;
   }
 

@@ -32,6 +32,7 @@ import {
   reportGameStart,
   reportRefusal,
   reportRefusalRecovered,
+  reportStarterThemeRow,
 } from "@/lib/loop-client";
 import { DAILY_DOOR_COPY } from "@/lib/daily-door";
 import {
@@ -90,6 +91,9 @@ import {
   starterKeyForId,
   starterPlacement,
   startersFor,
+  regionFromLanguages,
+  themeRowFor,
+  THEME_CAPTION,
 } from "@/lib/starter-playlists";
 import {
   EditorialWarning,
@@ -442,6 +446,22 @@ export default function SetupPage() {
       releaseAutoRecheck();
     };
   }, []);
+
+  // The device's region, for the order of a "Pick a theme" row only
+  // (lib/starter-playlists.ts, themeRowFor). Read here and not in the
+  // initialiser — `/` is prerendered — and from the browser, not the
+  // request's country, which would make `/` dynamic. Null until then, and
+  // null orders the row as listed.
+  const [themeRegion, setThemeRegion] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      setThemeRegion(regionFromLanguages(navigator.languages?.length ? navigator.languages : [navigator.language]));
+    } catch {
+      // No navigator worth reading: the list's own order.
+    }
+  }, []);
+  // One `starter_theme_row:shown:<style>` per page load per style, never per render.
+  const themeRowReportedRef = useRef<Set<string>>(new Set());
 
   /** Drop a scheduled automatic recheck: the host has done something first. */
   function cancelAutoRecheck() {
@@ -1334,11 +1354,34 @@ export default function SetupPage() {
     recentCount: recentPlaylists.length,
     failureCode: failure?.code ?? null,
   });
+  // Two or more themed starters for this style draw them as "Pick a theme"
+  // chips, region first; fewer is null and everything below is as before.
+  const themeRow = themeRowFor(styleStarters, themeRegion);
   // The one row under the field: the recent chips and, in the order style,
   // the order starter beside them (lib/starter-playlists.ts, fieldChipRow).
-  const fieldRow = fieldChipRow(recentPlaylists, styleStarters, starterPlace);
+  const fieldRow = themeRow
+    ? fieldChipRow(recentPlaylists, themeRow, starterPlace, { themed: true })
+    : fieldChipRow(recentPlaylists, styleStarters, starterPlace);
+  // Whether a theme chip is on screen now: under the box, or in the field row
+  // (where a recent chip can already hold every theme's id).
+  const themeRowDrawn =
+    themeRow !== null &&
+    (starterPlace === "refusal" || (starterPlace === "field" && fieldRow.starterIds.size > 0));
+  useEffect(() => {
+    if (!themeRowDrawn || themeRowReportedRef.current.has(playStyle)) return;
+    themeRowReportedRef.current.add(playStyle);
+    reportStarterThemeRow(playStyle);
+  }, [themeRowDrawn, playStyle]);
   // Under a refusal: the style's starters alone, with their sentence.
-  const starterChips = (
+  const starterChips = themeRow ? (
+    <PlaylistChips
+      label="Themes"
+      caption={THEME_CAPTION}
+      playlists={themeRow}
+      currentId={currentPlaylistId}
+      onPick={(playlist) => pickPlaylist(playlist.id, "starter")}
+    />
+  ) : (
     <PlaylistChips
       label="Starter playlists"
       caption={starterCaption(styleStarters.length)}

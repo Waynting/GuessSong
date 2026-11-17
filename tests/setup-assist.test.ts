@@ -377,8 +377,13 @@ describe("the chips", () => {
     // style the order starter beside them (two instances were two rows).
     expect(single).toMatch(/<PlaylistChips\s+label=\{fieldRow\.label\}\s+caption=\{fieldRow\.caption \?\? undefined\}\s+playlists=\{fieldRow\.playlists\}/);
     expect(single.indexOf("<PlaylistChips")).toBeGreaterThan(single.indexOf('className={`url-input'));
-    expect(body).toMatch(/const fieldRow = fieldChipRow\(recentPlaylists, styleStarters, starterPlace\);/);
-    expect(positions(body, "fieldChipRow(")).toHaveLength(1);
+    // Two calls, one row: a theme row (lib/starter-playlists.ts, themeRowFor)
+    // goes through the same fieldChipRow, and without one the call is the
+    // one the page always made.
+    expect(body).toMatch(
+      /const fieldRow = themeRow\s*\?\s*fieldChipRow\(recentPlaylists, themeRow, starterPlace, \{ themed: true \}\)\s*:\s*fieldChipRow\(recentPlaylists, styleStarters, starterPlace\);/
+    );
+    expect(positions(body, "fieldChipRow(")).toHaveLength(2);
   });
 
   it("lights the chip whose playlist is in the field", () => {

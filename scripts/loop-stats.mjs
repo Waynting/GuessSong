@@ -389,6 +389,20 @@ if (starterKeys.some((k) => get(`host_setup_starter:${k}`) > 0)) {
 }
 
 /**
+ * The "Pick a theme" row (`themeRowFor` in lib/starter-playlists.ts):
+ * `starter_theme_row:shown:<guess|order>`, once per setup page that drew it.
+ * Zero, and so silent, until a style has two themed starters. Read the picks
+ * above (that style's keys) over this; picks count by any route, so the
+ * ratio is a ceiling on what the row itself converted.
+ */
+const themeRowShown = ["guess", "order"].map((s) => [s, get(`starter_theme_row:shown:${s}`)]);
+if (themeRowShown.some(([, n]) => n > 0)) {
+  console.log(
+    `theme row shown       ${themeRowShown.map(([s, n]) => `${s} ${n}`).join(" · ")}   (pages that drew "Pick a theme"; picks are the starter keys above)`
+  );
+}
+
+/**
  * Where the games went. `Games started` is a beacon from the setup page;
  * these two are beacons from the Game Over screen, so the difference is the
  * tab that closed mid-party — and the Game Over screen is where every
@@ -1536,6 +1550,7 @@ const RENDERED_PREFIXES = [
   "host_index:",
   "host_setup:",
   "host_setup_starter:",
+  "starter_theme_row:",
   "game_end:",
   "game_end_round:",
   "game_end_host:",

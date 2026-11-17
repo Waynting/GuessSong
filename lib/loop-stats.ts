@@ -54,6 +54,7 @@ import { RECOVERY_STAGES, type RecoveryStage } from "@/lib/refusal-recovery";
 import { SETUP_SOURCES, isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { GAME_MODES, isGameMode, isPlaylistKind, type GameMode, type PlaylistKind } from "@/lib/game-session";
 import { ORDER_VERDICTS, isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
+import { isPlayStyle, type PlayStyle } from "@/lib/order-game";
 import { ARRIVALS, isArrival, type Arrival } from "@/lib/arrival";
 import { isSoloStep, soloStepFitsBand, type SoloStep } from "@/lib/solo-party";
 import {
@@ -1759,6 +1760,18 @@ export const MUSIC_AGE_OUTCOMES: readonly MusicAgeOutcome[] = ["shared", "copied
 export function recordMusicAge(outcome: MusicAgeOutcome): Promise<void> {
   if (!MUSIC_AGE_OUTCOMES.includes(outcome)) return Promise.resolve();
   return bump(`music_age:${outcome}`);
+}
+
+/**
+ * The setup page drew a "Pick a theme" row of starter chips for one play
+ * style (`themeRowFor` in lib/starter-playlists.ts): `starter_theme_row:shown:<style>`,
+ * once per page load. One impression per row rather than one per theme, so
+ * the denominator for `host_setup_starter:<key>` costs one command and not
+ * one per chip. Zero until a style has two themed starters.
+ */
+export function recordStarterThemeRow(style: PlayStyle): Promise<void> {
+  if (!isPlayStyle(style)) return Promise.resolve();
+  return bump(`starter_theme_row:shown:${style}`);
 }
 
 /** One quiz moved a stage down its funnel. */
