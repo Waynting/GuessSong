@@ -82,6 +82,7 @@ export async function POST(req: NextRequest) {
         starter: event.starter,
         playlistKind: event.playlistKind,
         soloStep: event.soloStep,
+        teams: event.teams,
       });
       break;
     case "game_finished":
@@ -97,6 +98,7 @@ export async function POST(req: NextRequest) {
         playlistKind: event.playlistKind,
         streak: event.streak,
         best: event.best,
+        teams: event.teams,
       });
       break;
     case "first_clip":

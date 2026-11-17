@@ -177,6 +177,8 @@ export type PulseEvent =
       playlistKind?: PlaylistKind;
       /** A device's first solo game, or its first party after one (lib/solo-party.ts). */
       soloStep?: SoloStep;
+      /** The host split the room into two teams (lib/teams.ts); present only when true. */
+      teams?: true;
     }
   | {
       kind: "game_finished";
@@ -197,6 +199,8 @@ export type PulseEvent =
       streak?: StreakBand;
       /** A game of one with a single playlist: its score against the stored best. */
       best?: BestOutcome;
+      /** A team game (lib/teams.ts); present only when true. */
+      teams?: true;
     }
   | { kind: "first_clip"; path: FirstClipPath; outcome: FirstClipOutcome }
   | {
@@ -285,7 +289,11 @@ export function parsePulse(body: unknown): PulseEvent | null {
     // And the solo-to-party step: `solo_party:${value}` is a key, almost every
     // start sends none, and an unknown value is dropped rather than the game.
     // Whether it fits the band is the recorder's call, which owns the key.
-    return isSoloStep(raw.soloStep) ? { ...kinded, soloStep: raw.soloStep } : kinded;
+    const stepped = isSoloStep(raw.soloStep) ? { ...kinded, soloStep: raw.soloStep } : kinded;
+    // And whether the room was split into teams: a literal `true` only —
+    // anything else is dropped, never the game. It becomes `game_teams:on`,
+    // and whether it fits the band is the recorder's call.
+    return raw.teams === true ? { ...stepped, teams: true as const } : stepped;
   }
 
   if (raw.kind === "game_finished") {
@@ -326,6 +334,8 @@ export function parsePulse(body: unknown): PulseEvent | null {
       // band is the recorder's call, which owns the keys.
       ...(isStreakBand(raw.streak) ? { streak: raw.streak } : {}),
       ...(isBestOutcome(raw.best) ? { best: raw.best } : {}),
+      // A team game: a literal `true` only. `game_end_teams:${end}` is a key.
+      ...(raw.teams === true ? { teams: true as const } : {}),
     };
   }
 

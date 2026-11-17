@@ -36,6 +36,8 @@ import {
 import { buzzerErrorMessage } from "@/lib/error-messages";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { gameScored, playerBand } from "@/lib/game-players";
+import { hasTeams } from "@/lib/teams";
+import { TeamGameOver, TeamScoreList } from "@/components/team-scoreboard";
 import { loadGame } from "@/lib/game-storage";
 import { useScreenWakeLock } from "@/lib/wake-lock";
 import { LoopQr } from "@/components/loop-qr";
@@ -551,6 +553,8 @@ export default function OrderPage() {
       mode: "order",
       players: playerBand(players.length),
       scored: gameScored(players),
+      // A team game (lib/teams.ts): `game_end_teams:<end>`, beside `game_teams:on`.
+      ...(hasTeams(players) ? { teams: true } : {}),
       // Whether this Game Over draws the Mixed link — the link's denominator.
       linkDrawn: gameOverOnward(layout, players.length).mixedLink,
       // Whether the round still face down had been touched — read at round
@@ -702,6 +706,10 @@ export default function OrderPage() {
   const result = round ? readArrangement(arrangedIds, round) : null;
   const solo = players.length === 1;
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+  // Two teams (lib/teams.ts): the scoreboard and Game Over add each side up.
+  // Awards stay per player, so a buzzer or order-phone award by name still
+  // lands on a row, and the totals follow from it.
+  const teamGame = hasTeams(players);
   const maxScore = sortedPlayers[0]?.score ?? 0;
   const leftoverLine = orderLeftoverLine(leftover);
   const onward = gameOverOnward(screen, players.length);
@@ -1725,31 +1733,37 @@ export default function OrderPage() {
                 <p style={{ color: "#444", fontSize: "13px" }}>{playlistName}</p>
               </div>
 
-              {maxScore > 0 && sortedPlayers.length > 0 && (
-                <div className="winner-hero">
-                  <span className="winner-trophy">🏆</span>
-                  <span className="winner-hero-name">{sortedPlayers[0].name}</span>
-                  <div style={{ textAlign: "right" }}>
-                    <div className="winner-hero-score">{sortedPlayers[0].score}</div>
-                    <div className="winner-hero-pts">pts</div>
-                  </div>
-                </div>
-              )}
-
-              {sortedPlayers.length > 1 && (
-                <div className="final-scoreboard">
-                  {sortedPlayers.slice(1).map((p, i) => {
-                    const idx = i + 1;
-                    const rankClass = idx === 1 ? "second" : idx === 2 ? "third" : "rest";
-                    return (
-                      <div key={p.name} className="final-row">
-                        <span className={`final-rank ${rankClass}`}>{idx + 1}</span>
-                        <span className="final-name">{p.name}</span>
-                        <span className={`final-score${idx <= 2 ? " podium" : ""}`}>{p.score}</span>
+              {teamGame ? (
+                <TeamGameOver players={players} />
+              ) : (
+                <>
+                  {maxScore > 0 && sortedPlayers.length > 0 && (
+                    <div className="winner-hero">
+                      <span className="winner-trophy">🏆</span>
+                      <span className="winner-hero-name">{sortedPlayers[0].name}</span>
+                      <div style={{ textAlign: "right" }}>
+                        <div className="winner-hero-score">{sortedPlayers[0].score}</div>
+                        <div className="winner-hero-pts">pts</div>
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                  )}
+
+                  {sortedPlayers.length > 1 && (
+                    <div className="final-scoreboard">
+                      {sortedPlayers.slice(1).map((p, i) => {
+                        const idx = i + 1;
+                        const rankClass = idx === 1 ? "second" : idx === 2 ? "third" : "rest";
+                        return (
+                          <div key={p.name} className="final-row">
+                            <span className={`final-rank ${rankClass}`}>{idx + 1}</span>
+                            <span className="final-name">{p.name}</span>
+                            <span className={`final-score${idx <= 2 ? " podium" : ""}`}>{p.score}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
 
               {/* A game of one: the day streak and this playlist's best,
@@ -1821,20 +1835,24 @@ export default function OrderPage() {
         <aside className="sidebar">
           <div className="sidebar-header">Scoreboard</div>
           <div className="score-list">
-            {sortedPlayers.map((p, idx) => {
-              const isLeader = p.score === maxScore && maxScore > 0;
-              return (
-                <div key={p.name} className={`score-row${isLeader ? " leader" : ""}`}>
-                  <div className="score-row-left">
-                    <span className={`rank-num${idx === 0 ? " first" : ""}`}>{idx + 1}</span>
-                    <span className={`player-name-score${isLeader ? " leader" : ""}`}>{p.name}</span>
+            {teamGame ? (
+              <TeamScoreList players={players} scorePulse={scorePulse} />
+            ) : (
+              sortedPlayers.map((p, idx) => {
+                const isLeader = p.score === maxScore && maxScore > 0;
+                return (
+                  <div key={p.name} className={`score-row${isLeader ? " leader" : ""}`}>
+                    <div className="score-row-left">
+                      <span className={`rank-num${idx === 0 ? " first" : ""}`}>{idx + 1}</span>
+                      <span className={`player-name-score${isLeader ? " leader" : ""}`}>{p.name}</span>
+                    </div>
+                    <span className={`score-chip${isLeader ? " leader" : ""}${scorePulse === p.name ? " pulse" : ""}`}>
+                      {p.score}
+                    </span>
                   </div>
-                  <span className={`score-chip${isLeader ? " leader" : ""}${scorePulse === p.name ? " pulse" : ""}`}>
-                    {p.score}
-                  </span>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </aside>
       </div>

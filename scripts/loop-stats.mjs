@@ -763,6 +763,31 @@ if (playerCols.length > 0) {
 }
 
 /**
+ * Team games (lib/teams.ts, since 2026-11-17): `game_teams:on` on the start of
+ * a game whose host split a room of four or more into two teams, and
+ * `game_end_teams:<end>` on its end beacon. The 5+ band's played-out rate is
+ * printed beside it because that is the room teams are for — the bar is a
+ * team game playing out at least as often as the 5+ band does.
+ */
+const teamsStarted = get("game_teams:on");
+const teamsPlayedOut = get("game_end_teams:played_out");
+const teamsEndedEarly = get("game_end_teams:ended_early");
+if (teamsStarted + teamsPlayedOut + teamsEndedEarly > 0) {
+  const bigStarted = get("game_players:p5_plus");
+  const bigPlayedOut = get("game_end_players:p5_plus:played_out");
+  console.log(
+    `\nTeam games  started ${teamsStarted} · played out ${teamsPlayedOut} · ended early ${teamsEndedEarly} · ` +
+      `played out ${pct(teamsPlayedOut, teamsStarted).trim()} of started (5+ band: ${pct(bigPlayedOut, bigStarted).trim()})`
+  );
+  console.log(
+    "  how to read it: a team game is a room of four or more, so set its rate against\n" +
+      "  the 5+ band beside it, not the site's. Level or above says splitting the room\n" +
+      "  costs nothing; well below says the toggle is in the way. Left mid-game is not\n" +
+      "  split by teams, so the two counts sum to less than started."
+  );
+}
+
+/**
  * Mode × players: `game_mode_players:<mode>:<band>` on the start (the
  * denominator), `game_end_mode_players:<mode>:<band>:<end>` and
  * `game_left_mode_players:<mode>:<band>:<rband>` on the beacons, all since
@@ -1669,6 +1694,8 @@ const RENDERED_PREFIXES = [
   "personal_best:",
   "lyric_line:",
   "lyric_line_round:",
+  "game_teams:",
+  "game_end_teams:",
 ];
 
 const leftovers = [...totals.keys()]

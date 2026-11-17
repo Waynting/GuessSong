@@ -23,6 +23,8 @@ import {
   type PlaylistKind,
 } from "@/lib/game-session";
 import { gameScored, playerBand } from "@/lib/game-players";
+import { hasTeams } from "@/lib/teams";
+import { TeamGameOver, TeamScoreList } from "@/components/team-scoreboard";
 import { loadGame } from "@/lib/game-storage";
 import { useScreenWakeLock } from "@/lib/wake-lock";
 import { fetchPreview, fetchPreviewBatch } from "@/lib/preview-client";
@@ -1205,6 +1207,8 @@ export default function GamePage() {
       mode,
       players: playerBand(players.length),
       scored: gameScored(players),
+      // A team game (lib/teams.ts): `game_end_teams:<end>`, beside `game_teams:on`.
+      ...(hasTeams(players) ? { teams: true } : {}),
       // Whether this Game Over draws the Mixed link — the link's denominator.
       linkDrawn: gameOverOnward(layout, players.length).mixedLink,
       playlistKind: playlistKindRef.current,
@@ -1517,6 +1521,10 @@ export default function GamePage() {
   const isRevealed = phase === "revealed" || phase === "finished";
   const showAlbumArt = isRevealed || albumHintShown;
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+  // Two teams (lib/teams.ts): the scoreboard and Game Over add each side up.
+  // Awards stay per player, so a buzzer or order-phone award by name still
+  // lands on a row, and the totals follow from it.
+  const teamGame = hasTeams(players);
   // Null on an empty history, so an abandoned or non-mixed game renders nothing
   // rather than a sentence made of zeroes.
   const roundSummaryLine = describeRounds(summarizeRounds(roundHistory));
@@ -2746,34 +2754,40 @@ export default function GamePage() {
               </div>
 
               {/* Winner hero — only shown when someone scored */}
-              {maxScore > 0 && sortedPlayers.length > 0 && (
-                <div className="winner-hero">
-                  <span className="winner-trophy">🏆</span>
-                  <span className="winner-hero-name">{sortedPlayers[0].name}</span>
-                  <div style={{ textAlign: "right" }}>
-                    <div className="winner-hero-score">{sortedPlayers[0].score}</div>
-                    <div className="winner-hero-pts">pts</div>
-                  </div>
-                </div>
-              )}
-
-              {/* Rest of players (2nd place onward) in compact scrollable list */}
-              {sortedPlayers.length > 1 && (
-                <div className="final-scoreboard">
-                  {sortedPlayers.slice(1).map((p, i) => {
-                    const idx = i + 1; // actual rank index (0-based = 2nd place onward)
-                    const rankClass = idx === 1 ? "second" : idx === 2 ? "third" : "rest";
-                    const rankLabel = `${idx + 1}`;
-                    const isPodium = idx <= 2;
-                    return (
-                      <div key={p.name} className="final-row">
-                        <span className={`final-rank ${rankClass}`}>{rankLabel}</span>
-                        <span className="final-name">{p.name}</span>
-                        <span className={`final-score${isPodium ? " podium" : ""}`}>{p.score}</span>
+              {teamGame ? (
+                <TeamGameOver players={players} />
+              ) : (
+                <>
+                  {maxScore > 0 && sortedPlayers.length > 0 && (
+                    <div className="winner-hero">
+                      <span className="winner-trophy">🏆</span>
+                      <span className="winner-hero-name">{sortedPlayers[0].name}</span>
+                      <div style={{ textAlign: "right" }}>
+                        <div className="winner-hero-score">{sortedPlayers[0].score}</div>
+                        <div className="winner-hero-pts">pts</div>
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                  )}
+
+                  {/* Rest of players (2nd place onward) in compact scrollable list */}
+                  {sortedPlayers.length > 1 && (
+                    <div className="final-scoreboard">
+                      {sortedPlayers.slice(1).map((p, i) => {
+                        const idx = i + 1; // actual rank index (0-based = 2nd place onward)
+                        const rankClass = idx === 1 ? "second" : idx === 2 ? "third" : "rest";
+                        const rankLabel = `${idx + 1}`;
+                        const isPodium = idx <= 2;
+                        return (
+                          <div key={p.name} className="final-row">
+                            <span className={`final-rank ${rankClass}`}>{rankLabel}</span>
+                            <span className="final-name">{p.name}</span>
+                            <span className={`final-score${isPodium ? " podium" : ""}`}>{p.score}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
 
               {/* How the scoring actually went, which the scoreboard cannot
@@ -2865,20 +2879,24 @@ export default function GamePage() {
         <aside className="sidebar">
           <div className="sidebar-header">Scoreboard</div>
           <div className="score-list">
-            {sortedPlayers.map((p, idx) => {
-              const isLeader = p.score === maxScore && maxScore > 0;
-              return (
-                <div key={p.name} className={`score-row${isLeader ? " leader" : ""}`}>
-                  <div className="score-row-left">
-                    <span className={`rank-num${idx === 0 ? " first" : ""}`}>{idx + 1}</span>
-                    <span className={`player-name-score${isLeader ? " leader" : ""}`}>{p.name}</span>
+            {teamGame ? (
+              <TeamScoreList players={players} scorePulse={scorePulse} />
+            ) : (
+              sortedPlayers.map((p, idx) => {
+                const isLeader = p.score === maxScore && maxScore > 0;
+                return (
+                  <div key={p.name} className={`score-row${isLeader ? " leader" : ""}`}>
+                    <div className="score-row-left">
+                      <span className={`rank-num${idx === 0 ? " first" : ""}`}>{idx + 1}</span>
+                      <span className={`player-name-score${isLeader ? " leader" : ""}`}>{p.name}</span>
+                    </div>
+                    <span className={`score-chip${isLeader ? " leader" : ""}${scorePulse === p.name ? " pulse" : ""}`}>
+                      {p.score}
+                    </span>
                   </div>
-                  <span className={`score-chip${isLeader ? " leader" : ""}${scorePulse === p.name ? " pulse" : ""}`}>
-                    {p.score}
-                  </span>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </aside>
       </div>

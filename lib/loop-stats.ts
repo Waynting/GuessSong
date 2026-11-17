@@ -977,6 +977,9 @@ export function loopStatsKeys(
   gameKind: Record<CrossedPlaylistKind, string>;
   gameEndKind: Record<CrossedPlaylistKind, Record<GameEnd, string>>;
   gameLeftKind: Record<CrossedPlaylistKind, Record<EarlyEndBand, string>>;
+  /** Team games (lib/teams.ts): the start, and how they ended. */
+  gameTeams: string;
+  gameEndTeams: Record<GameEnd, string>;
 } {
   const impressions: Record<string, string> = {};
   const clicks: Record<string, string> = {};
@@ -1123,6 +1126,10 @@ export function loopStatsKeys(
       CROSSED_PLAYLIST_KINDS.map((k) => [k, key(day, `game_kind:${k}`)])
     ) as Record<CrossedPlaylistKind, string>,
     gameEndKind: byList("game_end_kind", CROSSED_PLAYLIST_KINDS, GAME_ENDS),
+    gameTeams: key(day, "game_teams:on"),
+    gameEndTeams: Object.fromEntries(
+      GAME_ENDS.map((e) => [e, key(day, `game_end_teams:${e}`)])
+    ) as Record<GameEnd, string>,
     gameLeftKind: byList("game_left_kind", CROSSED_PLAYLIST_KINDS, EARLY_END_BANDS),
     playlistInvalid: Object.fromEntries(
       PLAYLIST_INVALID_KINDS.map((k) => [k, key(day, `playlist_invalid:${k}`)])
@@ -1331,11 +1338,23 @@ export interface GameStartDetails {
   playlistKind?: PlaylistKind;
   /** This device's first solo game, or its first party after one (lib/solo-party.ts). */
   soloStep?: SoloStep;
+  /** The host split the room into two teams (lib/teams.ts). Sent only when true. */
+  teams?: boolean;
+}
+
+/**
+ * Whether a team flag fits the band: teams are offered from four names, so a
+ * game of one or two claiming them is a page that got it wrong. The bands
+ * cannot tell three from four, so `p3_4` passes — the setup page never sends
+ * the flag for three.
+ */
+export function teamsFitBand(players: PlayerBand | undefined): boolean {
+  return players === "p3_4" || players === "p5_plus";
 }
 
 export async function recordGameStart(
   hostGameIndex: number,
-  { mixed, source, mode, players, from, starter, playlistKind, soloStep }: GameStartDetails = {}
+  { mixed, source, mode, players, from, starter, playlistKind, soloStep, teams }: GameStartDetails = {}
 ): Promise<void> {
   const index = Number.isFinite(hostGameIndex)
     ? Math.max(1, Math.min(Math.trunc(hostGameIndex), HOST_INDEX_CEILING))
@@ -1385,6 +1404,10 @@ export async function recordGameStart(
   // four, or a party step on a game of one, is a page that got it wrong, and
   // filing it would put devices in the wrong column of the only ratio read.
   if (isSoloStep(soloStep) && soloStepFitsBand(soloStep, players)) await bump(`solo_party:${soloStep}`);
+  // A team game (lib/teams.ts): one command on the starts that split the
+  // room, none on any other. A literal `true` only, and only for a band
+  // teams can be offered in — the denominator for `game_end_teams:<end>`.
+  if (teams === true && teamsFitBand(players)) await bump("game_teams:on");
 }
 
 /**
@@ -1430,6 +1453,8 @@ export async function recordGameEnd(
     streak?: StreakBand;
     /** A game of one with a single playlist: its score against the stored best. */
     best?: BestOutcome;
+    /** A team game (lib/teams.ts). Sent only when true. */
+    teams?: boolean;
   } = {}
 ): Promise<void> {
   if (!GAME_ENDS.includes(end)) return;
@@ -1463,6 +1488,9 @@ export async function recordGameEnd(
     if (isStreakBand(details.streak)) extras.push(bump(`streak:${details.streak}`));
     if (isBestOutcome(details.best)) extras.push(bump(`personal_best:${details.best}`));
   }
+  // How a team game ended — `game_teams:on` is the denominator. Gated on the
+  // band like the start, so the two sides of the ratio count the same games.
+  if (details.teams === true && teamsFitBand(details.players)) extras.push(bump(`game_end_teams:${end}`));
   if (end !== "ended_early") {
     await Promise.all(extras);
     return;
