@@ -11,7 +11,7 @@ import {
   recordLoopImpression,
   recordQuizShare,
 } from "@/lib/loop-stats";
-import { recordQuizCopy, recordQuizSocial, recordSoloInvite } from "@/lib/loop-stats";
+import { recordDailyDoor, recordQuizCopy, recordQuizSocial, recordSoloInvite } from "@/lib/loop-stats";
 import { recordOrderPhone, recordOrderRound } from "@/lib/loop-stats";
 
 /**
@@ -126,6 +126,9 @@ export async function POST(req: NextRequest) {
       break;
     case "solo_invite":
       await recordSoloInvite(event.outcome);
+      break;
+    case "daily_door":
+      await recordDailyDoor(event.stage);
       break;
   }
 

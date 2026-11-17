@@ -39,7 +39,7 @@ import type { GameScored, PlayerBand } from "@/lib/game-players";
 import type { Arrival } from "@/lib/arrival";
 import type { StarterKey } from "@/lib/starter-playlists";
 import type { SoloStep } from "@/lib/solo-party";
-import type { SoloInviteOutcome } from "@/lib/loop-stats";
+import type { DailyDoorStage, SoloInviteOutcome } from "@/lib/loop-stats";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
 
@@ -354,4 +354,13 @@ export function reportQuizSocial(by: QuizShareBy, platform: SocialPlatform): voi
 export function reportSoloInvite(outcome: SoloInviteOutcome): void {
   trackEvent("solo_invite_tapped", { outcome });
   sendPulse({ kind: "solo_invite", outcome });
+}
+
+/**
+ * Call when the setup page's "Today's challenge" fake door is first drawn, and
+ * on its first tap. See `lib/daily-door.ts`.
+ */
+export function reportDailyDoor(stage: DailyDoorStage): void {
+  trackEvent("daily_door", { stage });
+  sendPulse({ kind: "daily_door", stage });
 }

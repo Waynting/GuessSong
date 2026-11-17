@@ -28,10 +28,12 @@ import {
   type RecheckAnswer,
 } from "@/lib/auto-recheck";
 import {
+  reportDailyDoor,
   reportGameStart,
   reportRefusal,
   reportRefusalRecovered,
 } from "@/lib/loop-client";
+import { DAILY_DOOR_COPY } from "@/lib/daily-door";
 import {
   NO_REFUSAL,
   RECOVERY_STORAGE_KEY,
@@ -118,6 +120,7 @@ import { getGuide } from "@/lib/guides";
 import { InstallBanner } from "@/components/install-banner";
 import {
   CheckIcon,
+  CalendarIcon,
   LinkIcon,
   MixIcon,
   MusicIcon,
@@ -339,6 +342,22 @@ export default function SetupPage() {
   const [showSettings, setShowSettings] = useState(false);
   const locale = useErrorLocale();
   const firstInputRef = useRef<HTMLInputElement>(null);
+  // The "Today's challenge" fake door (lib/daily-door.ts): counted once when
+  // drawn and once on its first tap, per page load.
+  const dailyDoorTappedRef = useRef(false);
+  const [dailyDoorOpen, setDailyDoorOpen] = useState(false);
+  // Drawn only once mounted, so the card is in the device's language from its
+  // first paint rather than switching from English after hydration.
+  useEffect(() => {
+    if (mounted) reportDailyDoor("shown");
+  }, [mounted]);
+  function openDailyDoor() {
+    setDailyDoorOpen(true);
+    if (dailyDoorTappedRef.current) return;
+    dailyDoorTappedRef.current = true;
+    reportDailyDoor("tapped");
+  }
+  const dailyDoor = DAILY_DOOR_COPY[locale];
 
   /**
    * The last submission that failed in a way the submission itself determines,
@@ -1899,6 +1918,28 @@ export default function SetupPage() {
               "Who's playing?" — it is the thing to do instead. Its own card,
               under the form and above the fold for someone alone, where a
               text link under Start had sat below it. */}
+          {/* A question, not a feature: there is no daily challenge, and the
+              tap is how we find out whether there should be. A card shaped
+              like the quiz's below, because a card is what the real thing
+              would be. lib/daily-door.ts. */}
+          {mounted && (
+            <div lang={locale === "zh" ? "zh-TW" : "en"}>
+              {dailyDoorOpen ? (
+                <p className="daily-door-note" role="status">{dailyDoor.note}</p>
+              ) : (
+                <button type="button" className="quiz-card daily-door" onClick={openDailyDoor}>
+                  <span className="quiz-card-icon" aria-hidden>
+                    <CalendarIcon />
+                  </span>
+                  <span>
+                    <span className="quiz-card-title">{dailyDoor.title}</span>
+                    <span className="quiz-card-sub">{dailyDoor.sub}</span>
+                  </span>
+                </button>
+              )}
+            </div>
+          )}
+
           <Link href={QUIZ_SETUP_HREF} className="quiz-card">
             <span className="quiz-card-icon" aria-hidden>
               <LinkIcon />
