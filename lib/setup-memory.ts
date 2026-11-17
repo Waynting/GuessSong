@@ -67,6 +67,7 @@ import {
 import { SETUP_MODES, type SetupMode } from "@/lib/start-status";
 import { DEFAULT_PLAY_STYLE, isPlayStyle, type PlayStyle } from "@/lib/order-game";
 import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
+import type { ChallengeDeal } from "@/lib/challenge";
 
 export const SETUP_MEMORY_KEY = "guesssong_last_setup";
 export const RECENT_PLAYLISTS_KEY = "guesssong_recent_playlists";
@@ -381,6 +382,12 @@ export interface SetupArrival {
   sharedUrl: string | null;
   /** `requestedSetupMode(query)`. */
   requestedMode: RequestedSetupMode | null;
+  /**
+   * A friend's "beat my score" link (`parseChallengeArrival` in
+   * lib/challenge.ts), or absent. Optional so every arrival that predates it
+   * reads exactly as before.
+   */
+  challenge?: ChallengeDeal | null;
 }
 
 /** Every piece of form state a restore can set. */
@@ -432,6 +439,31 @@ export function initialSetup(
 
   const restoredUrl = remembered?.playlistUrl ?? "";
   const playStyle = remembered?.playStyle ?? DEFAULT_PLAY_STYLE;
+
+  // A friend's challenge is the most specific thing a URL can ask for, so it
+  // outranks the rest of the URL as well as the memory: the challenge's
+  // playlist in the field, the order game, someone alone ("Just me" is
+  // derived from order + at most one name, lib/who-playing.ts), no buzzer,
+  // and the challenger's song count — the pick is part of the deal.
+  const challenge = arrival.challenge ?? null;
+  if (challenge) {
+    const first = names.slice(0, 1);
+    return {
+      setupMode: "single",
+      mixedSubMode: remembered?.mixedSubMode ?? "room",
+      playlistUrl: playableUrlOf(challenge.ref),
+      // It did arrive as `?playlist=` — the share target's parameter — so it
+      // is filed with those; `challenge:started` is the challenge's own count.
+      linkSource: "shared",
+      players: [...first, ...Array.from({ length: Math.max(0, DEFAULT_PLAYER_ROWS - first.length) }, () => "")],
+      clipDuration: remembered?.clipDuration ?? DEFAULT_CLIP_DURATION,
+      songCount: songCountStateOf(challenge.count),
+      sampledPerPlayer: remembered?.sampledPerPlayer ?? DEFAULT_SAMPLED_PER_PLAYER,
+      buzzer: false,
+      playStyle: "order",
+    };
+  }
+
   return {
     setupMode,
     mixedSubMode: remembered?.mixedSubMode ?? "room",

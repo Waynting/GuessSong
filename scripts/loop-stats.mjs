@@ -1250,6 +1250,42 @@ if (streakTotal + bestTotal > 0) {
 }
 
 /**
+ * "Beat my score" (lib/challenge.ts, since 2026-11-17): a one-player order
+ * Game Over sends a friend the same deal. shown and followed are the
+ * `challenge` row of the surface table; this block reads the steps between
+ * and after. `started` is a friend's game from the link (guarded server-side
+ * to an order game of one), and won/lost/tied is that game's Game Over, so
+ * the three sum to at most `started`. The friend's playlist can load
+ * differently from the challenger's (an edited playlist, a refreshed cache),
+ * and then the deal differs — a floor on "same cards", not a defect to chase.
+ */
+const challengeShares = ["shared", "copied", "dismissed", "failed"].map((o) => [o, get(`challenge:share:${o}`)]);
+const challengeTaps = challengeShares.reduce((n, [, v]) => n + v, 0);
+const challengeShown = get("impression:challenge");
+const challengeFollowed = get("click:challenge");
+const challengeStarted = get("challenge:started");
+const challengeWon = get("challenge:won");
+const challengeLost = get("challenge:lost");
+const challengeTied = get("challenge:tied");
+if (challengeShown + challengeTaps + challengeFollowed + challengeStarted > 0) {
+  console.log(
+    `\nChallenge links  shown ${challengeShown} · tapped ${challengeTaps} (${pct(challengeTaps, challengeShown).trim()}) — ` +
+      challengeShares.map(([o, v]) => `${o} ${v}`).join(" · ")
+  );
+  console.log(
+    `  friends       followed ${challengeFollowed} · started ${challengeStarted} ` +
+      `(${pct(challengeStarted, challengeFollowed).trim()} of followed) · ` +
+      `won ${challengeWon} · lost ${challengeLost} · tied ${challengeTied}`
+  );
+  console.log(
+    "  how to read it: followed ÷ (shared + copied) is the link's pull, started ÷ followed\n" +
+      "  the landing's. The bar is the plain invite's 1 in 2,089: a challenge that is\n" +
+      "  followed at the quiz link's 13% is the carrier working; near zero is the\n" +
+      "  score not being the reason."
+  );
+}
+
+/**
  * The playlist quiz funnel: created → opened → started → completed → board,
  * then the share surface's own row above. Each stage is a server-side count
  * (the route that did the thing bumps it), so unlike the surface table
@@ -1696,6 +1732,7 @@ const RENDERED_PREFIXES = [
   "lyric_line_round:",
   "game_teams:",
   "game_end_teams:",
+  "challenge:",
 ];
 
 const leftovers = [...totals.keys()]

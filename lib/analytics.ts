@@ -669,6 +669,20 @@ export type AnalyticsEvent =
     }
   | {
       /**
+       * The "beat my score" button on a one-player order Game Over
+       * (`components/order-challenge.tsx`). KV's `challenge:share:<outcome>`
+       * is the authoritative copy.
+       */
+      name: "challenge_shared";
+      params: { outcome: "shared" | "copied" | "dismissed" | "failed" };
+    }
+  | {
+      /** A friend's challenge game ended. KV's `challenge:<verdict>` is authoritative. */
+      name: "challenge_finished";
+      params: { verdict: "won" | "lost" | "tied" };
+    }
+  | {
+      /**
        * The host's share button on the setup page, the taker's on the
        * result screen, or the owner's on their results page (`board`, which
        * was filed as `owner` until 2026-09-30). `outcome` follows

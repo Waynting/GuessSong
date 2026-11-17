@@ -178,7 +178,7 @@ describe("the page restores on arrival, in an effect", () => {
     expect(redirect).toBeGreaterThan(-1);
     expect(restore).toBeGreaterThan(redirect);
     expect(body).toMatch(
-      /const arrival: SetupArrival = \{\s*sharedUrl: query\.get\("playlist"\),\s*requestedMode: requestedSetupMode\(query\),\s*\};/
+      /const arrival: SetupArrival = \{\s*sharedUrl: query\.get\("playlist"\),\s*requestedMode: requestedSetupMode\(query\),\s*challenge: arrivedChallenge,\s*\};/
     );
     expect(body).toMatch(/const remembered = recallSetup\(\);/);
     expect(body).toMatch(/setRecalled\(remembered !== null\);/);

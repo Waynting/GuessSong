@@ -10,6 +10,7 @@ import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
 import { isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { isPlayableRef } from "@/lib/playlist-ref";
 import { normalizeTeams, type TeamSide } from "@/lib/teams";
+import { isChallengeScore, isSeed, type ChallengeScore } from "@/lib/challenge";
 
 export const GAME_STORAGE_KEY = "guesssong_game";
 
@@ -94,6 +95,15 @@ export interface GamePayload {
    * payload stored before 2026-11-17: no ref is no best, never a guessed one.
    */
   playlistRef?: string;
+  /**
+   * The seed both shuffles drew from (`seededRandom` in lib/challenge.ts).
+   * Set on every solo order game started from a single playlist, so any
+   * finished one can issue a "beat my score" link (with `playlistRef`);
+   * absent on every other game, which shuffles exactly as it always did.
+   */
+  seed?: number;
+  /** Set when this game is a friend's challenge: the score it is played against. */
+  challenge?: ChallengeScore;
 }
 
 /**
@@ -157,6 +167,8 @@ export interface BuildGamePayloadInput {
   setupSource?: SetupSource;
   playlistKind?: PlaylistKind;
   playlistRef?: string;
+  seed?: number;
+  challenge?: ChallengeScore;
 }
 
 export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
@@ -173,6 +185,10 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
     ...(input.setupSource ? { setupSource: input.setupSource } : {}),
     ...(input.playlistKind ? { playlistKind: input.playlistKind } : {}),
     ...(input.playlistRef ? { playlistRef: input.playlistRef } : {}),
+    ...(isSeed(input.seed) ? { seed: input.seed } : {}),
+    ...(isChallengeScore(input.challenge)
+      ? { challenge: { score: input.challenge.score, max: input.challenge.max } }
+      : {}),
   };
 }
 
@@ -409,5 +425,12 @@ export function parseGamePayload(raw: string): GamePayload | null {
     ...(isPlaylistKind(d.playlistKind) ? { playlistKind: d.playlistKind } : {}),
     // Absent when unreadable, the same trade: it keys a stored best.
     ...(isPlayableRef(d.playlistRef) ? { playlistRef: d.playlistRef } : {}),
+    // The challenge fields, each repaired by omission and never a reason to
+    // reject: a bad seed is a game that cannot issue a challenge, a bad score
+    // is a game played without one to beat — and either still plays.
+    ...(isSeed(d.seed) ? { seed: d.seed } : {}),
+    ...(isChallengeScore(d.challenge)
+      ? { challenge: { score: d.challenge.score, max: d.challenge.max } }
+      : {}),
   };
 }

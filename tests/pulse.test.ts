@@ -704,6 +704,7 @@ describe("the route records every kind the parser accepts", () => {
     expect(route).toMatch(/case "quiz_copied":\s*await recordQuizCopy\(event\.by, event\.outcome\);/);
     expect(route).toMatch(/case "quiz_shared":\s*await recordQuizShare\(event\.by, event\.outcome\);/);
     expect(route).toMatch(/case "quiz_social":\s*await recordQuizSocial\(event\.by, event\.platform\);/);
+    expect(route).toMatch(/case "challenge":\s*await recordChallenge\(event\.step\);/);
     expect(route).toMatch(/case "order_round":\s*await recordOrderRound\(event\.verdict, event\.arranged\);/);
     // The tap's screen, and the two beacons' `arranged`, each reach their
     // recorder — a field parsed and not passed is a counter that never moves.
@@ -711,7 +712,7 @@ describe("the route records every kind the parser accepts", () => {
     // The mode rides to all three game recorders, or the KV rows read as
     // "no mode was ever sent".
     expect(route).toMatch(
-      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,\s*players: event\.players,\s*from: event\.from,\s*starter: event\.starter,\s*playlistKind: event\.playlistKind,\s*soloStep: event\.soloStep,\s*teams: event\.teams,\s*\}\)/
+      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,\s*players: event\.players,\s*from: event\.from,\s*starter: event\.starter,\s*playlistKind: event\.playlistKind,\s*soloStep: event\.soloStep,\s*teams: event\.teams,\s*challenge: event\.challenge,\s*\}\)/
     );
     expect(route).toMatch(
       /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored, event\.arranged, event\.playlistKind\)/
