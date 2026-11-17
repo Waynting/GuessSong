@@ -42,6 +42,7 @@ import { LoopQr } from "@/components/loop-qr";
 import { SoloInvite } from "@/components/solo-invite";
 import { MusicAgeCard } from "@/components/music-age";
 import { musicAge, type MusicAgeRound } from "@/lib/music-age";
+import { streakLine, takeStreakResult, type StreakResult } from "@/lib/streak";
 import { formatMixList } from "@/lib/mix-export";
 import {
   CARD_FOOTER_HEIGHT,
@@ -205,6 +206,8 @@ export default function OrderPage() {
   /** Null until an effect has asked — see gameScreenFor in lib/game-over.ts. */
   const [screen, setScreen] = useState<GameScreen | null>(null);
   const [mixCopied, setMixCopied] = useState(false);
+  // The solo Game Over's streak line, set once by trackGameFinished.
+  const [streakResult, setStreakResult] = useState<StreakResult | null>(null);
   const [mixFallback, setMixFallback] = useState<string | null>(null);
 
   // Read by what outlives a render: the leave beacon, which fires from a
@@ -232,6 +235,8 @@ export default function OrderPage() {
   const setupSourceRef = useRef<SetupSource | undefined>(undefined);
   // What the link was, for the end and leave beacons (lib/game-session.ts).
   const playlistKindRef = useRef<PlaylistKind>("playlist");
+  // The single link's ref, which a solo player's best is kept under; none on a Mixed pool.
+  const playlistRefRef = useRef<string | undefined>(undefined);
   /** False when this page is a reload of a game that already had one. */
   const firstPageRef = useRef<boolean | null>(null);
   const leftRef = useRef(false);
@@ -256,6 +261,7 @@ export default function OrderPage() {
     hostKindRef.current = hostKindOf(hostGames);
     setupSourceRef.current = data.setupSource;
     playlistKindRef.current = data.playlistKind ?? "playlist";
+    playlistRefRef.current = data.playlistRef;
     // Claimed once per page, not once per effect run — StrictMode runs this
     // twice in development, and the second run would read its own page as a
     // reload.
@@ -526,6 +532,15 @@ export default function OrderPage() {
     if (finishedTrackedRef.current) return;
     finishedTrackedRef.current = true;
     const roundsPlayed = orderRoundsPlayed(currentIndex, phase);
+    // A game of one that played at least a round writes the day streak and
+    // this playlist's best, here and only here — the once-per-game guard
+    // above is what keeps a re-render from counting it twice. A room's
+    // scoreboard is nobody's personal best. lib/streak.ts.
+    const soloStreak =
+      players.length === 1 && roundsPlayed >= 1
+        ? takeStreakResult({ ref: playlistRefRef.current, score: players[0].score })
+        : null;
+    if (soloStreak) setStreakResult(soloStreak);
     // The layout is read here, in the click: it names the screen this tap
     // is about to draw.
     const layout = readGameScreen();
@@ -543,6 +558,9 @@ export default function OrderPage() {
       // buzzer room's phones arrange for themselves, so it sends none.
       ...(buzzerRoom ? {} : { arranged: hostArranged(arrangement, currentIndex) }),
       playlistKind: playlistKindRef.current,
+      // A game of one: the day streak and this playlist's best, banded.
+      ...(soloStreak ? { streak: soloStreak.band } : {}),
+      ...(soloStreak?.best ? { best: soloStreak.best.outcome } : {}),
     });
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,
@@ -1732,6 +1750,25 @@ export default function OrderPage() {
                     );
                   })}
                 </div>
+              )}
+
+              {/* A game of one: the day streak and this playlist's best,
+                  written once by trackGameFinished (lib/streak.ts). Under the
+                  scores, above Play Again; a room never draws it. */}
+              {streakResult && (
+                <p
+                  style={{
+                    color: "#9a9a9a",
+                    fontSize: "13px",
+                    lineHeight: 1.4,
+                    textAlign: "center",
+                    margin: "0 0 12px",
+                    maxWidth: "480px",
+                    flexShrink: 0,
+                  }}
+                >
+                  {streakLine(streakResult, playlistName)}
+                </p>
               )}
 
               <button className="btn-lg green" onClick={playAgain}>

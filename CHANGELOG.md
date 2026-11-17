@@ -56,6 +56,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adding one is a single key + entry — steps at the top of the file and in
   `docs/operations.md` §6.
 
+- **A day streak and a personal best on the one-player Game Over**
+  (`lib/streak.ts`, `/game` and `/order`). Most games are now one person alone
+  and many play about three and leave; with no accounts (D1) the reason to come
+  back has to live on the device. Two `localStorage` keys through
+  `lib/host-session.ts`: `guesssong_streak` (`{day, count}` — consecutive
+  *local* calendar days with a Game Over; same day unchanged, next day +1, a
+  gap back to 1, a day earlier than the stored one changes nothing) and
+  `guesssong_bests` (best score per `playableRefOf` ref, at most `BESTS_MAX` =
+  30, least recently played evicted). Both repaired field by field. The
+  payload carries the ref as `playlistRef` (single-link starts only; a Mixed
+  pool or a short link has no best). Written once, from `trackGameFinished`'s
+  once-per-game guard, for a game of one that played at least a round; the
+  line ("🔥 3-day streak · Best on Decades: 9 — new best!", or "Day 1 — come
+  back tomorrow to start a streak") sits under the scores. The end beacon
+  carries `streak` (`d1|d2|d3_6|d7_plus`) and `best`
+  (`new|tied|below|first`); `recordGameEnd` writes `streak:<band>` and
+  `personal_best:<outcome>` only for `players: "p1"`. Printed as "Streaks
+  (one-player Game Overs)" in `npm run stats`; read the day 2+ share week over
+  week.
+  - Known gaps: a best compares points regardless of song count or an early
+    End Game, so a 10-song game is measured against a 30-song best; a round-0
+    End Game writes nothing (deliberate — it is the order bounce, not a day
+    played).
+
+
 - **Does a solo try come back as a party?** Since 2026-11-11 most games are
   one person alone from Google (30,701 one-player starts in a week against
   4,435 with two or more), and nothing could say whether that is the step

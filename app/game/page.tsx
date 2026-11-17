@@ -32,6 +32,7 @@ import { isPreviewSettled, type PreviewBatchTrack } from "@/types/preview";
 import { BuzzerHostPanel, type BuzzerControls } from "@/components/buzzer-host-panel";
 import { LoopQr } from "@/components/loop-qr";
 import { SoloInvite } from "@/components/solo-invite";
+import { streakLine, takeStreakResult, type StreakResult } from "@/lib/streak";
 import { closeRoundEntry, type RoundHistoryEntry } from "@/lib/round-history";
 import { describeRounds, summarizeRounds } from "@/lib/round-summary";
 import { formatMixList } from "@/lib/mix-export";
@@ -176,6 +177,8 @@ export default function GamePage() {
   const [playlistSource, setPlaylistSource] = useState<PlaylistSource>("own");
   const [mixedMeta, setMixedMeta] = useState<MixedPlaylistMeta | null>(null);
   const [mixCopied, setMixCopied] = useState(false);
+  // The solo Game Over's streak line, set once by trackGameFinished.
+  const [streakResult, setStreakResult] = useState<StreakResult | null>(null);
   const [mixFallback, setMixFallback] = useState<string | null>(null);
   const [mode, setMode] = useState<GameMode>("party");
   // Read by the leave beacon, which fires from a listener registered once.
@@ -267,6 +270,8 @@ export default function GamePage() {
   // What the link was, for the end and leave beacons; a payload from before
   // 2026-11-10 has none and reads as a playlist, the baseline.
   const playlistKindRef = useRef<PlaylistKind>("playlist");
+  // The single link's ref, which a solo player's best is kept under; none on a Mixed pool.
+  const playlistRefRef = useRef<string | undefined>(undefined);
   /**
    * False when this page is a reload of a game that already had one. Null
    * until the game has loaded. See claimFirstPage in lib/game-beacons.ts for
@@ -389,6 +394,7 @@ export default function GamePage() {
     hostKindRef.current = hostKindOf(hostGames);
     setupSourceRef.current = data.setupSource;
     playlistKindRef.current = data.playlistKind ?? "playlist";
+    playlistRefRef.current = data.playlistRef;
     // Claimed once per page, not once per effect run — StrictMode runs this
     // twice in development, and the second run would find the first's marker
     // and read its own page as a reload.
@@ -1092,6 +1098,15 @@ export default function GamePage() {
     if (finishedTrackedRef.current) return;
     finishedTrackedRef.current = true;
     const roundsPlayed = countRoundsPlayed(currentIndex, phase);
+    // A game of one that played at least a round writes the day streak and
+    // this playlist's best, here and only here — the once-per-game guard
+    // above is what keeps a re-render from counting it twice. A room's
+    // scoreboard is nobody's personal best. lib/streak.ts.
+    const soloStreak =
+      players.length === 1 && roundsPlayed >= 1
+        ? takeStreakResult({ ref: playlistRefRef.current, score: players[0].score })
+        : null;
+    if (soloStreak) setStreakResult(soloStreak);
     // The KV copy, under the same once-per-game guard so the two cannot
     // disagree. `Games started` minus this is the tab that closed mid-party.
     // The layout is read here, in the click, rather than from `screen`: it
@@ -1107,6 +1122,9 @@ export default function GamePage() {
       // Whether this Game Over draws the Mixed link — the link's denominator.
       linkDrawn: gameOverOnward(layout, players.length).mixedLink,
       playlistKind: playlistKindRef.current,
+      // A game of one: the day streak and this playlist's best, banded.
+      ...(soloStreak ? { streak: soloStreak.band } : {}),
+      ...(soloStreak?.best ? { best: soloStreak.best.outcome } : {}),
     });
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,
@@ -2650,6 +2668,25 @@ export default function GamePage() {
                   would render a line built from an empty array. */}
               {playlistSource === "mixed" && roundSummaryLine && (
                 <p className="round-summary">{roundSummaryLine}</p>
+              )}
+
+              {/* A game of one: the day streak and this playlist's best,
+                  written once by trackGameFinished (lib/streak.ts). Under the
+                  scores, above Play Again; a room never draws it. */}
+              {streakResult && (
+                <p
+                  style={{
+                    color: "#9a9a9a",
+                    fontSize: "13px",
+                    lineHeight: 1.4,
+                    textAlign: "center",
+                    margin: "0 0 12px",
+                    maxWidth: "480px",
+                    flexShrink: 0,
+                  }}
+                >
+                  {streakLine(streakResult, playlistName)}
+                </p>
               )}
 
               {installCta && <InstallCta onInstall={handleInstall} />}
