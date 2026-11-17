@@ -1128,6 +1128,33 @@ if (dailyShown + dailyTapped > 0) {
 }
 
 /**
+ * "Your ears live in 1987" on the order Game Over (lib/music-age.ts, since
+ * 2026-11-17): a result about the player rather than an invitation. Shown is
+ * the `music_age` surface's impression — drawn only when a round scored —
+ * and the outcomes are `music_age:<outcome>`; a friend opening the link is
+ * the surface's click.
+ */
+const ageOutcomes = ["shared", "copied", "dismissed", "failed"].map((o) => [o, get(`music_age:${o}`)]);
+const ageTaps = ageOutcomes.reduce((n, [, v]) => n + v, 0);
+const ageShown = get("impression:music_age");
+if (ageShown + ageTaps > 0) {
+  const ageSent = get("music_age:shared") + get("music_age:copied");
+  console.log(
+    `\nMusic age  shown ${ageShown} · tapped ${ageTaps} (${pct(ageTaps, ageShown).trim()}) — ` +
+      ageOutcomes.map(([o, v]) => `${o} ${v}`).join(" · ") +
+      ` · sent ${ageSent} (${pct(ageSent, ageShown).trim()} of shown) · opened by a friend ${get("click:music_age")}`
+  );
+  console.log(
+    "  how to read it: `sent` is shared + copied, the sends that could have left the\n" +
+      "  device. The bet is that people alone share a result about themselves where they\n" +
+      "  would not send an invitation: the solo invite card read ~0.05% real sends of\n" +
+      "  its views. The bar is sends well above that — several times, not a rounding\n" +
+      "  error — with friend opens following. Near the invite's rate after a week of\n" +
+      "  order Game Overs, and the card comes back out."
+  );
+}
+
+/**
  * The playlist quiz funnel: created → opened → started → completed → board,
  * then the share surface's own row above. Each stage is a server-side count
  * (the route that did the thing bumps it), so unlike the surface table
@@ -1566,6 +1593,7 @@ const RENDERED_PREFIXES = [
   "solo_party:",
   "solo_invite:",
   "daily_door:",
+  "music_age:",
 ];
 
 const leftovers = [...totals.keys()]

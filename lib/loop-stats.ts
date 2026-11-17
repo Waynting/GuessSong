@@ -1746,6 +1746,21 @@ export function recordDailyDoor(stage: DailyDoorStage): Promise<void> {
   return bump(`daily_door:${stage}`);
 }
 
+/**
+ * What the order Game Over's music-age card did when tapped
+ * (`components/music-age.tsx`): `music_age:<outcome>`. Shown and followed
+ * are the `music_age` loop surface; this is the step between them. The year
+ * itself is never a key tail — the outcome is the whole key space.
+ */
+export type MusicAgeOutcome = ShareLinkOutcome;
+
+export const MUSIC_AGE_OUTCOMES: readonly MusicAgeOutcome[] = ["shared", "copied", "dismissed", "failed"];
+
+export function recordMusicAge(outcome: MusicAgeOutcome): Promise<void> {
+  if (!MUSIC_AGE_OUTCOMES.includes(outcome)) return Promise.resolve();
+  return bump(`music_age:${outcome}`);
+}
+
 /** One quiz moved a stage down its funnel. */
 export function recordQuizStage(stage: QuizStage): Promise<void> {
   return bump(`quiz:${stage}`);

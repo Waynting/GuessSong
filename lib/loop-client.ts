@@ -39,7 +39,7 @@ import type { GameScored, PlayerBand } from "@/lib/game-players";
 import type { Arrival } from "@/lib/arrival";
 import type { StarterKey } from "@/lib/starter-playlists";
 import type { SoloStep } from "@/lib/solo-party";
-import type { DailyDoorStage, SoloInviteOutcome } from "@/lib/loop-stats";
+import type { DailyDoorStage, MusicAgeOutcome, SoloInviteOutcome } from "@/lib/loop-stats";
 
 const SEEN_PREFIX = "guesssong_loop_seen:";
 
@@ -363,4 +363,15 @@ export function reportSoloInvite(outcome: SoloInviteOutcome): void {
 export function reportDailyDoor(stage: DailyDoorStage): void {
   trackEvent("daily_door", { stage });
   sendPulse({ kind: "daily_door", stage });
+}
+
+/**
+ * The order Game Over's music-age card was tapped, and what the share sheet
+ * did (`components/music-age.tsx`). Its own pair, not `reportSoloInvite`: the
+ * two cards are opposite bets — a result about the player against an
+ * invitation — and one counter would average them.
+ */
+export function reportMusicAge(outcome: MusicAgeOutcome): void {
+  trackEvent("music_age_shared", { outcome });
+  sendPulse({ kind: "music_age", outcome });
 }

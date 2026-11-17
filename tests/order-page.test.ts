@@ -134,12 +134,13 @@ describe("the order page's beacons", () => {
     expect(close.match(/reportOrderRound\(/g) ?? []).toHaveLength(2);
     expect(close).toMatch(/if \(phase !== "revealed"\) return;/);
     expect(close).toMatch(
-      /reportOrderRound\(\s*orderVerdict\(\{ exact: exactWinner !== null, oldest: oldestWinner !== null \}\),/
+      /const verdict = orderVerdict\(\{ exact: exactWinner !== null, oldest: oldestWinner !== null \}\);\s*reportOrderRound\(verdict, currentIndex \+ 1, hostArranged\(arrangement, currentIndex\)\);\s*keep\(verdict\);/
     );
     // The phones' round: the best answer for order_round, no `arranged`, and
-    // its own beacon only when a phone was in play.
+    // its own beacon only when a phone was in play. Both verdicts are also
+    // kept for the music-age card (lib/music-age.ts) — the same value, once.
     expect(close).toMatch(
-      /if \(phoneRound\?\.round === currentIndex\) \{\s*reportOrderRound\(roomVerdict\(phoneRound\.reveal\), currentIndex \+ 1\);\s*if \(phoneRound\.coverage\) \{\s*reportOrderPhoneRound\(currentIndex \+ 1, phoneRound\.coverage, phoneVerdictCounts\(phoneRound\.reveal\)\);\s*\}\s*return;/
+      /if \(phoneRound\?\.round === currentIndex\) \{\s*const verdict = roomVerdict\(phoneRound\.reveal\);\s*reportOrderRound\(verdict, currentIndex \+ 1\);\s*keep\(verdict\);\s*if \(phoneRound\.coverage\) \{\s*reportOrderPhoneRound\(currentIndex \+ 1, phoneRound\.coverage, phoneVerdictCounts\(phoneRound\.reveal\)\);\s*\}\s*return;/
     );
     expect(body.match(/reportOrderPhoneRound\(/g) ?? []).toHaveLength(1);
     expect(member("nextRound")).toMatch(/closeRound\(\)/);

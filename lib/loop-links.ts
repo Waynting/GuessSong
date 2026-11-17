@@ -89,6 +89,15 @@ export const LOOP_SURFACES = [
    * arm, never averaged with a QR. `followed` is a friend opening it.
    */
   "solo_invite",
+  /**
+   * "Your ears live in 1987" on the order game's Game Over
+   * (`components/music-age.tsx`), since 2026-11-17: a result about the
+   * player, shared to a chat. Its own arm rather than `solo_invite`'s,
+   * because the bet is the opposite one — people alone share themselves, not
+   * an invitation. Shown only when a round scored; `followed` is a friend
+   * opening the link.
+   */
+  "music_age",
 ] as const;
 
 export type LoopSurface = (typeof LOOP_SURFACES)[number];
