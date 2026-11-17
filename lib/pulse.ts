@@ -99,6 +99,7 @@ import { isBestOutcome, isStreakBand, type BestOutcome, type StreakBand } from "
 import { SOLO_INVITE_OUTCOMES, type SoloInviteOutcome } from "@/lib/loop-stats";
 import { DAILY_DOOR_STAGES, type DailyDoorStage } from "@/lib/loop-stats";
 import { MUSIC_AGE_OUTCOMES, type MusicAgeOutcome } from "@/lib/loop-stats";
+import { LYRIC_LINE_ROUND_OUTCOMES, type LyricLineRoundOutcome } from "@/lib/loop-stats";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
@@ -220,7 +221,8 @@ export type PulseEvent =
   | { kind: "solo_invite"; outcome: SoloInviteOutcome }
   | { kind: "daily_door"; stage: DailyDoorStage }
   | { kind: "music_age"; outcome: MusicAgeOutcome }
-  | { kind: "starter_theme_row"; style: PlayStyle };
+  | { kind: "starter_theme_row"; style: PlayStyle }
+  | { kind: "lyric_line_round"; outcome: LyricLineRoundOutcome };
 
 /**
  * Narrows an untrusted request body, or returns null.
@@ -445,6 +447,14 @@ export function parsePulse(body: unknown): PulseEvent | null {
   if (raw.kind === "starter_theme_row") {
     // The style is the key tail; anything but a play style is refused.
     return isPlayStyle(raw.style) ? { kind: "starter_theme_row", style: raw.style } : null;
+  }
+
+  if (raw.kind === "lyric_line_round") {
+    // A key tail from an open endpoint: only the declared outcome is accepted.
+    if (typeof raw.outcome !== "string" || !(LYRIC_LINE_ROUND_OUTCOMES as readonly string[]).includes(raw.outcome)) {
+      return null;
+    }
+    return { kind: "lyric_line_round", outcome: raw.outcome as LyricLineRoundOutcome };
   }
 
   return null;

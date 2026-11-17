@@ -79,6 +79,10 @@ export type AppErrorCode =
   | "rate_limited_room_create"
   // Preview lookups
   | "preview_request_invalid"
+  // The guess game's "Read a lyric instead" — two facts, see their entries
+  | "rate_limited_lyric"
+  | "lyric_absent"
+  | "lyric_unavailable"
   // Rooms
   | "room_code_invalid"
   | "room_code_taken"
@@ -396,6 +400,29 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
   preview_request_invalid: {
     en: "That preview request wasn't valid.",
     zh: "這個試聽片段的請求格式不正確。",
+  },
+
+  /**
+   * Like `rate_limited_preview`, never rendered: the game page reads a
+   * refused lyric request as `lyric_unavailable`. Carried so the route
+   * answers in the same shape as every other one.
+   */
+  rate_limited_lyric: {
+    en: "Too many lyric lookups, please slow down.",
+    zh: "查詢歌詞的次數太多了，請慢一點。",
+  },
+  /**
+   * The two answers the game page shows under "Read a lyric instead" when it
+   * has no line — two sentences because they are two facts, the clip's rule:
+   * the song has no line we can quote, or we could not ask this time.
+   */
+  lyric_absent: {
+    en: "No lyric line for this one — reveal it or skip.",
+    zh: "這首找不到可以念的歌詞，直接揭曉或跳過吧。",
+  },
+  lyric_unavailable: {
+    en: "Couldn't fetch a lyric right now — reveal it or skip.",
+    zh: "現在拿不到歌詞，直接揭曉或跳過吧。",
   },
 
   room_code_invalid: {

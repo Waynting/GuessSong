@@ -80,6 +80,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     End Game writes nothing (deliberate — it is the order bounce, not a day
     played).
 
+- **"Read a lyric instead" in the guess game.** Some tracks have no clip
+  anywhere (the "no audio" state, 0.4–3% of first clips), and a round was
+  then Reveal or Skip. Now the waiting phase offers one line of the song for
+  the host to read aloud — a quiet secondary under Play, the primary over the
+  skip row when the track has no clip. The room shouts, the host still judges
+  and awards +3/+1 as before; there is no answer checking. `GET /api/lyric`
+  (`track`/`name`/`artist`, clamped through `clampPreviewField`, its own
+  per-IP limit `LYRIC_LINE_LIMIT` 120 per 10 min, limiter first) reuses
+  `lookupLyricCandidates` (`lib/lyrics.ts`) and `pickLyricLine`
+  (`lib/lyric-fragment.ts`) — the quiz's LRCLIB path, budget, cooldown and
+  `lyrics:v1:<id>` cache, no second path or key shape — and answers one line,
+  deterministically the first cached candidate that does not name the title
+  (re-checked through `titleKey` against the request's own title, so
+  Simplified/Traditional cannot leak it); every candidate naming the title is
+  `absent`. **The legal bounds are unchanged**: at most
+  `LYRIC_CANDIDATES_MAX` lines cut to `QUIZ_LYRIC_MAX_CHARS` cached, never
+  `plainLyrics`, one line handed out per request. The page fetches through
+  `lib/lyric-client.ts` (`readLyricForRound`: `begin()` before the await, a
+  stale answer dropped from the round but cached by track id, settled answers
+  only), shows the line in quotes or `lyric_absent` / `lyric_unavailable`
+  (en + zh), and the button goes for the round; `retireRound` clears it.
+  Counted as `lyric_line:<found|absent|unavailable>` per tap by the route and
+  `lyric_line_round:played` (a `lyric_line_round` pulse, one outcome) at the
+  reveal of a round a line was shown on; printed as "Lyric lines (guess
+  game)" in `npm run stats`. Pinned by `tests/lyric-line.test.ts`.
+  - Known gaps: the cache is keyed by track id and filled from the caller's
+    name/artist on a miss — the preview route's exposure, unchanged; the
+    line is not shown during `playing`/`guessing` if the host also plays
+    the clip; GA4 has no event for it (KV only).
 
 - **Does a solo try come back as a party?** Since 2026-11-11 most games are
   one person alone from Google (30,701 one-player starts in a week against

@@ -26,6 +26,10 @@ import { gameScored, playerBand } from "@/lib/game-players";
 import { loadGame } from "@/lib/game-storage";
 import { useScreenWakeLock } from "@/lib/wake-lock";
 import { fetchPreview, fetchPreviewBatch } from "@/lib/preview-client";
+import { readLyricForRound } from "@/lib/lyric-client";
+import type { LyricLineResult, LyricStatus } from "@/types/lyric-line";
+import { errorMessage } from "@/lib/error-messages";
+import { useErrorLocale } from "@/lib/use-error-locale";
 import { createRoundToken } from "@/lib/round-token";
 import { announcesNoScore } from "@/lib/round-outcome";
 import { isPreviewSettled, type PreviewBatchTrack } from "@/types/preview";
@@ -50,6 +54,7 @@ import {
   reportGameEnd,
   reportGameLeft,
   reportGameOverTap,
+  reportLyricLineRound,
 } from "@/lib/loop-client";
 import type { FirstClipOutcome, GameHostKind, GameScreen, SetupSource } from "@/lib/loop-stats";
 import { getHostGameCount } from "@/lib/host-session";
@@ -162,6 +167,13 @@ export default function GamePage() {
   /** The browser refused a play(), and the host is being asked to tap again. */
   const [playBlocked, setPlayBlocked] = useState(false);
   const [loadingSkipVisible, setLoadingSkipVisible] = useState(false);
+  /**
+   * "Read a lyric instead" for the round on screen: null until asked, then
+   * `loading`, then the route's answer. Cleared by retireRound, so the button
+   * comes back with the next track and a line never outlives its round.
+   */
+  const [lyric, setLyric] = useState<{ status: LyricStatus | "loading"; line: string | null } | null>(null);
+  const errorLocale = useErrorLocale();
   /** Known-silent tracks taken out of the queue — lib/track-queue.ts. */
   const [silentSkipped, setSilentSkipped] = useState(0);
   /**
@@ -249,6 +261,13 @@ export default function GamePage() {
    * moment into a track that stays silent for the rest of the game.
    */
   const previewCache = useRef<Record<string, string | null>>({});
+  /**
+   * Settled lyric answers by track id, previewCache's rule: an `unavailable`
+   * is never kept, and a stale round's answer still is (lib/lyric-client.ts).
+   */
+  const lyricCache = useRef(new Map<string, LyricLineResult>());
+  /** `lyric_line_round:played` is sent once per round, at its reveal. */
+  const lyricRoundCountedRef = useRef(false);
   /** One repair attempt per track, so a genuinely dead URL can't loop. */
   const refreshedTracks = useRef<Set<string>>(new Set());
   /**
@@ -344,9 +363,12 @@ export default function GamePage() {
    */
   function skipControls() {
     const canRetry = clipMiss === "unavailable" && !previewLoading;
+    // While "Read a lyric instead" is on offer above this row it is the
+    // primary, so Reveal steps down rather than standing beside it as a second.
+    const lyricLeads = Boolean(clipMiss) && !previewLoading && lyric === null;
     return (
       <div className={`btn-row${canRetry ? " with-retry" : ""}`}>
-        <button className="btn-primary" onClick={reveal}>
+        <button className={lyricLeads ? "btn-ghost lead" : "btn-primary"} onClick={reveal}>
           Reveal Answer →
         </button>
         {canRetry && (
@@ -647,6 +669,8 @@ export default function GamePage() {
     endBusy();
     setClipMiss(null);
     setPlayBlocked(false);
+    setLyric(null);
+    lyricRoundCountedRef.current = false;
   }, [settleFirstClip, stopClip, releaseClip, endBusy]);
 
   /**
@@ -1007,7 +1031,69 @@ export default function GamePage() {
     requestSound("repair");
   }
 
+  /**
+   * "Read a lyric instead": one line of the song for the host to read aloud,
+   * a second way to play a round — the room still shouts, the host still
+   * judges. Same round rule as playClip: begin() before the await, and an
+   * answer for a round the host has left is dropped from the screen (it is
+   * still cached by track id inside readLyricForRound).
+   */
+  async function readLyric() {
+    const track = tracks[currentIndex];
+    if (!track || lyric) return;
+    const stillThisRound = roundsRef.current.begin();
+    setLyric({ status: "loading", line: null });
+    const result = await readLyricForRound(
+      { id: track.id, name: track.name, artist: track.artists[0] ?? "", durationMs: track.durationMs },
+      stillThisRound,
+      lyricCache.current
+    );
+    if (!result) return;
+    setLyric({ status: result.status, line: result.line });
+  }
+
+  /**
+   * The lyric affordance for the waiting phase: the button until it is
+   * pressed, then the line in quotes or one sentence saying there is none —
+   * after which the button is gone for the round. `primary` when the track
+   * has no clip, where it is the one way left to play the round.
+   */
+  function lyricBlock(primary: boolean) {
+    if (lyric?.status === "found" && lyric.line) {
+      return (
+        <p className="lyric-line" role="status">
+          “{lyric.line}”
+        </p>
+      );
+    }
+    if (lyric?.status === "absent" || lyric?.status === "unavailable") {
+      return (
+        <p className="clip-note" role="status" style={primary ? { margin: "0 0 8px" } : undefined}>
+          {errorMessage(lyric.status === "absent" ? "lyric_absent" : "lyric_unavailable", errorLocale)}
+        </p>
+      );
+    }
+    const loading = lyric?.status === "loading";
+    return (
+      <div className={`lyric-offer${primary ? " primary" : ""}`}>
+        <button
+          className={primary ? "btn-primary" : "btn-ghost compact"}
+          onClick={readLyric}
+          disabled={loading}
+        >
+          {loading ? "Finding a line…" : "Read a lyric instead"}
+        </button>
+      </div>
+    );
+  }
+
   function reveal() {
+    // A round played from a lyric line, counted once at its reveal — the
+    // numerator of `lyric_line_round:played` over `lyric_line:found`.
+    if (lyric?.status === "found" && !lyricRoundCountedRef.current) {
+      lyricRoundCountedRef.current = true;
+      reportLyricLineRound();
+    }
     // A press still waiting on its clip when the answer goes up came to
     // nothing, and nothing after this will answer it: stopClip drops the
     // request, so the spinner it was holding has to be put away here.
@@ -1692,12 +1778,24 @@ export default function GamePage() {
         .btn-row.with-retry { flex-wrap: wrap; }
         .btn-row.with-retry .btn-primary { flex: 1 1 100%; }
         .btn-row.with-retry .btn-ghost { flex: 1 1 0; }
+        /* Reveal stepped down under "Read a lyric instead" keeps Reveal's place. */
+        .btn-row .btn-ghost.lead { flex: 1; }
+        .btn-row.with-retry .btn-ghost.lead { flex: 1 1 100%; }
 
         /* One quiet line under the Play prompt. The blocked variant is the
            one the host has to act on, so it is the one that is legible
            across a room. */
         .clip-note { margin-top: 8px; font-size: 12px; line-height: 1.4; color: #555; text-align: center; }
         .clip-note.blocked { margin-top: 0; font-size: 14px; font-weight: 500; color: #e8e8e8; }
+
+        /* "Read a lyric instead": a quiet secondary under the Play prompt,
+           the primary over the skip row when the track has no clip. The
+           line itself is read aloud across a room, so it is the largest
+           text on the card until the reveal. */
+        .lyric-offer { display: flex; justify-content: center; margin-top: 10px; }
+        .lyric-offer.primary { margin: 0 0 8px; }
+        .lyric-offer.primary .btn-primary { flex: none; width: 100%; }
+        .lyric-line { margin: 4px 0 12px; font-size: 18px; line-height: 1.45; font-weight: 500; font-style: italic; color: #f0f0f0; text-align: center; overflow-wrap: anywhere; }
 
         .btn-primary {
           flex: 1;
@@ -2437,17 +2535,34 @@ export default function GamePage() {
                     {loadingSkipVisible && skipControls()}
                   </div>
                 ) : clipMiss ? (
-                  skipControls()
+                  <>
+                    {/* No clip: the lyric is the round's way in. */}
+                    {lyricBlock(true)}
+                    {skipControls()}
+                  </>
                 ) : playBlocked ? (
                   <p className="clip-note blocked" role="status">
                     {CLIP_COPY.blockedPlay}
                   </p>
                 ) : (
                   <>
-                    <p style={{ color: "#555", fontSize: "13px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                      Press Play to start the clip
-                    </p>
+                    {lyric?.status === "found" ? (
+                      lyricBlock(false)
+                    ) : (
+                      <p style={{ color: "#555", fontSize: "13px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                        Press Play to start the clip
+                      </p>
+                    )}
                     {skippedLine && <p className="clip-note">{skippedLine}</p>}
+                    {lyric?.status === "found" ? (
+                      <div className="btn-row">
+                        <button className="btn-primary" onClick={reveal}>
+                          Reveal Answer →
+                        </button>
+                      </div>
+                    ) : (
+                      lyricBlock(false)
+                    )}
                   </>
                 )}
               </div>

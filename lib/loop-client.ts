@@ -392,3 +392,13 @@ export function reportMusicAge(outcome: MusicAgeOutcome): void {
 export function reportStarterThemeRow(style: PlayStyle): void {
   sendPulse({ kind: "starter_theme_row", style });
 }
+
+/**
+ * A guess-game round was revealed after a lyric line was shown on it
+ * (`app/game/page.tsx`, "Read a lyric instead"). Pulse only: the tap's own
+ * outcome is counted by `GET /api/lyric` server-side, and this is the one
+ * fact only the page has.
+ */
+export function reportLyricLineRound(): void {
+  sendPulse({ kind: "lyric_line_round", outcome: "played" });
+}
