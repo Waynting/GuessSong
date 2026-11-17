@@ -95,6 +95,7 @@ import { isGameScored, isPlayerBand, type GameScored, type PlayerBand } from "@/
 import { isArrival, type Arrival } from "@/lib/arrival";
 import { isSoloStep, type SoloStep } from "@/lib/solo-party";
 import { SOLO_INVITE_OUTCOMES, type SoloInviteOutcome } from "@/lib/loop-stats";
+import { DAILY_DOOR_STAGES, type DailyDoorStage } from "@/lib/loop-stats";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
@@ -209,7 +210,8 @@ export type PulseEvent =
   | { kind: "quiz_copied"; by: QuizShareBy; outcome: QuizCopyOutcome }
   | { kind: "quiz_shared"; by: QuizShareBy; outcome: QuizShareOutcome }
   | { kind: "quiz_social"; by: QuizShareBy; platform: SocialPlatform }
-  | { kind: "solo_invite"; outcome: SoloInviteOutcome };
+  | { kind: "solo_invite"; outcome: SoloInviteOutcome }
+  | { kind: "daily_door"; stage: DailyDoorStage };
 
 /**
  * Narrows an untrusted request body, or returns null.
@@ -408,6 +410,14 @@ export function parsePulse(body: unknown): PulseEvent | null {
       return null;
     }
     return { kind: "solo_invite", outcome: raw.outcome as SoloInviteOutcome };
+  }
+
+  if (raw.kind === "daily_door") {
+    // The stage is the whole event and a key tail; an undeclared one is refused.
+    if (typeof raw.stage !== "string" || !(DAILY_DOOR_STAGES as readonly string[]).includes(raw.stage)) {
+      return null;
+    }
+    return { kind: "daily_door", stage: raw.stage as DailyDoorStage };
   }
 
   return null;

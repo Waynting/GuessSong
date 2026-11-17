@@ -655,6 +655,11 @@ export type AnalyticsEvent =
       params: { outcome: "shared" | "copied" | "dismissed" | "failed" };
     }
   | {
+      /** The setup page's "Today's challenge" fake door (`lib/daily-door.ts`). KV's `daily_door:<stage>` is authoritative. */
+      name: "daily_door";
+      params: { stage: "shown" | "tapped" };
+    }
+  | {
       /**
        * The host's share button on the setup page, the taker's on the
        * result screen, or the owner's on their results page (`board`, which

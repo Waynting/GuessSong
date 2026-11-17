@@ -1110,6 +1110,24 @@ if (soloFirst + partyAfterSolo + inviteTaps > 0) {
 }
 
 /**
+ * The setup page's "Today's challenge" fake door (`lib/daily-door.ts`). There
+ * is no daily challenge; a tap is a visitor asking for one. `shown` is every
+ * setup page load. Bar (2026-11-17): tapped ÷ shown at or above 3%.
+ */
+const dailyShown = get("daily_door:shown");
+const dailyTapped = get("daily_door:tapped");
+if (dailyShown + dailyTapped > 0) {
+  console.log(
+    `\nToday's challenge (fake door)  shown ${dailyShown} · tapped ${dailyTapped} (${pct(dailyTapped, dailyShown).trim()})`
+  );
+  console.log(
+    "  how to read it: there is no daily challenge; a tap is someone asking for one. The bar\n" +
+      "  is 3% of page loads — six times the online-room door's 0.5%, which was a text link\n" +
+      "  where this is a card. Under it, take the card down and do not build it."
+  );
+}
+
+/**
  * The playlist quiz funnel: created → opened → started → completed → board,
  * then the share surface's own row above. Each stage is a server-side count
  * (the route that did the thing bumps it), so unlike the surface table
@@ -1547,6 +1565,7 @@ const RENDERED_PREFIXES = [
   "quiz_lyric:",
   "solo_party:",
   "solo_invite:",
+  "daily_door:",
 ];
 
 const leftovers = [...totals.keys()]

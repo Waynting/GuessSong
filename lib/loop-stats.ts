@@ -1732,6 +1732,20 @@ export function recordSoloInvite(outcome: SoloInviteOutcome): Promise<void> {
   return bump(`solo_invite:${outcome}`);
 }
 
+/**
+ * The setup page's "Today's challenge" fake door (`lib/daily-door.ts`):
+ * `shown` once per page load, `tapped` once per page load. Nothing is started
+ * from it, because there is nothing to start.
+ */
+export type DailyDoorStage = "shown" | "tapped";
+
+export const DAILY_DOOR_STAGES: readonly DailyDoorStage[] = ["shown", "tapped"];
+
+export function recordDailyDoor(stage: DailyDoorStage): Promise<void> {
+  if (!DAILY_DOOR_STAGES.includes(stage)) return Promise.resolve();
+  return bump(`daily_door:${stage}`);
+}
+
 /** One quiz moved a stage down its funnel. */
 export function recordQuizStage(stage: QuizStage): Promise<void> {
   return bump(`quiz:${stage}`);

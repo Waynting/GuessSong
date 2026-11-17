@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **"Today's challenge" fake door on `/`** (`lib/daily-door.ts`). A card under
+  the form, shaped like the Taste Quiz card, offering a daily challenge that
+  does not exist yet; tapped, it says so, says the tap was counted, and points
+  at "Just me". en/zh by device language, drawn after mount. Counted
+  `daily_door:<shown|tapped>` once each per page load, GA4 `daily_door`,
+  printed as "Today's challenge (fake door)" in `npm run stats`. Bar agreed
+  2026-11-17: tapped ÷ shown ≥ 3% (the online-room door read 0.5% as a text
+  link) before a real daily challenge is built; take the card down either way
+  once it has answered.
+
 - **Does a solo try come back as a party?** Since 2026-11-11 most games are
   one person alone from Google (30,701 one-player starts in a week against
   4,435 with two or more), and nothing could say whether that is the step

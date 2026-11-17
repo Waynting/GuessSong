@@ -182,6 +182,23 @@ export function SetupStyles() {
         @media (hover: hover) { .quiz-card:hover { background: rgba(29,185,84,0.1); border-color: rgba(29,185,84,0.55); } }
         .quiz-card:active { background: rgba(29,185,84,0.16); transition: none; }
         .quiz-card:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+        /* The "Today's challenge" fake door (lib/daily-door.ts): the quiz
+           card's look on a <button>, so the button's own chrome is reset. */
+        .quiz-card.daily-door {
+          width: 100%;
+          text-align: left;
+          font-family: inherit;
+          cursor: pointer;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .daily-door-note {
+          margin: 14px auto 0;
+          font-size: 13px;
+          line-height: 1.55;
+          color: #aaa;
+          max-width: 440px;
+          text-align: center;
+        }
 
         /* Under the roster for a group: the buzzer, offered where the room can
            see it rather than only in the settings fold. A whole-row button,
@@ -601,6 +618,15 @@ export function MixIcon() {
   return (
     <LineIcon>
       <path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+    </LineIcon>
+  );
+}
+
+export function CalendarIcon() {
+  return (
+    <LineIcon>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18M8 3v4M16 3v4" />
     </LineIcon>
   );
 }
