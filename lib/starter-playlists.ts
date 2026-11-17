@@ -1,6 +1,41 @@
 /**
  * Playlists to offer a host who has none to hand.
  *
+ * ## Adding a theme pack — one entry, once the owner has an id
+ *
+ * 1. The owner makes the playlist **public on their own Spotify account**
+ *    (never somebody else's, never a `37i9…` one) and sends its link.
+ * 2. Add its key to `STARTER_KEYS` below. The key and the entry go in
+ *    together: a key with no entry is a counter that can never move, and
+ *    `tests/starter-playlists.test.ts` refuses either half on its own. Add
+ *    the key to `STARTER_KEY_ORDER` in `scripts/loop-stats.mjs` too, so it
+ *    prints in a fixed place (it still prints, last, if forgotten).
+ * 3. Add one entry to `STARTER_PLAYLISTS`:
+ *
+ *        {
+ *          id: "<the 22 characters after /playlist/ in the link>",
+ *          starterKey: "eighties",
+ *          game: "order",            // or "guess": the style it is offered in
+ *          name: "Hits of the 80s",
+ *          blurb: "Synths, big hair, every chorus you know.",
+ *          theme: { label: "80s", emoji: "📼", markets: ["US", "GB"] },
+ *        },
+ *
+ *    `theme.label` is the chip's whole text in the theme row (at most
+ *    `THEME_LABEL_MAX` characters); `emoji` is optional; `markets` is
+ *    optional too — ISO 3166 country codes whose visitors see the chip
+ *    first. It only orders the row: no visitor is shown fewer themes for
+ *    where they are.
+ *
+ * That is all. Once a style has `THEME_ROW_MIN` (two) starters carrying a
+ * `theme`, the setup page offers that style's starters as a "Pick a theme"
+ * row (`themeRowFor`) instead of the name-and-blurb chips, ordered by the
+ * device's region, and reports one `starter_theme_row:shown:<style>` per page
+ * that drew it. Below two themed entries the page renders exactly what it did
+ * before themes existed, `theme` field or not. The pick is counted as it
+ * always was, `host_setup_starter:<key>`. `docs/operations.md` §6 has the
+ * same steps.
+ *
  * ## Whose playlists these should be
  *
  * The site owner's own public playlists, by default. With `STARTER_PLAYLISTS`
@@ -74,7 +109,33 @@ export interface StarterPlaylist {
   name: string;
   /** One short line on what is in it, shown under the name. */
   blurb: string;
+  /**
+   * How it is drawn in a "Pick a theme" row, once its style has
+   * `THEME_ROW_MIN` themed starters (`themeRowFor`). Ignored below that.
+   */
+  theme?: StarterTheme;
 }
+
+export interface StarterTheme {
+  /** The chip's text in the theme row: short, `THEME_LABEL_MAX` characters at most. */
+  label: string;
+  /** One emoji before the label, or none. */
+  emoji?: string;
+  /**
+   * ISO 3166-1 alpha-2 codes, upper case, whose visitors see this chip first.
+   * Ordering only, never a filter: every visitor is offered every theme.
+   */
+  markets?: readonly string[];
+}
+
+/** Longer than this and a chip stops reading as a theme. */
+export const THEME_LABEL_MAX = 20;
+
+/** How many themed starters a style needs before it gets a theme row. */
+export const THEME_ROW_MIN = 2;
+
+/** The sentence over a row of themes alone. */
+export const THEME_CAPTION = "Pick a theme";
 
 /**
  * `tests/starter-playlists.test.ts` checks whatever is here: every id 22
@@ -200,9 +261,9 @@ export function starterCaption(count: number): string {
   return count === 1 ? "No playlist handy? Start with ours" : "No playlist handy? Try one of these";
 }
 
-export interface FieldChipRow<T extends { id: string }> {
+export interface FieldChipRow<T extends { id: string }, S extends { id: string } = StarterPlaylist> {
   /** The one row under the field: the recent chips, then the starters not already among them. */
-  playlists: ReadonlyArray<T | StarterPlaylist>;
+  playlists: ReadonlyArray<T | S>;
   /** Which of those are starters — what `onPick` names the source by. */
   starterIds: ReadonlySet<string>;
   /** Only over a row of starters alone; recents need no sentence. */
@@ -218,12 +279,19 @@ export interface FieldChipRow<T extends { id: string }> {
  * played the decades list last night sees one chip, not two — and the
  * starters' ids handed back so the pick can say which it was. With `place`
  * anything but `field` the row is the recent chips exactly as before.
+ *
+ * Handed a theme row (`themeRowFor`) in place of the starters, with
+ * `themed`, the same rules hold — one row, recents first, deduped on id —
+ * and only the words change: "Pick a theme" over a row of themes alone.
+ * Beside recent chips the themes are still in the one row, never a second:
+ * Start has to stay on a 390×844 screen.
  */
-export function fieldChipRow<T extends { id: string }>(
+export function fieldChipRow<T extends { id: string }, S extends { id: string } = StarterPlaylist>(
   recent: readonly T[],
-  starters: readonly StarterPlaylist[],
-  place: StarterPlace | null
-): FieldChipRow<T> {
+  starters: readonly S[],
+  place: StarterPlace | null,
+  { themed = false }: { themed?: boolean } = {}
+): FieldChipRow<T, S> {
   if (place !== "field") {
     return { playlists: recent, starterIds: new Set(), caption: null, label: "Recent" };
   }
@@ -232,7 +300,66 @@ export function fieldChipRow<T extends { id: string }>(
   return {
     playlists: [...recent, ...added],
     starterIds: new Set(added.map((s) => s.id)),
-    caption: recent.length === 0 ? starterCaption(starters.length) : null,
-    label: recent.length === 0 ? "Starter playlists" : "Playlists",
+    caption: recent.length === 0 ? (themed ? THEME_CAPTION : starterCaption(starters.length)) : null,
+    label: recent.length === 0 ? (themed ? "Themes" : "Starter playlists") : "Playlists",
   };
+}
+
+/** One chip in a theme row: what `PlaylistChips` draws, and the key it came from. */
+export interface ThemeChip {
+  id: string;
+  /** The emoji and the label, as the chip shows them. */
+  name: string;
+  starterKey: StarterKey;
+}
+
+/**
+ * The device's region from `navigator.languages`: "pt-BR" is `BR`,
+ * "zh-Hant-TW" is `TW`, a bare "en" is nothing. The first tag naming a region
+ * wins. Read in an effect on the setup page, never in a `useState`
+ * initialiser — `/` is prerendered, and reading the request's country
+ * (`lib/market.ts`) there would make it dynamic.
+ */
+export function regionFromLanguages(languages: readonly unknown[] | null | undefined): string | null {
+  for (const tag of languages ?? []) {
+    if (typeof tag !== "string") continue;
+    const match = /^[A-Za-z]{2,3}(?:[-_][A-Za-z]{4})?[-_]([A-Za-z]{2})(?:[-_]|$)/.exec(tag.trim());
+    if (match) return match[1].toUpperCase();
+  }
+  return null;
+}
+
+/**
+ * The starters in market order: those whose `theme.markets` names `region`
+ * first, then the rest, each half in the list's own order. Never drops an
+ * entry — the hint orders, it does not hide.
+ */
+export function orderByMarket<S extends Pick<StarterPlaylist, "theme">>(
+  starters: readonly S[],
+  region: string | null
+): S[] {
+  const want = region ? region.toUpperCase() : null;
+  const matches = (s: S) => want !== null && (s.theme?.markets ?? []).includes(want);
+  return [...starters.filter(matches), ...starters.filter((s) => !matches(s))];
+}
+
+/**
+ * The theme row for one style's starters (pass `startersFor(playStyle)`), or
+ * null for "draw them as before".
+ *
+ * Null until `THEME_ROW_MIN` of them carry a `theme`, so a style with one
+ * starter — the order game's, today — or with untitled ones renders exactly
+ * what it rendered before themes existed. Once it is on, every starter of the
+ * style is in it (one without a theme under its name), in market order.
+ */
+export function themeRowFor(
+  starters: readonly StarterPlaylist[],
+  region: string | null
+): ThemeChip[] | null {
+  if (starters.filter((s) => s.theme).length < THEME_ROW_MIN) return null;
+  return orderByMarket(starters, region).map((s) => ({
+    id: s.id,
+    name: s.theme ? (s.theme.emoji ? `${s.theme.emoji} ${s.theme.label}` : s.theme.label) : s.name,
+    starterKey: s.starterKey,
+  }));
 }

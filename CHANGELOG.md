@@ -37,6 +37,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   link) before a real daily challenge is built; take the card down either way
   once it has answered.
 
+- **Theme packs — the infrastructure; ids pending from the owner.** For a
+  new visitor the starter list is the product (`decades` was picked 3,777
+  times in a week), so `lib/starter-playlists.ts` now lets a starter carry a
+  `theme` (`label`, optional `emoji`, optional `markets` — ISO codes used
+  only to order the row, never to hide). Once a play style has two themed
+  starters (`THEME_ROW_MIN`), the setup page draws them as a "Pick a theme"
+  row (`themeRowFor`) in the one chip row under the field — recents first,
+  never a second row, never wrapping — ordered by the browser's language
+  region (`regionFromLanguages`, read in an effect so `/` stays static; the
+  request country would have made it dynamic). With one starter per style,
+  today's state, the page renders exactly as before. Picks still count as
+  `host_setup_starter:<key>`; the denominator is one new
+  `starter_theme_row:shown:<guess|order>` per page that drew the row (a
+  `starter_theme_row` pulse), printed as `theme row shown` in `npm run
+  stats`. No playlist or key was added: the owner will create the packs (80s,
+  2000s, soundtracks, sertanejo/funk, Polish pop) on their own account, and
+  adding one is a single key + entry — steps at the top of the file and in
+  `docs/operations.md` §6.
+
 - **Does a solo try come back as a party?** Since 2026-11-11 most games are
   one person alone from Google (30,701 one-player starts in a week against
   4,435 with two or more), and nothing could say whether that is the step

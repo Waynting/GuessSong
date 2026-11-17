@@ -34,7 +34,7 @@ import type {
 import { sendPulse } from "@/lib/pulse-client";
 import type { PlaylistHelpTopic } from "@/lib/playlist-help";
 import type { GameMode, PlaylistKind } from "@/lib/game-session";
-import type { OrderPhoneCoverage, OrderPhoneVerdict, OrderVerdict } from "@/lib/order-game";
+import type { OrderPhoneCoverage, OrderPhoneVerdict, OrderVerdict, PlayStyle } from "@/lib/order-game";
 import type { GameScored, PlayerBand } from "@/lib/game-players";
 import type { Arrival } from "@/lib/arrival";
 import type { StarterKey } from "@/lib/starter-playlists";
@@ -374,4 +374,14 @@ export function reportDailyDoor(stage: DailyDoorStage): void {
 export function reportMusicAge(outcome: MusicAgeOutcome): void {
   trackEvent("music_age_shared", { outcome });
   sendPulse({ kind: "music_age", outcome });
+}
+
+/**
+ * The setup page drew a "Pick a theme" row for this play style. KV only: the
+ * pick is already `starter_key` on GA4's `game_started`, and a per-page
+ * impression is the denominator, which KV is authoritative for. The page
+ * sends it once per load per style (a ref), never per render.
+ */
+export function reportStarterThemeRow(style: PlayStyle): void {
+  sendPulse({ kind: "starter_theme_row", style });
 }

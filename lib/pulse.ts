@@ -80,6 +80,7 @@ import { isPlaylistHelpTopic, type PlaylistHelpTopic } from "@/lib/playlist-help
 import { isGameMode, isPlaylistKind, type GameMode, type PlaylistKind } from "@/lib/game-session";
 import { isOrderVerdict, type OrderVerdict } from "@/lib/order-game";
 import { isOrderPhoneCoverage, type OrderPhoneCoverage } from "@/lib/order-game";
+import { isPlayStyle, type PlayStyle } from "@/lib/order-game";
 import { BUZZER_MAX_PLAYERS } from "@/lib/buzzer-protocol";
 
 /**
@@ -213,7 +214,8 @@ export type PulseEvent =
   | { kind: "quiz_social"; by: QuizShareBy; platform: SocialPlatform }
   | { kind: "solo_invite"; outcome: SoloInviteOutcome }
   | { kind: "daily_door"; stage: DailyDoorStage }
-  | { kind: "music_age"; outcome: MusicAgeOutcome };
+  | { kind: "music_age"; outcome: MusicAgeOutcome }
+  | { kind: "starter_theme_row"; style: PlayStyle };
 
 /**
  * Narrows an untrusted request body, or returns null.
@@ -428,6 +430,11 @@ export function parsePulse(body: unknown): PulseEvent | null {
       return null;
     }
     return { kind: "music_age", outcome: raw.outcome as MusicAgeOutcome };
+  }
+
+  if (raw.kind === "starter_theme_row") {
+    // The style is the key tail; anything but a play style is refused.
+    return isPlayStyle(raw.style) ? { kind: "starter_theme_row", style: raw.style } : null;
   }
 
   return null;

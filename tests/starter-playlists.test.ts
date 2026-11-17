@@ -1,5 +1,8 @@
 // @vitest-environment node
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { parsePulse } from "@/lib/pulse";
 import { isDeterministicPlaylistFailure } from "@/lib/error-messages";
 import { PLAYLIST_REFUSAL_CODES } from "@/lib/loop-stats";
 import { isEditorialId, isPlaylistId } from "@/lib/playlist-ref";
@@ -12,9 +15,31 @@ import {
   starterKeyForId,
   starterPlacement,
   startersFor,
+  orderByMarket,
+  regionFromLanguages,
+  themeRowFor,
+  THEME_CAPTION,
+  THEME_LABEL_MAX,
+  THEME_ROW_MIN,
   type StarterContext,
   type StarterPlaylist,
 } from "@/lib/starter-playlists";
+
+const kv = vi.hoisted(() => ({ incrs: [] as string[] }));
+
+vi.mock("@/lib/kv", () => ({
+  dayBucket: () => "2026-11-17",
+  getKvStore: async () => ({
+    async incr(key: string) {
+      kv.incrs.push(key);
+      return 1;
+    },
+  }),
+}));
+
+const { recordStarterThemeRow, __resetLivenessForTests } = await import("@/lib/loop-stats");
+
+const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
 /**
  * The starter playlists.
@@ -30,6 +55,26 @@ const FIXTURE: readonly StarterPlaylist[] = [
 ];
 const ORDER_FIXTURE: readonly StarterPlaylist[] = [
   { id: "1AbCdEfGhIjKlMnOpQrStU", starterKey: "decades", game: "order", name: "Every decade", blurb: "1960s to now" },
+];
+
+/**
+ * Three themed order lists, as the owner's packs will look: the keys are
+ * borrowed from STARTER_KEYS (the type insists), the ids are made up and
+ * never ship.
+ */
+const THEMED: readonly StarterPlaylist[] = [
+  {
+    id: "1AbCdEfGhIjKlMnOpQrStU", starterKey: "decades", game: "order", name: "Every decade", blurb: "1960s to now",
+    theme: { label: "Every decade", emoji: "📅" },
+  },
+  {
+    id: "2AbCdEfGhIjKlMnOpQrStU", starterKey: "party_hits", game: "order", name: "Hits of the 80s", blurb: "Synths",
+    theme: { label: "80s", emoji: "📼", markets: ["US", "GB"] },
+  },
+  {
+    id: "3AbCdEfGhIjKlMnOpQrStU", starterKey: "reggaeton", game: "order", name: "Sertanejo", blurb: "Brazil",
+    theme: { label: "Sertanejo", markets: ["BR", "PT"] },
+  },
 ];
 
 /** A first visit: Single Playlist, the guess game, nothing typed, nothing remembered, no error. */
@@ -91,6 +136,28 @@ describe("the list as it ships", () => {
     // The order game's list: 375 dated songs over 62 years on 2026-11-10.
     expect(startersFor("order").map((p) => p.starterKey)).toEqual(["decades"]);
     expect(startersFor("order")[0].id).toBe("0RRc1JAhWKFm7QSWGiI5y8");
+  });
+
+  it("declares no key without a list: a key nobody can pick is a counter that never moves", () => {
+    // Adding a theme is one key and one entry, together (the file's header).
+    const used = new Set(STARTER_PLAYLISTS.map((p) => p.starterKey));
+    for (const key of STARTER_KEYS) expect(used.has(key), `${key} has no entry`).toBe(true);
+  });
+
+  it("gives each themed entry a short trimmed label, at most one emoji's worth, and real market codes", () => {
+    for (const { id, theme } of [...STARTER_PLAYLISTS, ...THEMED]) {
+      if (!theme) continue;
+      expect(theme.label, id).toBe(theme.label.trim());
+      expect(theme.label.length, id).toBeGreaterThan(0);
+      expect([...theme.label].length, id).toBeLessThanOrEqual(THEME_LABEL_MAX);
+      if (theme.emoji !== undefined) {
+        expect(theme.emoji.trim().length, id).toBeGreaterThan(0);
+        expect(/[A-Za-z0-9\s]/.test(theme.emoji), `${id}: emoji holds text`).toBe(false);
+        expect([...theme.emoji].length, id).toBeLessThanOrEqual(4);
+      }
+      for (const market of theme.markets ?? []) expect(market, id).toMatch(/^[A-Z]{2}$/);
+      expect(new Set(theme.markets ?? []).size, id).toBe((theme.markets ?? []).length);
+    }
   });
 
   it("holds the fixture to the same rules, so the checks above are known to bite", () => {
@@ -287,5 +354,147 @@ describe("with a list, under a refusal", () => {
     // A host can clear the field with the error still up, which makes both
     // conditions true. The box is the one they are reading.
     expect(starterPlacement(context({ fieldEmpty: true, failureCode: "playlist_not_found" }))).toBe("refusal");
+  });
+});
+
+describe("the device's region, for ordering themes only", () => {
+  it("reads the first tag that names a region, and nothing from one that does not", () => {
+    expect(regionFromLanguages(["pt-BR", "en-US"])).toBe("BR");
+    expect(regionFromLanguages(["en", "pl-PL"])).toBe("PL");
+    expect(regionFromLanguages(["zh-Hant-TW"])).toBe("TW");
+    expect(regionFromLanguages(["es_mx"])).toBe("MX");
+    expect(regionFromLanguages(["es-419"])).toBeNull(); // a UN region, not a country
+    expect(regionFromLanguages(["en"])).toBeNull();
+    expect(regionFromLanguages([])).toBeNull();
+    expect(regionFromLanguages(null)).toBeNull();
+    expect(regionFromLanguages(undefined)).toBeNull();
+    expect(regionFromLanguages([42, "x-BRAZIL", "fr-CA"])).toBe("CA");
+  });
+});
+
+describe("market ordering", () => {
+  it("puts the region's themes first and keeps every theme — the hint orders, it never hides", () => {
+    expect(orderByMarket(THEMED, "BR").map((s) => s.id)).toEqual([THEMED[2].id, THEMED[0].id, THEMED[1].id]);
+    expect(orderByMarket(THEMED, "gb").map((s) => s.id)).toEqual([THEMED[1].id, THEMED[0].id, THEMED[2].id]);
+    for (const region of [null, "JP", "BR", "US"]) {
+      const ordered = orderByMarket(THEMED, region);
+      expect(ordered).toHaveLength(THEMED.length);
+      expect(new Set(ordered)).toEqual(new Set(THEMED));
+    }
+  });
+
+  it("leaves the list's own order alone with no region, or one no theme names", () => {
+    expect(orderByMarket(THEMED, null)).toEqual(THEMED);
+    expect(orderByMarket(THEMED, "JP")).toEqual(THEMED);
+    expect(orderByMarket(FIXTURE, "BR")).toEqual(FIXTURE);
+  });
+});
+
+describe("the theme row", () => {
+  it("appears only once a style has two themed starters", () => {
+    expect(THEME_ROW_MIN).toBe(2);
+    expect(themeRowFor(THEMED, null)).not.toBeNull();
+    expect(themeRowFor(THEMED.slice(0, 2), null)).not.toBeNull();
+    // One themed starter, or two untitled ones, is the old presentation.
+    expect(themeRowFor(THEMED.slice(0, 1), null)).toBeNull();
+    expect(themeRowFor(FIXTURE, null)).toBeNull();
+    expect(themeRowFor([...FIXTURE, THEMED[1]], null)).toBeNull();
+    expect(themeRowFor([], "BR")).toBeNull();
+  });
+
+  it("draws each as emoji and label, in market order, with the key it came from", () => {
+    expect(themeRowFor(THEMED, "BR")).toEqual([
+      { id: THEMED[2].id, name: "Sertanejo", starterKey: "reggaeton" },
+      { id: THEMED[0].id, name: "📅 Every decade", starterKey: "decades" },
+      { id: THEMED[1].id, name: "📼 80s", starterKey: "party_hits" },
+    ]);
+    // An untitled starter in a themed style is still offered, under its name.
+    const mixed = themeRowFor([...THEMED.slice(0, 2), FIXTURE[0]], null);
+    expect(mixed?.map((c) => c.name)).toEqual(["📅 Every decade", "📼 80s", "Party Hits"]);
+  });
+
+  it("is the one row under the field, with its own sentence over themes alone", () => {
+    const row = themeRowFor(THEMED, null)!;
+    const alone = fieldChipRow([], row, "field", { themed: true });
+    expect(alone.playlists).toEqual(row);
+    expect(alone.caption).toBe(THEME_CAPTION);
+    expect(alone.label).toBe("Themes");
+    expect([...alone.starterIds]).toEqual(row.map((c) => c.id));
+    // Beside recent chips: still one row, recents first, deduped, no sentence.
+    const recent = [{ id: THEMED[1].id, name: "My 80s" }];
+    const beside = fieldChipRow(recent, row, "field", { themed: true });
+    expect(beside.playlists.map((p) => p.id)).toEqual([THEMED[1].id, THEMED[0].id, THEMED[2].id]);
+    expect(beside.caption).toBeNull();
+    expect(beside.label).toBe("Playlists");
+    expect(fieldChipRow(recent, row, null, { themed: true }).playlists).toEqual(recent);
+  });
+
+  it("counts a theme pick under the list's own key, by any route", () => {
+    expect(starterKeyForId(THEMED[2].id, THEMED)).toBe("reggaeton");
+  });
+});
+
+describe("the single-starter path is what it was before themes", () => {
+  it("draws the real lists exactly as before: no theme row in either style", () => {
+    expect(themeRowFor(startersFor("order"), "BR")).toBeNull();
+    expect(themeRowFor(startersFor("guess"), "BR")).toBeNull();
+  });
+
+  it("ignores a theme on a style's only starter", () => {
+    const one = [THEMED[1]];
+    expect(themeRowFor(one, "US")).toBeNull();
+    expect(fieldChipRow([], one, "field")).toEqual(fieldChipRow([], one, "field", { themed: false }));
+    const row = fieldChipRow([], one, "field");
+    expect(row.playlists).toEqual(one);
+    expect(row.caption).toBe("No playlist handy? Start with ours");
+    expect(row.label).toBe("Starter playlists");
+  });
+
+  it("keeps the page's old render on the null branch: same chips, same sentence, same row", () => {
+    // app/page.tsx: the field row and the refusal row fall back to exactly
+    // the calls they made before themes, and only a theme row changes them.
+    const page = read("app/page.tsx");
+    expect(page).toMatch(/const themeRow = themeRowFor\(styleStarters, themeRegion\);/);
+    expect(page).toMatch(
+      /const fieldRow = themeRow\s*\?\s*fieldChipRow\(recentPlaylists, themeRow, starterPlace, \{ themed: true \}\)\s*:\s*fieldChipRow\(recentPlaylists, styleStarters, starterPlace\);/
+    );
+    expect(page).toMatch(
+      /:\s*\(\s*<PlaylistChips\s+label="Starter playlists"\s+caption=\{starterCaption\(styleStarters\.length\)\}\s+playlists=\{styleStarters\}/
+    );
+    // One PlaylistChips in the field slot, never a second row for themes.
+    expect(page.match(/label=\{fieldRow\.label\}/g)).toHaveLength(1);
+    expect(page).not.toMatch(/useState[^;]*regionFromLanguages/);
+    expect(page).not.toMatch(/marketFromHeaders/);
+  });
+});
+
+describe("the theme row's one counter", () => {
+  beforeEach(() => {
+    kv.incrs = [];
+    __resetLivenessForTests();
+  });
+
+  it("is one impression per row and style, from a closed set", async () => {
+    await recordStarterThemeRow("order");
+    await recordStarterThemeRow("guess");
+    await recordStarterThemeRow("party" as never);
+    const metrics = kv.incrs.filter((k) => !k.endsWith(":live")).map((k) => k.replace("loop:stats:2026-11-17:", ""));
+    expect(metrics).toEqual(["starter_theme_row:shown:order", "starter_theme_row:shown:guess"]);
+  });
+
+  it("is parsed from the beacon only for a play style", () => {
+    expect(parsePulse({ kind: "starter_theme_row", style: "order" })).toEqual({ kind: "starter_theme_row", style: "order" });
+    expect(parsePulse({ kind: "starter_theme_row", style: "decades" })).toBeNull();
+    expect(parsePulse({ kind: "starter_theme_row" })).toBeNull();
+  });
+
+  it("is sent once per page per style, and printed by npm run stats", () => {
+    const page = read("app/page.tsx");
+    expect(page).toMatch(/themeRowReportedRef\.current\.has\(playStyle\)/);
+    expect(page.match(/reportStarterThemeRow\(/g)).toHaveLength(1);
+    const script = read("scripts/loop-stats.mjs");
+    const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
+    expect(rendered).toContain('"starter_theme_row:"');
+    expect(script).toContain("starter_theme_row:shown:${s}");
   });
 });
