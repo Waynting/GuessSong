@@ -9,6 +9,7 @@ import type { PlaylistSource } from "@/lib/analytics";
 import { DEFAULT_SAMPLED_PER_PLAYER } from "@/types/room";
 import { isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { isPlayableRef } from "@/lib/playlist-ref";
+import { normalizeTeams, type TeamSide } from "@/lib/teams";
 
 export const GAME_STORAGE_KEY = "guesssong_game";
 
@@ -30,6 +31,13 @@ export type GameMode = "party" | "buzzer" | "order";
 export interface GamePlayer {
   name: string;
   score: number;
+  /**
+   * Which of two teams this player is on (lib/teams.ts), when the host split
+   * the room. Optional and absent on every game without teams, and on every
+   * payload stored before 2026-11-17. Points are still awarded per player;
+   * the team totals are summed from these scores whenever they are drawn.
+   */
+  team?: TeamSide;
 }
 
 /** Mixed Playlist Mode metadata — how the pool was assembled. */
@@ -337,14 +345,20 @@ export function parseGamePayload(raw: string): GamePayload | null {
   const tracks = Array.isArray(d.tracks)
     ? d.tracks.map(normalizeTrack).filter((t): t is Track => t !== null)
     : [];
-  const players = Array.isArray(d.players)
-    ? d.players
-        .filter((p): p is GamePlayer => typeof p === "object" && p !== null)
-        .map((p) => ({
-          name: typeof p.name === "string" ? p.name : "",
-          score: typeof p.score === "number" ? p.score : 0,
-        }))
-        .filter((p) => p.name !== "")
+  // Teams are repaired as a whole, after the rows are: a junk side is no
+  // side, and a split that leaves either team under two is no teams at all
+  // (`normalizeTeams`) — never a reason to drop the payload.
+  const players: GamePlayer[] = Array.isArray(d.players)
+    ? normalizeTeams(
+        d.players
+          .filter((p): p is Record<string, unknown> => typeof p === "object" && p !== null)
+          .map((p) => ({
+            name: typeof p.name === "string" ? p.name : "",
+            score: typeof p.score === "number" ? p.score : 0,
+            team: p.team,
+          }))
+          .filter((p) => p.name !== "")
+      )
     : [];
 
   const rawMeta = d.mixedPlaylistMeta as Record<string, unknown> | undefined;

@@ -711,13 +711,13 @@ describe("the route records every kind the parser accepts", () => {
     // The mode rides to all three game recorders, or the KV rows read as
     // "no mode was ever sent".
     expect(route).toMatch(
-      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,\s*players: event\.players,\s*from: event\.from,\s*starter: event\.starter,\s*playlistKind: event\.playlistKind,\s*soloStep: event\.soloStep,\s*\}\)/
+      /recordGameStart\(event\.hostGameIndex, \{\s*mixed: event\.mixed,\s*source: event\.source,\s*mode: event\.mode,\s*players: event\.players,\s*from: event\.from,\s*starter: event\.starter,\s*playlistKind: event\.playlistKind,\s*soloStep: event\.soloStep,\s*teams: event\.teams,\s*\}\)/
     );
     expect(route).toMatch(
       /recordGameLeft\(event\.roundsPlayed, event\.host, event\.source, event\.mode, event\.players, event\.scored, event\.arranged, event\.playlistKind\)/
     );
     expect(route).toMatch(
-      /mode: event\.mode,\s*players: event\.players,\s*scored: event\.scored,\s*arranged: event\.arranged,\s*linkDrawn: event\.linkDrawn,\s*playlistKind: event\.playlistKind,\s*streak: event\.streak,\s*best: event\.best,\s*\}\);/
+      /mode: event\.mode,\s*players: event\.players,\s*scored: event\.scored,\s*arranged: event\.arranged,\s*linkDrawn: event\.linkDrawn,\s*playlistKind: event\.playlistKind,\s*streak: event\.streak,\s*best: event\.best,\s*teams: event\.teams,\s*\}\);/
     );
   });
 

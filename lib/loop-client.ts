@@ -123,6 +123,8 @@ export interface GameStartDetails {
   playlistKind?: PlaylistKind;
   /** A device's first solo game, or its first party after one — `takeSoloStep` in lib/solo-party.ts. */
   soloStep?: SoloStep;
+  /** The host split the room into two teams (lib/teams.ts). Sent only when true. */
+  teams?: boolean;
 }
 
 /**
@@ -131,7 +133,7 @@ export interface GameStartDetails {
  * to reach the field you mean is how the wrong one gets filed.
  */
 export function reportGameStart(hostGameIndex: number, details: GameStartDetails = {}): void {
-  const { mixed, source, mode, players, from, starter, playlistKind, soloStep } = details;
+  const { mixed, source, mode, players, from, starter, playlistKind, soloStep, teams } = details;
   sendPulse({
     kind: "game_started",
     hostGameIndex,
@@ -145,6 +147,7 @@ export function reportGameStart(hostGameIndex: number, details: GameStartDetails
     ...(starter ? { starter } : {}),
     ...(playlistKind ? { playlistKind } : {}),
     ...(soloStep ? { soloStep } : {}),
+    ...(teams === true ? { teams: true as const } : {}),
   });
 }
 
@@ -181,6 +184,8 @@ export function reportGameEnd(
     streak?: StreakBand;
     /** A game of one with a single playlist only: how the score sat against its best. */
     best?: BestOutcome;
+    /** A team game (lib/teams.ts). Sent only when true. */
+    teams?: boolean;
   } = {}
 ): void {
   sendPulse({
@@ -198,6 +203,7 @@ export function reportGameEnd(
     ...(details.playlistKind ? { playlistKind: details.playlistKind } : {}),
     ...(details.streak ? { streak: details.streak } : {}),
     ...(details.best ? { best: details.best } : {}),
+    ...(details.teams === true ? { teams: true as const } : {}),
   });
 }
 

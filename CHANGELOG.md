@@ -110,6 +110,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     line is not shown during `playing`/`guessing` if the host also plays
     the clip; GA4 has no event for it (KV only).
 
+- **Two teams for a big room** (`lib/teams.ts`). Rooms of five or more play
+  out 48% of games against 24% for one player, so the big room is the
+  audience to make easier to run. From four typed names the setup page's
+  roster shows "Split into two teams": on deals A, B, A, B over the names,
+  each name gets a letter chip that swaps its side, and the switch reads
+  "2 a side needed" when a swap leaves a team under two. Not offered with the
+  buzzer, "Just me" or Mixed (none of them shows the typed roster), turned
+  off when the names drop under four, and not remembered across visits.
+  `GamePlayer.team?: "a" | "b"` rides on the payload; `parseGamePayload`
+  repairs it through `normalizeTeams` (a junk side is no side, a teamless
+  player joins the smaller team, fewer than two on either side is no teams).
+  The host still awards a player; `/game` and `/order` draw each team's
+  total with its members under it (`components/team-scoreboard.tsx` — one
+  chip strip on a phone, no second row) and Game Over names the winning team
+  or the tie. Counted as `game_teams:on` on the start (a literal `true`, only
+  for the `p3_4`/`p5_plus` bands) and `game_end_teams:<end>` on the end
+  beacon; printed as "Team games" in `npm run stats` beside the 5+ band's
+  played-out rate. Bar: a team game plays out at least as often as the 5+
+  band.
 - **Does a solo try come back as a party?** Since 2026-11-11 most games are
   one person alone from Google (30,701 one-player starts in a week against
   4,435 with two or more), and nothing could say whether that is the step

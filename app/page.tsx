@@ -46,6 +46,19 @@ import {
 } from "@/lib/refusal-recovery";
 import { playerBand } from "@/lib/game-players";
 import { takeSoloStep } from "@/lib/solo-party";
+import {
+  TEAM_NAMES,
+  dealTeams,
+  fitTeams,
+  hasTeams,
+  normalizeTeams,
+  otherSide,
+  removeTeamAt,
+  rosterWithTeams,
+  swapTeam,
+  teamsOffered,
+  type TeamSide,
+} from "@/lib/teams";
 import { currentArrival } from "@/lib/arrival";
 import type { MixedSubMode, SetupSource } from "@/lib/loop-stats";
 import {
@@ -283,6 +296,12 @@ export default function SetupPage() {
    */
   const [linkSource, setLinkSource] = useState<LinkSource>("typed");
   const [players, setPlayers] = useState<string[]>(["", ""]);
+  // "Split into two teams" (lib/teams.ts): the switch, and each roster row's
+  // side, parallel to `players`. Offered from four typed names, turned off
+  // when the count drops under that, and not remembered across visits —
+  // the side list is only meaningful beside the names it was dealt over.
+  const [teamsOn, setTeamsOn] = useState(false);
+  const [playerTeams, setPlayerTeams] = useState<TeamSide[]>([]);
   const [clipDuration, setClipDuration] = useState(DEFAULT_CLIP_DURATION);
   // Selected count + the custom field's text, moved together so the transitions
   // between them stay in lib/song-count.ts where the suite can reach them.
@@ -558,6 +577,8 @@ export default function SetupPage() {
     setPlaylistUrl(form.playlistUrl);
     setLinkSource(form.linkSource);
     setPlayers(form.players);
+    setTeamsOn(false);
+    setPlayerTeams([]);
     setClipDuration(form.clipDuration);
     setSongCount(form.songCount);
     setSampledPerPlayer(form.sampledPerPlayer);
@@ -779,7 +800,9 @@ export default function SetupPage() {
     mode: GameMode,
     playerCount: number,
     /** What the single link was (the response's `playlistKind`); a Mixed pool has none. */
-    playlistKind?: PlaylistKind
+    playlistKind?: PlaylistKind,
+    /** Whether the stored roster is split into two teams (`hasTeams` on the payload's players). */
+    teams?: boolean
   ) {
     const hostGameIndex = bumpHostGameCount();
     const setupSource = setupSourceFor(Boolean(mixed));
@@ -802,6 +825,7 @@ export default function SetupPage() {
       ...(starter ? { starter } : {}),
       ...(playlistKind ? { playlistKind } : {}),
       ...(soloStep ? { soloStep } : {}),
+      ...(teams ? { teams: true } : {}),
     });
     const recovery = noteStart(recoveryRef.current, setupSource);
     if (recovery.state !== recoveryRef.current) setRecovery(recovery.state);
@@ -831,13 +855,50 @@ export default function SetupPage() {
     setPlayers((p) => [...p, ""]);
   }
 
+  /** Under four typed names the switch hides, and teams go off with it. */
+  function dropTeamsBelowMinimum(rows: string[]) {
+    if (!teamsOffered(rows.filter((r) => r.trim()).length)) setTeamsOn(false);
+  }
+
   function removePlayer(idx: number) {
-    setPlayers((p) => p.filter((_, i) => i !== idx));
+    const next = players.filter((_, i) => i !== idx);
+    setPlayers(next);
+    setPlayerTeams((t) => removeTeamAt(fitTeams(t, players.length), idx));
+    dropTeamsBelowMinimum(next);
   }
 
   function updatePlayer(idx: number, val: string) {
-    setPlayers((p) => p.map((v, i) => (i === idx ? val : v)));
+    const next = players.map((v, i) => (i === idx ? val : v));
+    setPlayers(next);
+    dropTeamsBelowMinimum(next);
   }
+
+  /** The switch: on deals A, B, A, B over the typed names. */
+  function toggleTeams() {
+    if (teamsOn) {
+      setTeamsOn(false);
+      return;
+    }
+    setPlayerTeams(dealTeams(players));
+    setTeamsOn(true);
+  }
+
+  function swapPlayerTeam(idx: number) {
+    setPlayerTeams((t) => swapTeam(fitTeams(t, players.length), idx));
+  }
+
+  // Teams live on the typed roster only — the one the host can see. A buzzer
+  // room names itself from the phones, "Just me" has one name, and Mixed
+  // takes its roster from the contributors, so none of those offers the
+  // switch, and a switch left on behind them is not applied.
+  const typedPlayerCount = players.filter((p) => p.trim()).length;
+  const teamsVisible = teamsOffered(typedPlayerCount);
+  const teamsActive =
+    teamsOn && teamsVisible && setupMode === "single" && !buzzerEnabled && who !== "solo";
+  const rowTeams = fitTeams(playerTeams, players.length);
+  // A swap that leaves a side under two is played without teams (the start
+  // runs `normalizeTeams`), so the switch says so before Start does it.
+  const teamsHold = teamsActive && hasTeams(normalizeTeams(rosterWithTeams(players, rowTeams)));
 
   /**
    * `recheck` is the private refusal's button: the same link asked again past
@@ -945,6 +1006,13 @@ export default function SetupPage() {
       // had time to scan in. `undefined` when Buzzer Mode is off.
       const room = buzzerEnabled ? openedRoom?.buzzer : undefined;
 
+      // With teams on, each name carries its side, through the same repair
+      // the game page's parse runs (`normalizeTeams`): a split that leaves a
+      // team under two is played without teams rather than refused.
+      const rosterPlayers =
+        teamsActive && !room
+          ? normalizeTeams(rosterWithTeams(roster, rowTeams).map((p) => ({ ...p, score: 0 })))
+          : validPlayers.map((name) => ({ name, score: 0 }));
       const payload = buildGamePayload({
         tracks: limited,
         // Empty in Buzzer Mode, even if the inputs still hold something. A host
@@ -952,7 +1020,7 @@ export default function SetupPage() {
         // rows nobody can claim: the section is hidden, so those names are
         // invisible, but they'd sit on the scoreboard all game next to the real
         // players the room reports.
-        players: room ? [] : validPlayers.map((name) => ({ name, score: 0 })),
+        players: room ? [] : rosterPlayers,
         playlistName: data.name,
         clipDuration,
         totalTracks: data.totalTracks,
@@ -980,7 +1048,8 @@ export default function SetupPage() {
           undefined,
           gameMode(Boolean(room)),
           room ? buzzerPlayerCount + 1 : validPlayers.length,
-          playlistKind
+          playlistKind,
+          hasTeams(payload.players)
         ),
       });
       // Remembered here — once the playlist has loaded and the game is stored
@@ -1608,6 +1677,16 @@ export default function SetupPage() {
                             onChange={(e) => updatePlayer(idx, e.target.value)}
                             maxLength={PLAYER_NAME_MAX}
                           />
+                          {teamsActive && name.trim() && (
+                            <button
+                              type="button"
+                              className={`team-chip side-${rowTeams[idx]}`}
+                              onClick={() => swapPlayerTeam(idx)}
+                              aria-label={`${name.trim()} is on ${TEAM_NAMES[rowTeams[idx]]}. Move to ${TEAM_NAMES[otherSide(rowTeams[idx])]}`}
+                            >
+                              {rowTeams[idx].toUpperCase()}
+                            </button>
+                          )}
                           {players.length > 1 && (
                             <button
                               className="remove-btn"
@@ -1624,6 +1703,22 @@ export default function SetupPage() {
                         Add Player
                       </button>
                     </div>
+                    {/* Offered from four names: a big room is easier to run
+                        as two sides. Points still go to a player; the game
+                        adds each side up (lib/teams.ts). */}
+                    {teamsVisible && (
+                      <button
+                        type="button"
+                        className="teams-toggle"
+                        aria-pressed={teamsActive}
+                        onClick={toggleTeams}
+                      >
+                        <span>Split into two teams</span>
+                        <span className="teams-state">
+                          {!teamsActive ? "Off" : teamsHold ? "On" : "2 a side needed"}
+                        </span>
+                      </button>
+                    )}
                     {/* The buzzer, where a room can see it. Under the roster
                         because that is what it replaces — everyone types their
                         own name as they scan in. With the order game the same

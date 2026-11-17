@@ -420,6 +420,52 @@ export function SetupStyles() {
         }
         .add-player-btn:active { background: rgba(29,185,84,0.1); transition: none; }
 
+        /* Two teams (lib/teams.ts). The switch is one row under Add Player,
+           offered from four names; each name's chip is its side, tapped to
+           swap. The chip is 36px like the remove button beside it, so a row
+           with both stays one line on a 390px phone. */
+        .teams-toggle {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          width: 100%;
+          min-height: 44px;
+          margin-top: 8px;
+          padding: 8px 14px;
+          background: var(--surface2);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          color: var(--text);
+          font-family: 'Outfit', sans-serif;
+          font-size: 14px;
+          cursor: pointer;
+          transition: border-color 0.15s, background 0.15s;
+        }
+        .teams-toggle .teams-state { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+        .teams-toggle[aria-pressed="true"] { border-color: rgba(29,185,84,0.45); background: rgba(29,185,84,0.08); }
+        .teams-toggle[aria-pressed="true"] .teams-state { color: var(--green); }
+        @media (hover: hover) { .teams-toggle:hover { border-color: rgba(29,185,84,0.45); } }
+        .teams-toggle:active { background: rgba(29,185,84,0.14); transition: none; }
+        .teams-toggle:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+        .team-chip {
+          flex-shrink: 0;
+          min-width: 36px;
+          height: 36px;
+          padding: 0 10px;
+          border-radius: 18px;
+          font-family: 'Outfit', sans-serif;
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: transform 0.1s;
+        }
+        .team-chip.side-a { background: rgba(29,185,84,0.14); border: 1px solid rgba(29,185,84,0.5); color: var(--green); }
+        .team-chip.side-b { background: rgba(96,165,250,0.14); border: 1px solid rgba(96,165,250,0.5); color: #60a5fa; }
+        @media (hover: hover) { .team-chip:hover { filter: brightness(1.2); } }
+        .team-chip:active { transform: scale(0.94); transition: none; }
+        .team-chip:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
         .remove-btn {
           width: 36px;
           height: 36px;
