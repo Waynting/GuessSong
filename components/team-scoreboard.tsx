@@ -17,7 +17,8 @@
  */
 
 import type { GamePlayer } from "@/lib/game-session";
-import { TEAM_NAMES, teamLeader, teamMembers, teamOrder, teamTotals } from "@/lib/teams";
+import { teamLeader, teamMembers, teamOrder, teamTotals } from "@/lib/teams";
+import { ORDER_COPY, type OrderLocale } from "@/lib/order-copy";
 
 const TEAM_STYLE = `
   .team-block { display: flex; flex-direction: column; padding: 4px 0 8px; }
@@ -82,7 +83,17 @@ const TEAM_STYLE = `
 `;
 
 /** The scoreboard's list for a team game: each side's total, its members under it. */
-export function TeamScoreList({ players, scorePulse }: { players: GamePlayer[]; scorePulse: string | null }) {
+export function TeamScoreList({
+  players,
+  scorePulse,
+  locale = "en",
+}: {
+  players: GamePlayer[];
+  scorePulse: string | null;
+  /** The game payload's language (lib/order-copy.ts); /game is always English. */
+  locale?: OrderLocale;
+}) {
+  const names = ORDER_COPY[locale].teams.names;
   const totals = teamTotals(players);
   const leader = teamLeader(players);
   return (
@@ -91,7 +102,7 @@ export function TeamScoreList({ players, scorePulse }: { players: GamePlayer[]; 
       {teamOrder(players).map((side) => (
         <div key={side} className={`team-block${leader === side ? " ahead" : ""}`}>
           <div className="team-head">
-            <span className="team-name">{TEAM_NAMES[side]}</span>
+            <span className="team-name">{names[side]}</span>
             <span className="team-total">{totals[side]}</span>
           </div>
           {teamMembers(players, side).map((p) => (
@@ -113,7 +124,9 @@ export function TeamScoreList({ players, scorePulse }: { players: GamePlayer[]; 
  * then every player with their side. Shown whether or not anyone scored — a
  * 0–0 is a tie, and saying so beats an empty card.
  */
-export function TeamGameOver({ players }: { players: GamePlayer[] }) {
+export function TeamGameOver({ players, locale = "en" }: { players: GamePlayer[]; locale?: OrderLocale }) {
+  const copy = ORDER_COPY[locale].teams;
+  const names = copy.names;
   const totals = teamTotals(players);
   const leader = teamLeader(players);
   const sorted = [...players].sort((a, b) => b.score - a.score);
@@ -124,12 +137,12 @@ export function TeamGameOver({ players }: { players: GamePlayer[] }) {
       <div className="winner-hero">
         <span className="winner-trophy">{leader === "tie" ? "🤝" : "🏆"}</span>
         <span className="winner-hero-name">
-          {leader === "tie" || leader === null ? "It's a tie" : `${TEAM_NAMES[leader]} wins`}
+          {leader === "tie" || leader === null ? copy.tie : copy.wins(names[leader])}
         </span>
         <div style={{ textAlign: "right" }}>
           <div className="winner-hero-score">{totals[first]}</div>
           <div className="winner-hero-vs">
-            {leader === "tie" || leader === null ? "pts each" : `vs ${TEAM_NAMES[second]} ${totals[second]}`}
+            {leader === "tie" || leader === null ? copy.ptsEach : copy.vs(names[second], totals[second])}
           </div>
         </div>
       </div>
@@ -138,7 +151,7 @@ export function TeamGameOver({ players }: { players: GamePlayer[] }) {
           <div key={p.name} className="final-row">
             <span className={`final-rank ${idx === 0 ? "first" : idx === 1 ? "second" : idx === 2 ? "third" : "rest"}`}>{idx + 1}</span>
             <span className="final-name">{p.name}</span>
-            <span className="final-team-tag">{p.team ? TEAM_NAMES[p.team] : ""}</span>
+            <span className="final-team-tag">{p.team ? names[p.team] : ""}</span>
             <span className={`final-score${idx <= 2 ? " podium" : ""}`}>{p.score}</span>
           </div>
         ))}

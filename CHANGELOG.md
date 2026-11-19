@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The order game speaks Portuguese when the setup page did**
+  (`lib/order-copy.ts`, `GamePayload.locale`). Since 2026-11-17, 27% of games
+  start on the Portuguese setup page (`host_locale:pt`), most of them "Ponha
+  em ordem", and pressing "Começar o jogo →" landed them on an English page.
+  `app/setup-page.tsx` now writes `locale: gameLocaleFor(pageLocale)` on all
+  three start paths (`"pt"` from `/pt`, absent otherwise), and
+  `parseGamePayload` reads it through the `GAME_LOCALES` allow-list — absent
+  is English, any other value is repaired to absent, so every stored game
+  reads as before. `app/order/page.tsx` reads every visible string and aria
+  label from `ORDER_COPY[orderLocaleOf(data.locale)]` (`Record<"en" | "pt">`,
+  English byte-identical to the old literals), sets `lang="pt-BR"` on its
+  layout, and renders buzzer errors in Portuguese for a pt game. The lines
+  that live beside their rules take a `locale` argument instead:
+  `orderLeftoverLine`, `musicAgeCopy` / `decadeLabel` ("o fim dos anos 80"),
+  `streakLine`, and the challenge card's `challengeResultLine` /
+  `challengeButtonLabel` / `challengeShareText`. `TeamScoreList`,
+  `TeamGameOver` (teams "Time A/B", from `SETUP_COPY.pt`), `OrderChallenge`,
+  `MusicAgeCard` take a `locale` prop and `LoopQr` a `caption`, all
+  defaulting to English, so `/game` is unchanged. No new counter:
+  `host_locale:pt` already marks these starts. `tests/order-copy.test.ts`
+  pins the table's shape, the English literals, the payload repair, the three
+  start paths and the page's markup for a leftover English literal.
+  - Known gaps: the saved result image (`downloadResultImage`,
+    `lib/result-image.ts`) stays English; a Mixed game's stored name
+    ("3-Player Mix") is data written by the setup page and stays English in
+    the top bar; the one-frame "Loading…" before the payload is read is
+    English; the guess game page (`/game`) and the phones' order screen
+    (`components/order-phone.tsx` on `/buzz/[code]`) are untranslated.
+
 - **"Your ears live in 1987" on the order game's Game Over**
   (`components/music-age.tsx`, `lib/music-age.ts`). The solo invite card read
   one real send in 2,089 views; people alone share results about themselves,

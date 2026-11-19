@@ -35,9 +35,16 @@ import { reportLoopImpression } from "@/lib/loop-client";
 export function LoopQr({
   surface = "game_over",
   size = 92,
+  caption = LOOP_QR_CAPTION,
 }: {
   surface?: LoopSurface;
   size?: number;
+  /**
+   * The line under the name. The loop's own sentence by default; the order
+   * page passes its Portuguese one for a game started from /pt
+   * (lib/order-copy.ts, whose `en` is this same constant).
+   */
+  caption?: string;
 }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
 
@@ -98,7 +105,7 @@ export function LoopQr({
           GuessSong
         </div>
         <div style={{ fontSize: "12px", color: "#666", marginTop: "2px" }}>
-          {LOOP_QR_CAPTION}
+          {caption}
         </div>
       </div>
     </div>

@@ -26,9 +26,18 @@ import { reportLoopImpression, reportMusicAge } from "@/lib/loop-client";
 import { COPIED_FLASH_MS, shareLink } from "@/lib/quiz-share";
 import { musicAgeCopy, type MusicAge } from "@/lib/music-age";
 
-export function MusicAgeCard({ age, room }: { age: MusicAge; room: boolean }) {
+export function MusicAgeCard({
+  age,
+  room,
+  locale = "en",
+}: {
+  age: MusicAge;
+  room: boolean;
+  /** The game payload's language (lib/order-copy.ts). */
+  locale?: "en" | "pt";
+}) {
   const [copied, setCopied] = useState(false);
-  const copy = musicAgeCopy(age, room);
+  const copy = musicAgeCopy(age, room, locale);
 
   useEffect(() => {
     reportLoopImpression("music_age");
@@ -83,7 +92,7 @@ export function MusicAgeCard({ age, room }: { age: MusicAge; room: boolean }) {
         // class still supplies :active's background and press scale.
         style={{ width: "100%", color: "#1DB954", borderColor: "rgba(29,185,84,0.5)", whiteSpace: "normal" }}
       >
-        {copied ? "Link copied ✓" : copy.button}
+        {copied ? copy.copied : copy.button}
       </button>
     </div>
   );

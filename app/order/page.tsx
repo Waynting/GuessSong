@@ -34,6 +34,7 @@ import {
   sameDeal,
 } from "@/lib/order-phone";
 import { buzzerErrorMessage } from "@/lib/error-messages";
+import { ORDER_COPY, orderLang, orderLocaleOf, type OrderLocale } from "@/lib/order-copy";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { gameScored, playerBand } from "@/lib/game-players";
 import { hasTeams } from "@/lib/teams";
@@ -66,7 +67,6 @@ import {
 import type { GameHostKind, GameScreen, SetupSource } from "@/lib/loop-stats";
 import { getHostGameCount } from "@/lib/host-session";
 import {
-  MIXED_NEXT_GAME_LABEL,
   MIXED_SETUP_HREF,
   PHONE_MEDIA_QUERY,
   gameOverOnward,
@@ -214,7 +214,15 @@ export default function OrderPage() {
    */
   const dealtRef = useRef<string | null>(null);
   const revealSentRef = useRef<number | null>(null);
-  const locale = useErrorLocale();
+  const deviceLocale = useErrorLocale();
+  /**
+   * The page's language, from the payload (lib/order-copy.ts): "pt" for a
+   * game started from the Portuguese setup page, English otherwise. Errors
+   * follow it for a Portuguese game and the device's language otherwise.
+   */
+  const [pageLocale, setPageLocale] = useState<OrderLocale>("en");
+  const copy = ORDER_COPY[pageLocale];
+  const locale = pageLocale === "pt" ? "pt" : deviceLocale;
   /** Null until an effect has asked — see gameScreenFor in lib/game-over.ts. */
   const [screen, setScreen] = useState<GameScreen | null>(null);
   const [mixCopied, setMixCopied] = useState(false);
@@ -294,6 +302,7 @@ export default function OrderPage() {
     // The ref must be one a challenge link may carry (not editorial).
     setDealSource(data.seed !== undefined && isChallengeRef(data.playlistRef) ? { seed: data.seed, ref: data.playlistRef } : null);
     setAgainst(data.challenge ?? null);
+    setPageLocale(orderLocaleOf(data.locale));
     gameStartTimeRef.current = Date.now();
   }, [router]);
 
@@ -730,7 +739,7 @@ export default function OrderPage() {
   // lands on a row, and the totals follow from it.
   const teamGame = hasTeams(players);
   const maxScore = sortedPlayers[0]?.score ?? 0;
-  const leftoverLine = orderLeftoverLine(leftover);
+  const leftoverLine = orderLeftoverLine(leftover, pageLocale);
   const onward = gameOverOnward(screen, players.length);
   // The year the rounds you got right sit in, or null when none scored — the
   // card then renders nothing, and reports no impression (lib/music-age.ts).
@@ -759,7 +768,7 @@ export default function OrderPage() {
   if (rounds.length === 0) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#111", color: "#555", fontFamily: "Outfit, sans-serif" }}>
-        Loading…
+        {copy.loading}
       </div>
     );
   }
@@ -1500,10 +1509,10 @@ export default function OrderPage() {
         }
       `}</style>
 
-      <div className="game-layout">
+      <div className="game-layout" lang={orderLang(pageLocale)}>
         <header className="top-bar">
           <div className="round-badge">
-            <span>Round</span>
+            <span>{copy.round}</span>
             <span className="round-num">
               {phase === "finished" ? rounds.length : currentIndex + 1}
             </span>
@@ -1513,7 +1522,7 @@ export default function OrderPage() {
           <span className="playlist-name">{playlistName}</span>
           {phase !== "finished" && (
             <button className="end-game-btn" onClick={endGame}>
-              End Game
+              {copy.endGame}
             </button>
           )}
         </header>
@@ -1522,10 +1531,10 @@ export default function OrderPage() {
           <div className="game-card">
             <p className={`order-prompt${isRevealed ? " revealed" : ""}`}>
               {isRevealed
-                ? "Oldest to newest — the real order"
+                ? copy.prompt.revealed
                 : buzzerRoom
-                ? "Everyone orders these on their phone. Move one here and yours counts too"
-                : "Oldest on top. Drag the cards into order, then reveal"}
+                ? copy.prompt.phones
+                : copy.prompt.solo}
             </p>
 
             <div className="order-list" ref={cardDrag.listRef} role="list">
@@ -1552,7 +1561,7 @@ export default function OrderPage() {
                       : {
                           tabIndex: 0,
                           role: "listitem",
-                          "aria-label": `${displayTitle(t.name)}, position ${i + 1} of ${cards.length}. Arrow keys move it.`,
+                          "aria-label": copy.cardAria(displayTitle(t.name), i + 1, cards.length),
                           onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => cardDrag.pickUp(e, t.id),
                           onPointerMove: cardDrag.dragMove,
                           onPointerUp: cardDrag.putDown,
@@ -1560,7 +1569,7 @@ export default function OrderPage() {
                           onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => cardDrag.keyMove(e, t.id),
                         })}
                   >
-                    <span className="order-slot" aria-label={isRevealed ? `Rank ${i + 1}` : `Card ${letterOf.get(t.id)}`}>
+                    <span className="order-slot" aria-label={isRevealed ? copy.rankAria(i + 1) : copy.cardLetterAria(letterOf.get(t.id) ?? "")}>
                       {isRevealed ? i + 1 : letterOf.get(t.id)}
                     </span>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1578,11 +1587,7 @@ export default function OrderPage() {
                       <p className="order-artist">{t.artists.join(", ")}</p>
                       {isRevealed && t.albumName && <p className="order-album">{t.albumName}</p>}
                       {isRevealed && t.contributors && t.contributors.length > 0 && (
-                        <p className="order-from">
-                          {t.contributors.length > 1
-                            ? `${t.contributors.join(" & ")}'s playlists`
-                            : `${t.contributors[0]}'s playlist`}
-                        </p>
+                        <p className="order-from">{copy.fromPlaylists(t.contributors)}</p>
                       )}
                     </div>
                     {!isRevealed && <CardGrip />}
@@ -1590,7 +1595,7 @@ export default function OrderPage() {
                       <span className="order-mark">
                         <span className="order-year">{releaseYear(t)}</span>
                         {/* Where the room had it, when that was not here. */}
-                        {missed && <span className="order-was">yours #{slot + 1}</span>}
+                        {missed && <span className="order-was">{copy.yours(slot + 1)}</span>}
                       </span>
                     )}
                   </div>
@@ -1604,20 +1609,23 @@ export default function OrderPage() {
                   <p className="phone-status-line error">
                     {buzzerErrorMessage(room.error, locale, "host")}{" "}
                     <button type="button" className="text-btn" onClick={room.reconnect}>
-                      Reconnect
+                      {copy.room.reconnect}
                     </button>
                   </p>
                 ) : !roomConnected ? (
-                  <p className="phone-status-line">Connecting to room {buzzerRoom.code}…</p>
+                  <p className="phone-status-line">{copy.room.connecting(buzzerRoom.code)}</p>
                 ) : phonesNow.length === 0 ? (
-                  <p className="phone-status-line">Room {buzzerRoom.code} · no phones in yet</p>
+                  <p className="phone-status-line">{copy.room.noPhones(buzzerRoom.code)}</p>
                 ) : (
                   <>
                     <p className="phone-status-line">
                       {/* The code stays on screen for a latecomer: this page
                           shows no QR, and a phone can join mid-game. */}
-                      Room {buzzerRoom.code} · {phonesNow.filter((p) => lockedSet.has(p.playerId)).length} of{" "}
-                      {phonesNow.length} phones locked in
+                      {copy.room.lockedIn(
+                        buzzerRoom.code,
+                        phonesNow.filter((p) => lockedSet.has(p.playerId)).length,
+                        phonesNow.length
+                      )}
                     </p>
                     <div className="phone-chips">
                       {phonesNow.map((p) => (
@@ -1635,7 +1643,7 @@ export default function OrderPage() {
             {phase === "showing" && (
               <div>
                 <button className={revealUntouched ? "btn-ghost btn-ghost-accent" : "btn-primary"} onClick={reveal}>
-                  Reveal the Years →
+                  {copy.reveal}
                 </button>
                 {leftoverLine && <p className="order-note">{leftoverLine}</p>}
               </div>
@@ -1652,24 +1660,24 @@ export default function OrderPage() {
                       <div key={id} className={`phone-result${r.points > 0 ? " scored" : ""}`}>
                         <span className="phone-result-name">
                           {phoneResults.names[id] ?? "?"}
-                          {id === room.playerId ? " (here)" : ""}
+                          {id === room.playerId ? copy.phone.here : ""}
                         </span>
                         <span className="phone-result-verdict">
                           {!r.locked
                             ? id === room.playerId
-                              ? "didn't play"
-                              : "didn't lock in"
+                              ? copy.phone.didntPlay
+                              : copy.phone.didntLock
                             : r.verdict === "exact"
-                            ? `full order +${r.points}`
+                            ? copy.phone.fullOrder(r.points)
                             : r.verdict === "oldest"
-                            ? `oldest right +${r.points}`
-                            : "no points"}
+                            ? copy.phone.oldestRight(r.points)
+                            : copy.phone.noPoints}
                         </span>
                       </div>
                     ))}
                 </div>
                 <button className="btn-primary next" onClick={nextRound}>
-                  {lastRound ? "See Final Scores →" : "Next Round →"}
+                  {lastRound ? copy.seeFinalScores : copy.nextRound}
                 </button>
               </div>
             )}
@@ -1679,10 +1687,8 @@ export default function OrderPage() {
                 {result && (
                   <p className={`order-result${result.exact ? " exact" : ""}`} role="status">
                     {result.exact
-                      ? "Every card in the right place"
-                      : `${result.inPlace} of ${cards.length} in the right place · oldest ${
-                          result.oldest ? "✓" : "✗"
-                        }`}
+                      ? copy.result.allRight
+                      : copy.result.partial(result.inPlace, cards.length, result.oldest)}
                   </p>
                 )}
                 {/* Revealed untouched and nothing scored: say what was not
@@ -1690,18 +1696,20 @@ export default function OrderPage() {
                     graded, and a line that contradicts a scoreboard that
                     just moved is worse than none. */}
                 {!hostMoved && !buzzerRoom && exactWinner === null && oldestWinner === null && (
-                  <p className="order-untouched">Left as dealt — drag the cards next round to score.</p>
+                  <p className="order-untouched">{copy.result.untouched}</p>
                 )}
                 {/* The whole order, the round's question. One award. A
                     one-player game was scored from the screen at the reveal,
                     so it gets the outcome, not buttons to award itself. */}
                 {solo ? (
                   <p className="awarded-line">
-                    {exactWinner !== null ? `+${ORDER_EXACT_POINTS} pts → ${exactWinner}` : `Full order +${ORDER_EXACT_POINTS} — not this time`}
+                    {exactWinner !== null
+                      ? copy.result.awarded(ORDER_EXACT_POINTS, exactWinner)
+                      : copy.result.fullOrderMissed(ORDER_EXACT_POINTS)}
                   </p>
                 ) : exactWinner === null ? (
                   <>
-                    <p className="who-scored">Who called the full order? (+{ORDER_EXACT_POINTS} pts)</p>
+                    <p className="who-scored">{copy.result.whoCalled(ORDER_EXACT_POINTS)}</p>
                     <div className="player-picker">
                       {players.map((p) => (
                         <button key={p.name} className="player-pick-btn" onClick={() => awardExact(p.name)}>
@@ -1711,15 +1719,15 @@ export default function OrderPage() {
                     </div>
                   </>
                 ) : (
-                  <p className="awarded-line">+{ORDER_EXACT_POINTS} pts → {exactWinner}</p>
+                  <p className="awarded-line">{copy.result.awarded(ORDER_EXACT_POINTS, exactWinner)}</p>
                 )}
 
                 {/* The oldest song alone, the consolation. Compact, like the
                     guess game's album row: the order is the question. */}
                 <div className="score-row-compact">
-                  <span className="score-row-label">Oldest song +{ORDER_OLDEST_POINTS}</span>
+                  <span className="score-row-label">{copy.result.oldestLabel(ORDER_OLDEST_POINTS)}</span>
                   {solo && oldestWinner === null ? (
-                    <span className="score-row-done missed">not this time</span>
+                    <span className="score-row-done missed">{copy.result.notThisTime}</span>
                   ) : oldestWinner === null ? (
                     players.map((p) => (
                       <button
@@ -1731,12 +1739,12 @@ export default function OrderPage() {
                       </button>
                     ))
                   ) : (
-                    <span className="score-row-done">+{ORDER_OLDEST_POINTS} pt → {oldestWinner}</span>
+                    <span className="score-row-done">{copy.result.oldestAwarded(ORDER_OLDEST_POINTS, oldestWinner)}</span>
                   )}
                 </div>
 
                 <button className="btn-primary next" onClick={nextRound}>
-                  {lastRound ? "See Final Scores →" : "Next Round →"}
+                  {lastRound ? copy.seeFinalScores : copy.nextRound}
                 </button>
               </div>
             )}
@@ -1746,14 +1754,14 @@ export default function OrderPage() {
             <div className="finished-overlay">
               <div className="finished-header">
                 <p style={{ fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase", color: "#555", marginBottom: "4px" }}>
-                  Game Over
+                  {copy.gameOver}
                 </p>
-                <h1 className="finished-title">Final Scores</h1>
+                <h1 className="finished-title">{copy.finalScores}</h1>
                 <p style={{ color: "#444", fontSize: "13px" }}>{playlistName}</p>
               </div>
 
               {teamGame ? (
-                <TeamGameOver players={players} />
+                <TeamGameOver players={players} locale={pageLocale} />
               ) : (
                 <>
                   {maxScore > 0 && sortedPlayers.length > 0 && (
@@ -1762,7 +1770,7 @@ export default function OrderPage() {
                       <span className="winner-hero-name">{sortedPlayers[0].name}</span>
                       <div style={{ textAlign: "right" }}>
                         <div className="winner-hero-score">{sortedPlayers[0].score}</div>
-                        <div className="winner-hero-pts">pts</div>
+                        <div className="winner-hero-pts">{copy.pts}</div>
                       </div>
                     </div>
                   )}
@@ -1800,20 +1808,20 @@ export default function OrderPage() {
                     flexShrink: 0,
                   }}
                 >
-                  {streakLine(streakResult, playlistName)}
+                  {streakLine(streakResult, playlistName, pageLocale)}
                 </p>
               )}
 
               <button className="btn-lg green" onClick={playAgain}>
-                Play Again →
+                {copy.playAgain}
               </button>
               <div className="finished-secondary">
                 <button className="btn-ghost compact" onClick={downloadResultImage}>
-                  Save Results
+                  {copy.saveResults}
                 </button>
                 {playlistSource === "mixed" && (
                   <button className="btn-ghost compact" onClick={copyMixList}>
-                    {mixCopied ? "Copied ✓" : "Copy the Mix"}
+                    {mixCopied ? copy.mixCopied : copy.copyMix}
                   </button>
                 )}
               </div>
@@ -1824,7 +1832,7 @@ export default function OrderPage() {
                   readOnly
                   value={mixFallback}
                   onFocus={(e) => e.currentTarget.select()}
-                  aria-label="The mixed playlist, ready to copy"
+                  aria-label={copy.mixAria}
                 />
               )}
 
@@ -1832,7 +1840,7 @@ export default function OrderPage() {
                   year the rounds they got right sit in. Rendered only behind
                   a computed age, because mounting reports its impression.
                   lib/music-age.ts. */}
-              {ears && <MusicAgeCard age={ears} room={!solo} />}
+              {ears && <MusicAgeCard age={ears} room={!solo} locale={pageLocale} />}
               {/* The QR for a room looking at a shared screen; a link for a
                   host holding the screen, and under the QR as well on a
                   desktop with a room of two or more. The QR is not rendered
@@ -1851,12 +1859,13 @@ export default function OrderPage() {
                     max: soloOrderMaxScore(rounds.length),
                   }}
                   against={against}
+                  locale={pageLocale}
                 />
               )}
-              {onward.qr && <LoopQr />}
+              {onward.qr && <LoopQr caption={copy.qrCaption} />}
               {onward.mixedLink && (
                 <a className="next-game-link" href={MIXED_SETUP_HREF} onClick={openMixedSetup}>
-                  {MIXED_NEXT_GAME_LABEL}
+                  {copy.mixedNextGame}
                 </a>
               )}
             </div>
@@ -1864,10 +1873,10 @@ export default function OrderPage() {
         </main>
 
         <aside className="sidebar">
-          <div className="sidebar-header">Scoreboard</div>
+          <div className="sidebar-header">{copy.scoreboard}</div>
           <div className="score-list">
             {teamGame ? (
-              <TeamScoreList players={players} scorePulse={scorePulse} />
+              <TeamScoreList players={players} scorePulse={scorePulse} locale={pageLocale} />
             ) : (
               sortedPlayers.map((p, idx) => {
                 const isLeader = p.score === maxScore && maxScore > 0;

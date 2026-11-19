@@ -125,7 +125,7 @@ import {
 } from "@/components/setup-assist";
 import { useErrorLocale } from "@/lib/use-error-locale";
 import { ServiceNotice } from "@/components/service-notice";
-import { buildGamePayload, findDuplicateName, isPlaylistKind, type GameMode, type PlaylistKind } from "@/lib/game-session";
+import { buildGamePayload, findDuplicateName, gameLocaleFor, isPlaylistKind, type GameMode, type PlaylistKind } from "@/lib/game-session";
 import {
   DEFAULT_PLAY_STYLE,
   orderRefusal,
@@ -658,6 +658,8 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
         totalTracks: tracks.length,
         playlistSource: "mixed",
         mode: gameMode(Boolean(room)),
+        // The game's own screen speaks the setup page's language (lib/order-copy.ts).
+        locale: gameLocaleFor(pageLocale),
         setupSource: setupSourceFor(true),
         mixedPlaylistMeta: {
           contributorNames: data.players,
@@ -1052,6 +1054,8 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
         totalTracks: data.totalTracks,
         playlistSource: "own",
         mode: gameMode(Boolean(room)),
+        // The game's own screen speaks the setup page's language (lib/order-copy.ts).
+        locale: gameLocaleFor(pageLocale),
         setupSource: setupSourceFor(false),
         ...(playlistKind ? { playlistKind } : {}),
         // What a solo player's best is kept under (lib/streak.ts).
@@ -1349,6 +1353,8 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
         totalTracks: tracks.length,
         playlistSource: "mixed",
         mode: gameMode(Boolean(room)),
+        // The game's own screen speaks the setup page's language (lib/order-copy.ts).
+        locale: gameLocaleFor(pageLocale),
         setupSource: setupSourceFor(true),
         mixedPlaylistMeta: {
           contributorNames: mixedContributions.map((c) => c.name),

@@ -104,6 +104,27 @@ export interface GamePayload {
   seed?: number;
   /** Set when this game is a friend's challenge: the score it is played against. */
   challenge?: ChallengeScore;
+  /**
+   * The language the game's own screen speaks. Set to `"pt"` by the
+   * Portuguese setup page (`app/setup-page.tsx` with `locale="pt"`) so the
+   * order page (`lib/order-copy.ts`) does not switch a Brazilian host to
+   * English the moment they press Start. Absent is English — every game
+   * stored before 2026-11-19 and every game from `/` — and any other value
+   * is repaired to absent, never a reason to reject the payload.
+   */
+  locale?: GameLocale;
+}
+
+/**
+ * The non-English languages a game payload may carry. A closed set with an
+ * allow-list, like `GAME_MODES`: English is the absence of the field.
+ */
+export type GameLocale = "pt";
+
+export const GAME_LOCALES: readonly GameLocale[] = ["pt"];
+
+export function isGameLocale(value: unknown): value is GameLocale {
+  return typeof value === "string" && (GAME_LOCALES as readonly string[]).includes(value);
 }
 
 /**
@@ -169,6 +190,17 @@ export interface BuildGamePayloadInput {
   playlistRef?: string;
   seed?: number;
   challenge?: ChallengeScore;
+  /** `gameLocaleFor(setup page's locale)`: undefined for English. */
+  locale?: GameLocale;
+}
+
+/**
+ * The payload's language for a setup page rendered in `setupLocale`: `"pt"`
+ * from the Portuguese page, undefined (English) from every other. Takes a
+ * plain string so this module does not import the setup page's copy table.
+ */
+export function gameLocaleFor(setupLocale: string): GameLocale | undefined {
+  return isGameLocale(setupLocale) ? setupLocale : undefined;
 }
 
 export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
@@ -186,6 +218,7 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
     ...(input.playlistKind ? { playlistKind: input.playlistKind } : {}),
     ...(input.playlistRef ? { playlistRef: input.playlistRef } : {}),
     ...(isSeed(input.seed) ? { seed: input.seed } : {}),
+    ...(isGameLocale(input.locale) ? { locale: input.locale } : {}),
     ...(isChallengeScore(input.challenge)
       ? { challenge: { score: input.challenge.score, max: input.challenge.max } }
       : {}),
@@ -429,6 +462,8 @@ export function parseGamePayload(raw: string): GamePayload | null {
     // reject: a bad seed is a game that cannot issue a challenge, a bad score
     // is a game played without one to beat — and either still plays.
     ...(isSeed(d.seed) ? { seed: d.seed } : {}),
+    // Absent is English; a value outside the allow-list reads as English too.
+    ...(isGameLocale(d.locale) ? { locale: d.locale } : {}),
     ...(isChallengeScore(d.challenge)
       ? { challenge: { score: d.challenge.score, max: d.challenge.max } }
       : {}),

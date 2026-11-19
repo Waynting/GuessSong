@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { PHONE_MEDIA_QUERY } from "@/lib/game-over";
 import { SETUP_COPY } from "@/lib/setup-copy";
 import { orderSummary } from "@/lib/order-game";
+import { ORDER_COPY } from "@/lib/order-copy";
 
 /**
  * The order page's wiring, as far as the suite can see it.
@@ -185,14 +186,14 @@ describe("the order page's beacons", () => {
 describe("the order page's Game Over", () => {
   it("renders the QR only where the rule says to, so a phone never reports its impression", () => {
     expect(body.match(/<LoopQr\b/g) ?? []).toHaveLength(1);
-    expect(body).toMatch(/\{onward\.qr && <LoopQr \/>\}/);
+    expect(body).toMatch(/\{onward\.qr && <LoopQr caption=\{copy\.qrCaption\} \/>\}/);
     expect(body).toMatch(/const onward = gameOverOnward\(screen, players\.length\);/);
     expect(body).not.toMatch(/reportLoopImpression/);
   });
 
   it("gives the phone the Mixed link from the constants in lib/, and counts both taps before navigating", () => {
     expect(body).toMatch(
-      /\{onward\.mixedLink && \(\s*<a className="next-game-link" href=\{MIXED_SETUP_HREF\} onClick=\{openMixedSetup\}>\s*\{MIXED_NEXT_GAME_LABEL\}/
+      /\{onward\.mixedLink && \(\s*<a className="next-game-link" href=\{MIXED_SETUP_HREF\} onClick=\{openMixedSetup\}>\s*\{copy\.mixedNextGame\}/
     );
     expect(body).not.toContain("mode=mixed");
     expect(member("playAgain")).toMatch(/reportGameOverTap\("play_again", screen\);\s*router\.push\("\/"\);/);
@@ -470,7 +471,8 @@ describe("the order game's first screen (2026-11-10)", () => {
     expect(prompt).toMatch(/color: #9a9a9a/);
     expect(prompt).not.toMatch(/uppercase|letter-spacing/);
     expect(source).toMatch(/\.order-prompt\.revealed \{ color: #1DB954; letter-spacing: 0\.06em; text-transform: uppercase; \}/);
-    expect(body).toMatch(/"Oldest on top\. Drag the cards into order, then reveal"/);
+    expect(body).toMatch(/: copy\.prompt\.solo\}/);
+    expect(ORDER_COPY.en.prompt.solo).toBe("Oldest on top. Drag the cards into order, then reveal");
   });
 
   it("draws Reveal as a green-bordered ghost on round one until a card moves, never disabled", () => {
@@ -495,7 +497,7 @@ describe("the order game's first screen (2026-11-10)", () => {
     // A deal left alone is still graded, and the top card is the oldest one
     // time in four: the line must never contradict a scoreboard that moved.
     expect(body).toMatch(
-      /\{!hostMoved && !buzzerRoom && exactWinner === null && oldestWinner === null && \(\s*<p className="order-untouched">Left as dealt — drag the cards next round to score\.<\/p>/
+      /\{!hostMoved && !buzzerRoom && exactWinner === null && oldestWinner === null && \(\s*<p className="order-untouched">\{copy\.result\.untouched\}<\/p>/
     );
     expect(body.indexOf('className="order-untouched"')).toBeGreaterThan(body.indexOf('className={`order-result'));
     expect(rule(source, ".order-untouched")).toMatch(/color: #888/);

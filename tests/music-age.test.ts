@@ -108,7 +108,7 @@ describe("the wire and the counter", () => {
 describe("the card", () => {
   it("renders on the order Game Over only behind the computed age, above the onward offers", () => {
     const page = read("app/order/page.tsx");
-    expect(page).toContain("{ears && <MusicAgeCard age={ears} room={!solo} />}");
+    expect(page).toContain("{ears && <MusicAgeCard age={ears} room={!solo} locale={pageLocale} />}");
     expect(page.match(/<MusicAgeCard /g)).toHaveLength(1);
     expect(page).toMatch(/const ears = phase === "finished" \? musicAge\(closedRounds\) : null;/);
   });
