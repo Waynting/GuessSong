@@ -292,6 +292,18 @@ that shipped:
   page. `tests/error-messages.test.ts` pins that neither of the two browser
   codes mentions the playlist.
 
+**Page translation is switched off, and that is a crash fix, not a style
+choice** (issue #87, "O jogo parou"). Every page says `lang="en"`, so a phone
+set to "always translate English" ran the site through Google Translate, which
+swaps React's text nodes for `<font>` elements; the next render's `removeChild`
+threw `NotFoundError` and Start on `/` landed on the crash screen for Brazilian
+hosts. `translate="no"` plus `<meta name="google" content="notranslate">` on
+the root layout and `app/global-error.tsx` is the fix (a translated React page
+also freezes text it no longer owns, e.g. scores), and
+`TRANSLATE_GUARD_SCRIPT` (`lib/translate-guard.ts`, inline in `<head>` before
+hydration) makes `removeChild`/`insertBefore` tolerate moved nodes for
+translators that ignore the opt-out. `tests/translate-guard.test.ts` pins both.
+
 The boundary reports through `client_error` in `lib/analytics.ts`, bucketed by
 which boundary caught it. **No message, stack or digest may join those params** —
 stack frames carry pasted playlist URLs and query strings, which is exactly the

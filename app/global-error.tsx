@@ -19,7 +19,10 @@ export default function GlobalError({
   reset: () => void;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" translate="no">
+      <head>
+        <meta name="google" content="notranslate" />
+      </head>
       <body style={{ margin: 0, background: "#111" }}>
         <CrashScreen error={error} reset={reset} boundary="root" />
       </body>
