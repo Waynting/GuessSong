@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { PwaSetup } from "@/components/pwa-setup";
+import { TRANSLATE_GUARD_SCRIPT } from "@/lib/translate-guard";
 import "./globals.css";
 
 const GA_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
@@ -118,8 +119,13 @@ export default function RootLayout({
   };
 
   return (
-    <html lang="en">
+    // translate="no" + the notranslate meta keep Google Translate off React's
+    // DOM, and the guard script below is the net for translators that ignore
+    // them — issue #87, see lib/translate-guard.ts. Do not remove either.
+    <html lang="en" translate="no">
       <head>
+        <meta name="google" content="notranslate" />
+        <script dangerouslySetInnerHTML={{ __html: TRANSLATE_GUARD_SCRIPT }} />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
