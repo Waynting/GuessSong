@@ -82,8 +82,13 @@ export const LOOP_SURFACES = [
    */
   "quiz_result",
   /**
-   * The invite card on a one-player Game Over (`components/solo-invite.tsx`),
-   * since 2026-11-15: someone who just played alone sends the group chat a
+   * **Retired 2026-11-19; kept so links already sent still count.** The
+   * invite card on a one-player Game Over (`components/solo-invite.tsx`,
+   * deleted), 2026-11-15 → 11-19: about 4,000 shown, 5 real sends — against the
+   * music-age card's 1.1% of shown in the same window. People alone share a
+   * result about themselves, not an invitation. Nothing reports an impression
+   * for it any more, so a `followed` with no `shown` is expected here, as for
+   * `share`. Originally: someone who just played alone sends the group chat a
    * link to play it together next time. A warm sender and a cold recipient —
    * the same carrier as `quiz_result`, a URL in a chat — so it is its own
    * arm, never averaged with a QR. `followed` is a friend opening it.

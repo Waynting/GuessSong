@@ -41,7 +41,6 @@ import { TeamGameOver, TeamScoreList } from "@/components/team-scoreboard";
 import { loadGame } from "@/lib/game-storage";
 import { useScreenWakeLock } from "@/lib/wake-lock";
 import { LoopQr } from "@/components/loop-qr";
-import { SoloInvite } from "@/components/solo-invite";
 import { MusicAgeCard } from "@/components/music-age";
 import { musicAge, type MusicAgeRound } from "@/lib/music-age";
 import { streakLine, takeStreakResult, type StreakResult } from "@/lib/streak";
@@ -1854,9 +1853,6 @@ export default function OrderPage() {
                   against={against}
                 />
               )}
-              {/* A game of one: nobody here to scan or mix with, so the offer
-                  is to ask someone for next time. lib/game-over.ts. */}
-              {onward.soloInvite && <SoloInvite game="order" />}
               {onward.qr && <LoopQr />}
               {onward.mixedLink && (
                 <a className="next-game-link" href={MIXED_SETUP_HREF} onClick={openMixedSetup}>

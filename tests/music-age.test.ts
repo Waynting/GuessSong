@@ -111,7 +111,6 @@ describe("the card", () => {
     expect(page).toContain("{ears && <MusicAgeCard age={ears} room={!solo} />}");
     expect(page.match(/<MusicAgeCard /g)).toHaveLength(1);
     expect(page).toMatch(/const ears = phase === "finished" \? musicAge\(closedRounds\) : null;/);
-    expect(page.indexOf("<MusicAgeCard ")).toBeLessThan(page.indexOf("<SoloInvite "));
   });
 
   it("keeps the rounds from closeRound's own verdicts, not a second grading path", () => {

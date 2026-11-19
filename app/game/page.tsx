@@ -37,7 +37,6 @@ import { announcesNoScore } from "@/lib/round-outcome";
 import { isPreviewSettled, type PreviewBatchTrack } from "@/types/preview";
 import { BuzzerHostPanel, type BuzzerControls } from "@/components/buzzer-host-panel";
 import { LoopQr } from "@/components/loop-qr";
-import { SoloInvite } from "@/components/solo-invite";
 import { streakLine, takeStreakResult, type StreakResult } from "@/lib/streak";
 import { closeRoundEntry, type RoundHistoryEntry } from "@/lib/round-history";
 import { describeRounds, summarizeRounds } from "@/lib/round-summary";
@@ -2862,9 +2861,6 @@ export default function GamePage() {
                   is not rendered at all, because rendering is what reports
                   its impression. A desktop with a room of two or more gets
                   the link under the QR as well. lib/game-over.ts. */}
-              {/* A game of one: nobody here to scan or mix with, so the offer
-                  is to ask someone for next time. lib/game-over.ts. */}
-              {onward.soloInvite && <SoloInvite game="guess" />}
               {onward.qr && <LoopQr />}
               {onward.mixedLink && (
                 <a className="next-game-link" href={MIXED_SETUP_HREF} onClick={openMixedSetup}>

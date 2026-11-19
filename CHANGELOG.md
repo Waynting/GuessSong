@@ -276,6 +276,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "those loads were N Spotify requests — x.xx per load" under the budget
   block. That ratio, not the load count, is what the ceiling is set against.
 
+### Removed
+
+- **The one-player invite card** ("Better with friends · Send it to the group
+  chat", `components/solo-invite.tsx`, `lib/solo-invite-copy.ts`), shipped
+  2026-11-15. About 4,000 shown and 5 real sends, against the music-age
+  card's 1.1% of shown over the same days: people alone share a result about
+  themselves, not an invitation. `gameOverOnward` loses `soloInvite`. The
+  `solo_invite` surface, pulse kind and `solo_invite:<outcome>` counters stay,
+  so links already sent still redirect and count and the stats line still
+  reads the history.
+
+
 ## [1.24.0] - 2026-11-10
 
 ### Added
