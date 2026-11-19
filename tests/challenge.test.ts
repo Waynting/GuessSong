@@ -400,24 +400,28 @@ describe("the pages, by reading the source", () => {
     expect(page.match(/seededRandom\(/g)).toHaveLength(1);
   });
 
-  it("the order page offers the challenge to a solo seeded game and counts a friend's result once", () => {
+  it("the order page no longer issues a challenge, shows a friend's result and counts it once", () => {
     const page = code(read("app/order/page.tsx"));
-    expect(page).toMatch(/\{solo && dealSource && players\[0\] && \(\s*<OrderChallenge/);
-    expect(page).toMatch(/count: pool\.length,/);
-    expect(page).toMatch(/max: soloOrderMaxScore\(rounds\.length\),/);
+    // The "Challenge a friend" button is gone from every order Game Over
+    // (2026-11-20, the daily challenge replaced it): the card is drawn only
+    // for a friend's challenge game, and only off a daily game.
+    expect(page).toMatch(/\{!daily && solo && against && players\[0\] && \(\s*<OrderChallenge score=\{players\[0\]\.score\} against=\{against\} locale=\{pageLocale\} \/>/);
+    expect(page.match(/<OrderChallenge\b/g)).toHaveLength(1);
+    expect(page).not.toMatch(/dealSource|soloOrderMaxScore|challengeShareUrl/);
     const finished = page.slice(page.indexOf("function trackGameFinished"), page.indexOf("function nextRound"));
     expect(finished).toMatch(/if \(finishedTrackedRef\.current\) return;/);
     expect(finished).toMatch(/reportChallengeResult\(challengeVerdict\(players\[0\]\.score, against\.score\)\)/);
     expect(page.match(/reportChallengeResult\(/g)).toHaveLength(1);
   });
 
-  it("the card reports its impression on mount and shares the counting redirect's URL, never the tab's", () => {
-    const src = read("components/order-challenge.tsx");
-    expect(src).toMatch(/reportLoopImpression\("challenge"\)/);
-    expect(src).toMatch(/challengeShareUrl\(deal\)/);
-    expect(src).toMatch(/reportChallengeShare\(outcome\)/);
-    expect(src).toMatch(/className="btn-ghost compact"/);
-    expect(code(src)).not.toMatch(/window\.location/);
+  it("the card is the result line only: no button, no share, no impression for a link it does not carry", () => {
+    const src = code(read("components/order-challenge.tsx"));
+    expect(src).toMatch(/challengeResultLine\(score, against\.score, locale\)/);
+    expect(src).not.toMatch(/<button|shareLink|challengeShareUrl|reportChallengeShare|reportLoopImpression|challengeButtonLabel/);
+    // No other component issues a challenge link either.
+    for (const page of ["app/order/page.tsx", "app/game/page.tsx", "app/setup-page.tsx"]) {
+      expect(code(read(page)), page).not.toMatch(/challengeShareUrl|challengeButtonLabel/);
+    }
   });
 
   it("the redirect route hands its query to the decision", () => {

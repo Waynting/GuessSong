@@ -148,6 +148,7 @@ export type AppErrorCode =
   | "order_too_few_dated"
   | "order_dates_pending"
   | "order_count_too_small"
+  | "daily_unavailable"
   // The browser itself, not the playlist — see the note above their entries
   | "storage_blocked"
   | "client_error"
@@ -705,6 +706,14 @@ export const ERROR_MESSAGES: Record<AppErrorCode, Record<ErrorLocale, string>> =
     en: "That number of songs is too few to put in order. Raise Number of Songs in the settings, or pick All.",
     zh: "歌曲數太少，排不出順序。在設定裡把「歌曲數」調高，或選「全部」。",
     pt: "Esse número de músicas é pouco para pôr em ordem. Aumente o Número de músicas nas configurações, ou escolha Todas.",
+  },
+  // The daily challenge's own list (lib/daily.ts) could not deal five songs
+  // from five different years today. Ours to fix, never the host's: it names
+  // no link and offers the order game they can still play.
+  daily_unavailable: {
+    en: "Today's challenge couldn't be dealt — that's on us, not you. Pick \"Just me\" above to play the order game in the meantime.",
+    zh: "今日挑戰今天發不出牌，是我們這邊的問題，不是你的。可以先在上面選「Just me」玩排順序。",
+    pt: "Não deu para montar o desafio de hoje — o problema é nosso, não seu. Enquanto isso, escolha \"Só eu\" lá em cima para jogar o Ponha em ordem.",
   },
   order_dates_pending: {
     en: "We don't have release years for this playlist yet — our saved copy is from before this mode existed and refreshes within a day. Play Guess the song for now, or try Put them in order again later.",

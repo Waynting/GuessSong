@@ -655,7 +655,7 @@ export type AnalyticsEvent =
       params: { outcome: "shared" | "copied" | "dismissed" | "failed" };
     }
   | {
-      /** The setup page's "Today's challenge" fake door (`lib/daily-door.ts`). KV's `daily_door:<stage>` is authoritative. */
+      /** Retired 2026-11-19: the "Today's challenge" fake door, replaced by the real one (lib/daily.ts). Nothing sends it. */
       name: "daily_door";
       params: { stage: "shown" | "tapped" };
     }

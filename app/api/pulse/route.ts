@@ -11,7 +11,7 @@ import {
   recordLoopImpression,
   recordQuizShare,
 } from "@/lib/loop-stats";
-import { recordDailyDoor, recordQuizCopy, recordQuizSocial, recordSoloInvite } from "@/lib/loop-stats";
+import { recordDaily, recordDailyDoor, recordDailyShare, recordQuizCopy, recordQuizSocial, recordSoloInvite } from "@/lib/loop-stats";
 import { recordMusicAge } from "@/lib/loop-stats";
 import { recordLyricLineRound } from "@/lib/loop-stats";
 import { recordChallenge } from "@/lib/loop-stats";
@@ -151,6 +151,12 @@ export async function POST(req: NextRequest) {
       break;
     case "challenge":
       await recordChallenge(event.step);
+      break;
+    case "daily":
+      await recordDaily(event.stage, event.stage === "finished" ? event.score : undefined);
+      break;
+    case "daily_share":
+      await recordDailyShare(event.outcome);
       break;
   }
 

@@ -111,6 +111,15 @@ export const LOOP_SURFACES = [
    * `?ref=` — `lib/loop-redirect.ts` re-validates the challenge on the way.
    */
   "challenge",
+  /**
+   * The daily challenge's result card on a daily Game Over
+   * (`components/daily-result.tsx`, `lib/daily.ts`), since 2026-11-19: a
+   * Wordle-style grid about the player, pasted into a chat with this link.
+   * Lands on `/?ref=daily` like every surface; the setup page's daily card is
+   * the same five songs for whoever opens it today. `shown` is the card's
+   * mount, `followed` a friend opening the link.
+   */
+  "daily",
 ] as const;
 
 export type LoopSurface = (typeof LOOP_SURFACES)[number];

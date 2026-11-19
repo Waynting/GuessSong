@@ -159,7 +159,8 @@ describe("the payload carries the setup page's language", () => {
   it("is written by every start path of the setup page, from its locale prop", () => {
     const page = read("app/setup-page.tsx");
     const builds = page.match(/buildGamePayload\(\{[\s\S]*?\n {6}\}\);/g) ?? [];
-    expect(builds).toHaveLength(3);
+    // Three form starts and the daily challenge's start (2026-11-19).
+    expect(builds).toHaveLength(4);
     for (const build of builds) expect(build).toMatch(/locale: gameLocaleFor\(pageLocale\),/);
   });
 });
@@ -263,8 +264,9 @@ describe("the lib lines the order page renders", () => {
     expect(read("components/music-age.tsx")).toMatch(/musicAgeCopy\(age, room, locale\)/);
     const challenge = read("components/order-challenge.tsx");
     expect(challenge).toMatch(/const copy = ORDER_COPY\[locale\]\.challenge;/);
-    expect(challenge).toMatch(/challengeResultLine\(deal\.score, against\.score, locale\)/);
-    expect(challenge).toMatch(/challengeShareText\(deal\.score, deal\.max, locale\)/);
+    // The issuing button went with the daily challenge; the result line stays localized.
+    expect(challenge).toMatch(/challengeResultLine\(score, against\.score, locale\)/);
+    expect(read("components/daily-result.tsx")).toMatch(/const copy = ORDER_COPY\[locale\]\.daily;/);
     const teams = read("components/team-scoreboard.tsx");
     expect(teams).not.toMatch(/TEAM_NAMES|"It's a tie"|"pts each"/);
     expect(read("components/loop-qr.tsx")).toMatch(/\{caption\}/);

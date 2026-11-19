@@ -136,11 +136,29 @@ export interface OrderCopy {
     vs: (team: string, total: number) => string;
   };
 
-  /** components/order-challenge.tsx; its other lines are lib/challenge.ts's. */
+  /**
+   * components/order-challenge.tsx, a friend's challenge game only; its
+   * result line is lib/challenge.ts's. The issuing button and its words went
+   * with the daily challenge (2026-11-19).
+   */
   challenge: {
     againstBody: string;
-    body: (score: number, max: number) => string;
-    linkCopied: string;
+  };
+
+  /**
+   * The daily challenge's Game Over card (components/daily-result.tsx) and
+   * the game's name in the top bar. The share line's format is
+   * `dailyShareText` in lib/daily.ts, by the same locale.
+   */
+  daily: {
+    playlistName: (n: number) => string;
+    title: (n: number) => string;
+    scoreLine: (score: number, size: number) => string;
+    body: string;
+    share: string;
+    copied: string;
+    tomorrow: string;
+    gridAria: (score: number, size: number) => string;
   };
 }
 
@@ -218,9 +236,18 @@ export const ORDER_COPY: Record<OrderLocale, OrderCopy> = {
     },
 
     challenge: {
-      againstBody: "Same songs, same order. Send your score back and see if they can top it.",
-      body: (score, max) => `You scored ${score} of ${max}. Send a friend the same songs and see if they can beat it.`,
-      linkCopied: "Link copied ✓",
+      againstBody: "Same songs, same order as your friend's game.",
+    },
+
+    daily: {
+      playlistName: (n) => `Daily #${n}`,
+      title: (n) => `Daily #${n}`,
+      scoreLine: (score, size) => `${score}/${size} in the right place`,
+      body: "Same five songs for everyone today. Send your grid — no spoilers, just squares.",
+      share: "Share my grid",
+      copied: "Copied ✓",
+      tomorrow: "A new five tomorrow.",
+      gridAria: (score, size) => `${score} of ${size} in place`,
     },
   },
 
@@ -304,10 +331,18 @@ export const ORDER_COPY: Record<OrderLocale, OrderCopy> = {
     },
 
     challenge: {
-      againstBody: "Mesmas músicas, mesma ordem. Mande seu placar de volta e veja se dá para superar.",
-      body: (score, max) =>
-        `Você fez ${score} de ${max}. Mande as mesmas músicas para um amigo e veja se ele consegue superar.`,
-      linkCopied: "Link copiado ✓",
+      againstBody: "Mesmas músicas, na mesma ordem do jogo do seu amigo.",
+    },
+
+    daily: {
+      playlistName: (n) => `Desafio do dia #${n}`,
+      title: (n) => `Desafio #${n}`,
+      scoreLine: (score, size) => `${score}/${size} no lugar certo`,
+      body: "As mesmas cinco músicas para todo mundo hoje. Mande seus quadradinhos — sem spoiler.",
+      share: "Compartilhar meu resultado",
+      copied: "Copiado ✓",
+      tomorrow: "Amanhã tem mais cinco.",
+      gridAria: (score, size) => `${score} de ${size} no lugar`,
     },
   },
 };

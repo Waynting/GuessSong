@@ -128,6 +128,21 @@ export interface SetupCopy {
   quizCardTitle: string;
   quizCardSub: string;
 
+  /** The daily challenge's card under the form (lib/daily.ts). */
+  daily: {
+    title: (n: number) => string;
+    sub: string;
+    loading: string;
+    /** The card in its "done today" state, tapped to share again. */
+    done: (n: number, score: number, size: number) => string;
+    shareAgain: string;
+    copied: string;
+    /** Under the done card, instead of a second attempt. */
+    tomorrow: (next: number) => string;
+    /** The one name a daily game is played under. */
+    player: string;
+  };
+
   whatIsTitle: string;
   whatIsBody: string;
   howToPlay: string;
@@ -307,6 +322,16 @@ export const SETUP_COPY: Record<SetupLocale, SetupCopy> = {
 
     quizCardTitle: "Not playing right now?",
     quizCardSub: "Make a Taste Quiz link for friends →",
+    daily: {
+      title: (n) => `Today's challenge #${n}`,
+      sub: "Five songs, put them in order — the same for everyone today →",
+      loading: "Dealing today's five…",
+      done: (n, score, size) => `Today's challenge #${n} — done: ${score}/${size}`,
+      shareAgain: "Share",
+      copied: "Copied ✓",
+      tomorrow: (next) => `Back tomorrow for #${next}.`,
+      player: "You",
+    },
 
     whatIsTitle: "What is GuessSong?",
     whatIsBody:
@@ -503,6 +528,16 @@ export const SETUP_COPY: Record<SetupLocale, SetupCopy> = {
 
     quizCardTitle: "Não vai jogar agora?",
     quizCardSub: "Crie um link de Quiz de Gosto para os amigos →",
+    daily: {
+      title: (n) => `Desafio do dia #${n}`,
+      sub: "Cinco músicas para pôr em ordem — as mesmas para todo mundo hoje →",
+      loading: "Separando as cinco de hoje…",
+      done: (n, score, size) => `Desafio do dia #${n} — feito: ${score}/${size}`,
+      shareAgain: "Compartilhar",
+      copied: "Copiado ✓",
+      tomorrow: (next) => `Volte amanhã para o #${next}.`,
+      player: "Você",
+    },
 
     whatIsTitle: "O que é o GuessSong?",
     whatIsBody:
