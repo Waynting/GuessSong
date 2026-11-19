@@ -398,7 +398,10 @@ describe("the loop says one thing", () => {
     expect(cta).toMatch(/children = LOOP_CTA_LABEL/);
     expect(cta).toMatch(/LOOP_FOOTER_LABEL\.split\("GuessSong"\)/);
     const qr = code(read("components/loop-qr.tsx"));
-    expect(qr).toMatch(/\{LOOP_QR_CAPTION\}/);
+    // The caption defaults to the loop's sentence; the order page passes its
+    // Portuguese one for a /pt game (lib/order-copy.ts, whose `en` is it).
+    expect(qr).toMatch(/caption = LOOP_QR_CAPTION,/);
+    expect(qr).toMatch(/\{caption\}/);
     // The result card printed the caption beside its QR until the `share`
     // arm read 0 of 94 and the code came off (1.15.0). What it prints now is
     // the bare address, and nothing scan-shaped: a "Scan to …" line with no

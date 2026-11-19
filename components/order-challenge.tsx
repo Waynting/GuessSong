@@ -30,17 +30,22 @@ import {
   type ChallengeDeal,
   type ChallengeScore,
 } from "@/lib/challenge";
+import { ORDER_COPY, type OrderLocale } from "@/lib/order-copy";
 
 export function OrderChallenge({
   deal,
   against,
+  locale = "en",
 }: {
   /** This game's deal and score — what the button sends. */
   deal: ChallengeDeal;
   /** The friend's score this game was played against, when it was a challenge. */
   against: ChallengeScore | null;
+  /** The game payload's language (lib/order-copy.ts). */
+  locale?: OrderLocale;
 }) {
   const [copied, setCopied] = useState(false);
+  const copy = ORDER_COPY[locale].challenge;
 
   useEffect(() => {
     reportLoopImpression("challenge");
@@ -54,7 +59,7 @@ export function OrderChallenge({
 
   async function challenge() {
     const url = challengeShareUrl(deal);
-    const text = challengeShareText(deal.score, deal.max);
+    const text = challengeShareText(deal.score, deal.max, locale);
     const outcome = await shareLink({ url, text, title: "GuessSong" }, `${text} ${url}`);
     reportChallengeShare(outcome);
     if (outcome === "copied") setCopied(true);
@@ -86,20 +91,20 @@ export function OrderChallenge({
             marginBottom: "8px",
           }}
         >
-          {challengeResultLine(deal.score, against.score)}
+          {challengeResultLine(deal.score, against.score, locale)}
         </div>
       )}
       <p style={{ fontSize: "13px", color: "#aaa", margin: "0 0 12px", lineHeight: 1.45 }}>
         {against
-          ? "Same songs, same order. Send your score back and see if they can top it."
-          : `You scored ${deal.score} of ${deal.max}. Send a friend the same songs and see if they can beat it.`}
+          ? copy.againstBody
+          : copy.body(deal.score, deal.max)}
       </p>
       <button
         className="btn-ghost compact"
         onClick={challenge}
         style={{ width: "100%", color: "#1DB954", borderColor: "rgba(29,185,84,0.5)", whiteSpace: "normal" }}
       >
-        {copied ? "Link copied ✓" : challengeButtonLabel(deal.score, against !== null)}
+        {copied ? copy.linkCopied : challengeButtonLabel(deal.score, against !== null, locale)}
       </button>
     </div>
   );

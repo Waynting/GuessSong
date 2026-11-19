@@ -268,8 +268,9 @@ describe("page wiring", () => {
   it.each(["app/game/page.tsx", "app/order/page.tsx"])("%s draws team totals and sends the flag on the end", (file) => {
     const page = read(file);
     expect(page).toMatch(/const teamGame = hasTeams\(players\)/);
-    expect(page).toMatch(/<TeamScoreList players=\{players\} scorePulse=\{scorePulse\} \/>/);
-    expect(page).toMatch(/<TeamGameOver players=\{players\} \/>/);
+    // The order page passes its payload's language (lib/order-copy.ts); /game is English.
+    expect(page).toMatch(/<TeamScoreList players=\{players\} scorePulse=\{scorePulse\}(?: locale=\{pageLocale\})? \/>/);
+    expect(page).toMatch(/<TeamGameOver players=\{players\}(?: locale=\{pageLocale\})? \/>/);
     expect(page).toMatch(/\.\.\.\(hasTeams\(players\) \? \{ teams: true \} : \{\}\)/);
   });
 

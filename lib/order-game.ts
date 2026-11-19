@@ -334,9 +334,18 @@ export function orderSummary(songCount: number | "all"): string {
   return `${songCount} songs (${rounds} round${rounds === 1 ? "" : "s"} of ${ORDER_ROUND_SIZE})`;
 }
 
-/** The note under the cards for the songs that could not be dealt, or null for none. */
-export function orderLeftoverLine(leftover: number): string | null {
+/**
+ * The note under the cards for the songs that could not be dealt, or null
+ * for none. `locale` is the game payload's (`lib/order-copy.ts`): a game
+ * started from the Portuguese setup page reads it in Portuguese.
+ */
+export function orderLeftoverLine(leftover: number, locale: "en" | "pt" = "en"): string | null {
   if (!Number.isInteger(leftover) || leftover <= 0) return null;
+  if (locale === "pt") {
+    return leftover === 1
+      ? "1 música ficou de fora — sem ano de lançamento, ou com o ano perto demais do das outras cartas"
+      : `${leftover} músicas ficaram de fora — sem ano de lançamento, ou com o ano perto demais do das outras cartas`;
+  }
   return leftover === 1
     ? "1 song left out — no release year, or too close in year to every other card"
     : `${leftover} songs left out — no release year, or too close in year to every other card`;

@@ -324,7 +324,8 @@ describe("both Game Over screens, solo only", () => {
       expect(src).toMatch(/\.\.\.\(soloStreak \? \{ streak: soloStreak\.band \} : \{\}\),/);
       expect(src).toMatch(/\.\.\.\(soloStreak\?\.best \? \{ best: soloStreak\.best\.outcome \} : \{\}\),/);
       expect(src).toMatch(/\{streakResult && \(/);
-      expect(src).toMatch(/\{streakLine\(streakResult, playlistName\)\}/);
+      // The order page reads it in its payload's language (lib/order-copy.ts).
+      expect(src).toMatch(/\{streakLine\(streakResult, playlistName(?:, pageLocale)?\)\}/);
       // Under the scores, above Play Again.
       const line = src.indexOf("{streakResult && (");
       const playAgain = src.indexOf('onClick={playAgain}');

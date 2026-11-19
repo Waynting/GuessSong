@@ -263,7 +263,8 @@ function shortName(name: string): string {
  * The line under the scores. "🔥 3-day streak · Best on Decades: 9 — new best!"
  * Day one says what a streak is instead of claiming one.
  */
-export function streakLine(result: StreakResult, playlistName: string): string {
+export function streakLine(result: StreakResult, playlistName: string, locale: "en" | "pt" = "en"): string {
+  if (locale === "pt") return streakLinePt(result, playlistName);
   const parts = [
     result.streak <= 1 ? "Day 1 — come back tomorrow to start a streak" : `🔥 ${result.streak}-day streak`,
   ];
@@ -273,6 +274,30 @@ export function streakLine(result: StreakResult, playlistName: string): string {
     const suffix =
       outcome === "new" ? " — new best!" : outcome === "tied" ? " — tied your best" : outcome === "first" ? " — beat it next time" : "";
     parts.push(`Best on ${name}: ${best}${suffix}`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * `streakLine` for a game started from the Portuguese setup page (the game
+ * payload's `locale`, `lib/order-copy.ts`).
+ */
+function streakLinePt(result: StreakResult, playlistName: string): string {
+  const parts = [
+    result.streak <= 1 ? "Dia 1 — volte amanhã para começar uma sequência" : `🔥 ${result.streak} dias seguidos`,
+  ];
+  const name = shortName(playlistName);
+  if (result.best && name) {
+    const { outcome, best } = result.best;
+    const suffix =
+      outcome === "new"
+        ? " — novo recorde!"
+        : outcome === "tied"
+        ? " — igualou seu recorde"
+        : outcome === "first"
+        ? " — tente superar na próxima"
+        : "";
+    parts.push(`Recorde em ${name}: ${best}${suffix}`);
   }
   return parts.join(" · ");
 }

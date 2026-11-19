@@ -242,22 +242,37 @@ export function isChallengeStep(value: unknown): value is ChallengeStep {
   return typeof value === "string" && (CHALLENGE_STEPS as readonly string[]).includes(value);
 }
 
-// ── Copy, English only like both game pages ────────────────────────────────
+// ── Copy: the setup banner is in lib/setup-copy.ts's table; the Game Over
+// card's lines below speak the order page's two languages ─────────────────
 
 export function challengeBanner(score: number, max: number): string {
   return `Your friend scored ${score} of ${max} on this playlist — beat it`;
 }
 
-export function challengeButtonLabel(score: number, answering: boolean): string {
+/*
+ * The Game Over card's words take the game payload's locale
+ * (`lib/order-copy.ts`): a game started from the Portuguese setup page gets
+ * them in Portuguese, the share text included — the friend is most likely in
+ * the same chat, reading the same language.
+ */
+export function challengeButtonLabel(score: number, answering: boolean, locale: "en" | "pt" = "en"): string {
+  if (locale === "pt") return answering ? `Mande de volta: supere meus ${score}` : `Desafie um amigo: supere meus ${score}`;
   return answering ? `Send it back: beat my ${score}` : `Challenge a friend: beat my ${score}`;
 }
 
-export function challengeShareText(score: number, max: number): string {
+export function challengeShareText(score: number, max: number, locale: "en" | "pt" = "en"): string {
+  if (locale === "pt") {
+    return `Fiz ${score} de ${max} pondo estas músicas na ordem de lançamento. Mesmas músicas, sua vez — consegue superar? Grátis, sem app.`;
+  }
   return `I got ${score} of ${max} putting these songs in release order. Same songs, your turn — can you beat it? Free, no app.`;
 }
 
-export function challengeResultLine(mine: number, theirs: number): string {
+export function challengeResultLine(mine: number, theirs: number, locale: "en" | "pt" = "en"): string {
   const verdict = challengeVerdict(mine, theirs);
+  if (locale === "pt") {
+    const tail = verdict === "won" ? "você venceu!" : verdict === "lost" ? "seu amigo venceu" : "empate";
+    return `Você ${mine} · Seu amigo ${theirs} — ${tail}`;
+  }
   const tail = verdict === "won" ? "you win!" : verdict === "lost" ? "your friend wins" : "a tie";
   return `You ${mine} · Your friend ${theirs} — ${tail}`;
 }
