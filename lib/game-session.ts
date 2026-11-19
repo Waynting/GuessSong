@@ -11,6 +11,7 @@ import { isSetupSource, type SetupSource } from "@/lib/setup-source";
 import { isPlayableRef } from "@/lib/playlist-ref";
 import { normalizeTeams, type TeamSide } from "@/lib/teams";
 import { isChallengeScore, isSeed, type ChallengeScore } from "@/lib/challenge";
+import { parseDailyTag, type DailyTag } from "@/lib/daily";
 
 export const GAME_STORAGE_KEY = "guesssong_game";
 
@@ -113,6 +114,13 @@ export interface GamePayload {
    * is repaired to absent, never a reason to reject the payload.
    */
   locale?: GameLocale;
+  /**
+   * Set when this game is the daily challenge (lib/daily.ts): the UTC day and
+   * its number. The tracks are then the day's five, in deal order, and the
+   * order page deals them as one round. Absent on every other game; a junk
+   * value is dropped by `parseGamePayload` and the game still plays.
+   */
+  daily?: DailyTag;
 }
 
 /**
@@ -192,6 +200,7 @@ export interface BuildGamePayloadInput {
   challenge?: ChallengeScore;
   /** `gameLocaleFor(setup page's locale)`: undefined for English. */
   locale?: GameLocale;
+  daily?: DailyTag;
 }
 
 /**
@@ -222,6 +231,7 @@ export function buildGamePayload(input: BuildGamePayloadInput): GamePayload {
     ...(isChallengeScore(input.challenge)
       ? { challenge: { score: input.challenge.score, max: input.challenge.max } }
       : {}),
+    ...dailyField(input.daily),
   };
 }
 
@@ -467,5 +477,13 @@ export function parseGamePayload(raw: string): GamePayload | null {
     ...(isChallengeScore(d.challenge)
       ? { challenge: { score: d.challenge.score, max: d.challenge.max } }
       : {}),
+    // The daily tag, the same trade: a bad one is dropped, the game plays on
+    // as an ordinary order game (lib/daily.ts `parseDailyTag`).
+    ...dailyField(d.daily),
   };
+}
+
+function dailyField(value: unknown): { daily?: DailyTag } {
+  const daily = parseDailyTag(value);
+  return daily ? { daily } : {};
 }

@@ -58,6 +58,14 @@ import { ORDER_VERDICTS, isOrderVerdict, type OrderVerdict } from "@/lib/order-g
 import { isPlayStyle, type PlayStyle } from "@/lib/order-game";
 import { ARRIVALS, isArrival, type Arrival } from "@/lib/arrival";
 import { isSoloStep, soloStepFitsBand, type SoloStep } from "@/lib/solo-party";
+import {
+  isDailyScore,
+  isDailyShareOutcome,
+  isDailyStage,
+  type DailyScore,
+  type DailyShareOutcome,
+  type DailyStage,
+} from "@/lib/daily";
 import { isBestOutcome, isStreakBand, type BestOutcome, type StreakBand } from "@/lib/streak";
 import { isChallengeStep, type ChallengeStep } from "@/lib/challenge";
 import {
@@ -1807,9 +1815,11 @@ export function recordSoloInvite(outcome: SoloInviteOutcome): Promise<void> {
 }
 
 /**
- * The setup page's "Today's challenge" fake door (`lib/daily-door.ts`):
- * `shown` once per page load, `tapped` once per page load. Nothing is started
- * from it, because there is nothing to start.
+ * **Retired 2026-11-19.** The setup page's "Today's challenge" fake door:
+ * `shown` once per page load, `tapped` once per page load. It answered (7.8%
+ * tapped against a 3% bar) and the real daily challenge replaced it
+ * (`recordDaily` below). Kept, recorder and pulse alike, so the history stays
+ * readable in `npm run stats`; nothing on the site sends it any more.
  */
 export type DailyDoorStage = "shown" | "tapped";
 
@@ -1818,6 +1828,25 @@ export const DAILY_DOOR_STAGES: readonly DailyDoorStage[] = ["shown", "tapped"];
 export function recordDailyDoor(stage: DailyDoorStage): Promise<void> {
   if (!DAILY_DOOR_STAGES.includes(stage)) return Promise.resolve();
   return bump(`daily_door:${stage}`);
+}
+
+/**
+ * The daily challenge (lib/daily.ts): `daily:<stage>`, and on `finished` the
+ * cards left in their true slot as `daily_score:<0..5>`. A `finished` without
+ * a valid score still counts the stage; a score is never written without it.
+ * Closed sets, refused rather than clamped — both tails come from a request body.
+ */
+export function recordDaily(stage: DailyStage, score?: DailyScore): Promise<void> {
+  if (!isDailyStage(stage)) return Promise.resolve();
+  const writes = [bump(`daily:${stage}`)];
+  if (stage === "finished" && isDailyScore(score)) writes.push(bump(`daily_score:${score}`));
+  return Promise.all(writes).then(() => undefined);
+}
+
+/** A daily result shared, from the Game Over card or the setup card's "done" state: `daily_share:<outcome>`. */
+export function recordDailyShare(outcome: DailyShareOutcome): Promise<void> {
+  if (!isDailyShareOutcome(outcome)) return Promise.resolve();
+  return bump(`daily_share:${outcome}`);
 }
 
 /**

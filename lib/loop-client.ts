@@ -40,7 +40,8 @@ import type { Arrival } from "@/lib/arrival";
 import type { StarterKey } from "@/lib/starter-playlists";
 import type { CountedSetupLocale } from "@/lib/setup-copy";
 import type { SoloStep } from "@/lib/solo-party";
-import type { DailyDoorStage, MusicAgeOutcome, SoloInviteOutcome } from "@/lib/loop-stats";
+import type { MusicAgeOutcome, SoloInviteOutcome } from "@/lib/loop-stats";
+import type { DailyScore, DailyShareOutcome, DailyStage } from "@/lib/daily";
 import type { BestOutcome, StreakBand } from "@/lib/streak";
 import type { ChallengeVerdict } from "@/lib/challenge";
 import type { ShareLinkOutcome } from "@/lib/quiz-share";
@@ -379,12 +380,25 @@ export function reportSoloInvite(outcome: SoloInviteOutcome): void {
 }
 
 /**
- * Call when the setup page's "Today's challenge" fake door is first drawn, and
- * on its first tap. See `lib/daily-door.ts`.
+ * The daily challenge (lib/daily.ts). KV only: `daily:<stage>` is the
+ * funnel, and `finished` carries the score (`daily_score:<n>`). The fake
+ * door's `reportDailyDoor` was here until 2026-11-19; its recorder stays in
+ * lib/loop-stats.ts so the history reads, but nothing sends it.
  */
-export function reportDailyDoor(stage: DailyDoorStage): void {
-  trackEvent("daily_door", { stage });
-  sendPulse({ kind: "daily_door", stage });
+export function reportDaily(stage: Exclude<DailyStage, "finished">): void;
+export function reportDaily(stage: "finished", score: DailyScore): void;
+export function reportDaily(stage: DailyStage, score?: DailyScore): void {
+  if (stage === "finished") {
+    if (score === undefined) return;
+    sendPulse({ kind: "daily", stage, score });
+    return;
+  }
+  sendPulse({ kind: "daily", stage });
+}
+
+/** A daily result left the share sheet or the clipboard: `daily_share:<outcome>`. */
+export function reportDailyShare(outcome: DailyShareOutcome): void {
+  sendPulse({ kind: "daily_share", outcome });
 }
 
 /**

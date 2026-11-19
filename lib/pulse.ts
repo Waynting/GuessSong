@@ -102,6 +102,14 @@ import { DAILY_DOOR_STAGES, type DailyDoorStage } from "@/lib/loop-stats";
 import { MUSIC_AGE_OUTCOMES, type MusicAgeOutcome } from "@/lib/loop-stats";
 import { LYRIC_LINE_ROUND_OUTCOMES, type LyricLineRoundOutcome } from "@/lib/loop-stats";
 import { isChallengeStep, type ChallengeStep } from "@/lib/challenge";
+import {
+  isDailyScore,
+  isDailyShareOutcome,
+  isDailyStage,
+  type DailyScore,
+  type DailyShareOutcome,
+  type DailyStage,
+} from "@/lib/daily";
 
 function isMixedSubMode(value: unknown): value is MixedSubMode {
   return typeof value === "string" && (MIXED_SUB_MODES as readonly string[]).includes(value);
@@ -233,7 +241,10 @@ export type PulseEvent =
   | { kind: "music_age"; outcome: MusicAgeOutcome }
   | { kind: "starter_theme_row"; style: PlayStyle }
   | { kind: "lyric_line_round"; outcome: LyricLineRoundOutcome }
-  | { kind: "challenge"; step: ChallengeStep };
+  | { kind: "challenge"; step: ChallengeStep }
+  | { kind: "daily"; stage: Exclude<DailyStage, "finished"> }
+  | { kind: "daily"; stage: "finished"; score: DailyScore }
+  | { kind: "daily_share"; outcome: DailyShareOutcome };
 
 /**
  * Narrows an untrusted request body, or returns null.
@@ -458,6 +469,21 @@ export function parsePulse(body: unknown): PulseEvent | null {
       return null;
     }
     return { kind: "daily_door", stage: raw.stage as DailyDoorStage };
+  }
+
+  if (raw.kind === "daily") {
+    // The stage is a key tail, and `finished` carries the score, another one:
+    // a finish without a score from the closed set is refused whole, so the
+    // score line can never sum past the finishes.
+    if (!isDailyStage(raw.stage)) return null;
+    if (raw.stage === "finished") {
+      return isDailyScore(raw.score) ? { kind: "daily", stage: "finished", score: raw.score } : null;
+    }
+    return { kind: "daily", stage: raw.stage };
+  }
+
+  if (raw.kind === "daily_share") {
+    return isDailyShareOutcome(raw.outcome) ? { kind: "daily_share", outcome: raw.outcome } : null;
   }
 
   if (raw.kind === "music_age") {

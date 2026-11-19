@@ -46,7 +46,17 @@ import { MusicAgeCard } from "@/components/music-age";
 import { musicAge, type MusicAgeRound } from "@/lib/music-age";
 import { streakLine, takeStreakResult, type StreakResult } from "@/lib/streak";
 import { OrderChallenge } from "@/components/order-challenge";
-import { challengeVerdict, isChallengeRef, soloOrderMaxScore, type ChallengeScore } from "@/lib/challenge";
+import { challengeVerdict, type ChallengeScore } from "@/lib/challenge";
+import { DailyResultCard } from "@/components/daily-result";
+import {
+  dailyGrid,
+  dailyRound,
+  gridScore,
+  rememberDailyResult,
+  type DailyResult,
+  type DailyScore,
+  type DailyTag,
+} from "@/lib/daily";
 import { formatMixList } from "@/lib/mix-export";
 import {
   CARD_FOOTER_HEIGHT,
@@ -59,6 +69,7 @@ import {
 import {
   reportGameEnd,
   reportChallengeResult,
+  reportDaily,
   reportGameLeft,
   reportGameOverTap,
   reportOrderPhoneRound,
@@ -197,14 +208,15 @@ export default function OrderPage() {
    * every phone too. Null is the shared-screen game, exactly as it was.
    */
   const [buzzerRoom, setBuzzerRoom] = useState<BuzzerRoomHandle | null>(null);
-  /**
-   * What a "beat my score" link needs from the payload (lib/challenge.ts):
-   * the seed the deal was drawn from and the link's ref. Null for a game that
-   * cannot issue one — a room, a Mixed pool, a game stored before the seed.
-   */
-  const [dealSource, setDealSource] = useState<{ seed: number; ref: string } | null>(null);
   /** The friend's score this game is played against, when it is a challenge. */
   const [against, setAgainst] = useState<ChallengeScore | null>(null);
+  /**
+   * The daily challenge this game is (lib/daily.ts), when its payload said so
+   * and its five cards deal as one round; null for every other game.
+   */
+  const [daily, setDaily] = useState<DailyTag | null>(null);
+  /** The day's result, set once by trackGameFinished after the reveal and stored. */
+  const [dailyResult, setDailyResult] = useState<DailyResult | null>(null);
   /** The reveal this page graded and sent, for the round it belongs to. */
   const [phoneRound, setPhoneRound] = useState<PhoneRound | null>(null);
   /**
@@ -273,7 +285,11 @@ export default function OrderPage() {
     // The deal is derived from the stored list, not stored itself, so a
     // reload reads the same list and deals the same rounds. A list that
     // deals nothing — a rollback, a hand-edited payload — has no game in it.
-    const built = buildOrderRounds(data.tracks);
+    // A daily game is the day's five as one round, in the stored order — the
+    // payload's order is the deal (lib/daily.ts). A daily tag over a list that
+    // does not deal that way is played as an ordinary order game.
+    const dailyDeal = data.daily ? dailyRound(data.tracks) : null;
+    const built = dailyDeal ? { rounds: [dailyDeal], leftover: 0 } : buildOrderRounds(data.tracks);
     if (built.rounds.length === 0) { router.push("/"); return; }
     // The start on `/` bumped the count before it navigated here, so the
     // count is this game's index. Read now and kept.
@@ -299,10 +315,9 @@ export default function OrderPage() {
     setPlaylistSource(data.playlistSource);
     setMixedMeta(data.mixedPlaylistMeta ?? null);
     setBuzzerRoom(data.buzzerRoom ?? null);
-    // The ref must be one a challenge link may carry (not editorial).
-    setDealSource(data.seed !== undefined && isChallengeRef(data.playlistRef) ? { seed: data.seed, ref: data.playlistRef } : null);
     setAgainst(data.challenge ?? null);
     setPageLocale(orderLocaleOf(data.locale));
+    setDaily(dailyDeal && data.daily ? data.daily : null);
     gameStartTimeRef.current = Date.now();
   }, [router]);
 
@@ -593,6 +608,18 @@ export default function OrderPage() {
     // are already on the board: a round is awarded at its reveal.
     if (against && players.length === 1) {
       reportChallengeResult(challengeVerdict(players[0].score, against.score));
+    }
+    // The daily challenge, once it was revealed: the grid is read off the
+    // arrangement the reveal scored, stored for the day (one attempt per
+    // device — the setup card shows it instead of a second deal) and counted.
+    // Ended before the reveal, it is no result: nothing is stored, so the
+    // card on `/` still offers the day's five.
+    if (daily && phase === "revealed" && rounds[0]) {
+      const grid = dailyGrid(arrangedIds, rounds[0]);
+      const finished: DailyResult = { day: daily.day, grid, score: gridScore(grid) };
+      rememberDailyResult(finished);
+      setDailyResult(finished);
+      reportDaily("finished", finished.score as DailyScore);
     }
     trackEvent("game_finished", {
       rounds_played: roundsPlayed,
@@ -1846,24 +1873,20 @@ export default function OrderPage() {
                   desktop with a room of two or more. The QR is not rendered
                   on a phone, because rendering is what reports its
                   impression. lib/game-over.ts. */}
-              {/* "Beat my score": a game of one with a seed and a single link
-                  can send a friend the same deal; a friend's own challenge
-                  game leads with the two scores. lib/challenge.ts. */}
-              {solo && dealSource && players[0] && (
-                <OrderChallenge
-                  deal={{
-                    ref: dealSource.ref,
-                    seed: dealSource.seed,
-                    count: pool.length,
-                    score: players[0].score,
-                    max: soloOrderMaxScore(rounds.length),
-                  }}
-                  against={against}
-                  locale={pageLocale}
-                />
+              {/* The daily challenge's grid replaces every onward offer: the
+                  one thing to do after today's five is send the squares.
+                  Rendered only behind a stored result, because mounting
+                  reports its impression. lib/daily.ts. */}
+              {daily && dailyResult && <DailyResultCard number={daily.number} grid={dailyResult.grid} locale={pageLocale} />}
+              {/* A friend's "beat my score" game: the two scores, side by
+                  side. The "Challenge a friend" button that issued these
+                  links is gone (2026-11-19) — the daily challenge replaced
+                  it — but links already sent still play. lib/challenge.ts. */}
+              {!daily && solo && against && players[0] && (
+                <OrderChallenge score={players[0].score} against={against} locale={pageLocale} />
               )}
-              {onward.qr && <LoopQr caption={copy.qrCaption} />}
-              {onward.mixedLink && (
+              {!daily && onward.qr && <LoopQr caption={copy.qrCaption} />}
+              {!daily && onward.mixedLink && (
                 <a className="next-game-link" href={MIXED_SETUP_HREF} onClick={openMixedSetup}>
                   {copy.mixedNextGame}
                 </a>

@@ -79,7 +79,10 @@ describe("the order page plays no audio", () => {
 
   it("deals from the stored list through lib/order-game, and refuses a list that deals nothing", () => {
     // The deal is derived, not stored, so a reload deals the same game.
-    expect(body).toMatch(/const built = buildOrderRounds\(data\.tracks\);/);
+    // A daily game (lib/daily.ts) is the day's five as one stored round; every
+    // other game is buildOrderRounds over the stored list.
+    expect(body).toMatch(/const dailyDeal = data\.daily \? dailyRound\(data\.tracks\) : null;/);
+    expect(body).toMatch(/const built = dailyDeal \? \{ rounds: \[dailyDeal\], leftover: 0 \} : buildOrderRounds\(data\.tracks\);/);
     expect(body).toMatch(/if \(built\.rounds\.length === 0\) \{ router\.push\("\/"\); return; \}/);
     expect(body).toMatch(/const cards = isRevealed && round \? trueOrder\(round\) : arranged;/);
     expect(body.match(/buildOrderRounds\(/g) ?? []).toHaveLength(1);
@@ -186,14 +189,15 @@ describe("the order page's beacons", () => {
 describe("the order page's Game Over", () => {
   it("renders the QR only where the rule says to, so a phone never reports its impression", () => {
     expect(body.match(/<LoopQr\b/g) ?? []).toHaveLength(1);
-    expect(body).toMatch(/\{onward\.qr && <LoopQr caption=\{copy\.qrCaption\} \/>\}/);
+    // Not on a daily game, whose result card replaces the onward offers.
+    expect(body).toMatch(/\{!daily && onward\.qr && <LoopQr caption=\{copy\.qrCaption\} \/>\}/);
     expect(body).toMatch(/const onward = gameOverOnward\(screen, players\.length\);/);
     expect(body).not.toMatch(/reportLoopImpression/);
   });
 
   it("gives the phone the Mixed link from the constants in lib/, and counts both taps before navigating", () => {
     expect(body).toMatch(
-      /\{onward\.mixedLink && \(\s*<a className="next-game-link" href=\{MIXED_SETUP_HREF\} onClick=\{openMixedSetup\}>\s*\{copy\.mixedNextGame\}/
+      /\{!daily && onward\.mixedLink && \(\s*<a className="next-game-link" href=\{MIXED_SETUP_HREF\} onClick=\{openMixedSetup\}>\s*\{copy\.mixedNextGame\}/
     );
     expect(body).not.toContain("mode=mixed");
     expect(member("playAgain")).toMatch(/reportGameOverTap\("play_again", screen\);\s*router\.push\("\/"\);/);

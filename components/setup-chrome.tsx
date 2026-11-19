@@ -182,23 +182,41 @@ export function SetupStyles() {
         @media (hover: hover) { .quiz-card:hover { background: rgba(29,185,84,0.1); border-color: rgba(29,185,84,0.55); } }
         .quiz-card:active { background: rgba(29,185,84,0.16); transition: none; }
         .quiz-card:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-        /* The "Today's challenge" fake door (lib/daily-door.ts): the quiz
-           card's look on a <button>, so the button's own chrome is reset. */
-        .quiz-card.daily-door {
+        /* The daily challenge (lib/daily.ts): the quiz card's look on a
+           <button>, so the button's own chrome is reset. Busy while the
+           day's list loads; the done state is the same card, tapped to share. */
+        .quiz-card.daily-card {
           width: 100%;
           text-align: left;
           font-family: inherit;
           cursor: pointer;
           -webkit-tap-highlight-color: transparent;
         }
-        .daily-door-note {
-          margin: 14px auto 0;
+        .quiz-card.daily-card:disabled { cursor: progress; opacity: 0.7; }
+        .daily-card-grid { display: flex; gap: 4px; margin-top: 6px; }
+        .daily-card-grid span { width: 14px; height: 14px; border-radius: 3px; background: #2a2a2a; border: 1px solid #3a3a3a; }
+        .daily-card-grid span.ok { background: var(--green); border-color: var(--green); }
+        .daily-note {
+          margin: 8px auto 0;
           font-size: 13px;
           line-height: 1.55;
-          color: #aaa;
+          color: #888;
           max-width: 440px;
           text-align: center;
         }
+        .daily-error {
+          margin: 10px 0 0;
+          padding: 10px 14px;
+          font-size: 13px;
+          line-height: 1.5;
+          color: #fca5a5;
+          background: rgba(239,68,68,0.08);
+          border: 1px solid rgba(239,68,68,0.3);
+          border-radius: 8px;
+        }
+        /* Arrived from someone's grid (/?ref=daily): the card is the reason
+           they came, so it says so once. */
+        .quiz-card.daily-card.arrived { border-color: var(--green); background: rgba(29,185,84,0.1); }
 
         /* Under the roster for a group: the buzzer, offered where the room can
            see it rather than only in the settings fold. A whole-row button,

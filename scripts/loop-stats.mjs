@@ -1188,20 +1188,66 @@ if (soloFirst + partyAfterSolo + inviteTaps > 0) {
 }
 
 /**
- * The setup page's "Today's challenge" fake door (`lib/daily-door.ts`). There
- * is no daily challenge; a tap is a visitor asking for one. `shown` is every
- * setup page load. Bar (2026-11-17): tapped ÷ shown at or above 3%.
+ * RETIRED 2026-11-19 — the setup page's "Today's challenge" fake door. It read
+ * 7.8% tapped (1,578 of 20,177) against a 3% bar and the real daily challenge
+ * replaced it (the block below). Nothing sends `daily_door:*` any more; the
+ * line stays so a window reaching back before the switch still reads.
  */
-const dailyShown = get("daily_door:shown");
-const dailyTapped = get("daily_door:tapped");
-if (dailyShown + dailyTapped > 0) {
+const doorShown = get("daily_door:shown");
+const doorTapped = get("daily_door:tapped");
+if (doorShown + doorTapped > 0) {
   console.log(
-    `\nToday's challenge (fake door)  shown ${dailyShown} · tapped ${dailyTapped} (${pct(dailyTapped, dailyShown).trim()})`
+    `\nToday's challenge (fake door, retired 2026-11-19)  shown ${doorShown} · tapped ${doorTapped} (${pct(doorTapped, doorShown).trim()})`
   );
   console.log(
-    "  how to read it: there is no daily challenge; a tap is someone asking for one. The bar\n" +
-      "  is 3% of page loads — six times the online-room door's 0.5%, which was a text link\n" +
-      "  where this is a card. Under it, take the card down and do not build it."
+    "  how to read it: history only. It cleared its 3% bar and the real daily challenge\n" +
+      "  replaced it; read the Daily challenge block for anything after 2026-11-19."
+  );
+}
+
+/**
+ * The daily challenge (lib/daily.ts, since 2026-11-19): five songs, the same
+ * for everyone each UTC day. `daily:shown` is the startable card drawn on a
+ * setup page load and `daily:repeat_view` the card drawn "done today" —
+ * exclusive, so `shown` is the denominator `started` is read against and
+ * `repeat_view` is people coming back the same day. `finished` is a daily
+ * Game Over after the reveal, carrying `daily_score:<0..5>` (cards left in
+ * their true slot). Shares come from both cards; the `daily` surface's
+ * impression is the Game Over card's mount and its click a friend opening
+ * the link.
+ */
+const dailyShown = get("daily:shown");
+const dailyStarted = get("daily:started");
+const dailyFinished = get("daily:finished");
+const dailyRepeat = get("daily:repeat_view");
+const dailyScores = [0, 1, 2, 3, 4, 5].map((n) => [n, get(`daily_score:${n}`)]);
+const dailyShares = ["shared", "copied", "dismissed", "failed"].map((o) => [o, get(`daily_share:${o}`)]);
+const dailyShareTaps = dailyShares.reduce((n, [, v]) => n + v, 0);
+const dailyCardShown = get("impression:daily");
+const dailyFollowed = get("click:daily");
+if (dailyShown + dailyStarted + dailyFinished + dailyRepeat + dailyShareTaps + dailyFollowed > 0) {
+  const dailySent = get("daily_share:shared") + get("daily_share:copied");
+  console.log(
+    `\nDaily challenge  shown ${dailyShown} → started ${dailyStarted} (${pct(dailyStarted, dailyShown).trim()}) → ` +
+      `finished ${dailyFinished} (${pct(dailyFinished, dailyStarted).trim()} of started)`
+  );
+  console.log(
+    `  scores        ` + dailyScores.map(([n, v]) => `${n}/5 ${v}`).join(" · ")
+  );
+  console.log(
+    `  shares        tapped ${dailyShareTaps} — ` +
+      dailyShares.map(([o, v]) => `${o} ${v}`).join(" · ") +
+      ` · sent ${dailySent} (${pct(dailySent, dailyFinished).trim()} of finished)`
+  );
+  console.log(
+    `  friends       result card shown ${dailyCardShown} · opened by a friend ${dailyFollowed}`
+  );
+  console.log(`  same day      came back to a done card ${dailyRepeat}`);
+  console.log(
+    "  how to read it: `started ÷ shown` is the door's 7.8% made real — well under it and\n" +
+      "  the card is not what people tapped for. `sent` is shared + copied over finished;\n" +
+      "  the music-age card's 1.1% of shown is the bar a result about the player has\n" +
+      "  already cleared. Friend opens are floors (ad blockers, stripped refs)."
   );
 }
 
@@ -1745,6 +1791,9 @@ const RENDERED_PREFIXES = [
   "solo_party:",
   "solo_invite:",
   "daily_door:",
+  "daily:",
+  "daily_score:",
+  "daily_share:",
   "music_age:",
   "streak:",
   "personal_best:",

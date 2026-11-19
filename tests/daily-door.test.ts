@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DAILY_DOOR_COPY } from "@/lib/daily-door";
-import { ERROR_LOCALES } from "@/lib/error-messages";
 import { parsePulse } from "@/lib/pulse";
+
+/**
+ * The "Today's challenge" fake door, retired 2026-11-19: it cleared its 3% bar
+ * (7.8%) and the real daily challenge replaced it (tests/daily.test.ts). Its
+ * counters stay readable — recorder, pulse and stats line — and nothing on the
+ * site sends them.
+ */
 
 const kv = vi.hoisted(() => ({ incrs: [] as string[] }));
 
@@ -28,24 +33,16 @@ beforeEach(() => {
   __resetLivenessForTests();
 });
 
-describe("the Today's challenge fake door", () => {
-  it("has copy in every locale, and the note says it is not built without promising a date", () => {
-    for (const locale of ERROR_LOCALES) {
-      const copy = DAILY_DOOR_COPY[locale];
-      expect(copy.title.length, locale).toBeGreaterThan(0);
-      expect(copy.sub.length, locale).toBeGreaterThan(0);
-      expect(copy.note, locale).not.toMatch(/soon|tomorrow|next week|即將|明天|下週/i);
-    }
-    expect(DAILY_DOOR_COPY.en.note).toMatch(/isn't built yet/);
-    expect(DAILY_DOOR_COPY.zh.note).toMatch(/還沒有做/);
-    expect(DAILY_DOOR_COPY.en.title).not.toBe(DAILY_DOOR_COPY.zh.title);
+describe("the retired Today's challenge fake door", () => {
+  it("is gone from the page: no copy module, no card, no report", () => {
+    expect(existsSync(join(process.cwd(), "lib/daily-door.ts"))).toBe(false);
+    const page = code(read("app/setup-page.tsx"));
+    expect(page).not.toMatch(/daily-door|DAILY_DOOR|reportDailyDoor|openDailyDoor/);
+    expect(code(read("lib/loop-client.ts"))).not.toMatch(/reportDailyDoor|kind: "daily_door"/);
+    expect(read("components/setup-chrome.tsx")).not.toMatch(/\.daily-door/);
   });
 
-  it("imports nothing at runtime, because the setup page bundles it", () => {
-    expect(read("lib/daily-door.ts")).not.toMatch(/^import (?!type )/m);
-  });
-
-  it("counts shown and tapped once per page load, in a closed set", async () => {
+  it("still records and parses its closed set, so the history stays readable", async () => {
     expect(DAILY_DOOR_STAGES).toEqual(["shown", "tapped"]);
     for (const stage of DAILY_DOOR_STAGES) {
       kv.incrs = [];
@@ -57,21 +54,11 @@ describe("the Today's challenge fake door", () => {
     expect(parsePulse({ kind: "daily_door" })).toBeNull();
   });
 
-  it("is drawn after mount, reports shown from an effect and tapped once, and starts nothing", () => {
-    const page = code(read("app/setup-page.tsx"));
-    expect(page).toMatch(/if \(mounted && !challenge\) reportDailyDoor\("shown"\);/);
-    expect(page).toMatch(/if \(dailyDoorTappedRef\.current\) return;\s*dailyDoorTappedRef\.current = true;\s*reportDailyDoor\("tapped"\);/);
-    // Hidden for a friend on a challenge link, in the render and the count alike.
-    expect(page).toMatch(/\{mounted && !challenge && \(\s*<div lang=/);
-    const opener = page.match(/function openDailyDoor\(\) \{[\s\S]*?\n {2}\}/)?.[0] ?? "";
-    expect(opener).not.toMatch(/router|handleStart|saveGame|fetch\(/);
-  });
-
-  it("routes the pulse to its recorder and is printed by npm run stats", () => {
+  it("routes the pulse to its recorder and is printed by npm run stats, marked retired", () => {
     expect(read("app/api/pulse/route.ts")).toMatch(/case "daily_door":\s*await recordDailyDoor\(event\.stage\);/);
     const script = read("scripts/loop-stats.mjs");
     const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
     expect(rendered).toContain('"daily_door:"');
-    expect(script).toMatch(/Today's challenge \(fake door\)/);
+    expect(script).toMatch(/Today's challenge \(fake door, retired 2026-11-19\)/);
   });
 });

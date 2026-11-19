@@ -38,6 +38,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     English; the guess game page (`/game`) and the phones' order screen
     (`components/order-phone.tsx` on `/buzz/[code]`) are untranslated.
 
+- **The daily challenge** (`lib/daily.ts`, `components/daily-result.tsx`),
+  replacing the "Today's challenge" fake door, which read 7.8% of setup loads
+  tapped (1,578 / 20,177) against its 3% bar. Five songs, the same for
+  everyone each UTC day: day #N counts from 2026-11-19 (#1, the day it shipped), the seed is
+  FNV-1a over the date string fed to mulberry32 (`seededRandom`), and the
+  source is the `decades` starter through `POST /api/playlist` — one
+  `loadPlaylist` cache entry for the whole site. `pickDaily` seeded-shuffles
+  the `usableOrderTracks` and takes five greedily with pairwise year gaps of
+  `ORDER_PREFERRED_YEAR_GAP`, stepping down to distinct years — the order
+  game's ladder restated for a single round, because `buildOrderRounds`
+  compares whole multi-round deals. Fewer than five usable distinct years is
+  the new `daily_unavailable` code (en/zh/pt) and nothing is stored. The
+  setup card (`.quiz-card.daily-card`, copy in `lib/setup-copy.ts` en + pt)
+  stores a one-player order payload with the new optional `daily: {day,
+  number}` field (repaired by omission in `parseGamePayload`), counted as a
+  hosted start with source `starter` and no starter key. `/order` deals the
+  stored five as one round (`dailyRound`), scoring unchanged; after the
+  reveal its Game Over stores `guesssong_daily` → `{day, grid, score}`
+  (host-session helpers, never throws) and replaces the onward offers (QR,
+  Mixed link, challenge card) with "Daily #N", five squares, `k/5` and Share
+  (`GuessSong Daily #12 🟩🟩⬛🟩🟩 4/5` + newline + `/r/daily`). Music age and
+  the streak line stay. Once played, the setup card reads "done: k/5 · Share"
+  and "Back tomorrow for #N+1" instead of dealing again. New loop surface
+  `daily` (lands on `/?ref=daily`, which scrolls to and lights the card);
+  pulses `daily` → `daily:<shown|started|finished|repeat_view>` and
+  `daily_score:<0..5>` on finish, `daily_share` →
+  `daily_share:<shared|copied|dismissed|failed>`; a "Daily challenge" block
+  in `npm run stats`. Known gaps: a reload mid-game restarts the round (the
+  payload rule); a day ended before the reveal stores nothing and can be
+  dealt again. From the Portuguese setup page the payload carries `locale:
+  "pt"` like every other start, the Game Over card reads from
+  `ORDER_COPY.pt.daily` (`lib/order-copy.ts`) and the share line is
+  `GuessSong Desafio #N … k/5` — grid and `#N k/5` identical across languages.
+
 - **"Your ears live in 1987" on the order game's Game Over**
   (`components/music-age.tsx`, `lib/music-age.ts`). The solo invite card read
   one real send in 2,089 views; people alone share results about themselves,
@@ -270,6 +304,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **"Challenge a friend" is no longer offered on any order Game Over**
+  (`components/order-challenge.tsx`). It read zero friends started; the daily
+  challenge replaced it as the shared-deal mechanic. Links already sent still
+  work end to end — `/r/challenge`, the setup banner, the same deal, and the
+  win/lose line with `challenge:<won|lost|tied>` — but the card no longer
+  reports a `challenge` impression, so `click:challenge` with no `shown` is
+  expected from now on.
+
 - **An oversized playlist costs 3 Spotify requests, not 5** (`SAMPLED_TRACK_PAGES`
   in `lib/spotify.ts`). A playlist over `MAX_PLAYLIST_TRACKS` used to be
   sampled as the head plus four pages — the full 500 — and a sample of the
@@ -307,6 +349,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The "Today's challenge" fake door** (`lib/daily-door.ts` deleted, its
+  card, `reportDailyDoor` and CSS gone). `daily_door:*` keeps its recorder,
+  pulse parse and a "retired" line in `npm run stats` so the history reads.
 - **The one-player invite card** ("Better with friends · Send it to the group
   chat", `components/solo-invite.tsx`, `lib/solo-invite-copy.ts`), shipped
   2026-11-15. About 4,000 shown and 5 real sends, against the music-age

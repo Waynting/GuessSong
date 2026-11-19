@@ -34,13 +34,25 @@ import {
   type RecheckAnswer,
 } from "@/lib/auto-recheck";
 import {
-  reportDailyDoor,
+  reportDaily,
   reportGameStart,
   reportRefusal,
   reportRefusalRecovered,
   reportStarterThemeRow,
 } from "@/lib/loop-client";
-import { DAILY_DOOR_COPY } from "@/lib/daily-door";
+import {
+  DAILY_GAME_HREF,
+  DAILY_PLAYLIST_ID,
+  DAILY_SIZE,
+  dailyNumber,
+  dailySeed,
+  pickDaily,
+  recallDailyResult,
+  utcDayKey,
+  type DailyResult,
+} from "@/lib/daily";
+import { shareDaily } from "@/components/daily-result";
+import { ORDER_COPY, orderLocaleOf } from "@/lib/order-copy";
 import {
   NO_REFUSAL,
   RECOVERY_STORAGE_KEY,
@@ -356,29 +368,41 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
   const deviceLocale = useErrorLocale();
   const locale: ErrorLocale = pageLocale === "pt" ? "pt" : deviceLocale;
   const firstInputRef = useRef<HTMLInputElement>(null);
-  // The "Today's challenge" fake door (lib/daily-door.ts): counted once when
-  // drawn and once on its first tap, per page load.
-  const dailyDoorTappedRef = useRef(false);
-  const [dailyDoorOpen, setDailyDoorOpen] = useState(false);
-  // Drawn only once mounted, so the card is in the device's language from its
-  // first paint rather than switching from English after hydration.
+  // The daily challenge (lib/daily.ts). Everything about it is read after
+  // mount — the UTC day comes from this device's clock and the result from
+  // its storage, and `/` is prerendered — so the card is drawn only once
+  // `dailyDay` is set. Null before day #1, and then no card is drawn.
+  const [dailyDay, setDailyDay] = useState<string | null>(null);
+  const [dailyDone, setDailyDone] = useState<DailyResult | null>(null);
+  const [dailyLoading, setDailyLoading] = useState(false);
+  const [dailyError, setDailyError] = useState<string | null>(null);
+  const [dailyCopied, setDailyCopied] = useState(false);
+  // Arrived from someone's grid (`/?ref=daily`): the card is scrolled to and
+  // lit once. Read in the mount effect, with the rest of the query.
+  const [dailyArrived, setDailyArrived] = useState(false);
+  const dailyCardRef = useRef<HTMLDivElement>(null);
+  const dailyNo = dailyDay ? dailyNumber(dailyDay) : null;
   // Not drawn for a friend who arrived on a challenge link: "Today's
   // challenge" beside "beat your friend's score" is two challenges on one
-  // screen, and those visits would inflate the door's taps. `challenge` is set
-  // in the same mount effect as `mounted`, so it is already known here.
+  // screen. `challenge` is set in the same mount effect as `mounted`.
+  const dailyDrawn = mounted && !challenge && dailyNo !== null;
+  // `daily:shown` for the startable card, `daily:repeat_view` for the "done
+  // today" one — exclusive, once per page load, so `shown` is the denominator
+  // `started` is read against.
+  const dailyReportedRef = useRef(false);
   useEffect(() => {
-    if (mounted && !challenge) reportDailyDoor("shown");
-  }, [mounted, challenge]);
-  function openDailyDoor() {
-    setDailyDoorOpen(true);
-    if (dailyDoorTappedRef.current) return;
-    dailyDoorTappedRef.current = true;
-    reportDailyDoor("tapped");
-  }
-  // In the page's language on `/pt`; on `/` the device's, as before, but
-  // never Portuguese there — its note names the "Just me" tile as `/` shows it.
-  const dailyDoorLocale: ErrorLocale = pageLocale === "pt" ? "pt" : siteLocale(deviceLocale);
-  const dailyDoor = DAILY_DOOR_COPY[dailyDoorLocale];
+    if (!dailyDrawn || dailyReportedRef.current) return;
+    dailyReportedRef.current = true;
+    reportDaily(dailyDone ? "repeat_view" : "shown");
+  }, [dailyDrawn, dailyDone]);
+  useEffect(() => {
+    if (dailyDrawn && dailyArrived) dailyCardRef.current?.scrollIntoView({ block: "center" });
+  }, [dailyDrawn, dailyArrived]);
+  useEffect(() => {
+    if (!dailyCopied) return;
+    const t = setTimeout(() => setDailyCopied(false), 2000);
+    return () => clearTimeout(t);
+  }, [dailyCopied]);
 
   /**
    * The last submission that failed in a way the submission itself determines,
@@ -721,6 +745,11 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
     // about to host one tonight, so the game this credits is weeks away.
     const ref = query.get("ref");
     if (ref) rememberLoopRef(ref);
+    // The daily card's day and this device's result for it (lib/daily.ts).
+    const today = utcDayKey();
+    setDailyDay(today);
+    setDailyDone(recallDailyResult(today));
+    setDailyArrived(ref === "daily");
 
     // A link that asked for the quiz. `/?mode=quiz` was how the content pages
     // reached it while the quiz was a mode of this form, and `/?ref=quiz_result`
@@ -809,15 +838,22 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
     /** Whether the stored roster is split into two teams (`hasTeams` on the payload's players). */
     teams?: boolean,
     /** A friend's challenge game (lib/challenge.ts); the server checks it is an order game of one. */
-    challengeGame?: boolean
+    challengeGame?: boolean,
+    /**
+     * The daily challenge (lib/daily.ts). Its list is ours, so its source is
+     * `starter`; it carries no starter key, because the field did not hold
+     * the link and `host_setup_starter:decades` is a read of the chip's list
+     * being picked — the daily game has its own funnel (`daily:*`).
+     */
+    dailyGame?: boolean
   ) {
     const hostGameIndex = bumpHostGameCount();
-    const setupSource = setupSourceFor(Boolean(mixed));
+    const setupSource: SetupSource = dailyGame ? "starter" : setupSourceFor(Boolean(mixed));
     // Which starter list, if the link in the field is one of ours — by any
     // route (a recent chip, a restored link), and only on a single-playlist
     // start: a Mixed room's start can still see a starter id sitting in the
     // single form's field, and that game was not played from it.
-    const starter = mixed === undefined ? starterKeyForId(currentPlaylistId) : null;
+    const starter = mixed === undefined && !dailyGame ? starterKeyForId(currentPlaylistId) : null;
     const players = playerBand(playerCount);
     // This device's first solo game, or its first party after one — the
     // question "does a solo try come back as a party" (lib/solo-party.ts).
@@ -1136,6 +1172,73 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
       setLoading(false);
       setRechecking(false);
     }
+  }
+
+  /**
+   * The daily card was tapped: load the day's list, deal its five, store a
+   * one-player order game and go to `/order`.
+   *
+   * Through `POST /api/playlist` like every link — so `loadPlaylist`'s cache
+   * answers it, one Spotify load per cache window for the whole site — and
+   * never through `handleStart`: the form is not what is being played, and
+   * nothing here reads or writes it (no `rememberSetup`, no recent chip).
+   * A list that cannot deal five distinct years refuses with
+   * `daily_unavailable` before anything is stored or counted. Errors are
+   * codes, rendered under the card.
+   */
+  async function startDaily() {
+    if (!dailyDay || dailyNo === null || dailyDone || dailyLoading || loading) return;
+    const day = dailyDay;
+    const number = dailyNo;
+    setDailyError(null);
+    setDailyLoading(true);
+    try {
+      const res = await fetch("/api/playlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: playableUrlOf(DAILY_PLAYLIST_ID) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw apiError(data, "playlist_load_failed");
+      const picked = pickDaily(Array.isArray(data.tracks) ? (data.tracks as Track[]) : [], dailySeed(day));
+      if (!picked) throw new AppError("daily_unavailable");
+      const playlistKind = isPlaylistKind(data.playlistKind) ? data.playlistKind : undefined;
+      const payload = buildGamePayload({
+        tracks: picked,
+        players: [{ name: copy.daily.player, score: 0 }],
+        playlistName: ORDER_COPY[orderLocaleOf(gameLocaleFor(pageLocale))].daily.playlistName(number),
+        clipDuration: DEFAULT_CLIP_DURATION,
+        totalTracks: picked.length,
+        playlistSource: "own",
+        mode: "order",
+        setupSource: "starter",
+        ...(playlistKind ? { playlistKind } : {}),
+        daily: { day, number },
+        // The Portuguese page's game speaks Portuguese, like every other start.
+        locale: gameLocaleFor(pageLocale),
+      });
+      if (!saveGame(payload)) throw new AppError("storage_blocked");
+      trackEvent("game_started", {
+        player_count: 1,
+        clip_duration: DEFAULT_CLIP_DURATION,
+        song_count: picked.length,
+        playlist_source: "own",
+        game_mode: "order",
+        ...recordHostedStart(undefined, "order", 1, playlistKind, false, false, true),
+      });
+      reportDaily("started");
+      router.push(DAILY_GAME_HREF);
+    } catch (e: unknown) {
+      setDailyError(describeError(e, locale, "playlist_load_failed"));
+      setDailyLoading(false);
+    }
+  }
+
+  /** Share the day's grid again from the "done today" card. */
+  async function shareDailyAgain() {
+    if (!dailyDone || dailyNo === null) return;
+    const outcome = await shareDaily(dailyNo, dailyDone.grid, orderLocaleOf(gameLocaleFor(pageLocale)));
+    if (outcome === "copied") setDailyCopied(true);
   }
 
   /**
@@ -2131,24 +2234,57 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
               "Who's playing?" — it is the thing to do instead. Its own card,
               under the form and above the fold for someone alone, where a
               text link under Start had sat below it. */}
-          {/* A question, not a feature: there is no daily challenge, and the
-              tap is how we find out whether there should be. A card shaped
-              like the quiz's below, because a card is what the real thing
-              would be. lib/daily-door.ts. */}
-          {mounted && !challenge && (
-            <div lang={dailyDoorLocale === "zh" ? "zh-TW" : dailyDoorLocale === "pt" ? "pt-BR" : "en"}>
-              {dailyDoorOpen ? (
-                <p className="daily-door-note" role="status">{dailyDoor.note}</p>
+          {/* The daily challenge (lib/daily.ts): five songs, the same for
+              everyone today. Drawn after mount — the day and this device's
+              result are client facts — and in the done state once played,
+              where a tap shares the grid again instead of dealing twice. */}
+          {dailyDrawn && dailyNo !== null && (
+            <div ref={dailyCardRef} lang={setupLang(pageLocale)}>
+              {dailyDone ? (
+                <>
+                  <button
+                    type="button"
+                    className={`quiz-card daily-card done${dailyArrived ? " arrived" : ""}`}
+                    onClick={shareDailyAgain}
+                  >
+                    <span className="quiz-card-icon" aria-hidden>
+                      <CalendarIcon />
+                    </span>
+                    <span>
+                      <span className="quiz-card-title">
+                        {copy.daily.done(dailyNo, dailyDone.score, DAILY_SIZE)} ·{" "}
+                        {dailyCopied ? copy.daily.copied : copy.daily.shareAgain}
+                      </span>
+                      <span className="daily-card-grid" aria-hidden>
+                        {dailyDone.grid.map((ok, i) => (
+                          <span key={i} className={ok ? "ok" : undefined} />
+                        ))}
+                      </span>
+                    </span>
+                  </button>
+                  <p className="daily-note">{copy.daily.tomorrow(dailyNo + 1)}</p>
+                </>
               ) : (
-                <button type="button" className="quiz-card daily-door" onClick={openDailyDoor}>
+                <button
+                  type="button"
+                  className={`quiz-card daily-card${dailyArrived ? " arrived" : ""}`}
+                  onClick={startDaily}
+                  disabled={dailyLoading}
+                  aria-busy={dailyLoading}
+                >
                   <span className="quiz-card-icon" aria-hidden>
                     <CalendarIcon />
                   </span>
                   <span>
-                    <span className="quiz-card-title">{dailyDoor.title}</span>
-                    <span className="quiz-card-sub">{dailyDoor.sub}</span>
+                    <span className="quiz-card-title">{copy.daily.title(dailyNo)}</span>
+                    <span className="quiz-card-sub">{dailyLoading ? copy.daily.loading : copy.daily.sub}</span>
                   </span>
                 </button>
+              )}
+              {dailyError && (
+                <p className="daily-error" role="alert">
+                  {dailyError}
+                </p>
               )}
             </div>
           )}

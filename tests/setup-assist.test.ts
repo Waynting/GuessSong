@@ -107,14 +107,25 @@ describe("the page remembers a game when it starts, and at no other time", () =>
   });
 
   it("writes the setup on each of the three hosted starts, after the game is stored", () => {
-    const starts = positions(body, "...recordHostedStart(");
+    // The daily challenge's start (`startDaily`) is a fourth hosted start, but
+    // it plays the day's list, not the form: it stores and counts and never
+    // writes the form's memory. Checked apart, below, and left out here.
+    const daily = body.slice(body.indexOf("async function startDaily()"), body.indexOf("async function shareDailyAgain()"));
+    const dailyAt = body.indexOf("async function startDaily()");
+    const outside = (at: number) => at < dailyAt || at > dailyAt + daily.length;
+    const starts = positions(body, "...recordHostedStart(").filter(outside);
     const writes = positions(body, "rememberSetup({");
     // `gameHref` is /game or /order by the play style; neither spelling may
     // appear as a literal, or one path would take an order game to the clips.
     const leaves = positions(body, "router.push(gameHref)");
     expect(body).not.toContain('router.push("/game")');
     expect(body).not.toContain('router.push("/order")');
-    const stored = positions(body, "if (!saveGame(payload)) throw");
+    const stored = positions(body, "if (!saveGame(payload)) throw").filter(outside);
+    expect(daily).not.toMatch(/rememberSetup|rememberPlaylist/);
+    const d = (needle: string) => daily.indexOf(needle);
+    expect(d("if (!saveGame(payload)) throw")).toBeGreaterThan(-1);
+    expect(d("if (!saveGame(payload)) throw")).toBeLessThan(d("...recordHostedStart("));
+    expect(d("...recordHostedStart(")).toBeLessThan(d("router.push(DAILY_GAME_HREF)"));
     expect(starts).toHaveLength(3);
     expect(writes).toHaveLength(3);
     expect(leaves).toHaveLength(3);
@@ -277,7 +288,8 @@ describe("the setup source follows the link into the field", () => {
   it("derives which starter list was played at the start, from the field, on a single-playlist start only", () => {
     // By any route — a recent chip or a restored link whose id is one of
     // ours — and never on a Mixed start, whose form can still hold one.
-    expect(body).toMatch(/const starter = mixed === undefined \? starterKeyForId\(currentPlaylistId\) : null;/);
+    // The daily start carries no starter key: the field did not hold its link.
+    expect(body).toMatch(/const starter = mixed === undefined && !dailyGame \? starterKeyForId\(currentPlaylistId\) : null;/);
     expect(body).toMatch(/\.\.\.\(starter \? \{ starter \} : \{\}\),/);
     expect(body).toMatch(/\.\.\.\(starter \? \{ starter_key: starter \} : \{\}\),/);
     expect(body).not.toMatch(/starterKey\b.*useState|setStarterKey/);
@@ -287,7 +299,9 @@ describe("the setup source follows the link into the field", () => {
     // One rule, so the start and the end beacons cannot file one game under
     // two sources: the payload carries it to the game page's end and leave.
     expect(body).toMatch(/return mixed \? "mixed" : linkSource;/);
-    expect(body).toMatch(/const setupSource = setupSourceFor\(Boolean\(mixed\)\);/);
+    // The daily start is `starter` — its list is ours — on the beacon and the payload alike.
+    expect(body).toMatch(/const setupSource: SetupSource = dailyGame \? "starter" : setupSourceFor\(Boolean\(mixed\)\);/);
+    expect(body.match(/setupSource: "starter",/g) ?? []).toHaveLength(1);
     expect(body.match(/setupSource: setupSourceFor\(true\),/g) ?? []).toHaveLength(2);
     expect(body.match(/setupSource: setupSourceFor\(false\),/g) ?? []).toHaveLength(1);
     expect(body).toMatch(/reportGameStart\(hostGameIndex, \{\s*mixed,\s*source: setupSource,\s*mode,/);

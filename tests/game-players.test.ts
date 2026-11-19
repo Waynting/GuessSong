@@ -44,7 +44,9 @@ describe("the pages send both, on every path", () => {
     expect(body).toMatch(
       /recordHostedStart\(\s*undefined,\s*gameMode\(Boolean\(room\)\),\s*room \? buzzerPlayerCount \+ 1 : validPlayers\.length,\s*playlistKind,\s*hasTeams\(payload\.players\),\s*Boolean\(challengeFor\)\s*\)/
     );
-    expect(body.match(/\.\.\.recordHostedStart\(/g)).toHaveLength(3);
+    // The daily challenge's start is the fourth, a game of one by construction.
+    expect(body).toMatch(/recordHostedStart\(undefined, "order", 1, playlistKind, false, false, true\)/);
+    expect(body.match(/\.\.\.recordHostedStart\(/g)).toHaveLength(4);
   });
 
   for (const page of ["app/game/page.tsx", "app/order/page.tsx"]) {

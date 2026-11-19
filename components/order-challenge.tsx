@@ -1,70 +1,39 @@
 "use client";
 
 /**
- * "Beat my score" on a one-player order Game Over (`lib/challenge.ts`).
+ * A friend's "beat my score" game, on its Game Over (`lib/challenge.ts`): the
+ * two scores side by side.
  *
- * A plain invitation converted 1 send in 2,089; a score to beat might. The
- * button shares a link that carries the deal (playlist ref, seed, song count)
- * and the score — no names, it goes to a group chat — and a friend who opens
- * it plays the same cards. On a friend's own Game Over the card leads with
- * the two scores side by side, and the button sends their score back.
+ * **The "Challenge a friend" button is gone (2026-11-19).** It shared a link
+ * carrying the deal and the score, and read zero friends started; the daily
+ * challenge (`lib/daily.ts`, `components/daily-result.tsx`) replaced it as
+ * the shared-deal mechanic. What stays is the arrival path for links already
+ * sent: `/r/challenge` still forwards, the setup page still shows the banner
+ * and deals the same cards, and this card still says who won —
+ * `challenge:<won|lost|tied>` is still counted by the order page. Nothing
+ * here reports a `challenge` impression any more: there is no link on it to
+ * follow, so a `click:challenge` with no `shown` is expected from now on.
  *
- * Counted the loop's way: shown (`loop_impression`, from an effect on mount,
- * which is why the page decides whether it renders), tapped with the share
- * sheet's outcome (`challenge:share:<outcome>`), followed (`/r/challenge`).
- * The link is the counting redirect's production URL, never `window.location`.
- *
- * Inline styles like `components/solo-invite.tsx`; the button takes the order
- * page's `btn-ghost` classes, which carry the `:active` and the hover behind
- * `(hover: hover)`.
+ * Inline styles like `components/music-age.tsx`. Words by the game payload's
+ * locale (`lib/order-copy.ts`).
  */
 
-import { useEffect, useState } from "react";
-import { reportChallengeShare, reportLoopImpression } from "@/lib/loop-client";
-import { COPIED_FLASH_MS, shareLink } from "@/lib/quiz-share";
-import {
-  challengeButtonLabel,
-  challengeResultLine,
-  challengeShareText,
-  challengeShareUrl,
-  type ChallengeDeal,
-  type ChallengeScore,
-} from "@/lib/challenge";
+import { challengeResultLine, type ChallengeScore } from "@/lib/challenge";
 import { ORDER_COPY, type OrderLocale } from "@/lib/order-copy";
 
 export function OrderChallenge({
-  deal,
+  score,
   against,
   locale = "en",
 }: {
-  /** This game's deal and score — what the button sends. */
-  deal: ChallengeDeal;
-  /** The friend's score this game was played against, when it was a challenge. */
-  against: ChallengeScore | null;
+  /** This game's score. */
+  score: number;
+  /** The friend's score this game was played against. */
+  against: ChallengeScore;
   /** The game payload's language (lib/order-copy.ts). */
   locale?: OrderLocale;
 }) {
-  const [copied, setCopied] = useState(false);
   const copy = ORDER_COPY[locale].challenge;
-
-  useEffect(() => {
-    reportLoopImpression("challenge");
-  }, []);
-
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), COPIED_FLASH_MS);
-    return () => clearTimeout(t);
-  }, [copied]);
-
-  async function challenge() {
-    const url = challengeShareUrl(deal);
-    const text = challengeShareText(deal.score, deal.max, locale);
-    const outcome = await shareLink({ url, text, title: "GuessSong" }, `${text} ${url}`);
-    reportChallengeShare(outcome);
-    if (outcome === "copied") setCopied(true);
-  }
-
   return (
     <div
       style={{
@@ -79,33 +48,20 @@ export function OrderChallenge({
         flexShrink: 0,
       }}
     >
-      {against && (
-        <div
-          className="challenge-result"
-          style={{
-            fontFamily: "'Bebas Neue', sans-serif",
-            fontSize: "22px",
-            letterSpacing: "0.04em",
-            color: "#1DB954",
-            lineHeight: 1.15,
-            marginBottom: "8px",
-          }}
-        >
-          {challengeResultLine(deal.score, against.score, locale)}
-        </div>
-      )}
-      <p style={{ fontSize: "13px", color: "#aaa", margin: "0 0 12px", lineHeight: 1.45 }}>
-        {against
-          ? copy.againstBody
-          : copy.body(deal.score, deal.max)}
-      </p>
-      <button
-        className="btn-ghost compact"
-        onClick={challenge}
-        style={{ width: "100%", color: "#1DB954", borderColor: "rgba(29,185,84,0.5)", whiteSpace: "normal" }}
+      <div
+        className="challenge-result"
+        style={{
+          fontFamily: "'Bebas Neue', sans-serif",
+          fontSize: "22px",
+          letterSpacing: "0.04em",
+          color: "#1DB954",
+          lineHeight: 1.15,
+          marginBottom: "8px",
+        }}
       >
-        {copied ? copy.linkCopied : challengeButtonLabel(deal.score, against !== null, locale)}
-      </button>
+        {challengeResultLine(score, against.score, locale)}
+      </div>
+      <p style={{ fontSize: "13px", color: "#aaa", margin: 0, lineHeight: 1.45 }}>{copy.againstBody}</p>
     </div>
   );
 }
