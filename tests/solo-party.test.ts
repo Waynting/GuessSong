@@ -13,7 +13,6 @@ import {
   soloStepFitsBand,
   takeSoloStep,
 } from "@/lib/solo-party";
-import { SOLO_INVITE_COPY } from "@/lib/solo-invite-copy";
 import { LOOP_SURFACES } from "@/lib/loop-links";
 import { parsePulse } from "@/lib/pulse";
 
@@ -139,7 +138,7 @@ describe("the wire and the counter", () => {
   });
 });
 
-describe("the invite card", () => {
+describe("the invite card (retired 2026-11-19; its counters stay readable)", () => {
   it("is a loop surface of its own, with its tap outcomes in a closed set", async () => {
     expect(LOOP_SURFACES).toContain("solo_invite");
     expect(parsePulse({ kind: "solo_invite", outcome: "shared" })).toEqual({ kind: "solo_invite", outcome: "shared" });
@@ -148,23 +147,6 @@ describe("the invite card", () => {
       kv.incrs = [];
       await recordSoloInvite(outcome);
       expect(metrics()).toEqual([`solo_invite:${outcome}`]);
-    }
-  });
-
-  it("reports its impression on mount and shares the counting redirect's URL, never the tab's", () => {
-    const src = read("components/solo-invite.tsx");
-    expect(src).toMatch(/reportLoopImpression\("solo_invite"\)/);
-    expect(src).toMatch(/loopUrl\("solo_invite"\)/);
-    expect(src).toMatch(/reportSoloInvite\(outcome\)/);
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
-    expect(code).not.toMatch(/window\.location/);
-  });
-
-  it("says what the game is with friends, in both games, and never asks the reader to log in", () => {
-    for (const copy of Object.values(SOLO_INVITE_COPY)) {
-      expect(copy.body).toMatch(/points/);
-      expect(copy.shareText).toMatch(/Free/);
-      expect(`${copy.body} ${copy.shareText}`).not.toMatch(/log ?in|sign ?up/i);
     }
   });
 
