@@ -399,6 +399,9 @@ export default function OrderPage() {
     if (leftRef.current) return;
     if (roundCountRef.current === 0) return;
     if (phaseRef.current === "finished") return;
+    // A game already reported as ended is not also a leave: the daily
+    // challenge reports its end at the reveal, before Game Over is drawn.
+    if (finishedTrackedRef.current) return;
     leftRef.current = true;
     if (firstPageRef.current === false) return;
     // The shared screen's drag only. A buzzer room's phones arrange for
@@ -648,6 +651,22 @@ export default function OrderPage() {
       setOldestWinner(null);
     }
   }
+
+  // The daily challenge is one round for one player, so its reveal *is* the
+  // finish: the result is stored, counted and its grid drawn on the reveal
+  // screen, under the years. Behind the extra "see final scores" tap, 72% of
+  // daily starts never reached the grid (2026-11-20 → 22: 1,197 started, 341
+  // finished). Not a jump to Game Over: that overlay covers the years, the
+  // answer the player just asked for. An effect rather than a call inside
+  // reveal(): trackGameFinished reads the phase and the score reveal() has
+  // only just set, so it runs on the render that has them. Its own ref is the
+  // once, so the later "see final scores" tap closes the round and nothing
+  // else.
+  useEffect(() => {
+    if (!daily || phase !== "revealed" || players.length !== 1) return;
+    trackGameFinished(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires on the reveal render; trackGameFinished guards the once
+  }, [daily, phase]);
 
   function endGame() {
     closeRound();
@@ -1722,9 +1741,18 @@ export default function OrderPage() {
                     done. Not beside an award — a deal left alone is still
                     graded, and a line that contradicts a scoreboard that
                     just moved is worse than none. */}
-                {!hostMoved && !buzzerRoom && exactWinner === null && oldestWinner === null && (
+                {/* Not on the daily challenge: it has no next round to drag in. */}
+                {!daily && !hostMoved && !buzzerRoom && exactWinner === null && oldestWinner === null && (
                   <p className="order-untouched">{copy.result.untouched}</p>
                 )}
+                {/* The daily challenge's grid, on the reveal itself and in
+                    place of the award rows: k/5 is its score, and the share
+                    button is the reason the card exists. The effect above
+                    stored the result on this render's commit. */}
+                {daily && solo ? (
+                  dailyResult && <DailyResultCard number={daily.number} grid={dailyResult.grid} locale={pageLocale} />
+                ) : (
+                <>
                 {/* The whole order, the round's question. One award. A
                     one-player game was scored from the screen at the reveal,
                     so it gets the outcome, not buttons to award itself. */}
@@ -1769,6 +1797,8 @@ export default function OrderPage() {
                     <span className="score-row-done">{copy.result.oldestAwarded(ORDER_OLDEST_POINTS, oldestWinner)}</span>
                   )}
                 </div>
+                </>
+                )}
 
                 <button className="btn-primary next" onClick={nextRound}>
                   {lastRound ? copy.seeFinalScores : copy.nextRound}
@@ -1877,7 +1907,9 @@ export default function OrderPage() {
                   one thing to do after today's five is send the squares.
                   Rendered only behind a stored result, because mounting
                   reports its impression. lib/daily.ts. */}
-              {daily && dailyResult && <DailyResultCard number={daily.number} grid={dailyResult.grid} locale={pageLocale} />}
+              {daily && dailyResult && (
+                <DailyResultCard number={daily.number} grid={dailyResult.grid} locale={pageLocale} countImpression={false} />
+              )}
               {/* A friend's "beat my score" game: the two scores, side by
                   side. The "Challenge a friend" button that issued these
                   links is gone (2026-11-19) — the daily challenge replaced

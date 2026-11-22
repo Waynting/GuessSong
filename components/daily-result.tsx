@@ -69,18 +69,25 @@ export function DailyResultCard({
   number,
   grid,
   locale = "en",
+  countImpression = true,
 }: {
   number: number;
   grid: readonly boolean[];
   /** The game payload's language (lib/order-copy.ts). */
   locale?: OrderLocale;
+  /**
+   * False for the Game Over copy: the order page draws the card on the reveal
+   * first, and one card seen twice is one impression, not two.
+   */
+  countImpression?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const copy = ORDER_COPY[locale].daily;
   const score = gridScore(grid);
 
   useEffect(() => {
-    reportLoopImpression("daily");
+    if (countImpression) reportLoopImpression("daily");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on mount only
   }, []);
 
   useEffect(() => {
