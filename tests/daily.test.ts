@@ -447,7 +447,8 @@ describe("the order page, by reading the source", () => {
   });
 
   it("replaces the onward offers with the result card, and keeps music age and the streak", () => {
-    expect(page).toMatch(/\{daily && dailyResult && <DailyResultCard number=\{daily\.number\} grid=\{dailyResult\.grid\} locale=\{pageLocale\} \/>\}/);
+    // Game Over's copy of the card: the reveal screen drew it first and counted it.
+    expect(page).toMatch(/\{daily && dailyResult && \(\s*<DailyResultCard number=\{daily\.number\} grid=\{dailyResult\.grid\} locale=\{pageLocale\} countImpression=\{false\} \/>\s*\)\}/);
     expect(page).toMatch(/\{!daily && onward\.qr && <LoopQr caption=\{copy\.qrCaption\} \/>\}/);
     expect(page).toMatch(/\{!daily && onward\.mixedLink && \(/);
     expect(page).toMatch(/\{!daily && solo && against && players\[0\] && \(/);
@@ -455,9 +456,10 @@ describe("the order page, by reading the source", () => {
     expect(page).toMatch(/\{streakResult && \(/);
   });
 
-  it("the result card reports its impression on mount and shares the counting redirect's URL", () => {
+  it("the result card reports its impression on mount (unless told not to) and shares the counting redirect's URL", () => {
     const card = read("components/daily-result.tsx");
-    expect(card).toMatch(/useEffect\(\(\) => \{\s*reportLoopImpression\("daily"\);\s*\}, \[\]\);/);
+    expect(card).toMatch(/useEffect\(\(\) => \{\s*if \(countImpression\) reportLoopImpression\("daily"\);[\s\S]*?\}, \[\]\);/);
+    expect(card).toMatch(/countImpression = true,/);
     expect(card).toMatch(/url: loopUrl\("daily"\)/);
     expect(card).toMatch(/dailyShareMessage\(number, grid, locale\)/);
     expect(card).toMatch(/const copy = ORDER_COPY\[locale\]\.daily;/);

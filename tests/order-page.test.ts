@@ -88,6 +88,26 @@ describe("the order page plays no audio", () => {
     expect(body.match(/buildOrderRounds\(/g) ?? []).toHaveLength(1);
   });
 
+  it("a daily game finishes at its reveal and draws its grid there, under the years", () => {
+    // Behind a "see final scores" tap, 72% of daily starts never saw the grid.
+    // Not a jump to Game Over either: that overlay covers the revealed years.
+    // The finish runs in an effect on the reveal render, not inside reveal(),
+    // so trackGameFinished reads the phase and score reveal() set.
+    const finish = body.match(/useEffect\(\(\) => \{\s*if \(!daily \|\| phase !== "revealed"[\s\S]*?\}, \[daily, phase\]\);/)?.[0] ?? "";
+    expect(finish).toMatch(/players\.length !== 1/);
+    expect(finish).toMatch(/trackGameFinished\(false\);/);
+    expect(finish).not.toMatch(/nextRound\(|setPhase\(/);
+    const reveal = body.match(/function reveal\(\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+    expect(reveal).not.toMatch(/nextRound\(|trackGameFinished\(/);
+    // The card on the reveal screen counts the impression; the Game Over copy does not.
+    const revealed = body.match(/\{phase === "revealed" && !phoneResults && \([\s\S]*?copy\.seeFinalScores/)?.[0] ?? "";
+    expect(revealed).toMatch(/\{daily && solo \? \(\s*dailyResult && <DailyResultCard number=\{daily\.number\} grid=\{dailyResult\.grid\} locale=\{pageLocale\} \/>/);
+    expect(body).toMatch(/<DailyResultCard number=\{daily\.number\} grid=\{dailyResult\.grid\} locale=\{pageLocale\} countImpression=\{false\} \/>/);
+    // An end already reported at the reveal is not also a leave.
+    const leave = body.match(/const reportLeave = useCallback\([\s\S]*?\}, \[\]\);/)?.[0] ?? "";
+    expect(leave).toMatch(/if \(finishedTrackedRef\.current\) return;/);
+  });
+
   it("never names a year on a face-down card: cleaned title, album only after the reveal", () => {
     expect(body).toMatch(/<p className="order-title">\{displayTitle\(t\.name\)\}<\/p>/);
     expect(body).toMatch(/\{isRevealed && t\.albumName && <p className="order-album">/);
@@ -500,8 +520,9 @@ describe("the order game's first screen (2026-11-10)", () => {
   it("tells an untouched host what they did not do — only when nothing scored and no phones played", () => {
     // A deal left alone is still graded, and the top card is the oldest one
     // time in four: the line must never contradict a scoreboard that moved.
+    // Never on the daily challenge, which has no next round to drag in.
     expect(body).toMatch(
-      /\{!hostMoved && !buzzerRoom && exactWinner === null && oldestWinner === null && \(\s*<p className="order-untouched">\{copy\.result\.untouched\}<\/p>/
+      /\{!daily && !hostMoved && !buzzerRoom && exactWinner === null && oldestWinner === null && \(\s*<p className="order-untouched">\{copy\.result\.untouched\}<\/p>/
     );
     expect(body.indexOf('className="order-untouched"')).toBeGreaterThan(body.indexOf('className={`order-result'));
     expect(rule(source, ".order-untouched")).toMatch(/color: #888/);
