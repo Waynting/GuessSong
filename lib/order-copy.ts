@@ -65,7 +65,17 @@ export interface OrderCopy {
   endGame: string;
 
   /** The line over the cards. */
-  prompt: { revealed: string; phones: string; solo: string };
+  prompt: {
+    revealed: string;
+    phones: string;
+    solo: string;
+    /**
+     * Under Reveal on round one while no card has moved: a reveal is allowed
+     * without an answer. 86% of order games over before their first reveal
+     * had moved nothing (2026-11-26).
+     */
+    unsure: string;
+  };
 
   /** A face-down card, for a screen reader. */
   cardAria: (title: string, position: number, total: number) => string;
@@ -173,6 +183,7 @@ export const ORDER_COPY: Record<OrderLocale, OrderCopy> = {
       revealed: "Oldest to newest — the real order",
       phones: "Everyone orders these on their phone. Move one here and yours counts too",
       solo: "Oldest on top. Drag the cards into order, then reveal",
+      unsure: "Not sure? Reveal anyway — a guess still counts.",
     },
 
     cardAria: (title, position, total) => `${title}, position ${position} of ${total}. Arrow keys move it.`,
@@ -267,6 +278,7 @@ export const ORDER_COPY: Record<OrderLocale, OrderCopy> = {
       revealed: "Da mais antiga à mais nova — a ordem certa",
       phones: "Cada um ordena no próprio celular. Mova uma carta aqui e a sua também conta",
       solo: "A mais antiga em cima. Arraste as cartas para pôr em ordem e depois revele",
+      unsure: "Não tem certeza? Revele mesmo assim — um chute também vale.",
     },
 
     cardAria: (title, position, total) => `${title}, posição ${position} de ${total}. Use as setas para mover.`,

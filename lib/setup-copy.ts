@@ -182,6 +182,8 @@ export interface SetupCopy {
     waitingPlaylists: (n: number) => string;
     phonesReady: (n: number) => string;
     nobodyScanned: string;
+    /** "Just me" with an empty field: what Start will play (`soloDefaultStarter`). */
+    soloStarter: (name: string) => string;
   };
 
   /** The room card (`components/room-panel.tsx`). */
@@ -373,6 +375,7 @@ export const SETUP_COPY: Record<SetupLocale, SetupCopy> = {
       waitingPlaylists: (n) => `Waiting for ${n} more playlist${plural(n, "", "s")}`,
       phonesReady: (n) => `${n} phone${plural(n, "", "s")} ready`,
       nobodyScanned: "Nobody has scanned yet — you can still start",
+      soloStarter: (name) => `No link? Start plays “${name}”`,
     },
 
     room: {
@@ -579,6 +582,7 @@ export const SETUP_COPY: Record<SetupLocale, SetupCopy> = {
       waitingPlaylists: (n) => `Esperando mais ${n} ${plural(n, "playlist", "playlists")}`,
       phonesReady: (n) => `${n} ${plural(n, "celular pronto", "celulares prontos")}`,
       nobodyScanned: "Ninguém escaneou ainda — dá para começar mesmo assim",
+      soloStarter: (name) => `Sem link? Começa com “${name}”`,
     },
 
     room: {

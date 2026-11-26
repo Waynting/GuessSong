@@ -25,6 +25,15 @@ export interface ShareLinkData {
 /**
  * Prefers `navigator.share`; falls back to writing `clipboardText` (the URL
  * by default) to the clipboard. Never throws.
+ *
+ * **A share sheet that throws is a browser with no sheet, not a dead end.**
+ * Having `navigator.share` is not the same as being able to use it: in-app
+ * webviews and some desktops expose the function and reject every call
+ * (`NotAllowedError`, `TypeError` for data they will not take). Returning
+ * "failed" there left a button that did nothing on every tap — the daily
+ * challenge read 13 `failed` in one day on 2026-11-25, one device pressing
+ * it again and again. Only `AbortError` is the person backing out; anything
+ * else goes on to the clipboard, and "failed" means both paths refused.
  */
 export async function shareLink(
   data: ShareLinkData,
@@ -32,13 +41,18 @@ export async function shareLink(
 ): Promise<ShareLinkOutcome> {
   try {
     if (typeof navigator.share === "function") {
-      await navigator.share(data);
-      return "shared";
+      try {
+        await navigator.share(data);
+        return "shared";
+      } catch (e: unknown) {
+        if (e instanceof Error && e.name === "AbortError") return "dismissed";
+        // Fall through to the clipboard.
+      }
     }
     await navigator.clipboard.writeText(clipboardText);
     return "copied";
-  } catch (e: unknown) {
-    return e instanceof Error && e.name === "AbortError" ? "dismissed" : "failed";
+  } catch {
+    return "failed";
   }
 }
 

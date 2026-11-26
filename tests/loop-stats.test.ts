@@ -879,33 +879,25 @@ describe("playlist refusals and quiz shares", () => {
     expect(kv.incrs).toEqual([]);
   });
 
-  it("crosses a game with what its link was — for an album or an artist only, never a playlist", async () => {
-    // ~300 commands a day for the ~3% of games the lifts are, not the ~9k a
-    // per-game cross would cost; a playlist's games are the existing tables.
+  it("no longer crosses a game with what its link was — retired 2026-11-26, the keys kept for the reader", async () => {
+    // The artist bar was read and the lift stays; three commands per album or
+    // artist game came back off. The pulse still carries `playlistKind`, so
+    // every value must be accepted and write no `_kind:` key.
     const keys = loopStatsKeys("2026-08-09", LOOP_SURFACES);
     expect(CROSSED_PLAYLIST_KINDS).toEqual(["album", "artist"]);
-    for (const kind of CROSSED_PLAYLIST_KINDS) {
+    for (const kind of ["album", "artist", "playlist", "Album", "show", "", undefined] as const) {
       kv.incrs = [];
-      await recordGameStart(1, { mode: "party", playlistKind: kind });
-      expect(keysWritten()).toContain(keys.gameKind[kind]);
-      kv.incrs = [];
-      await recordGameEnd("played_out", 9, { mode: "party", playlistKind: kind });
-      expect(keysWritten()).toContain(keys.gameEndKind[kind].played_out);
-      kv.incrs = [];
-      await recordGameEnd("ended_early", 2, { playlistKind: kind });
-      expect(keysWritten()).toContain(keys.gameEndKind[kind].ended_early);
-      kv.incrs = [];
-      await recordGameLeft(1, "first", "typed", "party", "p1", "unscored", undefined, kind);
-      expect(keysWritten()).toContain(keys.gameLeftKind[kind].r1_2);
-    }
-    for (const kind of ["playlist", "Album", "show", "", undefined] as const) {
-      kv.incrs = [];
-      await recordGameStart(1, { playlistKind: kind as never });
-      await recordGameEnd("played_out", 9, { playlistKind: kind as never });
-      await recordGameLeft(1, "first", undefined, undefined, undefined, undefined, undefined, kind as never);
+      await recordGameStart(1, { mode: "party", playlistKind: kind as never });
+      await recordGameEnd("played_out", 9, { mode: "party", playlistKind: kind as never });
+      await recordGameEnd("ended_early", 2, { playlistKind: kind as never });
+      await recordGameLeft(1, "first", "typed", "party", "p1", "unscored", undefined, kind as never);
       expect(keysWritten().some((k) => k.includes("_kind:")), String(kind)).toBe(false);
       expect(keysWritten(), String(kind)).toContain(keys.games);
     }
+    // The names survive so the days already written stay printable.
+    expect(keys.gameKind.artist).toContain("game_kind:artist");
+    expect(keys.gameEndKind.album.played_out).toContain("game_end_kind:album:played_out");
+    expect(keys.gameLeftKind.artist.r1_2).toContain("game_left_kind:artist:r1_2");
   });
 
   it("keys an arrival only on a device's first game, and only from the closed set", async () => {

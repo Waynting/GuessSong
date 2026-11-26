@@ -54,6 +54,74 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.25.0",
+    date: "2026-11-26",
+    headline: "A daily challenge, a game for one that starts in a tap, and the site in Portuguese.",
+    headlineZh: "每日挑戰上線、一個人也能一鍵開始，還多了葡萄牙文版。",
+    changes: [
+      {
+        kind: "new",
+        text: "Daily challenge: five songs, the same for everyone each day. Put them in order from oldest to newest, then share your grid of squares. It shows no song names, so it spoils nothing.",
+        textZh: "每日挑戰：每天五首歌，全世界都一樣。把它們從最舊排到最新，再把你的方格成績分享出去。方格不會顯示歌名，不怕爆雷。",
+      },
+      {
+        kind: "new",
+        text: "Playing alone? Pick \"Just me\" and press Start. With no link pasted, the game plays our own list of hits from every decade.",
+        textZh: "一個人玩？選「只有我」直接按開始就行。沒貼連結的話，會用我們準備的各年代金曲歌單。",
+      },
+      {
+        kind: "new",
+        text: "The setup page, the order game and every error message are now in Brazilian Portuguese for phones set to Portuguese.",
+        textZh: "手機語言是葡萄牙文的話，設定頁、排序遊戲和所有錯誤訊息現在都會顯示巴西葡萄牙文。",
+      },
+      {
+        kind: "new",
+        text: "\"Read a lyric instead\" in the guess game: when a song has no clip, or you just want a change, the host can read one line of it aloud for the room to guess.",
+        textZh: "猜歌遊戲多了「改唸一句歌詞」：歌曲沒有試聽片段、或只是想換個玩法時，主持人可以唸出一句歌詞讓大家猜。",
+      },
+      {
+        kind: "new",
+        text: "The Taste Quiz can ask lyric questions: one line of a song, and your friends pick which of two songs from your playlist it comes from.",
+        textZh: "品味鑒定可以出歌詞題了：給一句歌詞，朋友要從你歌單裡的兩首歌選出是哪一首。",
+      },
+      {
+        kind: "new",
+        text: "After a game alone you get a day streak, your best score on that playlist, and in the order game a \"music age\": the year your ears live in.",
+        textZh: "一個人玩完之後，會看到連續天數、這份歌單的個人最佳成績；排序遊戲還會算出你的「音樂年齡」，看看你的耳朵活在哪一年。",
+      },
+      {
+        kind: "new",
+        text: "Rooms of four or more can split into two teams from the setup page.",
+        textZh: "四個人以上可以在設定頁直接分成兩隊。",
+      },
+      {
+        kind: "better",
+        text: "On the first round of the order game, a line under the button says you can reveal the years even if you are not sure. A guess still counts.",
+        textZh: "排序遊戲的第一回合，按鈕下方會提醒：不確定也可以直接揭曉年份，用猜的也算分。",
+      },
+      {
+        kind: "better",
+        text: "When the site runs out of its daily Spotify allowance, the notice now says first that it is not about you or your link.",
+        textZh: "網站當天的 Spotify 額度用完時，通知會先講清楚：這跟你、跟你的連結都沒有關係。",
+      },
+      {
+        kind: "fixed",
+        text: "Phones that translate pages automatically no longer crash when you press Start.",
+        textZh: "手機開著自動翻譯網頁時，按開始不會再當掉了。",
+      },
+      {
+        kind: "fixed",
+        text: "A Share button that did nothing in some in-app browsers now copies your result so you can paste it.",
+        textZh: "在某些 App 內建瀏覽器裡，分享按鈕按了沒反應；現在會改成複製成績，讓你自己貼上。",
+      },
+      {
+        kind: "fixed",
+        text: "Lyric quizzes with many questions were sometimes built as title questions because the lyrics could not be fetched in time. They now wait and get their lines.",
+        textZh: "題數多的歌詞測驗，以前有時會因為來不及抓歌詞而被改成歌名題；現在會等一下，把歌詞抓齊。",
+      },
+    ],
+  },
+  {
     version: "1.24.0",
     date: "2026-11-10",
     headline: "Artist links play: paste an artist's page and the game is their ten biggest songs.",

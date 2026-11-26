@@ -203,6 +203,27 @@ export function starterKeyForId(
   return match ? match.starterKey : null;
 }
 
+/**
+ * The list a "Just me" Start plays when the field is empty: the order
+ * style's first starter, or null whenever the form is anything else. One tap
+ * from the tile to the first round — 84% of games are one player and a paste
+ * was the step between the tile and the game (TODOS.md, built 2026-11-26).
+ *
+ * Only for someone alone on the single-playlist order form with nothing in
+ * the field: a group's empty field is still `playlist_url_required`, because
+ * a room picking its music is the game, and a typed link always wins. The
+ * start it produces is an ordinary starter start — the field is filled first
+ * (`pickPlaylist(id, "starter")`), so the source, `host_setup_starter:<key>`
+ * and the setup memory all read it exactly as a chip tap followed by Start.
+ */
+export function soloDefaultStarter(
+  form: { solo: boolean; playStyle: PlayStyle; singleMode: boolean; fieldEmpty: boolean },
+  starters: readonly StarterPlaylist[] = STARTER_PLAYLISTS
+): StarterPlaylist | null {
+  if (!form.solo || !form.singleMode || !form.fieldEmpty || form.playStyle !== "order") return null;
+  return startersFor("order", starters)[0] ?? null;
+}
+
 export type StarterPlace = "field" | "refusal";
 
 export interface StarterContext {

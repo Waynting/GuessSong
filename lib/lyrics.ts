@@ -87,9 +87,21 @@ const DEFAULT_MAX_LOOKUPS_PER_MINUTE = 60;
 const BUDGET_KEY = "lyrics:budget";
 const BUDGET_WINDOW_SECONDS = 60;
 
-/** Same clamps as the preview cooldown: honest to the header, bounded either way. */
+/**
+ * The cooldown is the header's own figure, bounded above only.
+ *
+ * **The floor is one second, and it must not go back to thirty.** LRCLIB's
+ * limiter is a burst bucket: measured 2026-11-26, a creation's lookups at
+ * `LYRIC_LOOKUP_CONCURRENCY` drew a 429 after about thirty requests, with
+ * `Retry-After: 1`. Clamping that up to the preview cooldown's 30s floor
+ * parked every remaining lookup of the same creation — 39% of all lookups
+ * in the week to 2026-11-26 were "could not ask" (806 of 2,069), and eight
+ * lyric quizzes were built as the duel for it. One second is what upstream
+ * asked for; a call that can afford to wait it out does (`waitBudgetMs`).
+ * No header at all is still the cautious default.
+ */
 const COOLDOWN_KEY = "lyrics:cooldown";
-const MIN_COOLDOWN_SECONDS = 30;
+const MIN_COOLDOWN_SECONDS = 1;
 const MAX_COOLDOWN_SECONDS = 15 * 60;
 const DEFAULT_COOLDOWN_SECONDS = 60;
 
@@ -128,11 +140,12 @@ async function claimBudget(): Promise<boolean> {
 const COOLDOWN_MEMO_MS = 5000;
 let cooldownMemo: { until: number; readAt: number } | null = null;
 
-async function isCoolingDown(): Promise<boolean> {
+/** Milliseconds of cooldown left, or 0 when lookups may go out. */
+async function cooldownRemainingMs(): Promise<number> {
   const now = Date.now();
   if (cooldownMemo) {
-    if (cooldownMemo.until > now) return true;
-    if (now - cooldownMemo.readAt < COOLDOWN_MEMO_MS) return false;
+    if (cooldownMemo.until > now) return cooldownMemo.until - now;
+    if (now - cooldownMemo.readAt < COOLDOWN_MEMO_MS) return 0;
   }
   let until = 0;
   try {
@@ -142,10 +155,11 @@ async function isCoolingDown(): Promise<boolean> {
     // Unknown is "not cooling": the budget above still bounds the burst.
   }
   cooldownMemo = { until, readAt: now };
-  return until > now;
+  return until > now ? until - now : 0;
 }
 
-async function startCooldown(retryAfterSeconds?: number): Promise<void> {
+/** Parks every lookup, and says for how long, in milliseconds. */
+async function startCooldown(retryAfterSeconds?: number): Promise<number> {
   const seconds = Math.min(
     MAX_COOLDOWN_SECONDS,
     Math.max(MIN_COOLDOWN_SECONDS, retryAfterSeconds ?? DEFAULT_COOLDOWN_SECONDS)
@@ -157,6 +171,73 @@ async function startCooldown(retryAfterSeconds?: number): Promise<void> {
   } catch {
     // The memo parks this instance; the others join on their next miss.
   }
+  return seconds * 1000;
+}
+
+/**
+ * How long one call may spend waiting out cooldowns, as a wall-clock
+ * deadline shared by its workers — four workers parked by the same 429 wait
+ * the same second, not four of them. `wait` refuses a pause that would
+ * overrun, and the caller then answers `unavailable` as before.
+ *
+ * `turn` is the other half, and the one that does most of the work: it
+ * spaces the call's own requests so the 429 is not drawn in the first place.
+ * The first `LYRIC_BURST_REQUESTS` go out as fast as the workers ask — the
+ * default ten-question quiz is twenty lookups and should cost what it always
+ * did — and every request after that starts `LYRIC_PACE_MS` after the one
+ * before. Measured against the service on 2026-11-26: sixty requests at four
+ * workers drew a 429 at the twenty-ninth; the same sixty one at a time,
+ * 350ms apart, drew none. Waiting out refusals alone answered 50 of 60 in
+ * 15s and collected 28 refusals on the way, which is not "honour
+ * Retry-After"; burst-then-pace answered the same 50 with 5. What that says
+ * about the limiter: about thirty requests per ten seconds with no credit for
+ * a quiet start, so ~3 a second is the ceiling whatever we do and sixty cold
+ * lookups cannot take under ~20s — which is what `LYRIC_CREATE_WAIT_MS` is
+ * sized to. Up to ~28 lookups (an 18-question quiz) draw no refusal at all.
+ *
+ * **The deadline bounds the pacing too, and that is what keeps a creation
+ * inside its function.** A playlist of Traditional-titled live versions is
+ * up to four spellings a track; paced without a deadline, sixty such tracks
+ * are over a minute of requests in a route with a stated `maxDuration`, and the
+ * host gets a 504 where the duel would have been a quiz. A request whose
+ * turn falls past the deadline is not sent and its track is `unavailable`.
+ * With no patience at all (`waitBudgetMs` 0) nothing is paced or waited for.
+ */
+interface Patience {
+  wait(ms: number): Promise<boolean>;
+  /** False when this request's paced start would fall past the deadline: do not ask. */
+  turn(): Promise<boolean>;
+}
+
+export const LYRIC_BURST_REQUESTS = 20;
+export const LYRIC_PACE_MS = 350;
+
+/** A little past the header, so the retry lands after the window and not on its edge. */
+const COOLDOWN_WAIT_SLACK_MS = 150;
+
+function patienceFor(waitBudgetMs: number): Patience {
+  const deadline = Date.now() + Math.max(0, waitBudgetMs);
+  let asked = 0;
+  let nextAt = 0;
+  return {
+    async turn(): Promise<boolean> {
+      if (waitBudgetMs <= 0) return true;
+      asked += 1;
+      if (asked <= LYRIC_BURST_REQUESTS) return true;
+      const now = Date.now();
+      const at = Math.max(now, nextAt);
+      if (at > deadline) return false;
+      nextAt = at + LYRIC_PACE_MS;
+      if (at > now) await new Promise<void>((done) => setTimeout(done, at - now));
+      return true;
+    },
+    async wait(ms: number): Promise<boolean> {
+      const pause = ms + COOLDOWN_WAIT_SLACK_MS;
+      if (Date.now() + pause > deadline) return false;
+      await new Promise<void>((done) => setTimeout(done, pause));
+      return true;
+    },
+  };
 }
 
 /** Test seam: the memo outlives a test. */
@@ -255,19 +336,34 @@ function reduce(record: LrclibRecord, track: Pick<Track, "name" | "artists">): L
   return lines.length > 0 ? { status: "found", lines } : { status: "absent", lines: [] };
 }
 
-async function resolve(track: Pick<Track, "id" | "name" | "artists" | "durationMs">): Promise<LyricResult> {
-  if (await isCoolingDown()) return { status: "unavailable", lines: [] };
-  if (!(await claimBudget())) return { status: "unavailable", lines: [] };
+async function resolve(
+  track: Pick<Track, "id" | "name" | "artists" | "durationMs">,
+  patience: Patience
+): Promise<LyricResult> {
+  const unavailable: LyricResult = { status: "unavailable", lines: [] };
+  // A cooldown short enough to sit out is sat out; a long one is an answer.
+  for (let left = await cooldownRemainingMs(); left > 0; left = await cooldownRemainingMs()) {
+    if (!(await patience.wait(left))) return unavailable;
+  }
+  if (!(await claimBudget())) return unavailable;
   let missing = false;
   for (const query of lyricQueries(track)) {
-    const answer = await askLrclib(query);
+    if (!(await patience.turn())) return unavailable;
+    let answer = await askLrclib(query);
+    // A 429 is honoured, not given up on: park every lookup for what the
+    // header says, and ask the same spelling again if this call can wait.
+    while (answer.kind === "unavailable" && answer.throttled) {
+      const parkedMs = await startCooldown(answer.retryAfterSeconds);
+      if (!(await patience.wait(parkedMs))) return unavailable;
+      if (!(await patience.turn())) return unavailable;
+      answer = await askLrclib(query);
+    }
     if (answer.kind === "record") return reduce(answer.record, track);
     if (answer.kind === "missing") {
       missing = true;
       continue;
     }
-    if (answer.throttled) await startCooldown(answer.retryAfterSeconds);
-    return { status: "unavailable", lines: [] };
+    return unavailable;
   }
   // Every spelling came back 404: a clean "not here", cached a week.
   return missing ? { status: "absent", lines: [] } : { status: "unavailable", lines: [] };
@@ -301,6 +397,10 @@ async function writeCached(id: string, result: LyricResult): Promise<void> {
   }
 }
 
+/** The two callers' patience with LRCLIB (`waitBudgetMs` below), in milliseconds. */
+export const LYRIC_CREATE_WAIT_MS = 22_000;
+export const LYRIC_LINE_WAIT_MS = 2_500;
+
 /**
  * The lyric candidates for a set of tracks, by track id: one `mget`, then
  * the misses looked up `LYRIC_LOOKUP_CONCURRENCY` at a time and written
@@ -309,22 +409,32 @@ async function writeCached(id: string, result: LyricResult): Promise<void> {
  *
  * `onLookup` is told about each upstream resolution — not cache hits — so
  * the counters describe what was spent.
+ *
+ * `waitBudgetMs` is how long the whole call may spend being patient with
+ * LRCLIB — spacing its own requests past the first burst, and waiting out a
+ * `Retry-After` — before what is left is written off as `unavailable`.
+ * Zero, the default, is "never wait, never pace". A quiz creation passes
+ * `LYRIC_CREATE_WAIT_MS`, because its lookups are one burst and a burst is
+ * what the limiter refuses; a single line in the guess game passes
+ * `LYRIC_LINE_WAIT_MS`, a host with a room waiting.
  */
 export async function lookupLyricCandidates(
   tracks: readonly Pick<Track, "id" | "name" | "artists" | "durationMs">[],
-  onLookup?: (status: LyricStatus) => void
+  onLookup?: (status: LyricStatus) => void,
+  { waitBudgetMs = 0 }: { waitBudgetMs?: number } = {}
 ): Promise<Map<string, LyricResult>> {
   const byId = new Map<string, Pick<Track, "id" | "name" | "artists" | "durationMs">>();
   for (const t of tracks) if (t && typeof t.id === "string" && t.id && !byId.has(t.id)) byId.set(t.id, t);
   const results = await readCached([...byId.keys()]);
   const misses = [...byId.values()].filter((t) => !results.has(t.id));
 
+  const patience = patienceFor(waitBudgetMs);
   let next = 0;
   const worker = async () => {
     while (next < misses.length) {
       const track = misses[next];
       next += 1;
-      const result = await resolve(track);
+      const result = await resolve(track, patience);
       results.set(track.id, result);
       onLookup?.(result.status);
       await writeCached(track.id, result);

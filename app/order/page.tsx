@@ -1045,6 +1045,9 @@ export default function OrderPage() {
         }
         @keyframes pop-in { from{transform:scale(0.6);opacity:0} to{transform:scale(1);opacity:1} }
         .order-note { margin-top: 10px; font-size: 12px; line-height: 1.4; color: #555; text-align: center; }
+        /* An instruction, like the prompt over the cards, so it takes the prompt's
+           grey: #555 is 2.3:1 on the card, and this is the line a stuck host needs. */
+        .order-note.order-unsure { color: #9a9a9a; font-size: 13px; }
 
         /* The round on the phones: who has locked in, then how each did. */
         .phone-status { margin-bottom: 12px; text-align: center; }
@@ -1691,6 +1694,11 @@ export default function OrderPage() {
                 <button className={revealUntouched ? "btn-ghost btn-ghost-accent" : "btn-primary"} onClick={reveal}>
                   {copy.reveal}
                 </button>
+                {/* Round one, nothing moved: say a reveal is allowed. Under
+                    the button, never over the cards — it leaves when the
+                    first card lifts, and a line above the list would move
+                    the list under the finger that is dragging it. */}
+                {revealUntouched && <p className="order-note order-unsure">{copy.prompt.unsure}</p>}
                 {leftoverLine && <p className="order-note">{leftoverLine}</p>}
               </div>
             )}

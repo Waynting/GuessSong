@@ -120,6 +120,7 @@ import {
 } from "@/lib/setup-memory";
 import {
   fieldChipRow,
+  soloDefaultStarter,
   starterKeyForId,
   starterPlacement,
   startersFor,
@@ -291,6 +292,8 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
    * restored link makes it `typed`: the host has taken the link over.
    */
   const [linkSource, setLinkSource] = useState<LinkSource>("typed");
+  /** The link a one-tap solo Start has put in the field and is waiting to start on. */
+  const pendingSoloStartRef = useRef<string | null>(null);
   const [players, setPlayers] = useState<string[]>(["", ""]);
   // "Split into two teams" (lib/teams.ts): the switch, and each roster row's
   // side, parallel to `players`. Offered from four typed names, turned off
@@ -1509,6 +1512,13 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
   }
 
   const startBusy = loading || roomStarting;
+  // "Just me" with nothing in the field: Start plays the order game's own
+  // list (lib/starter-playlists.ts, soloDefaultStarter).
+  const soloDefault = soloDefaultStarter({
+    solo: who === "solo", playStyle,
+    singleMode: setupMode === "single",
+    fieldEmpty: !playlistUrl.trim(),
+  });
   const startState_ = startState({
     setupMode,
     mixedSubMode,
@@ -1520,6 +1530,7 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
     mixedContributions: mixedContributions.length,
     roomSubmissions: roomSubmissions.length,
     locale: pageLocale,
+    soloStarterName: soloDefault ? copy.starters[soloDefault.starterKey].name : null,
   });
   /**
    * The buzzer, offered under the roster and not only in the settings fold.
@@ -1534,8 +1545,27 @@ export function SetupPage({ locale: pageLocale }: { locale: SetupLocale }) {
     resetRoom();
   }
 
+  /**
+   * Start for someone alone with an empty field: fill the field with the
+   * starter exactly as its chip would, and start on the next render. Through
+   * the field and an effect rather than a URL handed to `handleStart`,
+   * because everything a start counts and stores — the source, the starter
+   * key, the playlist ref, the setup memory — is read from the form, and a
+   * start that bypassed the form would be one those could disagree with.
+   */
+  function startSoloDefault(id: string) {
+    pendingSoloStartRef.current = playableUrlOf(id);
+    pickPlaylist(id, "starter");
+  }
+  useEffect(() => {
+    if (pendingSoloStartRef.current === null || pendingSoloStartRef.current !== playlistUrl) return;
+    pendingSoloStartRef.current = null;
+    void handleStart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires on the fill it asked for, with that render's form
+  }, [playlistUrl]);
+
   const startClick = setupMode === "single"
-    ? handleStart
+    ? () => (soloDefault ? startSoloDefault(soloDefault.id) : handleStart())
     : mixedSubMode === "phone"
     ? handleMixedStart
     : handleRoomStart;

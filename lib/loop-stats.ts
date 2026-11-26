@@ -527,16 +527,19 @@ export const PLAYLIST_ARTIST_OUTCOMES: readonly PlaylistArtistOutcome[] = ["load
  * A playlist's games are the existing `game_end` / `game_left` tables — the
  * baseline — so the crosses are written only for the ~3% of games they are
  * for: three more commands on an album or artist game, ~300 a day, not the
- * ~9k a per-game cross would cost against the Upstash cap. Retire them once
- * the bar on the artist lift has been read.
+ * ~9k a per-game cross would cost against the Upstash cap.
+ *
+ * **Retired 2026-11-26: nothing writes these keys any more.** The bar on the
+ * artist lift was read (58.9% played out at ~260 starts a day, against a bar
+ * of 25 a day and `party`'s 29.9%) and the lift stays. The key names and this
+ * list remain so `npm run stats` can print the days already written until
+ * they expire; `playlistKind` still rides the pulse and is ignored by the
+ * three recorders, so a page from before the retirement is not refused.
  */
 export const CROSSED_PLAYLIST_KINDS: readonly Exclude<PlaylistKind, "playlist">[] = ["album", "artist"];
 
 export type CrossedPlaylistKind = (typeof CROSSED_PLAYLIST_KINDS)[number];
 
-function crossedKind(value: unknown): CrossedPlaylistKind | null {
-  return isPlaylistKind(value) && value !== "playlist" ? value : null;
-}
 
 /**
  * How following a short link came out, for every one the server was handed —
@@ -1349,7 +1352,7 @@ export interface GameStartDetails {
   players?: PlayerBand;
   from?: Arrival;
   starter?: StarterKey;
-  /** What the link was; crossed only for an album or an artist (`CROSSED_PLAYLIST_KINDS`). */
+  /** What the link was. Accepted, not counted — the cross was retired 2026-11-26 (`CROSSED_PLAYLIST_KINDS`). */
   playlistKind?: PlaylistKind;
   /** This device's first solo game, or its first party after one (lib/solo-party.ts). */
   soloStep?: SoloStep;
@@ -1413,10 +1416,9 @@ export async function recordGameStart(
   // hosts. One command on the ~20% of starts that are a starter's; the key
   // tail is a closed set and an unknown value writes nothing.
   if (isStarterKey(starter)) await bump(`host_setup_starter:${starter}`);
-  // The album and artist lifts' denominator — a playlist's games are the
-  // tables above, so nothing is written for one (see CROSSED_PLAYLIST_KINDS).
-  const crossed = crossedKind(playlistKind);
-  if (crossed) await bump(`game_kind:${crossed}`);
+  // `playlistKind` is accepted and not counted: the album/artist cross was
+  // retired on 2026-11-26 (see CROSSED_PLAYLIST_KINDS).
+  void playlistKind;
   // A device's first solo game, or its first party after one — once per
   // device each, so one command on a few percent of starts (lib/solo-party.ts).
   // Guarded against the band as well as the set: a `solo_first` on a game of
@@ -1476,7 +1478,7 @@ export async function recordGameEnd(
     arranged?: boolean;
     /** Whether this Game Over drew the Mixed link (`gameOverOnward`). */
     linkDrawn?: boolean;
-    /** What the link was; crossed only for an album or an artist. */
+    /** What the link was. Accepted, not counted since 2026-11-26. */
     playlistKind?: PlaylistKind;
     /** A game of one: the device's day streak, banded (lib/streak.ts). */
     streak?: StreakBand;
@@ -1505,9 +1507,6 @@ export async function recordGameEnd(
     extras.push(bump(`game_end_mode_players:${details.mode}:${details.players}:${end}`));
   }
   if (isGameScored(details.scored)) extras.push(bump(`game_end_scored:${details.scored}:${end}`));
-  // How an album or artist game ended — `game_kind:*` is the denominator.
-  const crossed = crossedKind(details.playlistKind);
-  if (crossed) extras.push(bump(`game_end_kind:${crossed}:${end}`));
   // The solo Game Over's streak and best (lib/streak.ts): `streak:<band>` and
   // `personal_best:<outcome>`, one each per one-player Game Over that wrote
   // them. Guarded against the band as well as the set, the `solo_party` rule:
@@ -1596,9 +1595,9 @@ export async function recordGameLeft(
   const round = clampRound(roundsPlayed);
   await bump(`game_left_round:${round}`);
   const band = earlyEndBand(round);
-  const crossed = crossedKind(playlistKind);
+  // The album/artist cross was retired on 2026-11-26 (CROSSED_PLAYLIST_KINDS).
+  void playlistKind;
   await Promise.all([
-    crossed ? bump(`game_left_kind:${crossed}:${band}`) : undefined,
     isGameHostKind(host) ? bump(`game_left_host:${host}:${band}`) : undefined,
     isSetupSource(source) ? bump(`game_left_source:${source}:${band}`) : undefined,
     isGameMode(mode) ? bump(`game_left_mode:${mode}:${band}`) : undefined,

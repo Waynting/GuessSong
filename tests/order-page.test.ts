@@ -499,6 +499,19 @@ describe("the order game's first screen (2026-11-10)", () => {
     expect(ORDER_COPY.en.prompt.solo).toBe("Oldest on top. Drag the cards into order, then reveal");
   });
 
+  it("says a reveal is allowed on round one, under the button, and only until a card moves", () => {
+    // Under Reveal, never above the list: it leaves when the first card
+    // lifts, and a line above would move the cards under the dragging finger.
+    expect(body).toMatch(
+      /\{copy\.reveal\}\s*<\/button>[\s\S]{0,420}\{revealUntouched && <p className="order-note order-unsure">\{copy\.prompt\.unsure\}<\/p>\}/
+    );
+    expect(body.indexOf("copy.prompt.unsure")).toBeGreaterThan(body.indexOf('className="order-list"'));
+    expect(ORDER_COPY.en.prompt.unsure).toBe("Not sure? Reveal anyway — a guess still counts.");
+    // Readable: the prompt's grey, not the note's #555 (2.3:1 on the card).
+    expect(source).toMatch(/\.order-note\.order-unsure \{ color: #9a9a9a; font-size: 13px; \}/);
+    expect(ORDER_COPY.pt.prompt.unsure).not.toBe(ORDER_COPY.en.prompt.unsure);
+  });
+
   it("draws Reveal as a green-bordered ghost on round one until a card moves, never disabled", () => {
     expect(body).toMatch(/const revealUntouched = currentIndex === 0 && !hostMoved && !buzzerRoom;/);
     expect(body).toMatch(

@@ -11,6 +11,7 @@ import {
   STARTER_PLAYLISTS,
   fieldChipRow,
   isStarterKey,
+  soloDefaultStarter,
   starterCaption,
   starterKeyForId,
   starterPlacement,
@@ -498,5 +499,37 @@ describe("the theme row's one counter", () => {
     const rendered = script.match(/const RENDERED_PREFIXES = \[([^\]]*)\]/)?.[1] ?? "";
     expect(rendered).toContain('"starter_theme_row:"');
     expect(script).toContain("starter_theme_row:shown:${s}");
+  });
+});
+
+describe("a one-tap start for someone alone", () => {
+  const solo = { solo: true, playStyle: "order" as const, singleMode: true, fieldEmpty: true };
+  const setup = readFileSync(join(process.cwd(), "app/setup-page.tsx"), "utf8");
+
+  it("is the order style's own list, and only on the empty single-playlist order form of one", () => {
+    expect(soloDefaultStarter(solo)?.starterKey).toBe("decades");
+    expect(soloDefaultStarter(solo)?.game).toBe("order");
+    expect(soloDefaultStarter({ ...solo, solo: false })).toBeNull();
+    expect(soloDefaultStarter({ ...solo, fieldEmpty: false })).toBeNull();
+    expect(soloDefaultStarter({ ...solo, singleMode: false })).toBeNull();
+    expect(soloDefaultStarter({ ...solo, playStyle: "guess" })).toBeNull();
+    // Never a guess list in the order game, and nothing when the style has none.
+    expect(soloDefaultStarter(solo, STARTER_PLAYLISTS.filter((s) => s.game === "guess"))).toBeNull();
+    expect(soloDefaultStarter(solo, [])).toBeNull();
+  });
+
+  it("starts through the field, so the source, the starter key and the memory read it as a chip tap", () => {
+    // The fill is the chip's own call, and the start is the ordinary one.
+    expect(setup).toMatch(
+      /function startSoloDefault\(id: string\) \{\s*pendingSoloStartRef\.current = playableUrlOf\(id\);\s*pickPlaylist\(id, "starter"\);\s*\}/
+    );
+    expect(setup).toMatch(
+      /if \(pendingSoloStartRef\.current === null \|\| pendingSoloStartRef\.current !== playlistUrl\) return;\s*pendingSoloStartRef\.current = null;\s*void handleStart\(\);/
+    );
+    expect(setup).toMatch(/\? \(\) => \(soloDefault \? startSoloDefault\(soloDefault\.id\) : handleStart\(\)\)/);
+    // A group's empty field is still refused, by the start itself.
+    expect(setup).toMatch(/if \(!playlistUrl\.trim\(\)\) \{\s*setFailure\(failureFor\("playlist_url_required", locale\)\);/);
+    // And the line under the button names the list in the page's language.
+    expect(setup).toMatch(/soloStarterName: soloDefault \? copy\.starters\[soloDefault\.starterKey\]\.name : null,/);
   });
 });

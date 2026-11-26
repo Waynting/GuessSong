@@ -865,6 +865,10 @@ if (crossCols.length > 0) {
  * artist game's played-out rate not below `party`'s; below it, the lift is
  * reverted to a refusal with an honest sentence. Read with `--since` the
  * deploy day.
+ *
+ * Retired 2026-11-26: the bar was read (artist 58.9% played out, ~260 starts
+ * a day) and nothing writes these keys now. The table prints the days already
+ * written until they expire, then disappears by itself.
  */
 const KIND_ORDER = ["album", "artist"];
 const kindCols = KIND_ORDER.filter((kind) =>
@@ -882,7 +886,7 @@ if (kindCols.length > 0) {
   const leftBands = earlyBands.map(([band]) => kindCols.map((k) => get(`game_left_kind:${k}:${band}`)));
   const left = kindCols.map((_, i) => leftBands.reduce((t, row) => t + row[i], 0));
   const leftEarly = kindCols.map((_, i) => leftBands[0][i] + leftBands[1][i]);
-  console.log("\nHow games ended, by what the link was (playlists are the tables above)");
+  console.log("\nHow games ended, by what the link was (retired 2026-11-26 — history only; playlists are the tables above)");
   console.log(sourceRow("", kindCols));
   console.log(sourceRow("started", started));
   console.log(sourceRow("played out", playedOut));
@@ -892,9 +896,10 @@ if (kindCols.length > 0) {
   console.log(sourcePctRow("played out, % of started", playedOut, started));
   console.log(sourcePctRow("left by round 2, %", leftEarly, started));
   console.log(
-    "  how to read it: set an artist game's played-out beside `party`'s above; the bar\n" +
-      "  is 25 played a day and a rate no lower. An album's games were unreadable before\n" +
-      "  this table; its ten-song games end early by construction, so read rounds, not ends."
+    "  how to read it: history only. The artist lift cleared its bar (25 played a day,\n" +
+      "  a played-out rate no lower than `party`'s) and stays; nothing is written after\n" +
+      "  2026-11-26, so a window past that day reads low. An album's ten-song games end\n" +
+      "  early by construction, so read rounds, not ends."
   );
 }
 

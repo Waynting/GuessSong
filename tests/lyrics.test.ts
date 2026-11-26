@@ -6,7 +6,18 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { getKvStore } from "@/lib/kv";
-import { LRCLIB_USER_AGENT, __resetLyricsForTests, lookupLyricCandidates, lyricQueries } from "@/lib/lyrics";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  LRCLIB_USER_AGENT,
+  LYRIC_BURST_REQUESTS,
+  LYRIC_CREATE_WAIT_MS,
+  LYRIC_PACE_MS,
+  LYRIC_LINE_WAIT_MS,
+  __resetLyricsForTests,
+  lookupLyricCandidates,
+  lyricQueries,
+} from "@/lib/lyrics";
 
 vi.hoisted(() => {
   process.env.UPSTASH_REDIS_REST_URL = "";
@@ -129,6 +140,118 @@ describe("lookupLyricCandidates", () => {
     expect((await lookupLyricCandidates([a])).get(a.id)?.status).toBe("unavailable");
     expect((await lookupLyricCandidates([b])).get(b.id)?.status).toBe("unavailable");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("parks for what the header says — one second is one second, never the old thirty", async () => {
+    // LRCLIB answers a creation's burst with `Retry-After: 1`. Clamped up to
+    // 30s, that wrote off the rest of the creation: 39% of lookups in the
+    // week to 2026-11-26 were "could not ask".
+    const a = { id: id(), name: "One", artists: ["Act"], durationMs: 0 };
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "1" } }));
+    const before = Date.now();
+    expect((await lookupLyricCandidates([a])).get(a.id)?.status).toBe("unavailable");
+    const until = await (await getKvStore()).get<number>("lyrics:cooldown");
+    expect(until).toBeGreaterThan(before);
+    expect((until as number) - before).toBeLessThanOrEqual(1500);
+  });
+
+  it("waits out a short Retry-After and asks again when the call has the patience", async () => {
+    const tracks = [1, 2, 3].map((n) => ({ id: id(), name: `Song ${n}`, artists: ["Act"], durationMs: 0 }));
+    let calls = 0;
+    fetchMock.mockImplementation(() => {
+      calls += 1;
+      // The second request of the burst is refused, once.
+      return Promise.resolve(
+        calls === 2
+          ? new Response("", { status: 429, headers: { "retry-after": "1" } })
+          : json({ plainLyrics: LYRIC })
+      );
+    });
+    const seen: string[] = [];
+    const out = await lookupLyricCandidates(tracks, (s) => seen.push(s), { waitBudgetMs: 5000 });
+    expect(tracks.map((t) => out.get(t.id)?.status)).toEqual(["found", "found", "found"]);
+    // One lookup per track is reported, the retried one included once.
+    expect(seen).toEqual(["found", "found", "found"]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not wait past its budget: a long Retry-After is still an answer", async () => {
+    const a = { id: id(), name: "One", artists: ["Act"], durationMs: 0 };
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "120" } }));
+    const started = Date.now();
+    const out = await lookupLyricCandidates([a], undefined, { waitBudgetMs: 5000 });
+    expect(out.get(a.id)?.status).toBe("unavailable");
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a default quiz's lookups go at once and spaces the ones after", async () => {
+    // Twenty lookups is the ten-question default; a burst that size is under
+    // what LRCLIB refuses. Past it, each request starts LYRIC_PACE_MS after
+    // the one before, whatever the worker count.
+    const tracks = Array.from({ length: LYRIC_BURST_REQUESTS + 3 }, (_, n) => ({
+      id: id(),
+      name: `Song ${n}`,
+      artists: ["Act"],
+      durationMs: 0,
+    }));
+    const at: number[] = [];
+    fetchMock.mockImplementation(() => {
+      at.push(Date.now());
+      return Promise.resolve(json({ plainLyrics: LYRIC }));
+    });
+    const out = await lookupLyricCandidates(tracks, undefined, { waitBudgetMs: 5000 });
+    expect([...out.values()].every((r) => r.status === "found")).toBe(true);
+    expect(at).toHaveLength(tracks.length);
+    const burst = at[LYRIC_BURST_REQUESTS - 1] - at[0];
+    expect(burst).toBeLessThan(LYRIC_PACE_MS);
+    // Three paced requests: the last starts at least two gaps after the burst's end.
+    const tail = at[at.length - 1] - at[LYRIC_BURST_REQUESTS];
+    expect(tail).toBeGreaterThanOrEqual(2 * LYRIC_PACE_MS - 30);
+  });
+
+  it("does not send a paced request that would start past the deadline", async () => {
+    // What keeps a creation inside `maxDuration`: four spellings a track,
+    // paced without a deadline, is over a minute of requests.
+    const tracks = Array.from({ length: LYRIC_BURST_REQUESTS + 4 }, (_, n) => ({
+      id: id(),
+      name: `Song ${n}`,
+      artists: ["Act"],
+      durationMs: 0,
+    }));
+    fetchMock.mockImplementation(() => Promise.resolve(json({ plainLyrics: LYRIC })));
+    // Room for the burst and one paced gap, not for four.
+    const out = await lookupLyricCandidates(tracks, undefined, { waitBudgetMs: LYRIC_PACE_MS + 100 });
+    const statuses = tracks.map((t) => out.get(t.id)?.status);
+    expect(statuses.filter((s) => s === "found").length).toBeGreaterThanOrEqual(LYRIC_BURST_REQUESTS + 1);
+    expect(statuses.filter((s) => s === "unavailable").length).toBeGreaterThanOrEqual(1);
+    expect(fetchMock.mock.calls.length).toBeLessThan(tracks.length);
+  });
+
+  it("neither paces nor waits with no patience — the old behaviour, for a caller that passes none", async () => {
+    const tracks = Array.from({ length: LYRIC_BURST_REQUESTS + 3 }, (_, n) => ({
+      id: id(),
+      name: `Song ${n}`,
+      artists: ["Act"],
+      durationMs: 0,
+    }));
+    fetchMock.mockImplementation(() => Promise.resolve(json({ plainLyrics: LYRIC })));
+    const started = Date.now();
+    const out = await lookupLyricCandidates(tracks);
+    expect([...out.values()].every((r) => r.status === "found")).toBe(true);
+    expect(Date.now() - started).toBeLessThan(LYRIC_PACE_MS);
+  });
+
+  it("hands both callers a wait budget, the creation the longer one", () => {
+    const quizRoute = readFileSync(join(process.cwd(), "app/api/quiz/route.ts"), "utf8");
+    const lineRoute = readFileSync(join(process.cwd(), "app/api/lyric/route.ts"), "utf8");
+    expect(quizRoute).toMatch(/waitBudgetMs: LYRIC_CREATE_WAIT_MS/);
+    expect(lineRoute).toMatch(/waitBudgetMs: LYRIC_LINE_WAIT_MS/);
+    expect(LYRIC_CREATE_WAIT_MS).toBeGreaterThan(LYRIC_LINE_WAIT_MS);
+    // The creation's ceiling is stated, and leaves room for the wait.
+    const ceiling = Number(quizRoute.match(/export const maxDuration = (\d+);/)?.[1]);
+    expect(ceiling * 1000).toBeGreaterThanOrEqual(LYRIC_CREATE_WAIT_MS + 10_000);
+    expect(LYRIC_LINE_WAIT_MS).toBeGreaterThanOrEqual(1000 + 150);
   });
 
   it("stops asking past the per-minute budget", async () => {

@@ -7,7 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-11-26
+
+Everything merged since 1.24.0 (PRs #77–#92) and the five changes of
+2026-11-26, cut from the stats read of that day: ~3.3–4.6k games a day,
+played out 38.3%, 5,623 of 17,221 one-player order games over before their
+first reveal (86% of those with no card moved), 39% of lyric-quiz lookups
+"could not ask".
+
+### Fixed
+
+- **A lyric quiz's lookups honour LRCLIB's `Retry-After` instead of being
+  written off by it** (`lib/lyrics.ts`). In the week to 2026-11-26
+  `quiz_lyric:*` read found 1,156 · absent 107 · **unavailable 806 (39%)**,
+  and eight lyric quizzes were built as the duel. Cause, reproduced against
+  the service: a creation asks about up to `LYRIC_LOOKUP_MAX` tracks at
+  `LYRIC_LOOKUP_CONCURRENCY`, LRCLIB's limiter is a burst bucket that answers
+  429 with `Retry-After: 1` after roughly thirty requests in a couple of
+  seconds (60 requests at four workers: 28 answered, 31 refused; the same 60
+  one at a time, 350ms apart: none refused), and the cooldown clamped that
+  one second up to the preview cache's 30-second floor — so every remaining
+  lookup of the same creation returned `unavailable` without asking.
+  `MIN_COOLDOWN_SECONDS` is 1; `startCooldown` returns what it parked for;
+  and `lookupLyricCandidates` takes `{ waitBudgetMs }`, a wall-clock deadline
+  shared by its workers: a cooldown or a 429 that fits inside it is sat out
+  (`Retry-After` + 150ms) and the same spelling asked again, anything longer
+  is `unavailable` as before. The same deadline paces the call's own
+  requests so the refusal is mostly not drawn: the first
+  `LYRIC_BURST_REQUESTS` (20, the default quiz's whole sample) go at once,
+  each one after starts `LYRIC_PACE_MS` (350ms) after the last, and a request
+  whose turn falls past the deadline is not sent — which is what keeps four
+  spellings a track from outrunning the function. `POST /api/quiz` passes `LYRIC_CREATE_WAIT_MS`
+  (22s) and exports `maxDuration = 45`, so the wait cannot be cut off by a
+  ten-second platform default; `GET /api/lyric` passes `LYRIC_LINE_WAIT_MS`
+  (2.5s). The per-minute budget, the cache TTLs and the legal bounds are
+  unchanged. The same algorithm replayed against the service, sixty cold
+  lookups with a 15s budget: 50 answered and 5 refusals drawn, against 28
+  answered before (waiting alone, without pacing: 50 answered, 28 refusals).
+  The limiter reads as ~30 requests per ten seconds, so sixty lookups cannot
+  take under ~20s, hence 22; that figure itself was not replayed.
+  Read after deploy: `could not ask` on the `lyric lookups` line, toward a
+  few percent.
+  - Known gap: a 50-question quiz on a cold cache now takes up to ~22s to
+    create and may still lose a few of its sixty lookups; anything up to
+    ~28 lookups (18 questions) draws no refusal and costs what it did.
+
+- **A Share button whose share sheet throws now copies instead of doing
+  nothing** (`shareLink` in `lib/quiz-share.ts`). `daily_share:failed` read
+  14 in a week, 13 of them on 2026-11-25: `navigator.share` existed and
+  rejected (an in-app webview, most likely one device pressed again and
+  again), `shareLink` returned `failed`, and no caller shows anything for
+  `failed`. Only `AbortError` is `dismissed` now; any other rejection falls
+  through to the clipboard, and `failed` means both paths refused. Every
+  share card is on this helper — the daily grid, music age, the quiz's
+  owner/taker/board buttons — so all their `failed` rows should fall and
+  `copied` rise by the same taps. `tests/quiz-share.test.ts` is new.
+
+- **Page translation no longer crashes Start** (issue #87, PR #91): every
+  page said `lang="en"`, so a phone set to always translate English ran the
+  site through Google Translate, whose `<font>` wrappers made React's next
+  `removeChild` throw. `translate="no"` and `<meta name="google"
+  content="notranslate">` on the root layout and `app/global-error.tsx`, and
+  `TRANSLATE_GUARD_SCRIPT` (`lib/translate-guard.ts`) for translators that
+  ignore the opt-out. `tests/translate-guard.test.ts`.
+
+- **The daily challenge's grid is on the reveal, not behind "see final
+  scores"** (PR #92). 1,197 started and 341 finished (28.5%) in its first
+  three days because `finished` — and the card the feature exists for — sat
+  behind a second tap on a one-round game. The daily now finishes at its
+  reveal and draws the grid under the years; finished ÷ started read 46% /
+  40% / 44% on 2026-11-23..25.
+
 ### Added
+
+- **"Just me" starts without a link** (`soloDefaultStarter` in
+  `lib/starter-playlists.ts`; TODOS.md, CEO 0G E2). Someone alone on the
+  order form with an empty field used to get `playlist_url_required`; Start
+  now plays the order style's own starter (`decades`), and the line under
+  the button says so ("No link? Start plays “Hits from every decade”",
+  `status.soloStarter` in `lib/setup-copy.ts`, en + pt, through
+  `startState`'s new `soloStarterName`). The start goes **through the
+  field**: `startSoloDefault` calls `pickPlaylist(id, "starter")` and an
+  effect runs `handleStart` on the render that holds the link, so the source
+  (`starter`), `host_setup_starter:decades`, the payload's `playlistRef` and
+  the setup memory are exactly a chip tap followed by Start. A group's empty
+  field is refused as before, and a typed link always wins.
+  - Known gap: no counter of its own, by design (the starter rule: never a
+    new pulse kind) — so a one-tap start cannot be told from a chip tap.
+    It makes a start cheaper, which by itself raises round-zero bounces; read
+    it with the line below, not alone.
+
+- **"Not sure? Reveal anyway — a guess still counts."** on the order game's
+  first round (`ORDER_COPY.*.prompt.unsure`, en + pt; TODOS.md, CEO 0G E4),
+  while `revealUntouched`. Its trigger was `order_bounce:*:untouched`
+  unchanged after the first-screen cues of 1.23.0: it was 82% then and 86%
+  now. Drawn under Reveal in the prompt's grey — never over the cards, where
+  its leaving on the first drag would move the list under the finger.
+  Baseline to read against: 32.7% of `order 1` starts over before any reveal.
 
 - **The order game speaks Portuguese when the setup page did**
   (`lib/order-copy.ts`, `GamePayload.locale`). Since 2026-11-17, 27% of games
@@ -348,6 +444,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block. That ratio, not the load count, is what the ceiling is set against.
 
 ### Removed
+
+- **The album/artist cross counters** (`game_kind:*`, `game_end_kind:*`,
+  `game_left_kind:*`). They existed to read one bar — `playlist_artist:loaded`
+  ≥ 25 a day and an artist game playing out no worse than `party` — and it
+  read 58.9% against 29.9% at ~260 starts a day, so the artist lift stays and
+  the three commands per album or artist game come off. `recordGameStart`,
+  `recordGameEnd` and `recordGameLeft` still accept `playlistKind` (pages
+  keep sending it) and write nothing by it; `CROSSED_PLAYLIST_KINDS` and the
+  key names stay so the "by what the link was" table in `npm run stats`
+  prints the days already written, marked history only.
 
 - **The "Today's challenge" fake door** (`lib/daily-door.ts` deleted, its
   card, `reportDailyDoor` and CSS gone). `daily_door:*` keeps its recorder,

@@ -14,7 +14,7 @@ import { marketFromHeaders } from "@/lib/market";
 import { SpotifyApiError } from "@/lib/spotify";
 import { createQuiz, QuizError, type LyricSource } from "@/lib/quiz-store";
 import { QUIZ_DECOY_POOL } from "@/lib/quiz-decoys";
-import { lookupLyricCandidates } from "@/lib/lyrics";
+import { LYRIC_CREATE_WAIT_MS, lookupLyricCandidates } from "@/lib/lyrics";
 import { recordQuizCreated, recordQuizLyricLookup, recordQuizThrottled } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { errorResponse } from "@/lib/api-error";
@@ -28,6 +28,14 @@ import {
   isQuizKind,
   type CreateQuizResponse,
 } from "@/types/quiz";
+
+/**
+ * A `lyric` creation may sit out LRCLIB's `Retry-After` for up to
+ * `LYRIC_CREATE_WAIT_MS` on top of its lookups, so the function's ceiling is
+ * stated rather than left to the platform default: a creation killed at ten
+ * seconds is a 504 where the duel would have been a quiz.
+ */
+export const maxDuration = 45;
 
 /** Tighter than the playlist route: a quiz is made once and shared, not retried. */
 const QUIZ_CREATE_LIMIT = 10;
@@ -57,7 +65,11 @@ const CreateQuizSchema = z.object({
  * store for a `lyric` request, so a duel never touches lib/lyrics.ts.
  */
 const lyricSource: LyricSource = (tracks) =>
-  lookupLyricCandidates(tracks, (status) => void recordQuizLyricLookup(status));
+  lookupLyricCandidates(tracks, (status) => void recordQuizLyricLookup(status), {
+    // One creation is one burst of lookups, and LRCLIB answers a burst with
+    // `Retry-After: 1`: wait it out rather than build the duel (lib/lyrics.ts).
+    waitBudgetMs: LYRIC_CREATE_WAIT_MS,
+  });
 
 export async function POST(req: NextRequest) {
   const limited = await enforceRateLimit(
