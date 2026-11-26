@@ -236,3 +236,22 @@ describe("MIXED_MIN_CONTRIBUTORS", () => {
     expect(MIXED_MIN_CONTRIBUTORS).toBe(2);
   });
 });
+
+describe("someone alone with an empty field", () => {
+  it("is told what Start will play, in the page's language, and the button stays live", () => {
+    expect(startState(inputs({ soloStarterName: "Hits from every decade" }))).toEqual({
+      disabled: false,
+      status: "No link? Start plays “Hits from every decade”",
+    });
+    expect(startState(inputs({ soloStarterName: "Sucessos de todas as décadas", locale: "pt" })).status).toBe(
+      "Sem link? Começa com “Sucessos de todas as décadas”"
+    );
+  });
+
+  it("says nothing without a list, while busy, or over a line the host has to act on", () => {
+    expect(startState(inputs()).status).toBeNull();
+    expect(startState(inputs({ soloStarterName: null })).status).toBeNull();
+    expect(startState(inputs({ soloStarterName: "X", busy: true })).status).toBeNull();
+    expect(startState(inputs({ soloStarterName: "X", needsRoom: true })).status).toBe("Open the room first");
+  });
+});

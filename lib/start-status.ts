@@ -73,6 +73,12 @@ export interface StartInputs {
   roomSubmissions: number;
   /** The page's language (lib/setup-copy.ts); English when omitted. */
   locale?: SetupLocale;
+  /**
+   * The list Start will play for someone alone with an empty field
+   * (`soloDefaultStarter`), by its name in the page's language; null or
+   * absent everywhere else.
+   */
+  soloStarterName?: string | null;
 }
 
 export interface StartState {
@@ -104,6 +110,7 @@ export function startState({
   mixedContributions,
   roomSubmissions,
   locale = "en",
+  soloStarterName = null,
 }: StartInputs): StartState {
   const lines = SETUP_COPY[locale].status;
   const isMixedPhone = setupMode === "mixed" && mixedSubMode === "phone";
@@ -138,6 +145,10 @@ export function startState({
     status = lines.waitingPlaylists(roomShort);
   } else if (buzzerEnabled) {
     status = buzzerPlayerCount > 0 ? lines.phonesReady(buzzerPlayerCount) : lines.nobodyScanned;
+  } else if (soloStarterName) {
+    // Information, like the buzzer's line: the button says what it does, and
+    // with no link in the field this is what it does.
+    status = lines.soloStarter(soloStarterName);
   }
 
   return { disabled, status };
