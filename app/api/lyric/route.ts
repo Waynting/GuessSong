@@ -33,7 +33,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { lookupLyricCandidates } from "@/lib/lyrics";
+import { LYRIC_LINE_WAIT_MS, lookupLyricCandidates } from "@/lib/lyrics";
 import { pickLyricLine } from "@/lib/lyric-fragment";
 import { recordLyricLine } from "@/lib/loop-stats";
 import { enforceRateLimit } from "@/lib/rate-limit";
@@ -74,9 +74,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json<LyricLineResult>({ line: null, status: "absent" });
   }
 
-  const results = await lookupLyricCandidates([
-    { id, name, artists: artist ? [artist] : [], durationMs },
-  ]);
+  const results = await lookupLyricCandidates(
+    [{ id, name, artists: artist ? [artist] : [], durationMs }],
+    undefined,
+    // A second of LRCLIB's Retry-After is worth sitting out; more is not.
+    { waitBudgetMs: LYRIC_LINE_WAIT_MS }
+  );
   const result = results.get(id) ?? { status: "unavailable" as const, lines: [] };
 
   let body: LyricLineResult;

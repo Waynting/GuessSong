@@ -38,7 +38,7 @@ import type { Track } from "@/types";
 vi.mock("@/lib/playlist-cache", () => ({ loadPlaylist: vi.fn() }));
 vi.mock("@/lib/preview-cache", () => ({ getPreview: vi.fn() }));
 // The lyrics database is a network call; the route's job here is to count.
-vi.mock("@/lib/lyrics", () => ({ lookupLyricCandidates: vi.fn() }));
+vi.mock("@/lib/lyrics", () => ({ lookupLyricCandidates: vi.fn(), LYRIC_CREATE_WAIT_MS: 15_000 }));
 
 /**
  * Pinned to the in-process Map whatever the shell holds. Every other KV test
